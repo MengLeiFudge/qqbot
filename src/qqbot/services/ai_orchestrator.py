@@ -26,6 +26,7 @@ from qqbot.services.codex_task_service import (
 )
 from qqbot.services.feature_catalog import list_visible_features
 from qqbot.services.message_normalizer import NormalizedMessage
+from qqbot.services.project_artifact_service import find_latest_project_zip
 from qqbot.services.settings_store import SettingsStore
 from qqbot.services.shapez_service import SHAPE_PATTERN
 
@@ -82,6 +83,10 @@ class AiOrchestrator:
         codex_session_result = await self._try_handle_codex_session(text, context, normalized_message)
         if codex_session_result.handled:
             return codex_session_result
+
+        upload_artifact_result = await self._try_upload_latest_project_zip(text, context)
+        if upload_artifact_result.handled:
+            return upload_artifact_result
 
         codex_result = await self._try_run_codex_fix(text, context, normalized_message)
         if codex_result.handled:
@@ -142,6 +147,50 @@ class AiOrchestrator:
         if not enabled_names:
             return AiOrchestratorResult(True, "本群当前没有启用插件。")
         return AiOrchestratorResult(True, "本群已启用插件：" + "、".join(enabled_names))
+
+    async def _try_upload_latest_project_zip(
+        self,
+        text: str,
+        context: AiOrchestratorContext,
+    ) -> AiOrchestratorResult:
+        if not looks_like_latest_zip_upload_request(text):
+            return AiOrchestratorResult(False)
+        if not context.is_admin:
+            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能上传项目压缩包。")
+        if context.group_id is None:
+            return AiOrchestratorResult(True, "上传项目压缩包需要在群聊里使用。")
+        if self.action_executor is None:
+            return AiOrchestratorResult(True, "当前没有可用的群文件上传执行器。")
+
+        project_match = resolve_codex_project_for_text(
+            text,
+            group_id=context.group_id,
+            data_root=self.data_root,
+        )
+        if project_match is None:
+            return AiOrchestratorResult(True, "没有找到要上传产物的项目，请写清楚项目名或别名。")
+
+        artifact = find_latest_project_zip(project_match.project)
+        if artifact is None:
+            return AiOrchestratorResult(
+                True,
+                f"没有找到 {project_match.project.display_name} 的 zip 产物。",
+            )
+        result = await self.action_executor.execute(
+            AiActionRequest(
+                action_type="send_group_file",
+                actor_user_id=context.actor_user_id,
+                target_group_id=context.group_id,
+                file_path=str(artifact.path),
+                is_admin=context.is_admin,
+            )
+        )
+        if not result.ok:
+            return AiOrchestratorResult(True, result.message)
+        return AiOrchestratorResult(
+            True,
+            f"已上传最新压缩包：{artifact.file_name}",
+        )
 
     def _try_update_style(
         self,
@@ -649,6 +698,14 @@ def looks_like_codex_fix_request(text: str, *, project_matched: bool = False) ->
         )
     )
     return wants_fix and (has_dsp_evidence or project_matched)
+
+
+def looks_like_latest_zip_upload_request(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text).lower()
+    wants_upload = any(keyword in compact for keyword in ("上传", "发到群", "传到群"))
+    wants_latest = "最新" in compact
+    wants_zip = any(keyword in compact for keyword in ("压缩包", "zip", "产物"))
+    return wants_upload and wants_latest and wants_zip
 
 
 def parse_codex_task_id(text: str) -> str | None:

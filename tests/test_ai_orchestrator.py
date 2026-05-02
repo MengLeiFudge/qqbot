@@ -8,8 +8,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.ai_actions import AiActionExecutor
+import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
-from qqbot.services.codex_task_service import get_codex_project_by_id
+from qqbot.services.codex_task_service import CodexProjectBinding, get_codex_project_by_id
 from qqbot.services.feature_catalog import get_feature_by_index
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.settings_store import SettingsStore
@@ -88,6 +89,81 @@ def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> Non
     assert result.handled is True
     assert "本群已启用插件：随机复读" in result.text
     assert "智能问答" not in result.text
+
+
+def test_orchestrator_uploads_latest_project_zip_for_admin_group(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    bot = FakeBot()
+    package = tmp_path / "repo" / "ModZips" / "FractionateEverything_2.3.0.zip"
+    package.parent.mkdir(parents=True)
+    package.write_bytes(b"zip")
+    project = CodexProjectBinding(
+        project_id="mlj_dspmods",
+        display_name="MLJ_DSPmods",
+        repo_path=str(tmp_path / "repo"),
+    )
+
+    def fake_resolve(*_args, **_kwargs):
+        return type("Match", (), {"project": project})()
+
+    monkeypatch.setattr(ai_orchestrator_module, "resolve_codex_project_for_text", fake_resolve)
+    orchestrator = AiOrchestrator(
+        data_root=tmp_path,
+        action_executor=AiActionExecutor(bot=bot, data_root=tmp_path),
+    )
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "上传最新分馏压缩包到群里",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="上传最新分馏压缩包到群里", outline="上传最新分馏压缩包到群里"),
+        )
+    )
+
+    assert result.handled is True
+    assert "已上传最新压缩包：FractionateEverything_2.3.0.zip" in result.text
+    assert bot.calls == [
+        (
+            "upload_group_file",
+            {
+                "group_id": 319567534,
+                "file": str(package),
+                "name": "FractionateEverything_2.3.0.zip",
+            },
+        )
+    ]
+
+
+def test_orchestrator_rejects_latest_zip_upload_for_non_admin(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "上传最新分馏压缩包到群里",
+            AiOrchestratorContext(actor_user_id="10001", group_id="319567534", is_admin=False),
+            NormalizedMessage(text="上传最新分馏压缩包到群里", outline="上传最新分馏压缩包到群里"),
+        )
+    )
+
+    assert result.handled is True
+    assert "只有作者或 Bot 管理员" in result.text
+
+
+def test_orchestrator_requires_group_for_latest_zip_upload(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "上传最新分馏压缩包到群里",
+            AiOrchestratorContext(actor_user_id="605738729", is_admin=True),
+            NormalizedMessage(text="上传最新分馏压缩包到群里", outline="上传最新分馏压缩包到群里"),
+        )
+    )
+
+    assert result.handled is True
+    assert "需要在群聊里使用" in result.text
 
 
 def test_orchestrator_requires_project_after_codex_keyword(tmp_path: Path) -> None:
