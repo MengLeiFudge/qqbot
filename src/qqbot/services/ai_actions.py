@@ -17,6 +17,7 @@ from qqbot.services.codex_task_service import (
     get_codex_project_for_group,
     run_codex_task,
 )
+from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
 from qqbot.services.message_delivery import call_split_text_api, wait_for_group_message_interval
 
 
@@ -54,6 +55,7 @@ class AiActionExecutor:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         task_factory: Callable[[Awaitable[None]], Any] | None = None,
         codex_runner: Callable[[CodexTaskRequest], Awaitable[CodexTaskResult]] = run_codex_task,
+        self_restart_scheduler: Callable[[], object] | None = None,
     ) -> None:
         self.bot = bot
         self.data_root = Path(data_root)
@@ -61,6 +63,7 @@ class AiActionExecutor:
         self.sleep = sleep
         self.task_factory = task_factory or asyncio.create_task
         self.codex_runner = codex_runner
+        self.self_restart_scheduler = self_restart_scheduler
 
     async def execute(self, request: AiActionRequest) -> AiActionResult:
         if request.action_type == "send_private_message":
@@ -176,6 +179,11 @@ class AiActionExecutor:
             CodexTaskStore(self.data_root).record_result(request.codex_task_id, result)
         status = "成功" if result.ok else "失败"
         message = f"Codex 修复任务{status}：{project.display_name}\n{result.message}"
+        restart_message = ""
+        if result.ok:
+            restart_message = self._prepare_self_update_restart(project, request)
+            if restart_message:
+                message = f"{message}\n{restart_message}"
         if request.target_group_id and request.target_group_id.isdigit():
             await call_split_text_api(
                 self.bot,
@@ -192,6 +200,32 @@ class AiActionExecutor:
                 user_id=int(request.actor_user_id),
                 message=message,
             )
+        if restart_message:
+            self.task_factory(self._run_delayed_self_restart())
+
+    def _prepare_self_update_restart(self, project, request: AiActionRequest) -> str:
+        if project.project_id != "qqbot" or self.self_restart_scheduler is None:
+            return ""
+        target_type = "group" if request.target_group_id else "private"
+        target_id = request.target_group_id or request.actor_user_id
+        source_label = (
+            f"Codex 草稿 {request.codex_task_id}"
+            if request.codex_task_id.strip()
+            else "Codex 修复任务"
+        )
+        CodexSelfUpdateNoticeStore(self.data_root).add_notice(
+            target_type=target_type,
+            target_id=target_id,
+            project_display_name=project.display_name,
+            source_label=source_label,
+        )
+        target_label = "本群" if target_type == "group" else "私聊"
+        return f"qqbot 自身项目已执行成功，已安排 Bot 重启。重启完成后会向{target_label}回报连接状态。"
+
+    async def _run_delayed_self_restart(self) -> None:
+        await self.sleep(2)
+        if self.self_restart_scheduler is not None:
+            self.self_restart_scheduler()
 
     async def _upload_codex_artifacts(self, text: str, repo_path: str, request: AiActionRequest) -> int:
         uploaded = 0

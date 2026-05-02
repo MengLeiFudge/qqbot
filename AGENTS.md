@@ -112,8 +112,13 @@
 - 涉及代码修改时，qqbot 只做中转、权限、项目路由、会话记录、结果回传和产物上传。
 - qqbot 给 Codex 的 prompt 不替目标仓库规定 git、分支、提交、测试、构建、输出格式或 Markdown 规则。
 - 目标仓库的 `AGENTS.md` / README / 项目规范决定 Codex 的具体执行规则。
-- `@机器人 codex` 进入 Codex 会话模式；讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
+- `@机器人 codex <项目>` 进入 Codex 会话模式，`codex` 后面必须写明确项目名或别名；未匹配项目时必须拒绝进入，避免误改仓库。
+- Codex 会话讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
 - Codex 输出的 `.zip` 产物路径可由 qqbot 解析并上传回来源群，但只能上传目标仓库内真实存在的 zip 文件。
+- 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报；直接在本地 Codex 终端执行的任务不应主动向 QQ 群发消息。
+- Codex 修改 qqbot 自身项目并成功完成后，必须安排 Bot 重启，使新代码实际生效。
+- 通过 qqbot 触发的自我更新，旧进程应先向来源群或私聊提示“已安排重启”，重启后在 OneBot 重新连接时再向相同目标回报连接状态。
+- 直接在本地 Codex 终端修改 qqbot 时，完成提交和验证后必须调用管理端重启入口，并检查 `onebot_connected=true`、`connected_bot_count>=1`。
 
 ## 运行与重启
 

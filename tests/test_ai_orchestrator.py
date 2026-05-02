@@ -89,7 +89,7 @@ def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> Non
     assert "智能问答" not in result.text
 
 
-def test_orchestrator_enters_codex_session_mode_for_bound_group(tmp_path: Path) -> None:
+def test_orchestrator_requires_project_after_codex_keyword(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -97,6 +97,37 @@ def test_orchestrator_enters_codex_session_mode_for_bound_group(tmp_path: Path) 
             "codex",
             AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
             NormalizedMessage(text="codex", outline="codex"),
+        )
+    )
+
+    assert result.handled is True
+    assert "必须在 codex 后面写项目" in result.text
+    assert "MLJ_DSPmods" in result.text
+
+
+def test_orchestrator_rejects_unknown_codex_session_project(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "codex 不存在项目",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="codex 不存在项目", outline="codex 不存在项目"),
+        )
+    )
+
+    assert result.handled is True
+    assert "没有找到 Codex 项目：不存在项目" in result.text
+
+
+def test_orchestrator_enters_codex_session_mode_with_explicit_project(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "codex 分馏",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="codex 分馏", outline="codex 分馏"),
         )
     )
 
@@ -116,7 +147,7 @@ def test_orchestrator_forwards_active_codex_session_turn_to_codex(tmp_path: Path
     async def run() -> None:
         orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
         context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
-        await orchestrator.handle("codex", context, NormalizedMessage(text="codex", outline="codex"))
+        await orchestrator.handle("codex 分馏", context, NormalizedMessage(text="codex 分馏", outline="codex 分馏"))
         result = await orchestrator.handle(
             "分馏现在一直是2.3.0版本，你看看能不能加一个修订版本号，跟R2兼容不",
             context,
@@ -145,7 +176,7 @@ def test_orchestrator_executes_active_codex_session_with_same_transcript(tmp_pat
     async def run() -> None:
         orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
         context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
-        await orchestrator.handle("codex", context, NormalizedMessage(text="codex", outline="codex"))
+        await orchestrator.handle("codex 分馏", context, NormalizedMessage(text="codex 分馏", outline="codex 分馏"))
         await orchestrator.handle(
             "先讨论版本号策略",
             context,
@@ -163,6 +194,44 @@ def test_orchestrator_executes_active_codex_session_with_same_transcript(tmp_pat
 
     assert requests[-1].mode == "execute"
     assert ("user", "先讨论版本号策略") in requests[-1].transcript
+
+
+def test_orchestrator_restarts_after_successful_qqbot_session_execute(tmp_path: Path) -> None:
+    tasks = []
+    restart_calls = []
+
+    def task_factory(coro):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
+
+    async def fake_codex_runner(request):
+        return type("Result", (), {"ok": True, "message": "已修改并提交。", "exit_code": 0})()
+
+    async def run() -> None:
+        orchestrator = AiOrchestrator(
+            data_root=tmp_path,
+            codex_session_runner=fake_codex_runner,
+            self_restart_scheduler=lambda: restart_calls.append("restart"),
+            sleep=lambda _seconds: asyncio.sleep(0),
+            task_factory=task_factory,
+        )
+        context = AiOrchestratorContext(actor_user_id="605738729", group_id="1163635014", is_admin=True)
+        await orchestrator.handle("codex qqbot", context, NormalizedMessage(text="codex qqbot", outline="codex qqbot"))
+        result = await orchestrator.handle(
+            "执行",
+            context,
+            NormalizedMessage(text="执行", outline="执行"),
+        )
+        assert result.handled is True
+        assert "已安排 Bot 重启" in result.text
+        await asyncio.gather(*tasks)
+
+    asyncio.run(run())
+
+    assert restart_calls == ["restart"]
+    notices = tmp_path / "ai" / "codex_self_update_notices.json"
+    assert "1163635014" in notices.read_text(encoding="utf-8")
 
 
 def test_orchestrator_uploads_codex_zip_artifacts_after_execute(tmp_path: Path) -> None:
@@ -184,7 +253,7 @@ def test_orchestrator_uploads_codex_zip_artifacts_after_execute(tmp_path: Path) 
             codex_session_runner=fake_codex_runner,
         )
         context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
-        await orchestrator.handle("codex", context, NormalizedMessage(text="codex", outline="codex"))
+        await orchestrator.handle("codex 分馏", context, NormalizedMessage(text="codex 分馏", outline="codex 分馏"))
         # 测试用临时目录覆盖项目路径，避免依赖真实 MLJ_DSPmods 产物。
         active = orchestrator._codex_session_store().get_active_session(
             actor_user_id="605738729",
@@ -215,7 +284,7 @@ def test_orchestrator_uploads_codex_zip_artifacts_after_execute(tmp_path: Path) 
 def test_orchestrator_exits_codex_session_mode(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
     context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
-    asyncio.run(orchestrator.handle("codex", context, NormalizedMessage(text="codex", outline="codex")))
+    asyncio.run(orchestrator.handle("codex 分馏", context, NormalizedMessage(text="codex 分馏", outline="codex 分馏")))
 
     result = asyncio.run(
         orchestrator.handle(

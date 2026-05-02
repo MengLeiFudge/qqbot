@@ -12,6 +12,7 @@ from qqbot.services.arc_background_service import ArcBackgroundService
 from qqbot.services.arc_constant_service import ArcConstantService
 from qqbot.services.arc_event_service import ArcEventService, _fetch_latest_arc_version
 from qqbot.services.arc_guess_service import ArcGuessService
+from qqbot.services.codex_self_update_service import publish_pending_codex_self_update_notices
 from qqbot.services.feature_catalog import get_feature_by_index
 from qqbot.services.settings_store import get_settings_store
 
@@ -67,6 +68,11 @@ async def log_startup() -> None:
 @driver.on_bot_connect
 async def log_bot_connect(bot: Bot) -> None:
     logger.success("OneBot bot connected: {}", bot.self_id)
+    settings = load_settings()
+    try:
+        await publish_pending_codex_self_update_notices(bot, settings.data_root)
+    except Exception as exc:
+        logger.exception("Failed to publish Codex self-update notices: {}", exc)
     if bot.self_id in _ARC_BACKGROUND_TASKS:
         return
     _ARC_BACKGROUND_TASKS[bot.self_id] = asyncio.create_task(run_arc_background_loop(bot))

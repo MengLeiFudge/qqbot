@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,7 @@ from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
 from qqbot.services.ai_requirement_store import AiRequirementStore
 from qqbot.services.ai_tool_registry import AiToolContext, build_default_ai_tool_registry
 from qqbot.services.ai_user_style_store import AiUserStyleStore
+from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
 from qqbot.services.codex_task_service import (
     CodexSessionRequest,
     CodexSessionStore,
@@ -50,10 +52,16 @@ class AiOrchestrator:
         data_root: Path,
         action_executor: AiActionExecutor | None = None,
         codex_session_runner: Callable[[CodexSessionRequest], Awaitable[CodexTaskResult]] = run_codex_session_turn,
+        self_restart_scheduler: Callable[[], object] | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        task_factory: Callable[[Awaitable[None]], object] | None = None,
     ) -> None:
         self.data_root = Path(data_root)
         self.action_executor = action_executor
         self.codex_session_runner = codex_session_runner
+        self.self_restart_scheduler = self_restart_scheduler
+        self.sleep = sleep
+        self.task_factory = task_factory or asyncio.create_task
         self.styles = AiUserStyleStore(self.data_root)
         self.requirements = AiRequirementStore(self.data_root)
         self.tools = build_default_ai_tool_registry()
@@ -294,13 +302,16 @@ class AiOrchestrator:
         if looks_like_codex_enter_request(text):
             if not context.is_admin:
                 return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能进入 Codex 模式。")
+            project_query = extract_codex_enter_project_query(text)
+            if not project_query:
+                return AiOrchestratorResult(True, build_codex_project_required_reply())
             project_match = resolve_codex_project_for_text(
-                f"{text}\n{build_codex_issue_evidence(normalized_message)}",
-                group_id=context.group_id,
+                project_query,
+                group_id=None,
                 data_root=self.data_root,
             )
             if project_match is None:
-                return AiOrchestratorResult(True, "进入 Codex 模式需要先指定项目，例如：codex mlj_dspmods。")
+                return AiOrchestratorResult(True, build_codex_project_not_found_reply(project_query))
             session = store.create_session(
                 project=project_match.project,
                 actor_user_id=context.actor_user_id,
@@ -353,8 +364,45 @@ class AiOrchestrator:
             )
             if uploaded_count > 0:
                 message = f"{message}\n已上传 {uploaded_count} 个产物到群。"
+            restart_message = self._schedule_self_update_restart(
+                project_id=project.project_id,
+                project_display_name=project.display_name,
+                actor_user_id=context.actor_user_id,
+                group_id=context.group_id,
+                source_label=f"Codex 会话 {active_session.session_id}",
+            )
+            if restart_message:
+                message = f"{message}\n{restart_message}"
         prefix = f"{updated.session_id} Codex："
         return AiOrchestratorResult(True, f"{prefix}\n{message}")
+
+    def _schedule_self_update_restart(
+        self,
+        *,
+        project_id: str,
+        project_display_name: str,
+        actor_user_id: str,
+        group_id: str | None,
+        source_label: str,
+    ) -> str:
+        if project_id != "qqbot" or self.self_restart_scheduler is None:
+            return ""
+        target_type = "group" if group_id else "private"
+        target_id = group_id or actor_user_id
+        CodexSelfUpdateNoticeStore(self.data_root).add_notice(
+            target_type=target_type,
+            target_id=target_id,
+            project_display_name=project_display_name,
+            source_label=source_label,
+        )
+        self.task_factory(self._run_delayed_self_restart())
+        target_label = "本群" if target_type == "group" else "私聊"
+        return f"qqbot 自身项目已执行成功，已安排 Bot 重启。重启完成后会向{target_label}回报连接状态。"
+
+    async def _run_delayed_self_restart(self) -> None:
+        await self.sleep(8)
+        if self.self_restart_scheduler is not None:
+            self.self_restart_scheduler()
 
     async def _upload_codex_artifacts_from_text(
         self,
@@ -590,6 +638,37 @@ def parse_codex_task_id(text: str) -> str | None:
 
 def looks_like_codex_enter_request(text: str) -> bool:
     return re.match(r"(?i)^codex(?:\s+|[:：]|$)", text.strip()) is not None
+
+
+def extract_codex_enter_project_query(text: str) -> str:
+    match = re.match(r"(?i)^codex(?:\s+|[:：])(?P<query>.+)$", text.strip())
+    if match is None:
+        return ""
+    return match.group("query").strip(" ：:，,。")
+
+
+def build_codex_project_required_reply() -> str:
+    return (
+        "进入 Codex 模式必须在 codex 后面写项目，不能只写 codex。\n"
+        "示例：codex qqbot、codex 分馏、codex 异星模组。\n"
+        f"可用项目：{format_codex_project_options()}"
+    )
+
+
+def build_codex_project_not_found_reply(query: str) -> str:
+    return (
+        f"没有找到 Codex 项目：{query}\n"
+        "请在 codex 后面写明确项目名或别名。\n"
+        f"可用项目：{format_codex_project_options()}"
+    )
+
+
+def format_codex_project_options() -> str:
+    projects = load_codex_projects()
+    return "、".join(
+        f"{project.display_name}({project.project_id})"
+        for project in projects.values()
+    )
 
 
 def looks_like_codex_exit_request(text: str) -> bool:

@@ -17,6 +17,7 @@ from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMe
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
+from qqbot.services.admin_service import AdminService
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_delivery import finish_split_text
@@ -93,9 +94,15 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         )
     )
 
+    restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
     orchestrator = AiOrchestrator(
         data_root=settings.data_root,
-        action_executor=AiActionExecutor(bot=bot, data_root=settings.data_root),
+        action_executor=AiActionExecutor(
+            bot=bot,
+            data_root=settings.data_root,
+            self_restart_scheduler=restart_scheduler,
+        ),
+        self_restart_scheduler=restart_scheduler,
     )
     local_result = await orchestrator.handle(
         prompt,
