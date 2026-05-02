@@ -12,9 +12,34 @@
 
 ## Git Practices
 
-- Commit messages in Chinese, conventional style: `功能：`, `修复：`, `重构：`, `杂项：`, `文档：`, `测试：`。
 - Atomic commits: one logical change per commit.
 - Do not push unless explicitly approved by the user.
+
+### 提交信息风格
+
+提交信息使用中文 conventional style，格式固定为：
+
+```text
+类型：一句话摘要
+```
+
+类型参考 `MLJ_DSPmods`，只使用以下四类：
+
+- `功能：` 新增用户可见能力、接口、命令或完整工作流。
+- `修复：` 修正 bug、错误行为、崩溃、超时或兼容问题。
+- `重构：` 调整内部结构、拆分模块、改善实现，不改变用户可见行为。
+- `杂项：` 文档、测试、配置、仓库初始化、依赖和维护性变更。
+
+示例：
+
+```text
+功能：支持 Codex 会话产物上传
+修复：移除智能问答空壳入口
+重构：整理 README 与 AGENTS 文档边界
+杂项：初始化 qqbot 仓库
+```
+
+禁止使用空泛摘要，例如 `update`、`fix`、`修改`、`调整代码`。
 
 ### Commit Policy for Agents
 
