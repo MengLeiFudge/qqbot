@@ -1,0 +1,70 @@
+[bot]
+host = "127.0.0.1"
+port = 8080
+command_start = "/"
+log_level = "INFO"
+author_qq = 10000
+author_name = "author"
+timezone = "Asia/Shanghai"
+
+[onebot]
+ws_path = "/onebot/v11/ws"
+
+[paths]
+data_root = "./run"
+arc_assets_root = "D:/path/to/Arcaea"
+arcaea_record_root = "D:/path/to/arcaeaRecord"
+arcaea_record_maven = "C:/path/to/maven/bin/mvn.cmd"
+arcaea_record_java_home = "C:/path/to/jdk"
+
+[ai]
+enabled = false
+default_profile = "xiaomi"
+max_context_messages = 12
+group_context_messages = 30
+show_metrics = false
+bot_name = "QQBot"
+
+[ai.providers.xiaomi]
+provider = "xiaomi_mimo"
+base_url = "https://api.xiaomimimo.com/v1"
+model = "mimo-v2.5-pro"
+api_key_env = "QQBOT_AI_KEY_XIAOMI"
+timeout_seconds = 45
+supports_vision = false
+
+[ai.providers.tokenflux]
+provider = "openai_compatible"
+base_url = "https://example.com/v1"
+model = "example-model"
+api_key_env = "QQBOT_AI_KEY_TOKENFLUX"
+timeout_seconds = 45
+supports_vision = false
+
+[codex.projects.mlj_dspmods]
+display_name = "MLJ_DSPmods"
+repo_path = "/mnt/d/project/csharp/DSP MOD/MLJ_DSPmods"
+aliases = ["分馏", "万物分馏", "FE", "FractionateEverything", "DSP MOD", "MLJ_DSPmods"]
+
+[codex.projects.dsp_calc]
+display_name = "dsp-calc"
+repo_path = "/mnt/d/project/js/dsp-calc"
+aliases = ["dsp-calc", "DSP 计算器", "计算器"]
+
+[codex.projects.qqbot]
+display_name = "qqbot"
+repo_path = "/mnt/d/project/python/qqbot"
+aliases = ["机器人", "bot", "qqbot", "棉花糖"]
+
+[codex.projects.tfwr_simulator]
+display_name = "TFWR_Simulator"
+repo_path = "/mnt/d/project/python/TFWR_Simulator"
+aliases = ["TFWR", "模拟器", "排行榜", "GameSimulator", "TFWR_Simulator"]
+
+[codex.projects.factorio_mods]
+display_name = "MLJ_Factorio_Mods"
+repo_path = "/mnt/d/project/lua/factorio/MLJ_Factorio_Mods"
+aliases = ["Factorio", "异星工厂", "异星模组", "MLJ_Factorio_Mods", "section autocraft", "section-autocraft"]
+
+[codex.groups."319567534"]
+project = "mlj_dspmods"
