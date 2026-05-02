@@ -5,6 +5,7 @@ import pytest
 from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
 import qqbot.services.admin_service as admin_service_module
+from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -95,6 +96,14 @@ def test_set_group_feature_uses_current_name_and_removes_legacy_keys(tmp_path: P
 
 def test_admin_list_and_update_use_bot_admin_json(tmp_path: Path) -> None:
     service = build_service(tmp_path)
+    nick_store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
+    nick_store.record_group_sender(
+        group_id=100,
+        qq=10001,
+        card="测试管理员",
+        nickname="",
+        updated_at=1,
+    )
 
     service.set_admin(10001, True)
     service.set_admin(10002, False)
@@ -102,8 +111,33 @@ def test_admin_list_and_update_use_bot_admin_json(tmp_path: Path) -> None:
 
     assert payload["author_qq"] == 0
     assert payload["admins"] == [10001]
+    assert payload["author"] == {"qq": 0, "name": "", "display_name": "0"}
+    assert payload["admin_items"] == [
+        {"qq": 10001, "name": "测试管理员", "display_name": "测试管理员（10001）"}
+    ]
     assert service.store.is_bot_admin(10001) is True
     assert service.store.is_bot_admin(10002) is False
+
+
+def test_admin_author_display_can_use_configured_name(tmp_path: Path) -> None:
+    settings = RuntimeSettings(
+        data_root=tmp_path / "run",
+        author_qq=605738729,
+        author_name="萌泪酱",
+    )
+    service = AdminService(
+        settings=settings,
+        store=SettingsStore(settings.data_root, settings.author_qq),
+        project_root=tmp_path,
+    )
+
+    payload = service.list_admins()
+
+    assert payload["author"] == {
+        "qq": 605738729,
+        "name": "萌泪酱",
+        "display_name": "萌泪酱（605738729）",
+    }
 
 
 def test_log_reading_rejects_unsafe_file_names_and_unknown_runs(tmp_path: Path) -> None:

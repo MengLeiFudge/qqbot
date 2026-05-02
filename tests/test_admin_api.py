@@ -8,6 +8,7 @@ from qqbot.admin_api import register_admin_routes
 from qqbot.config import RuntimeSettings
 import qqbot.services.admin_service as admin_service_module
 from qqbot.services.admin_service import AdminService
+from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -207,6 +208,14 @@ def test_ai_api_rejects_unknown_provider(tmp_path: Path) -> None:
 
 
 def test_admin_endpoints_update_admin_state(tmp_path: Path) -> None:
+    nick_store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
+    nick_store.record_group_sender(
+        group_id=516286670,
+        qq=10001,
+        card="测试管理员",
+        nickname="",
+        updated_at=1,
+    )
     app = build_app(tmp_path)
 
     add_status, add_body = asgi_request(
@@ -218,7 +227,11 @@ def test_admin_endpoints_update_admin_state(tmp_path: Path) -> None:
     delete_status, delete_body = asgi_request(app, "DELETE", "/admin/api/admins/10001")
 
     assert add_status == 200
-    assert json.loads(add_body)["admins"] == [10001]
+    add_payload = json.loads(add_body)
+    assert add_payload["admins"] == [10001]
+    assert add_payload["admin_items"] == [
+        {"qq": 10001, "name": "测试管理员", "display_name": "测试管理员（10001）"}
+    ]
     assert delete_status == 200
     assert json.loads(delete_body)["admins"] == []
 

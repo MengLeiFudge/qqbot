@@ -5,10 +5,11 @@ import os
 from pathlib import Path
 import subprocess
 
-from qqbot.config import RuntimeSettings
+from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
 from qqbot.services.feature_catalog import get_feature_by_index, list_visible_features
+from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_plugin_specs
 from qqbot.services.settings_store import SettingsStore
 
@@ -138,10 +139,20 @@ class AdminService:
     def list_admins(self) -> dict[str, object]:
         admins = self.store.list_bot_admins()
         enabled_admins = sorted(int(qq) for qq, enabled in admins.items() if enabled)
+        nick_store = GroupNickStore(self.settings.data_root / "settings" / "group_nick.json")
         return {
             "author_qq": self.settings.author_qq,
             "author_name": self.settings.author_name,
             "admins": enabled_admins,
+            "author": self._build_admin_display_item(
+                self.settings.author_qq,
+                self.settings.author_name,
+                nick_store,
+            ),
+            "admin_items": [
+                self._build_admin_display_item(qq, nick_store=nick_store)
+                for qq in enabled_admins
+            ],
         }
 
     def set_admin(self, qq: int, enabled: bool) -> dict[str, object]:
@@ -283,3 +294,35 @@ class AdminService:
     @staticmethod
     def _format_group_display_name(group_id: int, group_name: str) -> str:
         return f"{group_name}（{group_id}）" if group_name else str(group_id)
+
+    def _build_admin_display_item(
+        self,
+        qq: int,
+        fallback_name: str = "",
+        nick_store: GroupNickStore | None = None,
+    ) -> dict[str, object]:
+        name = self._resolve_admin_name(qq, fallback_name, nick_store)
+        return {
+            "qq": qq,
+            "name": name,
+            "display_name": f"{name}（{qq}）" if name else str(qq),
+        }
+
+    def _resolve_admin_name(
+        self,
+        qq: int,
+        fallback_name: str = "",
+        nick_store: GroupNickStore | None = None,
+    ) -> str:
+        if nick_store is None:
+            nick_store = GroupNickStore(
+                self.settings.data_root / "settings" / "group_nick.json"
+            )
+        resolved = nick_store.resolve_display_name(0, qq).strip()
+        if resolved and resolved != str(qq):
+            return resolved
+
+        fallback_name = fallback_name.strip()
+        if fallback_name and fallback_name not in {str(qq), DEFAULT_AUTHOR_NAME}:
+            return fallback_name
+        return ""

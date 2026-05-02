@@ -395,8 +395,20 @@ def build_admin_html(settings: RuntimeSettings) -> str:
 
     async function loadAdmins() {{
       const payload = await api("/admin/api/admins");
-      const admins = payload.admins.map(qq => `<li>${{qq}} <button onclick="removeAdmin(${{qq}})">删除</button></li>`).join("");
-      document.getElementById("adminList").innerHTML = `<li>作者：${{payload.author_qq}}（固定管理员）</li>${{admins}}`;
+      const author = payload.author || {{
+        qq: payload.author_qq,
+        display_name: payload.author_qq,
+      }};
+      const adminItems = payload.admin_items || payload.admins.map(qq => ({{
+        qq,
+        display_name: qq,
+      }}));
+      const admins = adminItems.map(item => {{
+        const qq = Number(item.qq);
+        const displayName = item.display_name || qq;
+        return `<li>${{escapeHtml(displayName)}} <button onclick="removeAdmin(${{qq}})">删除</button></li>`;
+      }}).join("");
+      document.getElementById("adminList").innerHTML = `<li>作者：${{escapeHtml(author.display_name || author.qq)}}（固定管理员）</li>${{admins}}`;
     }}
 
     async function addAdmin() {{
