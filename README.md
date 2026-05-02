@@ -25,7 +25,6 @@
 - `src/qqbot/services/`：业务服务层、持久化、AI/Codex 编排
 - `src/qqbot/services/plugin_registry.py`：插件元数据注册表
 - `tests/`：长期回归测试
-- `.codex/tests/`：Codex 临时验证脚本和一次性探针
 - `scripts/start_all.bat`：日常一键启动 qqbot 与 NapCat
 - `scripts/start_bot.ps1`：单独启动 qqbot
 - `scripts/start_napcat_onekey.bat`：单独启动 NapCat 一键包

@@ -198,9 +198,7 @@ tools/napcat/
 .DS_Store
 
 .sisyphus/
-.codex/*
-!.codex/tests/
-!.codex/tests/README.md
+.codex/
 .claude/
 docs/
 
