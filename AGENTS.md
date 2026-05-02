@@ -113,6 +113,10 @@
 - qqbot 给 Codex 的 prompt 不替目标仓库规定 git、分支、提交、测试、构建、输出格式或 Markdown 规则。
 - 目标仓库的 `AGENTS.md` / README / 项目规范决定 Codex 的具体执行规则。
 - `@机器人 codex <项目>` 进入 Codex 会话模式，`codex` 后面必须写明确项目名或别名；未匹配项目时必须拒绝进入，避免误改仓库。
+- 群聊 Codex 会话按群唯一：同一个群同时只能有一个 active Codex 会话，群内所有 Bot 管理员共享同一会话，直到发送 `退出codex`。
+- 私聊 Codex 会话按管理员唯一：每个 Bot 管理员私聊只能有一个 active Codex 会话，不和群聊会话共享。
+- 非 Bot 管理员不能进入、继续、执行或退出 Codex 会话；群聊中存在 active Codex 会话时，非管理员 @ Bot 也不能接管该会话。
+- 执行阶段按项目加锁：同一个项目同时只能有一个 running Codex 会话，不同群可以同时讨论不同项目。
 - Codex 会话讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
 - Codex 输出的 `.zip` 产物路径可由 qqbot 解析并上传回来源群，但只能上传目标仓库内真实存在的 zip 文件。
 - 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报；直接在本地 Codex 终端执行的任务不应主动向 QQ 群发消息。

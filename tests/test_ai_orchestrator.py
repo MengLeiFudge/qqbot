@@ -9,6 +9,7 @@ if str(SRC) not in sys.path:
 
 from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
+from qqbot.services.codex_task_service import get_codex_project_by_id
 from qqbot.services.feature_catalog import get_feature_by_index
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.settings_store import SettingsStore
@@ -137,6 +138,80 @@ def test_orchestrator_enters_codex_session_mode_with_explicit_project(tmp_path: 
     assert "不走普通 AI" in result.text
 
 
+def test_orchestrator_group_admins_share_active_codex_session(tmp_path: Path) -> None:
+    requests = []
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "共享会话回复。", "exit_code": 0})()
+
+    async def run() -> None:
+        orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+        await orchestrator.handle(
+            "codex 分馏",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="codex 分馏", outline="codex 分馏"),
+        )
+        result = await orchestrator.handle(
+            "另一个管理员继续讨论",
+            AiOrchestratorContext(actor_user_id="10001", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="另一个管理员继续讨论", outline="另一个管理员继续讨论"),
+        )
+        assert result.handled is True
+        assert "共享会话回复" in result.text
+
+    asyncio.run(run())
+
+    assert requests[0].session_id == "CODEX-S0001"
+    assert requests[0].project.project_id == "mlj_dspmods"
+
+
+def test_orchestrator_rejects_new_project_when_group_session_is_active(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+    context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
+
+    asyncio.run(
+        orchestrator.handle(
+            "codex 分馏",
+            context,
+            NormalizedMessage(text="codex 分馏", outline="codex 分馏"),
+        )
+    )
+    result = asyncio.run(
+        orchestrator.handle(
+            "codex qqbot",
+            context,
+            NormalizedMessage(text="codex qqbot", outline="codex qqbot"),
+        )
+    )
+
+    assert result.handled is True
+    assert "本群已有 Codex 模式 CODEX-S0001" in result.text
+    assert "退出codex" in result.text
+
+
+def test_orchestrator_rejects_non_admin_codex_use_in_active_group_session(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    asyncio.run(
+        orchestrator.handle(
+            "codex 分馏",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="codex 分馏", outline="codex 分馏"),
+        )
+    )
+    result = asyncio.run(
+        orchestrator.handle(
+            "我也说一句",
+            AiOrchestratorContext(actor_user_id="10002", group_id="319567534", is_admin=False),
+            NormalizedMessage(text="我也说一句", outline="我也说一句"),
+        )
+    )
+
+    assert result.handled is True
+    assert "只有作者或 Bot 管理员才能使用 Codex 模式" in result.text
+
+
 def test_orchestrator_forwards_active_codex_session_turn_to_codex(tmp_path: Path) -> None:
     requests = []
 
@@ -194,6 +269,38 @@ def test_orchestrator_executes_active_codex_session_with_same_transcript(tmp_pat
 
     assert requests[-1].mode == "execute"
     assert ("user", "先讨论版本号策略") in requests[-1].transcript
+
+
+def test_orchestrator_rejects_execute_when_same_project_is_running(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+    store = orchestrator._codex_session_store()
+    dsp_project = get_codex_project_by_id("mlj_dspmods")
+    assert dsp_project is not None
+    running = store.create_session(
+        project=dsp_project,
+        actor_user_id="605738729",
+        group_id="100",
+    )
+    store.mark_status(running.session_id, "running")
+
+    asyncio.run(
+        orchestrator.handle(
+            "codex 分馏",
+            AiOrchestratorContext(actor_user_id="10001", group_id="200", is_admin=True),
+            NormalizedMessage(text="codex 分馏", outline="codex 分馏"),
+        )
+    )
+    result = asyncio.run(
+        orchestrator.handle(
+            "执行",
+            AiOrchestratorContext(actor_user_id="10001", group_id="200", is_admin=True),
+            NormalizedMessage(text="执行", outline="执行"),
+        )
+    )
+
+    assert result.handled is True
+    assert "已有 Codex 会话正在执行" in result.text
+    assert "CODEX-S0001" in result.text
 
 
 def test_orchestrator_restarts_after_successful_qqbot_session_execute(tmp_path: Path) -> None:

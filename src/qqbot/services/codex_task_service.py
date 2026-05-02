@@ -318,16 +318,43 @@ class CodexSessionStore:
         return None
 
     def get_active_session(self, *, actor_user_id: str, group_id: str | None) -> CodexSession | None:
+        if group_id is not None:
+            return self.get_active_group_session(group_id)
+        return self.get_active_private_session(actor_user_id)
+
+    def get_active_group_session(self, group_id: str) -> CodexSession | None:
+        candidates = [
+            session
+            for session in self.list_sessions()
+            if session.status in {"discussing", "running"}
+            and session.group_id == group_id
+        ]
+        return _pick_latest_session(candidates)
+
+    def get_active_private_session(self, actor_user_id: str) -> CodexSession | None:
         candidates = [
             session
             for session in self.list_sessions()
             if session.status in {"discussing", "running"}
             and session.created_by == actor_user_id
-            and session.group_id == group_id
+            and session.group_id is None
         ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda session: session.updated_at)
+        return _pick_latest_session(candidates)
+
+    def get_running_project_session(
+        self,
+        project_id: str,
+        *,
+        exclude_session_id: str = "",
+    ) -> CodexSession | None:
+        candidates = [
+            session
+            for session in self.list_sessions()
+            if session.status == "running"
+            and session.project_id == project_id
+            and session.session_id != exclude_session_id
+        ]
+        return _pick_latest_session(candidates)
 
     def create_session(
         self,
@@ -429,6 +456,12 @@ class CodexSessionStore:
     def _write_payload(self, payload: dict[str, object]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _pick_latest_session(candidates: list[CodexSession]) -> CodexSession | None:
+    if not candidates:
+        return None
+    return max(candidates, key=lambda session: session.updated_at)
 
 
 def load_codex_projects(config_file: Path | None = None) -> dict[str, CodexProjectBinding]:

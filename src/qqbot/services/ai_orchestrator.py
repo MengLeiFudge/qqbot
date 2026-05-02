@@ -280,6 +280,8 @@ class AiOrchestrator:
             actor_user_id=context.actor_user_id,
             group_id=context.group_id,
         )
+        if (active_session is not None or looks_like_codex_control_request(text)) and not context.is_admin:
+            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能使用 Codex 模式。")
         if looks_like_codex_exit_request(text):
             if active_session is None:
                 return AiOrchestratorResult(True, "当前没有正在进行的 Codex 模式。")
@@ -300,8 +302,16 @@ class AiOrchestrator:
             )
 
         if looks_like_codex_enter_request(text):
-            if not context.is_admin:
-                return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能进入 Codex 模式。")
+            if active_session is not None:
+                scope_name = "本群" if context.group_id is not None else "当前私聊"
+                return AiOrchestratorResult(
+                    True,
+                    (
+                        f"{scope_name}已有 Codex 模式 {active_session.session_id}："
+                        f"{active_session.project_display_name}\n"
+                        "请先发送“退出codex”结束当前会话，再开启新项目。"
+                    ),
+                )
             project_query = extract_codex_enter_project_query(text)
             if not project_query:
                 return AiOrchestratorResult(True, build_codex_project_required_reply())
@@ -328,14 +338,26 @@ class AiOrchestrator:
 
         if active_session is None:
             return AiOrchestratorResult(False)
-        if not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能继续 Codex 模式。")
 
         mode = "execute" if looks_like_codex_execute_request(text) else "discuss"
         project = get_codex_project_by_id(active_session.project_id)
         if project is None:
             return AiOrchestratorResult(True, f"Codex 会话 {active_session.session_id} 对应的项目不存在。")
         if mode == "execute":
+            if active_session.status == "running":
+                return AiOrchestratorResult(
+                    True,
+                    f"Codex 会话 {active_session.session_id} 正在执行中，请等待本轮完成。",
+                )
+            running = store.get_running_project_session(project.project_id)
+            if running is not None:
+                return AiOrchestratorResult(
+                    True,
+                    (
+                        f"项目 {project.display_name} 已有 Codex 会话正在执行："
+                        f"{running.session_id}。请等待它完成后再执行。"
+                    ),
+                )
             store.mark_status(active_session.session_id, "running")
         result = await self.codex_session_runner(
             CodexSessionRequest(
@@ -638,6 +660,15 @@ def parse_codex_task_id(text: str) -> str | None:
 
 def looks_like_codex_enter_request(text: str) -> bool:
     return re.match(r"(?i)^codex(?:\s+|[:：]|$)", text.strip()) is not None
+
+
+def looks_like_codex_control_request(text: str) -> bool:
+    return (
+        looks_like_codex_enter_request(text)
+        or looks_like_codex_exit_request(text)
+        or looks_like_codex_status_request(text)
+        or looks_like_codex_execute_request(text)
+    )
 
 
 def extract_codex_enter_project_query(text: str) -> str:

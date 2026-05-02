@@ -239,6 +239,48 @@ def test_codex_session_store_creates_active_session_and_records_turns(tmp_path: 
     )
 
 
+def test_codex_session_store_shares_one_active_session_per_group(tmp_path: Path) -> None:
+    first_project = get_codex_project_by_id("mlj_dspmods")
+    second_project = get_codex_project_by_id("qqbot")
+    assert first_project is not None
+    assert second_project is not None
+    store = CodexSessionStore(tmp_path)
+
+    first = store.create_session(
+        project=first_project,
+        actor_user_id="605738729",
+        group_id="319567534",
+    )
+    second = store.create_session(
+        project=second_project,
+        actor_user_id="10001",
+        group_id="319567534",
+    )
+    active_for_second_admin = store.get_active_session(
+        actor_user_id="10001",
+        group_id="319567534",
+    )
+
+    assert second.session_id == first.session_id
+    assert second.project_id == "mlj_dspmods"
+    assert active_for_second_admin is not None
+    assert active_for_second_admin.session_id == first.session_id
+
+
+def test_codex_session_store_keeps_private_sessions_per_admin(tmp_path: Path) -> None:
+    project = get_codex_project_by_id("qqbot")
+    assert project is not None
+    store = CodexSessionStore(tmp_path)
+
+    first = store.create_session(project=project, actor_user_id="605738729", group_id=None)
+    second = store.create_session(project=project, actor_user_id="10001", group_id=None)
+
+    assert first.session_id == "CODEX-S0001"
+    assert second.session_id == "CODEX-S0002"
+    assert store.get_active_session(actor_user_id="605738729", group_id=None) == first
+    assert store.get_active_session(actor_user_id="10001", group_id=None) == second
+
+
 def test_codex_session_store_closes_session(tmp_path: Path) -> None:
     project = get_codex_project_by_id("qqbot")
     assert project is not None
