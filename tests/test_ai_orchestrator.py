@@ -220,7 +220,7 @@ def test_orchestrator_enters_codex_session_mode_with_explicit_project(tmp_path: 
     assert "不走普通 AI" in result.text
 
 
-def test_orchestrator_group_admins_share_active_codex_session(tmp_path: Path) -> None:
+def test_orchestrator_bot_admins_share_active_codex_session(tmp_path: Path) -> None:
     requests = []
 
     async def fake_codex_runner(request):
@@ -272,7 +272,7 @@ def test_orchestrator_rejects_new_project_when_group_session_is_active(tmp_path:
     assert "退出codex" in result.text
 
 
-def test_orchestrator_rejects_non_admin_codex_use_in_active_group_session(tmp_path: Path) -> None:
+def test_orchestrator_lets_non_admin_chat_fall_back_during_active_group_codex_session(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     asyncio.run(
@@ -287,6 +287,28 @@ def test_orchestrator_rejects_non_admin_codex_use_in_active_group_session(tmp_pa
             "我也说一句",
             AiOrchestratorContext(actor_user_id="10002", group_id="319567534", is_admin=False),
             NormalizedMessage(text="我也说一句", outline="我也说一句"),
+        )
+    )
+
+    assert result.handled is False
+    assert result.text == ""
+
+
+def test_orchestrator_rejects_non_admin_codex_control_in_active_group_session(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    asyncio.run(
+        orchestrator.handle(
+            "codex 分馏",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="codex 分馏", outline="codex 分馏"),
+        )
+    )
+    result = asyncio.run(
+        orchestrator.handle(
+            "执行",
+            AiOrchestratorContext(actor_user_id="10002", group_id="319567534", is_admin=False),
+            NormalizedMessage(text="执行", outline="执行"),
         )
     )
 

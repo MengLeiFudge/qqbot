@@ -341,8 +341,11 @@ class AiOrchestrator:
             actor_user_id=context.actor_user_id,
             group_id=context.group_id,
         )
-        if (active_session is not None or looks_like_codex_control_request(text)) and not context.is_admin:
+        if looks_like_codex_control_request(text) and not context.is_admin:
             return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能使用 Codex 模式。")
+        if active_session is not None and not context.is_admin:
+            # 非 Bot 管理员不参与群 Codex 会话，普通 @ 消息继续交给后续 AI 流程。
+            return AiOrchestratorResult(False)
         if looks_like_codex_exit_request(text):
             if active_session is None:
                 return AiOrchestratorResult(True, "当前没有正在进行的 Codex 模式。")
