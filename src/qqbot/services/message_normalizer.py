@@ -8,6 +8,7 @@ class NormalizedReply:
     user_id: str
     sender_name: str
     message: "NormalizedMessage"
+    message_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +56,7 @@ def normalize_onebot_reply(reply) -> NormalizedReply | None:
         user_id=user_id,
         sender_name=sender_name,
         message=message,
+        message_id=str(getattr(reply, "message_id", "") or ""),
     )
 
 

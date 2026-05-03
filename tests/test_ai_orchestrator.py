@@ -9,6 +9,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.ai_actions import AiActionExecutor
+from qqbot.services.ai_group_context_store import AiGroupContextStore
 import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.codex_task_service import CodexProjectBinding, get_codex_project_by_id
@@ -320,6 +321,60 @@ def test_orchestrator_forwards_active_codex_session_turn_to_codex(tmp_path: Path
     assert requests[0].mode == "discuss"
     assert requests[0].project.project_id == "mlj_dspmods"
     assert "修订版本号" in requests[0].prompt
+
+
+def test_orchestrator_forwards_reply_anchored_group_context_to_codex(tmp_path: Path) -> None:
+    requests = []
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "我会看引用上下文。", "exit_code": 0})()
+
+    async def run() -> None:
+        orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+        store = AiGroupContextStore(tmp_path)
+        for index, text in enumerate(
+            [
+                "前置消息A",
+                "前置消息B",
+                "上传最新分馏压缩包到群里",
+                "机器人上传了 GetDspData",
+                "后续追问",
+            ],
+            start=1,
+        ):
+            store.append_message(
+                group_id="319567534",
+                user_id=f"1000{index}",
+                sender_name=f"玩家{index}",
+                text=text,
+                timestamp=index,
+                message_id=200 + index,
+            )
+        context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
+        await orchestrator.handle("codex 分馏", context, NormalizedMessage(text="codex 分馏", outline="codex 分馏"))
+        result = await orchestrator.handle(
+            "看一下聊天记录，为什么传错了？",
+            context,
+            NormalizedMessage(
+                text="看一下聊天记录，为什么传错了？",
+                outline="看一下聊天记录，为什么传错了？",
+                reply=NormalizedReply(
+                    user_id="10003",
+                    sender_name="玩家3",
+                    message=NormalizedMessage(text="上传最新分馏压缩包到群里", outline="上传最新分馏压缩包到群里"),
+                    message_id="203",
+                ),
+            ),
+        )
+        assert result.handled is True
+
+    asyncio.run(run())
+
+    assert requests[0].source_context[0] == "引用消息及其附近群聊记录："
+    assert "前置消息B" in "\n".join(requests[0].source_context)
+    assert "【引用】玩家3(10003): 上传最新分馏压缩包到群里" in requests[0].source_context
+    assert "机器人上传了 GetDspData" in "\n".join(requests[0].source_context)
 
 
 def test_orchestrator_executes_active_codex_session_with_same_transcript(tmp_path: Path) -> None:

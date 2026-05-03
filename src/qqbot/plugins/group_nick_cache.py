@@ -39,6 +39,7 @@ def record_group_message_context(event: GroupMessageEvent, store: AiGroupContext
         sender_name=card or nickname or event.get_user_id(),
         text=outline,
         timestamp=event.time,
+        message_id=getattr(event, "message_id", ""),
     )
 
 

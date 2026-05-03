@@ -54,6 +54,7 @@ class CodexSessionRequest:
     session_id: str
     prompt: str
     transcript: tuple[tuple[str, str], ...]
+    source_context: tuple[str, ...] = ()
     mode: str = "discuss"
     model: str = DEFAULT_CODEX_MODEL
     timeout_seconds: int = DEFAULT_CODEX_TIMEOUT_SECONDS
@@ -641,6 +642,7 @@ def build_codex_fix_prompt(request: CodexTaskRequest) -> str:
 
 def build_codex_session_prompt(request: CodexSessionRequest) -> str:
     transcript = "\n".join(f"{role}: {content}" for role, content in request.transcript)
+    source_context = "\n".join(request.source_context)
     return (
         "本次是 QQ bot 转发给 Codex 的本地会话调用。\n"
         f"项目：{request.project.display_name}\n"
@@ -651,6 +653,8 @@ def build_codex_session_prompt(request: CodexSessionRequest) -> str:
         "以下只提供 QQ bot 中转的历史对话和当前用户消息，不附加项目执行规则。\n"
         "历史对话：\n"
         f"{transcript or '无'}\n"
+        "来源上下文：\n"
+        f"{source_context or '无'}\n"
         "当前用户消息：\n"
         f"{request.prompt.strip()}"
     )

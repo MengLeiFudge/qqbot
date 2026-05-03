@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,7 @@ def test_ai_group_context_store_keeps_recent_group_messages(tmp_path: Path) -> N
             sender_name=f"用户{index}",
             text=f"消息{index}",
             timestamp=index,
+            message_id=100 + index,
         )
 
     records = store.load_messages(516286670)
@@ -28,6 +30,7 @@ def test_ai_group_context_store_keeps_recent_group_messages(tmp_path: Path) -> N
         ("用户3", "消息3"),
         ("用户4", "消息4"),
     ]
+    assert [record.message_id for record in records] == ["102", "103", "104"]
 
 
 def test_ai_group_context_store_skips_empty_text(tmp_path: Path) -> None:
@@ -42,3 +45,27 @@ def test_ai_group_context_store_skips_empty_text(tmp_path: Path) -> None:
     )
 
     assert store.load_messages(516286670) == ()
+
+
+def test_ai_group_context_store_loads_legacy_records_without_message_id(tmp_path: Path) -> None:
+    path = tmp_path / "ai" / "group_context" / "516286670.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "user_id": "10001",
+                    "sender_name": "萌泪",
+                    "text": "旧消息",
+                    "timestamp": 1,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    records = AiGroupContextStore(tmp_path).load_messages(516286670)
+
+    assert len(records) == 1
+    assert records[0].message_id == ""

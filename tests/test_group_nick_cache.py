@@ -27,6 +27,7 @@ class FakeGroupMessageEvent:
     sender: FakeSender
     time: int
     user_id: int
+    message_id: int = 233
     text: str = "你好"
     segments: list[object] | None = None
 
@@ -112,6 +113,7 @@ def test_record_group_message_context_persists_plain_text(tmp_path: Path) -> Non
     assert len(records) == 1
     assert records[0].sender_name == "萌泪"
     assert records[0].text == "今天聊了 AI 接入"
+    assert records[0].message_id == "233"
 
 
 def test_record_group_message_context_persists_image_outline(tmp_path: Path) -> None:

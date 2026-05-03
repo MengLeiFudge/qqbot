@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 
 from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
+from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.ai_requirement_store import AiRequirementStore
 from qqbot.services.ai_tool_registry import AiToolContext, build_default_ai_tool_registry
 from qqbot.services.ai_user_style_store import AiUserStyleStore
@@ -25,7 +26,7 @@ from qqbot.services.codex_task_service import (
     run_codex_session_turn,
 )
 from qqbot.services.feature_catalog import list_visible_features
-from qqbot.services.message_normalizer import NormalizedMessage
+from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.project_artifact_service import find_latest_project_zip
 from qqbot.services.settings_store import SettingsStore
 from qqbot.services.shapez_service import SHAPE_PATTERN
@@ -44,6 +45,17 @@ class AiOrchestratorResult:
     text: str = ""
     image_path: str | None = None
     extra_context: tuple[str, ...] = ()
+
+
+def _find_group_message_index(records: tuple[AiGroupMessageRecord, ...], message_id: str) -> int | None:
+    for index, record in enumerate(records):
+        if record.message_id == message_id:
+            return index
+    return None
+
+
+def _format_codex_reply_context_line(reply: NormalizedReply) -> str:
+    return f"引用消息：{reply.sender_name}({reply.user_id}): {reply.message.outline}"
 
 
 class AiOrchestrator:
@@ -416,6 +428,10 @@ class AiOrchestrator:
                 session_id=active_session.session_id,
                 prompt=text,
                 transcript=active_session.transcript,
+                source_context=self._build_codex_source_context(
+                    group_id=context.group_id,
+                    reply=normalized_message.reply,
+                ),
                 mode=mode,
             )
         )
@@ -446,6 +462,35 @@ class AiOrchestrator:
                 message = f"{message}\n{restart_message}"
         prefix = f"{updated.session_id} Codex："
         return AiOrchestratorResult(True, f"{prefix}\n{message}")
+
+    def _build_codex_source_context(
+        self,
+        *,
+        group_id: str | None,
+        reply: NormalizedReply | None,
+    ) -> tuple[str, ...]:
+        if group_id is None or reply is None:
+            return ()
+
+        reply_line = _format_codex_reply_context_line(reply)
+        if not reply.message_id:
+            return (reply_line,)
+
+        records = AiGroupContextStore(self.data_root).load_messages(group_id)
+        anchor_index = _find_group_message_index(records, reply.message_id)
+        if anchor_index is None:
+            return (reply_line,)
+
+        radius = 3
+        start = max(0, anchor_index - radius)
+        end = min(len(records), anchor_index + radius + 1)
+        context_lines = ["引用消息及其附近群聊记录："]
+        for index, record in enumerate(records[start:end], start=start):
+            prefix = "【引用】" if index == anchor_index else ""
+            context_lines.append(
+                f"{prefix}{record.sender_name}({record.user_id}): {record.text}"
+            )
+        return tuple(context_lines)
 
     def _schedule_self_update_restart(
         self,

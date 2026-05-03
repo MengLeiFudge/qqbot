@@ -132,12 +132,15 @@ def test_codex_prompt_only_describes_qqbot_source_context() -> None:
             session_id="CODEX-S0001",
             prompt="执行",
             transcript=(),
+            source_context=("引用消息及其附近群聊记录：", "【引用】玩家(10002): 报错日志"),
             mode="execute",
         )
     )
 
     assert "QQ bot 转发" in prompt
     assert "本轮模式：execute" in prompt
+    assert "来源上下文" in prompt
+    assert "【引用】玩家(10002): 报错日志" in prompt
     assert "不附加项目执行规则" in prompt
     assert "不要 push" not in prompt
     assert "验证通过后必须原子提交" not in prompt

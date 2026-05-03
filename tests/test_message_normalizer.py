@@ -38,9 +38,10 @@ class FakeSender:
 
 
 class FakeReply:
-    def __init__(self, message: FakeMessage, sender: FakeSender | None = None) -> None:
+    def __init__(self, message: FakeMessage, sender: FakeSender | None = None, message_id: int = 114) -> None:
         self.message = message
         self.sender = sender or FakeSender()
+        self.message_id = message_id
 
 
 class FakeEvent:
@@ -123,4 +124,5 @@ def test_normalize_onebot_event_includes_reply_message() -> None:
     assert normalized.reply is not None
     assert normalized.reply.sender_name == "群友B"
     assert normalized.reply.user_id == "10002"
+    assert normalized.reply.message_id == "114"
     assert normalized.reply.message.outline == "被引用的文字"

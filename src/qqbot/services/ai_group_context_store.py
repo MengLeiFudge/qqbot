@@ -11,6 +11,7 @@ class AiGroupMessageRecord:
     sender_name: str
     text: str
     timestamp: int
+    message_id: str = ""
 
 
 class AiGroupContextStore:
@@ -26,6 +27,7 @@ class AiGroupContextStore:
         sender_name: str,
         text: str,
         timestamp: int,
+        message_id: int | str | None = None,
     ) -> None:
         normalized_text = text.strip()
         if not normalized_text:
@@ -38,6 +40,7 @@ class AiGroupContextStore:
                 sender_name=sender_name.strip() or str(user_id),
                 text=normalized_text,
                 timestamp=int(timestamp),
+                message_id=str(message_id or ""),
             )
         )
         self._write_messages(group_id, records[-self.max_messages :])
@@ -66,6 +69,7 @@ class AiGroupContextStore:
                     sender_name=str(raw.get("sender_name", "")).strip(),
                     text=text,
                     timestamp=int(raw.get("timestamp", 0)),
+                    message_id=str(raw.get("message_id", "") or ""),
                 )
             )
 
@@ -87,6 +91,7 @@ class AiGroupContextStore:
                         "sender_name": record.sender_name,
                         "text": record.text,
                         "timestamp": record.timestamp,
+                        "message_id": record.message_id,
                     }
                     for record in records
                 ],
