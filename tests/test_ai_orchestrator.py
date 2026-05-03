@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import os
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,8 +98,12 @@ def test_orchestrator_uploads_latest_project_zip_for_admin_group(
 ) -> None:
     bot = FakeBot()
     package = tmp_path / "repo" / "ModZips" / "FractionateEverything_2.3.0.zip"
+    wrong_package = tmp_path / "repo" / "ModZips" / "GetDspData_1.0.0.zip"
     package.parent.mkdir(parents=True)
     package.write_bytes(b"zip")
+    wrong_package.write_bytes(b"wrong")
+    os.utime(package, (1000, 1000))
+    os.utime(wrong_package, (2000, 2000))
     project = CodexProjectBinding(
         project_id="mlj_dspmods",
         display_name="MLJ_DSPmods",

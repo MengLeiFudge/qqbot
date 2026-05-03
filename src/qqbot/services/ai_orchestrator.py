@@ -170,7 +170,7 @@ class AiOrchestrator:
         if project_match is None:
             return AiOrchestratorResult(True, "没有找到要上传产物的项目，请写清楚项目名或别名。")
 
-        artifact = find_latest_project_zip(project_match.project)
+        artifact = find_latest_project_zip(project_match.project, text)
         if artifact is None:
             return AiOrchestratorResult(
                 True,

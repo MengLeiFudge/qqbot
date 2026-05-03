@@ -37,3 +37,25 @@ def test_find_latest_project_zip_prefers_modzips(tmp_path: Path) -> None:
 
     assert artifact is not None
     assert artifact.path == new_package
+
+
+def test_find_latest_project_zip_filters_fractionate_everything_alias(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    modzips = repo / "AfterBuildEvent" / "bin" / "win" / "Debug" / "ModZips"
+    fractionate = modzips / "FractionateEverything_2.3.0.zip"
+    get_data = modzips / "GetDspData_1.0.0.zip"
+    modzips.mkdir(parents=True)
+    fractionate.write_bytes(b"fe")
+    get_data.write_bytes(b"data")
+    os.utime(fractionate, (1000, 1000))
+    os.utime(get_data, (2000, 2000))
+    project = CodexProjectBinding(
+        project_id="mlj_dspmods",
+        display_name="MLJ_DSPmods",
+        repo_path=str(repo),
+    )
+
+    artifact = find_latest_project_zip(project, "上传最新分馏压缩包到群里")
+
+    assert artifact is not None
+    assert artifact.path == fractionate
