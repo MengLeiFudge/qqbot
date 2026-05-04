@@ -6,7 +6,7 @@ from nonebot import on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from qqbot.services.command_guard import direct_command_rule, is_likely_command
-from qqbot.services.feature_catalog import get_feature_by_index
+from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.settings_store import get_settings_store
 from qqbot.services.thunder_service import parse_thunder_command
 
@@ -20,13 +20,13 @@ thunder_message_matcher = on_message(priority=60, block=False)
 
 
 def get_thunder_feature():
-    return get_feature_by_index(2)
+    return get_feature_by_menu_key("群管助手")
 
 
 @thunder_setting_matcher.handle()
 async def handle_thunder_setting(event: GroupMessageEvent) -> None:
     store = get_settings_store()
-    if not store.is_bot_admin(int(event.get_user_id())):
+    if not store.is_bot_admin_or_self(int(event.get_user_id()), getattr(event, "self_id", None)):
         await thunder_setting_matcher.finish("只有Bot管理员才能设置随机禁言哦！")
 
     command = parse_thunder_command(event.get_plaintext().strip())
@@ -53,6 +53,8 @@ async def handle_thunder_message(bot: Bot, event: GroupMessageEvent) -> None:
         return
     store = get_settings_store()
     if not store.get_group_feature_state(event.group_id, feature):
+        return
+    if not store.is_bot_admin_or_self(int(event.get_user_id()), getattr(event, "self_id", None)):
         return
 
     text = event.get_plaintext().strip()

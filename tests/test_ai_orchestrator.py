@@ -13,7 +13,7 @@ from qqbot.services.ai_group_context_store import AiGroupContextStore
 import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.codex_task_service import CodexProjectBinding, get_codex_project_by_id
-from qqbot.services.feature_catalog import get_feature_by_index
+from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.settings_store import SettingsStore
 
@@ -75,9 +75,9 @@ def test_orchestrator_records_user_style_preference(tmp_path: Path) -> None:
 
 def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path, author_qq=605738729)
-    reread = get_feature_by_index(1)
-    assert reread is not None
-    store.set_group_feature_state(1163635014, reread, True)
+    group_assistant = get_feature_by_menu_key("群管助手")
+    assert group_assistant is not None
+    store.set_group_feature_state(1163635014, group_assistant, True)
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -89,7 +89,8 @@ def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> Non
     )
 
     assert result.handled is True
-    assert "本群已启用插件：随机复读" in result.text
+    assert "当前启用插件：" in result.text
+    assert "群管助手" in result.text
     assert "智能问答" not in result.text
 
 

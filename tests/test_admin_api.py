@@ -117,6 +117,8 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "/admin/api/restart" in body
     assert "/admin/api/plugins" in body
     assert "/admin/api/ai" in body
+    assert "群功能" not in body
+    assert "/features" not in body
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
@@ -134,26 +136,6 @@ def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
     payload = json.loads(body)[0]
     assert payload["group_id"] == 516286670
     assert payload["display_name"] == "测试群（516286670）"
-
-
-def test_group_feature_toggle_updates_state(tmp_path: Path) -> None:
-    state_root = tmp_path / "run" / "settings" / "func_state"
-    state_root.mkdir(parents=True)
-    (state_root / "516286670.json").write_text('{"Arc狼人杀": true}', encoding="utf-8")
-    app = build_app(tmp_path)
-
-    status_code, body = asgi_request(
-        app,
-        "PUT",
-        "/admin/api/groups/516286670/features/13",
-        json_body={"enabled": False},
-    )
-
-    assert status_code == 200
-    assert json.loads(body)["feature"]["enabled"] is False
-    text = (state_root / "516286670.json").read_text(encoding="utf-8")
-    assert '"Arc": false' in text
-    assert "Arc狼人杀" not in text
 
 
 def test_plugins_api_lists_and_updates_global_state(tmp_path: Path) -> None:

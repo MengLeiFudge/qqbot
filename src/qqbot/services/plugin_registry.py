@@ -7,37 +7,50 @@ from dataclasses import dataclass
 class PluginSpec:
     id: str
     name: str
-    feature_index: int | None = None
     version: str = "1.0"
-    legacy_names: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
     menu_lines: tuple[str, ...] = ()
     menu_keys: tuple[str, ...] = ()
     commands: tuple[str, ...] = ()
     scopes: tuple[str, ...] = ("group", "private")
     requires_direct_at: bool = True
     ai_capabilities: tuple[str, ...] = ()
-    enabled_by_default: bool = False
+    visible: bool = True
+    admin_only: bool = False
 
 
 PLUGIN_SPECS: tuple[PluginSpec, ...] = (
     PluginSpec(
-        id="reread",
-        name="随机复读",
-        feature_index=1,
-        commands=("设置复读",),
+        id="group_assistant",
+        name="群管助手",
+        aliases=("群管", "群管理", "群功能", "QQ助手", "qq助手", "社交事件", "复读", "随机复读", "随机禁言"),
+        menu_lines=(
+            "设置复读概率5：设置随机复读概率",
+            "设置禁言概率2.5：设置随机禁言概率",
+            "设置随机禁言时间5 20：设置随机禁言秒数范围",
+            "禁30 @对方 / 解禁 @对方：管理成员禁言",
+            "群禁言 / 群解禁：开关全群禁言",
+            "踢出 @对方：移出群成员",
+            "自动同意 Bot 管理员发起的好友申请和邀请入群",
+            "戳一戳响应：Bot 管理员戳机器人或群成员时触发",
+        ),
+        commands=(
+            "设置复读",
+            "设置禁言概率",
+            "设置禁言时间",
+            "禁言",
+            "解禁",
+            "群禁言",
+            "群解禁",
+            "踢出",
+        ),
         scopes=("group",),
-    ),
-    PluginSpec(
-        id="thunder",
-        name="随机禁言",
-        feature_index=2,
-        commands=("设置禁言概率", "设置禁言时间"),
-        scopes=("group",),
+        admin_only=True,
     ),
     PluginSpec(
         id="lolicon",
         name="Lolicon美图",
-        feature_index=3,
+        aliases=("Lolicon", "美图", "色图"),
         commands=("来点色图", "美图", "开群色图", "关群色图"),
         scopes=("group", "private"),
     ),
@@ -47,11 +60,12 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
         commands=("ai",),
         scopes=("private",),
         ai_capabilities=("chat",),
+        visible=False,
     ),
     PluginSpec(
         id="kun",
         name="养鲲",
-        feature_index=11,
+        aliases=("鲲",),
         commands=(
             "摸鲲",
             "养鲲",
@@ -84,15 +98,14 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
     PluginSpec(
         id="sakura",
         name="落樱之都",
-        feature_index=12,
+        aliases=("樱花", "落樱"),
         commands=("注册樱花勇者", "个人信息", "加经验", "加力量", "恢复"),
         scopes=("group", "private"),
     ),
     PluginSpec(
         id="arc",
         name="Arc",
-        feature_index=13,
-        legacy_names=("Arc查询", "Arc狼人杀", "Arc吃鸡"),
+        aliases=("Arc查询", "Arc狼人杀", "Arc吃鸡", "arcaea"),
         menu_lines=(
             "arctj10.5：按 PTT 推荐谱面",
             "zm：开始字符猜歌",
@@ -111,16 +124,10 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
     PluginSpec(
         id="shapez",
         name="异形工厂",
-        feature_index=16,
+        aliases=("shapez",),
         commands=("i", "p"),
         scopes=("group", "private"),
         ai_capabilities=("render",),
-    ),
-    PluginSpec(
-        id="group_control",
-        name="群管",
-        commands=("禁言", "解禁", "群禁言", "群解禁", "踢出"),
-        scopes=("group",),
     ),
 )
 
@@ -130,16 +137,12 @@ def validate_plugin_specs(specs: tuple[PluginSpec, ...] = PLUGIN_SPECS) -> None:
     if len(ids) != len(set(ids)):
         raise ValueError("插件 id 不能重复")
 
-    feature_indexes = [spec.feature_index for spec in specs if spec.feature_index is not None]
-    if len(feature_indexes) != len(set(feature_indexes)):
-        raise ValueError("功能序号不能重复")
-
 
 def list_visible_plugin_specs() -> list[PluginSpec]:
     validate_plugin_specs()
     return sorted(
-        (spec for spec in PLUGIN_SPECS if spec.feature_index is not None),
-        key=lambda spec: spec.feature_index or 0,
+        (spec for spec in PLUGIN_SPECS if spec.visible),
+        key=lambda spec: spec.name.casefold(),
     )
 
 
@@ -151,25 +154,21 @@ def get_plugin_spec_by_id(plugin_id: str) -> PluginSpec | None:
     return None
 
 
-def get_plugin_spec_by_feature_index(index: int) -> PluginSpec | None:
-    for spec in PLUGIN_SPECS:
-        if spec.feature_index == index:
-            return spec
-    return None
-
-
 def get_plugin_spec_by_menu_key(key: str) -> PluginSpec | None:
     normalized = key.strip().lower()
-    if normalized.isdigit():
-        return get_plugin_spec_by_feature_index(int(normalized))
+    if not normalized or normalized.isdigit():
+        return None
 
     for spec in list_visible_plugin_specs():
-        if normalized == spec.name.lower():
+        names = (
+            spec.name,
+            spec.id,
+            *spec.aliases,
+            *spec.menu_keys,
+        )
+        normalized_names = [name.lower() for name in names]
+        if normalized in normalized_names:
             return spec
-        if normalized == spec.id:
-            return spec
-        if normalized in tuple(name.lower() for name in spec.legacy_names):
-            return spec
-        if normalized in spec.menu_keys:
+        if any(normalized in name or name in normalized for name in normalized_names):
             return spec
     return None

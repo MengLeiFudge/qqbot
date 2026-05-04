@@ -14,6 +14,8 @@ from nonebot.adapters.onebot.v11 import (
 )
 
 from qqbot.services.message_delivery import call_split_text_api
+from qqbot.services.feature_catalog import get_feature_by_menu_key
+from qqbot.services.settings_store import get_settings_store
 from qqbot.services.social_service import plan_poke_response, should_auto_approve_request
 
 request_matcher = on_request(priority=1, block=False)
@@ -22,6 +24,12 @@ poke_matcher = on_notice(priority=20, block=False)
 
 @request_matcher.handle()
 async def handle_request(bot: Bot, event: RequestEvent) -> None:
+    store = get_settings_store()
+    if not _can_trigger_group_assistant(store, getattr(event, "user_id", 0), bot.self_id):
+        return
+    if not _is_group_assistant_enabled(store):
+        return
+
     if isinstance(event, FriendRequestEvent):
         if should_auto_approve_request(event.request_type, None):
             await event.approve(bot)
@@ -35,6 +43,11 @@ async def handle_request(bot: Bot, event: RequestEvent) -> None:
 @poke_matcher.handle()
 async def handle_poke(bot: Bot, event: PokeNotifyEvent) -> None:
     if int(event.user_id) == int(bot.self_id):
+        return
+    store = get_settings_store()
+    if not _is_group_assistant_enabled(store):
+        return
+    if not _can_trigger_group_assistant(store, event.user_id, bot.self_id):
         return
 
     plan = plan_poke_response(
@@ -72,3 +85,16 @@ async def _send_poke_action(bot: Bot, event: PokeNotifyEvent, target_id: int) ->
         await bot.call_api("group_poke", group_id=str(event.group_id), user_id=str(target_id))
         return
     await bot.call_api("friend_poke", user_id=str(target_id))
+
+
+def _is_group_assistant_enabled(store) -> bool:
+    feature = get_feature_by_menu_key("群管助手")
+    return feature is not None and store.get_group_feature_state(0, feature)
+
+
+def _can_trigger_group_assistant(store, user_id: int | str, self_id: int | str) -> bool:
+    try:
+        actor_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    return store.is_bot_admin_or_self(actor_id, self_id)

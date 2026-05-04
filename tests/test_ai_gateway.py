@@ -99,7 +99,7 @@ def test_gateway_rejects_undeclared_capability() -> None:
         asyncio.run(
             gateway.complete(
                 AiRequest(
-                    plugin_id="group_control",
+                    plugin_id="group_assistant",
                     capability="chat",
                     prompt="禁言",
                     user_id="10001",

@@ -68,7 +68,10 @@
 
 - `src/qqbot/plugins/` 负责 NoneBot matcher、命令解析、事件入口。
 - `src/qqbot/services/` 负责可测试业务逻辑、持久化和外部服务封装。
-- `plugin_registry.py` 是插件元数据唯一入口；菜单、管理端和功能开关优先从这里读取。
+- `plugin_registry.py` 是插件元数据唯一入口；菜单、管理端和全局插件开关优先从这里读取。
+- 插件不使用功能序号；菜单入口使用 `菜单+模块名称/别名` 模糊匹配。
+- 新入群默认启用所有未被全局禁用的插件，不再维护每群功能开关。
+- `群管助手` 只覆盖 QQ/群行为能力，不包含菜单、全局插件开关或 Bot 管理员维护入口；其相关指令和功能只允许 Bot 管理员或机器人自身触发。
 - 新增插件时，先补服务层，再补 matcher；不要把复杂业务逻辑堆在 matcher 里。
 - 群聊显式命令默认需要 direct-at，避免普通聊天误触发。
 
@@ -76,7 +79,7 @@
 
 - `.env` 只放敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key。
 - `config/qqbot.toml` 放低频变化的非敏感配置，例如路径、AI provider、默认模型。
-- `run/settings/` 和 `run/ai/` 放运行时状态，例如群功能开关、管理员、AI 对话上下文、动作审计。
+- `run/settings/` 和 `run/ai/` 放运行时状态，例如全局插件开关、管理员、AI 对话上下文、动作审计。
 - 不要把真实 `.env`、真实 `config/qqbot.toml`、`run/`、`logs/` 放进公开仓库。
 
 ## 测试分层

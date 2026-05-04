@@ -30,20 +30,21 @@ def test_list_groups_reads_existing_feature_files(tmp_path: Path) -> None:
     assert [group["group_id"] for group in groups] == [10001, 10002]
     assert groups[0]["display_name"] == "测试群 A（10001）"
     assert groups[1]["display_name"] == "测试群 B（10002）"
-    first_features = groups[0]["features"]
-    assert first_features[0]["name"] == "随机复读"
+    assert "features" not in groups[0]
 
 
-def test_arc_legacy_keys_render_as_current_arc_feature(tmp_path: Path) -> None:
+def test_list_groups_includes_connected_group_names_without_feature_files(tmp_path: Path) -> None:
     service = build_service(tmp_path)
-    state_root = tmp_path / "run" / "settings" / "func_state"
-    state_root.mkdir(parents=True)
-    (state_root / "123.json").write_text('{"Arc狼人杀": true}', encoding="utf-8")
 
-    payload = service.get_group_features(123)
-    arc_feature = next(feature for feature in payload["features"] if feature["name"] == "Arc")
+    groups = service.list_groups({123: "在线群"})
 
-    assert arc_feature["enabled"] is True
+    assert groups == [
+        {
+            "group_id": 123,
+            "group_name": "在线群",
+            "display_name": "在线群（123）",
+        }
+    ]
 
 
 def test_list_plugins_returns_global_states(tmp_path: Path) -> None:
@@ -53,22 +54,18 @@ def test_list_plugins_returns_global_states(tmp_path: Path) -> None:
     arc_plugin = next(plugin for plugin in payload["plugins"] if plugin["id"] == "arc")
 
     assert arc_plugin["name"] == "Arc"
-    assert arc_plugin["feature_index"] == 13
+    assert "feature_index" not in arc_plugin
     assert arc_plugin["global_enabled"] is True
     assert arc_plugin["ai_capabilities"] == ["explain"]
 
 
-def test_set_plugin_enabled_affects_group_feature_effective_state(tmp_path: Path) -> None:
+def test_set_plugin_enabled_updates_global_state(tmp_path: Path) -> None:
     service = build_service(tmp_path)
-    service.set_group_feature(123, 13, True)
 
     payload = service.set_plugin_enabled("arc", False)
-    group_payload = service.get_group_features(123)
-    arc_feature = next(feature for feature in group_payload["features"] if feature["name"] == "Arc")
 
     assert payload["plugin"]["id"] == "arc"
     assert payload["plugin"]["global_enabled"] is False
-    assert arc_feature["enabled"] is False
 
 
 def test_set_plugin_enabled_rejects_unknown_plugin(tmp_path: Path) -> None:
@@ -76,22 +73,6 @@ def test_set_plugin_enabled_rejects_unknown_plugin(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         service.set_plugin_enabled("missing", False)
-
-
-def test_set_group_feature_uses_current_name_and_removes_legacy_keys(tmp_path: Path) -> None:
-    service = build_service(tmp_path)
-    state_path = tmp_path / "run" / "settings" / "func_state" / "123.json"
-    state_path.parent.mkdir(parents=True)
-    state_path.write_text('{"Arc查询": true, "Arc狼人杀": true}', encoding="utf-8")
-
-    payload = service.set_group_feature(123, 13, False)
-
-    assert payload["feature"]["name"] == "Arc"
-    assert payload["feature"]["enabled"] is False
-    text = state_path.read_text(encoding="utf-8")
-    assert '"Arc": false' in text
-    assert "Arc查询" not in text
-    assert "Arc狼人杀" not in text
 
 
 def test_admin_list_and_update_use_bot_admin_json(tmp_path: Path) -> None:

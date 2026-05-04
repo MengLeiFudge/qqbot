@@ -108,27 +108,6 @@ def register_admin_routes(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @app.get("/admin/api/groups/{group_id}/features")
-    async def admin_group_features(
-        group_id: int,
-        _: None = Depends(require_local_request),
-        admin_service: AdminService = Depends(service),
-    ) -> dict[str, object]:
-        return admin_service.get_group_features(group_id)
-
-    @app.put("/admin/api/groups/{group_id}/features/{feature_index}")
-    async def admin_update_group_feature(
-        group_id: int,
-        feature_index: int,
-        payload: FeatureToggleRequest,
-        _: None = Depends(require_local_request),
-        admin_service: AdminService = Depends(service),
-    ) -> dict[str, object]:
-        try:
-            return admin_service.set_group_feature(group_id, feature_index, payload.enabled)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
     @app.get("/admin/api/admins")
     async def admin_list_admins(
         _: None = Depends(require_local_request),
@@ -252,14 +231,6 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       </div>
     </section>
     <section>
-      <h2>群功能</h2>
-      <div class="row">
-        <select id="groupSelect"></select>
-        <button onclick="loadGroups()">刷新</button>
-      </div>
-      <div id="featureGrid" class="grid" style="margin-top: 12px;"></div>
-    </section>
-    <section>
       <h2>全局插件</h2>
       <div id="pluginGrid" class="grid"></div>
     </section>
@@ -326,21 +297,10 @@ def build_admin_html(settings: RuntimeSettings) -> str:
 
     async function loadGroups() {{
       const groups = await api("/admin/api/groups");
-      const select = document.getElementById("groupSelect");
-      const selected = select.value;
-      select.innerHTML = groups.map(group => `<option value="${{group.group_id}}">${{escapeHtml(group.display_name || group.group_id)}}</option>`).join("");
-      if (selected) select.value = selected;
-      if (select.value) await loadGroupFeatures(select.value);
-      else document.getElementById("featureGrid").innerHTML = `<span class="muted">暂无群配置。</span>`;
-    }}
-
-    async function loadGroupFeatures(groupId) {{
-      const payload = await api(`/admin/api/groups/${{groupId}}/features`);
-      document.getElementById("featureGrid").innerHTML = payload.features.map(feature => {{
-        const cls = feature.enabled ? "enabled" : "disabled";
-        const text = feature.enabled ? "开启" : "关闭";
-        return `<button class="${{cls}}" onclick="toggleFeature(${{payload.group_id}}, ${{feature.index}}, ${{!feature.enabled}})">${{feature.index}}. ${{feature.name}}：${{text}}</button>`;
-      }}).join("");
+      document.getElementById("status").insertAdjacentHTML(
+        "beforeend",
+        `<div><strong>已知群</strong><br><span>${{groups.length}}</span></div>`
+      );
     }}
 
     async function loadPlugins() {{
@@ -349,7 +309,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         const cls = plugin.global_enabled ? "enabled" : "disabled";
         const text = plugin.global_enabled ? "全局开启" : "全局关闭";
         const ai = plugin.ai_capabilities.length ? ` / AI: ${{plugin.ai_capabilities.join(", ")}}` : "";
-        return `<button class="${{cls}}" onclick="togglePlugin('${{plugin.id}}', ${{!plugin.global_enabled}})">${{plugin.feature_index}}. ${{plugin.name}}：${{text}}${{ai}}</button>`;
+        return `<button class="${{cls}}" onclick="togglePlugin('${{plugin.id}}', ${{!plugin.global_enabled}})">${{plugin.name}}：${{text}}${{ai}}</button>`;
       }}).join("");
     }}
 
@@ -382,15 +342,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         method: "PUT",
         body: JSON.stringify({{ enabled }}),
       }});
-      await Promise.all([loadPlugins(), loadGroups()]);
-    }}
-
-    async function toggleFeature(groupId, featureIndex, enabled) {{
-      await api(`/admin/api/groups/${{groupId}}/features/${{featureIndex}}`, {{
-        method: "PUT",
-        body: JSON.stringify({{ enabled }}),
-      }});
-      await loadGroupFeatures(groupId);
+      await loadPlugins();
     }}
 
     async function loadAdmins() {{
@@ -447,7 +399,6 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       document.getElementById("logContent").textContent = payload.content || "(空)";
     }}
 
-    document.getElementById("groupSelect").addEventListener("change", event => loadGroupFeatures(event.target.value));
     document.getElementById("logRunSelect").addEventListener("change", updateLogFiles);
     function escapeHtml(value) {{
       return String(value)
@@ -457,7 +408,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
     }}
-    Promise.all([loadStatus(), loadPlugins(), loadAiProvider(), loadGroups(), loadAdmins(), loadLogs()]).catch(error => {{
+    Promise.all([loadStatus().then(loadGroups), loadPlugins(), loadAiProvider(), loadAdmins(), loadLogs()]).catch(error => {{
       document.body.insertAdjacentHTML("beforeend", `<pre>${{error.message}}</pre>`);
     }});
   </script>

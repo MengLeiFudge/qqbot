@@ -8,16 +8,19 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.arc_background_service import ArcBackgroundService
-from qqbot.services.feature_catalog import get_feature_by_index
+from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.message_delivery import reset_group_message_interval_state
 from qqbot.services.settings_store import SettingsStore
 
 
 class FakeBot:
-    def __init__(self) -> None:
+    def __init__(self, group_ids: list[int] | None = None) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.group_ids = group_ids or [123456789]
 
     async def call_api(self, api: str, **data: object) -> None:
+        if api == "get_group_list":
+            return [{"group_id": group_id} for group_id in self.group_ids]
         self.calls.append((api, data))
 
 
@@ -89,7 +92,7 @@ def _service(
     return ArcBackgroundService(
         state_path=tmp_path / "run" / "data" / "arc" / "background_state.json",
         settings_store=store,
-        arc_feature=get_feature_by_index(13),
+        arc_feature=get_feature_by_menu_key("Arc"),
         author_qq=605738729,
         version_fetcher=version_fetcher,
         event_service=event_service,
@@ -180,7 +183,7 @@ def test_arc_background_service_sends_group_reminders_once_per_day_with_delay(tm
         sleep=fake_sleep,
     )
     bot = FakeBot()
-    feature = get_feature_by_index(13)
+    feature = get_feature_by_menu_key("Arc")
     assert feature is not None
     service.settings_store.set_group_feature_state(123456789, feature, True)
 
@@ -207,7 +210,7 @@ def test_arc_background_service_skips_empty_or_failed_activity_fetch(tmp_path: P
         event_service=FakeEventService(should_raise=True),
     )
     bot = FakeBot()
-    feature = get_feature_by_index(13)
+    feature = get_feature_by_menu_key("Arc")
     assert feature is not None
     empty_service.settings_store.set_group_feature_state(123456789, feature, True)
     failed_service.settings_store.set_group_feature_state(123456789, feature, True)
@@ -261,7 +264,7 @@ def test_arc_background_service_ignores_alias_sync_failure(tmp_path: Path) -> No
         alias_service=alias_service,
     )
     bot = FakeBot()
-    feature = get_feature_by_index(13)
+    feature = get_feature_by_menu_key("Arc")
     assert feature is not None
     service.settings_store.set_group_feature_state(123456789, feature, True)
     service.state.version_last_seen = "6.13.10c"

@@ -20,20 +20,20 @@ import qqbot.plugins.thunder as thunder
 from qqbot.services.message_delivery import reset_group_message_interval_state
 
 
-def test_reread_feature_binding_points_to_feature_1() -> None:
+def test_reread_feature_binding_points_to_group_assistant() -> None:
     feature = reread.get_reread_feature()
 
     assert feature is not None
-    assert feature.index == 1
-    assert feature.name == "随机复读"
+    assert feature.plugin_id == "group_assistant"
+    assert feature.name == "群管助手"
 
 
-def test_thunder_feature_binding_points_to_feature_2() -> None:
+def test_thunder_feature_binding_points_to_group_assistant() -> None:
     feature = thunder.get_thunder_feature()
 
     assert feature is not None
-    assert feature.index == 2
-    assert feature.name == "随机禁言"
+    assert feature.plugin_id == "group_assistant"
+    assert feature.name == "群管助手"
 
 
 def test_arc_blocking_bridge_uses_run_blocking(monkeypatch) -> None:
@@ -178,9 +178,10 @@ def test_arc_guess_answer_matchers_require_enabled_active_session(monkeypatch) -
 def test_feature_menu_matcher_accepts_arc_aliases() -> None:
     pattern = basic_management.FEATURE_MENU_PATTERN
 
-    assert re.match(pattern, "菜单13") is not None
+    assert re.match(pattern, "菜单13") is None
     assert re.match(pattern, "菜单arc") is not None
     assert re.match(pattern, "菜单arcaea") is not None
+    assert re.match(pattern, "菜单群管助手") is not None
 
 
 class FakeBot:
@@ -207,7 +208,7 @@ def test_social_group_poke_uses_group_poke_api(monkeypatch) -> None:
     monkeypatch.setattr(social.random, "randint", lambda _a, _b: 1)
     monkeypatch.setattr(social, "asyncio", SimpleNamespace(sleep=fake_sleep), raising=False)
     bot = OrderedBot(self_id="114514")
-    event = SimpleNamespace(group_id=2333, user_id=10001, target_id=114514)
+    event = SimpleNamespace(group_id=2333, user_id=605738729, target_id=114514)
 
     asyncio.run(social.handle_poke(bot, event))
 
@@ -218,8 +219,8 @@ def test_social_group_poke_uses_group_poke_api(monkeypatch) -> None:
         "send_group_msg",
         "group_poke",
     ]
-    assert bot.calls[2][1] == {"group_id": "2333", "user_id": "10001"}
-    assert bot.calls[4][1] == {"group_id": "2333", "user_id": "10001"}
+    assert bot.calls[2][1] == {"group_id": "2333", "user_id": "605738729"}
+    assert bot.calls[4][1] == {"group_id": "2333", "user_id": "605738729"}
     assert order[0:2] == [("api", "send_group_msg"), ("sleep", 1.0)]
     assert order[2][0] == "sleep"
     assert 0 < float(order[2][1]) <= 0.5
@@ -236,9 +237,32 @@ def test_social_group_poke_uses_group_poke_api(monkeypatch) -> None:
 def test_social_private_poke_uses_friend_poke_api(monkeypatch) -> None:
     monkeypatch.setattr(social.random, "randint", lambda _a, _b: 4)
     bot = FakeBot(self_id="114514")
-    event = SimpleNamespace(group_id=None, user_id=10001, target_id=114514)
+    event = SimpleNamespace(group_id=None, user_id=605738729, target_id=114514)
 
     asyncio.run(social.handle_poke(bot, event))
 
     assert [api for api, _ in bot.calls] == ["send_private_msg", "send_private_msg", "friend_poke"]
-    assert bot.calls[2][1] == {"user_id": "10001"}
+    assert bot.calls[2][1] == {"user_id": "605738729"}
+
+
+def test_social_request_only_auto_approves_bot_admin(monkeypatch) -> None:
+    class FakeFriendRequest:
+        request_type = "friend"
+
+        def __init__(self, user_id: int) -> None:
+            self.user_id = user_id
+            self.approved = False
+
+        async def approve(self, _bot) -> None:
+            self.approved = True
+
+    monkeypatch.setattr(social, "FriendRequestEvent", FakeFriendRequest)
+    bot = FakeBot(self_id="114514")
+    admin_event = FakeFriendRequest(605738729)
+    normal_event = FakeFriendRequest(10001)
+
+    asyncio.run(social.handle_request(bot, normal_event))
+    asyncio.run(social.handle_request(bot, admin_event))
+
+    assert normal_event.approved is False
+    assert admin_event.approved is True

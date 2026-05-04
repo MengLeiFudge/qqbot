@@ -13,7 +13,7 @@ from qqbot.services.arc_constant_service import ArcConstantService
 from qqbot.services.arc_event_service import ArcEventService, _fetch_latest_arc_version
 from qqbot.services.arc_guess_service import ArcGuessService
 from qqbot.services.codex_self_update_service import publish_pending_codex_self_update_notices
-from qqbot.services.feature_catalog import get_feature_by_index
+from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.settings_store import get_settings_store
 
 driver = get_driver()
@@ -43,7 +43,7 @@ def get_arc_background_service() -> ArcBackgroundService:
     return ArcBackgroundService(
         state_path=settings.data_root / "data" / "arc" / "background_state.json",
         settings_store=get_settings_store(),
-        arc_feature=get_feature_by_index(13),
+        arc_feature=get_feature_by_menu_key("Arc"),
         author_qq=settings.author_qq,
         version_fetcher=_fetch_latest_arc_version,
         event_service=ArcEventService(timezone=settings.timezone),

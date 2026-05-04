@@ -4,6 +4,7 @@ from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from qqbot.services.command_guard import direct_command_rule
+from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.group_control_service import parse_group_control_command
 from qqbot.services.settings_store import get_settings_store
 
@@ -20,7 +21,10 @@ group_control_matcher = on_regex(
 @group_control_matcher.handle()
 async def handle_group_control(bot: Bot, event: GroupMessageEvent) -> None:
     store = get_settings_store()
-    if not store.is_bot_admin(int(event.get_user_id())):
+    feature = get_feature_by_menu_key("群管助手")
+    if feature is None or not store.get_group_feature_state(event.group_id, feature):
+        return
+    if not store.is_bot_admin_or_self(int(event.get_user_id()), bot.self_id):
         return
 
     at_targets = []

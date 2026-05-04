@@ -8,7 +8,6 @@ import subprocess
 from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
-from qqbot.services.feature_catalog import get_feature_by_index, list_visible_features
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_plugin_specs
 from qqbot.services.settings_store import SettingsStore
@@ -35,7 +34,7 @@ class AdminService:
         group_names: dict[int, str] | None = None,
     ) -> list[dict[str, object]]:
         group_names = group_names or {}
-        group_ids = self._list_known_group_ids()
+        group_ids = sorted(set(self._list_known_group_ids()) | set(group_names))
         return [
             {
                 "group_id": group_id,
@@ -44,36 +43,9 @@ class AdminService:
                     group_id,
                     group_names.get(group_id, ""),
                 ),
-                "features": self._build_feature_states(group_id),
             }
             for group_id in group_ids
         ]
-
-    def get_group_features(self, group_id: int) -> dict[str, object]:
-        return {
-            "group_id": group_id,
-            "features": self._build_feature_states(group_id),
-        }
-
-    def set_group_feature(
-        self,
-        group_id: int,
-        feature_index: int,
-        enabled: bool,
-    ) -> dict[str, object]:
-        feature = get_feature_by_index(feature_index)
-        if feature is None:
-            raise ValueError(f"Unknown feature index: {feature_index}")
-
-        self.store.set_group_feature_state(group_id, feature, enabled)
-        return {
-            "group_id": group_id,
-            "feature": {
-                "index": feature.index,
-                "name": feature.name,
-                "enabled": self.store.get_group_feature_state(group_id, feature),
-            },
-        }
 
     def list_plugins(self) -> dict[str, object]:
         states = self.store.list_plugin_states()
@@ -82,12 +54,12 @@ class AdminService:
                 {
                     "id": spec.id,
                     "name": spec.name,
-                    "feature_index": spec.feature_index,
                     "global_enabled": states.get(spec.id, True),
                     "commands": list(spec.commands),
                     "scopes": list(spec.scopes),
                     "requires_direct_at": spec.requires_direct_at,
                     "ai_capabilities": list(spec.ai_capabilities),
+                    "admin_only": spec.admin_only,
                 }
                 for spec in list_visible_plugin_specs()
             ],
@@ -102,9 +74,9 @@ class AdminService:
             "plugin": {
                 "id": spec.id,
                 "name": spec.name,
-                "feature_index": spec.feature_index,
                 "global_enabled": self.store.get_plugin_enabled(spec.id),
                 "ai_capabilities": list(spec.ai_capabilities),
+                "admin_only": spec.admin_only,
             },
         }
 
@@ -262,27 +234,23 @@ class AdminService:
         }
 
     def _list_known_group_ids(self) -> list[int]:
+        group_ids: set[int] = set()
+        nick_path = self.store.settings_root / "group_nick.json"
+        if nick_path.exists():
+            try:
+                nick_store = GroupNickStore(nick_path)
+                group_ids.update(int(group_id) for group_id in nick_store.records if group_id.isdigit())
+            except Exception:
+                pass
+
         root = self.store.func_state_root
         if not root.exists():
-            return []
+            return sorted(group_ids)
 
-        group_ids = []
         for path in root.glob("*.json"):
-            try:
-                group_ids.append(int(path.stem))
-            except ValueError:
-                continue
+            if path.stem.isdigit():
+                group_ids.add(int(path.stem))
         return sorted(group_ids)
-
-    def _build_feature_states(self, group_id: int) -> list[dict[str, object]]:
-        return [
-            {
-                "index": feature.index,
-                "name": feature.name,
-                "enabled": self.store.get_group_feature_state(group_id, feature),
-            }
-            for feature in list_visible_features()
-        ]
 
     def _startup_logs_root(self) -> Path:
         return self.project_root / "logs" / "start_all"

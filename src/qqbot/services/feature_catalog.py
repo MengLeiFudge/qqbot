@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from qqbot.services.plugin_registry import (
     PluginSpec,
-    get_plugin_spec_by_feature_index,
     get_plugin_spec_by_menu_key,
     list_visible_plugin_specs,
 )
@@ -12,34 +11,27 @@ from qqbot.services.plugin_registry import (
 
 @dataclass(frozen=True, slots=True)
 class FeatureDefinition:
-    index: int
+    plugin_id: str
     name: str
-    legacy_names: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
     menu_lines: tuple[str, ...] = ()
     menu_keys: tuple[str, ...] = ()
+    admin_only: bool = False
 
 
 def _feature_from_plugin(spec: PluginSpec) -> FeatureDefinition:
-    if spec.feature_index is None:
-        raise ValueError(f"插件 {spec.id} 没有可见功能序号")
     return FeatureDefinition(
-        index=spec.feature_index,
+        plugin_id=spec.id,
         name=spec.name,
-        legacy_names=spec.legacy_names,
+        aliases=spec.aliases,
         menu_lines=spec.menu_lines,
         menu_keys=spec.menu_keys,
+        admin_only=spec.admin_only,
     )
 
 
 def list_visible_features() -> list[FeatureDefinition]:
     return [_feature_from_plugin(spec) for spec in list_visible_plugin_specs()]
-
-
-def get_feature_by_index(index: int) -> FeatureDefinition | None:
-    spec = get_plugin_spec_by_feature_index(index)
-    if spec is None:
-        return None
-    return _feature_from_plugin(spec)
 
 
 def get_feature_by_menu_key(key: str) -> FeatureDefinition | None:
@@ -49,22 +41,17 @@ def get_feature_by_menu_key(key: str) -> FeatureDefinition | None:
     return _feature_from_plugin(spec)
 
 
-def build_group_menu_text(feature_states: dict[int, bool]) -> str:
-    # 菜单文案沿用旧 mirai 结构，先保证迁移后的命令与原行为一致。
-    lines = ["本群功能开启情况如下："]
+def build_group_menu_text(feature_states: dict[str, bool]) -> str:
+    lines = ["当前插件模块如下："]
     for feature in list_visible_features():
-        status = "开启" if feature_states.get(feature.index, False) else "关闭"
-        lines.append(f"{feature.index}.{feature.name}：{status}")
-    lines.append("tips：【菜单+功能序号】获得对应功能菜单，如【菜单21】")
+        status = "开启" if feature_states.get(feature.plugin_id, False) else "关闭"
+        lines.append(f"{feature.name}：{status}")
+    lines.append("tips：【菜单+模块名称】获得对应功能菜单，如【菜单Arc】")
     return "\n".join(lines)
 
 
-def build_feature_menu_text(index_or_key: int | str) -> str | None:
-    feature = (
-        get_feature_by_index(index_or_key)
-        if isinstance(index_or_key, int)
-        else get_feature_by_menu_key(index_or_key)
-    )
+def build_feature_menu_text(key: str) -> str | None:
+    feature = get_feature_by_menu_key(key)
     if feature is None:
         return None
 

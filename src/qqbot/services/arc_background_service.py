@@ -115,7 +115,7 @@ class ArcBackgroundService:
         today = current.date().isoformat()
         pending_group_ids = [
             group_id
-            for group_id in self._list_arc_enabled_groups()
+            for group_id in await self._list_arc_enabled_groups(bot)
             if self.state.group_last_reminded_on.get(str(group_id)) != today
         ]
         if not pending_group_ids:
@@ -152,16 +152,19 @@ class ArcBackgroundService:
                 group_interval_sleep=self.sleep_func,
             )
 
-    def _list_arc_enabled_groups(self) -> list[int]:
-        if self.arc_feature is None or not self.settings_store.func_state_root.exists():
+    async def _list_arc_enabled_groups(self, bot) -> list[int]:
+        if self.arc_feature is None or not self.settings_store.get_group_feature_state(0, self.arc_feature):
+            return []
+        try:
+            groups = await bot.call_api("get_group_list")
+        except Exception:
             return []
         group_ids = []
-        for path in self.settings_store.func_state_root.glob("*.json"):
-            if not path.stem.isdigit():
+        for group in groups or []:
+            group_id = group.get("group_id") if isinstance(group, dict) else None
+            if group_id is None:
                 continue
-            group_id = int(path.stem)
-            if self.settings_store.get_group_feature_state(group_id, self.arc_feature):
-                group_ids.append(group_id)
+            group_ids.append(int(group_id))
         return sorted(group_ids)
 
     def _coerce_now(self, now: datetime | None) -> datetime:

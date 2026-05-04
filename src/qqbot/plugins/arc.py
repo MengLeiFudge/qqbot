@@ -22,7 +22,7 @@ from qqbot.services.arc_service import ArcService
 from qqbot.services.arc_constant_service import ArcConstantService
 from qqbot.services.async_tools import run_blocking
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.services.feature_catalog import get_feature_by_index
+from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.message_delivery import finish_split_text, send_split_text
 from qqbot.services.settings_store import get_settings_store
 
@@ -75,7 +75,7 @@ _ARC_APK_UPDATE_MANAGER: ArcApkUpdateManager | None = None
 
 
 def get_arc_feature():
-    return get_feature_by_index(13)
+    return get_feature_by_menu_key("Arc")
 
 
 def get_arc_service() -> ArcService:
@@ -302,13 +302,11 @@ def get_arc_room_id(event: MessageEvent) -> int:
 
 
 async def ensure_arc_enabled(event: MessageEvent) -> bool:
-    if not isinstance(event, GroupMessageEvent):
-        return True
     feature = get_arc_feature()
     if feature is None:
         return False
     store = get_settings_store()
-    return store.get_group_feature_state(event.group_id, feature)
+    return store.get_group_feature_state(getattr(event, "group_id", 0), feature)
 
 
 def get_player_name(event: MessageEvent) -> str:

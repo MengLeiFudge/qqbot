@@ -6,10 +6,7 @@ from pathlib import Path
 
 from qqbot.config import load_settings
 from qqbot.services.feature_catalog import FeatureDefinition
-from qqbot.services.plugin_registry import (
-    get_plugin_spec_by_feature_index,
-    list_visible_plugin_specs,
-)
+from qqbot.services.plugin_registry import list_visible_plugin_specs
 
 
 class SettingsStore:
@@ -30,21 +27,16 @@ class SettingsStore:
         admins = self._read_json(self.settings_root / "bot_admin.json", {})
         return bool(admins.get(str(qq), False))
 
+    def is_bot_admin_or_self(self, qq: int, self_id: int | str | None) -> bool:
+        if self_id is not None and str(qq) == str(self_id):
+            return True
+        return self.is_bot_admin(qq)
+
     def list_bot_admins(self) -> dict[str, bool]:
         return self._read_json(self.settings_root / "bot_admin.json", {})
 
     def get_group_feature_state(self, group_id: int, feature: FeatureDefinition) -> bool:
-        spec = get_plugin_spec_by_feature_index(feature.index)
-        if spec is not None and not self.get_plugin_enabled(spec.id):
-            return False
-
-        states = self._read_json(self.func_state_root / f"{group_id}.json", {})
-        if feature.name in states:
-            return bool(states[feature.name])
-        for legacy_name in feature.legacy_names:
-            if legacy_name in states:
-                return bool(states[legacy_name])
-        return False
+        return self.get_plugin_enabled(feature.plugin_id)
 
     def set_group_feature_state(
         self,
@@ -52,14 +44,10 @@ class SettingsStore:
         feature: FeatureDefinition,
         is_open: bool,
     ) -> None:
-        states = self._read_json(self.func_state_root / f"{group_id}.json", {})
-        states[feature.name] = is_open
-        for legacy_name in feature.legacy_names:
-            states.pop(legacy_name, None)
-        self._write_json(self.func_state_root / f"{group_id}.json", states)
+        self.set_plugin_enabled(feature.plugin_id, is_open)
 
     def get_group_feature_states(self, group_id: int) -> dict[str, bool]:
-        return self._read_json(self.func_state_root / f"{group_id}.json", {})
+        return self.list_plugin_states()
 
     def get_plugin_enabled(self, plugin_id: str) -> bool:
         states = self._read_json(self.settings_root / "plugin_state.json", {})

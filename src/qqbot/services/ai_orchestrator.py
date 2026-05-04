@@ -147,7 +147,7 @@ class AiOrchestrator:
         ):
             return AiOrchestratorResult(False)
         if context.group_id is None:
-            return AiOrchestratorResult(True, "这个问题需要在群聊里问，我才能读取当前群的插件状态。")
+            return AiOrchestratorResult(True, "当前插件状态由全局开关决定，可以在管理端查看。")
 
         store = SettingsStore(self.data_root, author_qq=0)
         group_id = int(context.group_id)
@@ -157,8 +157,8 @@ class AiOrchestrator:
             if store.get_group_feature_state(group_id, feature)
         ]
         if not enabled_names:
-            return AiOrchestratorResult(True, "本群当前没有启用插件。")
-        return AiOrchestratorResult(True, "本群已启用插件：" + "、".join(enabled_names))
+            return AiOrchestratorResult(True, "当前没有启用插件。")
+        return AiOrchestratorResult(True, "当前启用插件：" + "、".join(enabled_names))
 
     async def _try_upload_latest_project_zip(
         self,
