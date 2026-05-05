@@ -73,6 +73,32 @@ def test_orchestrator_records_user_style_preference(tmp_path: Path) -> None:
     assert "不要 markdown，短一点" in "\n".join(result.extra_context)
 
 
+def test_orchestrator_records_group_style_preference_for_later_users(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    update = asyncio.run(
+        orchestrator.handle(
+            "你要说话结尾带一个喵",
+            AiOrchestratorContext(actor_user_id="10001", group_id="516286670"),
+            NormalizedMessage(text="你要说话结尾带一个喵", outline="你要说话结尾带一个喵"),
+        )
+    )
+    later = asyncio.run(
+        orchestrator.handle(
+            "今天天气怎么样",
+            AiOrchestratorContext(actor_user_id="10002", group_id="516286670"),
+            NormalizedMessage(text="今天天气怎么样", outline="今天天气怎么样"),
+        )
+    )
+
+    assert update.handled is True
+    assert "已记住本群回复偏好：结尾带一个喵" in update.text
+    assert later.handled is False
+    assert later.extra_context == (
+        "提示词偏好层：\n本群回复偏好：结尾带一个喵",
+    )
+
+
 def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path, author_qq=605738729)
     group_assistant = get_feature_by_menu_key("群管助手")

@@ -58,6 +58,23 @@ def _format_codex_reply_context_line(reply: NormalizedReply) -> str:
     return f"引用消息：{reply.sender_name}({reply.user_id}): {reply.message.outline}"
 
 
+def looks_like_style_preference_update(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if not compact:
+        return False
+    if re.search(r"(以后|之后|今后|每次).{0,16}(回复|说话|回答|口吻|语气|结尾)", compact):
+        return True
+    return bool(re.search(r"^(你要|请你|记住).{0,16}(回复|说话|回答|口吻|语气|结尾)", compact))
+
+
+def extract_style_preference(text: str) -> str:
+    preference = text.strip()
+    preference = re.sub(r"^(你要|请你|记住)", "", preference).strip()
+    preference = re.sub(r"^(以后|之后|今后|每次)(都|要|请)?", "", preference).strip()
+    preference = re.sub(r"^(回复|说话|回答)(时|的时候|要)?", "", preference).strip()
+    return preference.strip(" ：:，,。")
+
+
 class AiOrchestrator:
     def __init__(
         self,
@@ -128,7 +145,7 @@ class AiOrchestrator:
         if schedule_result.handled:
             return schedule_result
 
-        style_context = self.styles.build_context(context.actor_user_id)
+        style_context = self.styles.build_context(context.actor_user_id, group_id=context.group_id)
         return AiOrchestratorResult(
             False,
             extra_context=(style_context,) if style_context else (),
@@ -209,17 +226,26 @@ class AiOrchestrator:
         text: str,
         context: AiOrchestratorContext,
     ) -> AiOrchestratorResult:
-        if not re.search(r"(以后|之后|今后).{0,8}(回复|说话|回答)", text):
+        if not looks_like_style_preference_update(text):
             return AiOrchestratorResult(False)
         if any(keyword in text for keyword in ("主动插话", "没人@", "拒绝承认", "伪装")):
             return AiOrchestratorResult(
                 True,
                 "这类全局行为不能作为个人回复偏好直接生效，需要作者审批。",
             )
-        preference = re.sub(r"^(以后|之后|今后)(回复|说话|回答)?", "", text).strip(" ：:，,。")
+        preference = extract_style_preference(text)
         if not preference:
             return AiOrchestratorResult(False)
-        self.styles.add_preference(context.actor_user_id, preference)
+        if context.group_id is not None:
+            self.styles.add_group_preference(context.group_id, preference)
+            return AiOrchestratorResult(
+                True,
+                f"已记住本群回复偏好：{preference}",
+                extra_context=(
+                    self.styles.build_context(context.actor_user_id, group_id=context.group_id),
+                ),
+            )
+        self.styles.add_user_preference(context.actor_user_id, preference)
         return AiOrchestratorResult(
             True,
             f"已记住你的回复偏好：{preference}",
