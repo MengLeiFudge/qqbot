@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 
 from nonebot import on_message, on_regex
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 
 from qqbot.services.command_guard import direct_command_rule, is_likely_command
 from qqbot.services.feature_catalog import get_feature_by_menu_key
@@ -68,12 +68,24 @@ async def handle_thunder_message(bot: Bot, event: GroupMessageEvent) -> None:
         return
 
     seconds = random.randint(min_seconds, max_seconds)
-    await bot.call_api(
-        "set_group_ban",
-        group_id=event.group_id,
-        user_id=int(event.get_user_id()),
-        duration=seconds,
-    )
+    try:
+        result = await bot.call_api(
+            "set_group_ban",
+            group_id=event.group_id,
+            user_id=int(event.get_user_id()),
+            duration=seconds,
+        )
+    except Exception:
+        return
+
+    if isinstance(result, dict) and result.get("status") == "failed":
+        return
+
     await thunder_message_matcher.send(
-        f"[CQ:at,qq={event.get_user_id()}]\n你被棉花糖的闪电击中，禁言{seconds}s！"
+        Message(
+            [
+                MessageSegment.at(int(event.get_user_id())),
+                MessageSegment.text(f"\n你被棉花糖的闪电击中，禁言{seconds}s！"),
+            ]
+        )
     )

@@ -4,6 +4,8 @@ import asyncio
 import re
 from types import SimpleNamespace
 
+from nonebot.adapters.onebot.v11 import Message
+
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -191,6 +193,72 @@ class FakeBot:
 
     async def call_api(self, api: str, **data: object) -> None:
         self.calls.append((api, data))
+
+
+class FakeThunderEvent:
+    group_id = 2333
+
+    def get_user_id(self) -> str:
+        return "744306344"
+
+    def get_plaintext(self) -> str:
+        return "我的城堡还没倒，我还能战！"
+
+
+class FakeThunderStore:
+    def get_group_feature_state(self, group_id: int, feature) -> bool:
+        return True
+
+    def is_bot_admin_or_self(self, qq: int, self_id: object) -> bool:
+        return True
+
+    def get_thunder_config(self, group_id: int) -> tuple[float, int, int]:
+        return 1.0, 10, 10
+
+
+def test_thunder_does_not_announce_when_group_ban_fails(monkeypatch) -> None:
+    sent_messages: list[object] = []
+
+    class FailedBanBot(FakeBot):
+        async def call_api(self, api: str, **data: object) -> dict[str, object]:
+            self.calls.append((api, data))
+            return {"status": "failed", "retcode": 1400}
+
+    async def fake_send(message: object) -> None:
+        sent_messages.append(message)
+
+    monkeypatch.setattr(thunder, "get_settings_store", lambda: FakeThunderStore())
+    monkeypatch.setattr(thunder.random, "random", lambda: 0.0)
+    monkeypatch.setattr(thunder.random, "randint", lambda _a, _b: 10)
+    monkeypatch.setattr(thunder.thunder_message_matcher, "send", fake_send)
+
+    asyncio.run(thunder.handle_thunder_message(FailedBanBot("114514"), FakeThunderEvent()))
+
+    assert sent_messages == []
+
+
+def test_thunder_announcement_uses_at_message_segment(monkeypatch) -> None:
+    sent_messages: list[object] = []
+
+    class SuccessfulBanBot(FakeBot):
+        async def call_api(self, api: str, **data: object) -> dict[str, object]:
+            self.calls.append((api, data))
+            return {"status": "ok", "retcode": 0}
+
+    async def fake_send(message: object) -> None:
+        sent_messages.append(message)
+
+    monkeypatch.setattr(thunder, "get_settings_store", lambda: FakeThunderStore())
+    monkeypatch.setattr(thunder.random, "random", lambda: 0.0)
+    monkeypatch.setattr(thunder.random, "randint", lambda _a, _b: 10)
+    monkeypatch.setattr(thunder.thunder_message_matcher, "send", fake_send)
+
+    asyncio.run(thunder.handle_thunder_message(SuccessfulBanBot("114514"), FakeThunderEvent()))
+
+    assert len(sent_messages) == 1
+    assert isinstance(sent_messages[0], Message)
+    assert [segment.type for segment in sent_messages[0]] == ["at", "text"]
+    assert sent_messages[0][0].data["qq"] == "744306344"
 
 
 def test_social_group_poke_uses_group_poke_api(monkeypatch) -> None:
