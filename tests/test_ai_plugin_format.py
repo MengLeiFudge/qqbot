@@ -14,7 +14,9 @@ from qqbot.plugins.ai_test import (
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import normalize_onebot_message
+from qqbot.services.settings_store import SettingsStore
 
 
 class FakeGroupEvent:
@@ -158,6 +160,59 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "当前发言者：萌泪(605738729)" in joined
     assert "用户A(10001): 今天讨论了机器人接入 AI。" in joined
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
+
+
+def test_ai_context_includes_author_and_admin_identity_facts(tmp_path: Path) -> None:
+    settings = RuntimeSettings(
+        data_root=tmp_path,
+        author_qq=605738729,
+        author_name="萌泪酱",
+    )
+    settings_store = SettingsStore(tmp_path, settings.author_qq)
+    settings_store.set_bot_admin(10001, True)
+    settings_store.set_bot_admin(10002, False)
+    nick_store = GroupNickStore(tmp_path / "settings" / "group_nick.json")
+    nick_store.record_group_sender(
+        group_id=516286670,
+        qq=10001,
+        card="棉花糖管理员",
+        nickname="",
+        updated_at=1,
+    )
+
+    context = build_ai_context(
+        settings,
+        FakeGroupEvent(user_id="605738729", sender=FakeSender(user_id=605738729, card="萌泪")),
+        AiGroupContextStore(tmp_path),
+        settings_store=settings_store,
+    )
+
+    joined = "\n".join(context)
+    assert "Bot 作者/主人：萌泪酱(605738729)" in joined
+    assert "Bot 管理员列表：萌泪酱(605738729)、棉花糖管理员(10001)" in joined
+    assert "当前发言者身份：Bot 作者/主人" in joined
+    assert "10002" not in joined
+    assert "别人问“萌泪酱是你的什么人”" in joined
+
+
+def test_ai_context_marks_current_sender_as_bot_admin(tmp_path: Path) -> None:
+    settings = RuntimeSettings(
+        data_root=tmp_path,
+        author_qq=605738729,
+        author_name="萌泪酱",
+    )
+    settings_store = SettingsStore(tmp_path, settings.author_qq)
+    settings_store.set_bot_admin(10001, True)
+
+    context = build_ai_context(
+        settings,
+        FakeGroupEvent(user_id="10001", sender=FakeSender(user_id=10001, card="管理员A")),
+        AiGroupContextStore(tmp_path),
+        settings_store=settings_store,
+    )
+
+    joined = "\n".join(context)
+    assert "当前发言者身份：Bot 管理员" in joined
 
 
 def test_ai_context_includes_quoted_reply_text(tmp_path: Path) -> None:

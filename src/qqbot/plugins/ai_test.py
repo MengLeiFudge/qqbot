@@ -22,7 +22,7 @@ from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_delivery import finish_split_text
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_event
-from qqbot.services.settings_store import get_settings_store
+from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
 ai_model_matcher = on_regex(
@@ -91,6 +91,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             event,
             group_context_store,
             normalized_message,
+            settings_store=store,
         )
     )
 
@@ -181,12 +182,18 @@ def build_ai_context(
     event: MessageEvent,
     group_context_store: AiGroupContextStore,
     normalized_message: NormalizedMessage | None = None,
+    *,
+    settings_store: SettingsStore | None = None,
 ) -> tuple[str, ...]:
     normalized_message = normalized_message or normalize_onebot_event(event)
+    settings_store = settings_store or SettingsStore(settings.data_root, settings.author_qq)
+    identity_context = build_ai_identity_context(settings, event, settings_store)
     context = [build_ai_system_context(settings)]
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         context.append("当前对话场景：私聊。")
         context.append(build_current_sender_context(event))
+        if identity_context:
+            context.append(identity_context)
         message_context = build_message_structure_context(normalized_message)
         if message_context:
             context.append(message_context)
@@ -203,6 +210,8 @@ def build_ai_context(
     context.append("当前对话场景：QQ群聊。用户是在群里 @ 你。")
     context.append(f"当前群号：{group_id}")
     context.append(build_current_sender_context(event))
+    if identity_context:
+        context.append(identity_context)
     message_context = build_message_structure_context(
         normalized_message,
         group_id=group_id,
@@ -234,6 +243,69 @@ def build_current_sender_context(event: MessageEvent) -> str:
     nickname = str(getattr(sender, "nickname", "") or "").strip()
     display_name = card or nickname or user_id
     return f"当前发言者：{display_name}({user_id})"
+
+
+def build_ai_identity_context(
+    settings: RuntimeSettings,
+    event: MessageEvent,
+    settings_store: SettingsStore,
+) -> str:
+    author_qq = int(settings.author_qq)
+    if author_qq <= 0:
+        return ""
+
+    nick_store = GroupNickStore(settings.data_root / "settings" / "group_nick.json")
+    author_label = format_admin_identity_label(
+        author_qq,
+        nick_store=nick_store,
+        fallback_name=settings.author_name,
+    )
+    admin_ids = {
+        int(qq)
+        for qq, enabled in settings_store.list_bot_admins().items()
+        if str(qq).isdigit() and enabled
+    }
+    admin_ids.add(author_qq)
+    ordered_admin_ids = [author_qq] + sorted(qq for qq in admin_ids if qq != author_qq)
+    admin_labels = [
+        format_admin_identity_label(qq, nick_store=nick_store)
+        if qq != author_qq
+        else author_label
+        for qq in ordered_admin_ids
+    ]
+
+    current_user_id = int(event.get_user_id()) if event.get_user_id().isdigit() else 0
+    if current_user_id == author_qq:
+        current_identity = "Bot 作者/主人"
+    elif current_user_id and settings_store.is_bot_admin(current_user_id):
+        current_identity = "Bot 管理员"
+    else:
+        current_identity = "普通用户"
+
+    author_name = author_label.rsplit("(", 1)[0].strip()
+    # 身份事实直接提供给普通 AI，避免模型把真实管理关系泛化成普通社交回答。
+    return (
+        "机器人身份事实："
+        f"\nBot 作者/主人：{author_label}"
+        f"\nBot 管理员列表：{'、'.join(admin_labels)}"
+        f"\n当前发言者身份：{current_identity}"
+        f"\n如果别人问“{author_name}是你的什么人”或类似问题，"
+        f"应回答 {author_name} 是你的作者、主人和最高管理者。"
+        "不要回答“大家都是主人”或否认这些身份事实。"
+    )
+
+
+def format_admin_identity_label(
+    qq: int,
+    *,
+    nick_store: GroupNickStore,
+    fallback_name: str = "",
+) -> str:
+    fallback_name = fallback_name.strip()
+    name = fallback_name or nick_store.resolve_display_name(0, qq).strip()
+    if not name or name == str(qq):
+        return str(qq)
+    return f"{name}({qq})"
 
 
 def build_message_structure_context(
