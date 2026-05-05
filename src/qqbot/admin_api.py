@@ -512,29 +512,53 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     async function loadGroupMessages() {{
       const status = document.getElementById("groupMessageStatus");
       status.textContent = "正在刷新...";
+      const shouldKeepBottom = isMessageListAtBottom();
       groupMessagePayload = await api("/admin/api/group-messages");
       const select = document.getElementById("messageGroupSelect");
-      const currentValue = select.value || "__all__";
-      const options = [`<option value="__all__">全部群</option>`].concat(
-        groupMessagePayload.groups.map(group => (
-          `<option value="${{group.group_id}}">${{escapeHtml(group.display_name)}}（${{group.messages.length}}）</option>`
-        ))
-      );
-      select.innerHTML = options.join("");
+      const currentValue = select.value;
+      select.innerHTML = groupMessagePayload.groups.map(group => (
+        `<option value="${{group.group_id}}">${{escapeHtml(group.display_name)}}（${{group.messages.length}}）</option>`
+      )).join("");
       select.value = [...select.options].some(option => option.value === currentValue)
         ? currentValue
-        : "__all__";
+        : selectLatestMessageGroup();
       renderGroupMessages();
+      if (shouldKeepBottom) scrollSelectedMessageListToBottom();
       status.textContent = `已刷新：${{formatTime(Date.now() / 1000)}}`;
     }}
 
     function renderGroupMessages() {{
-      const selected = document.getElementById("messageGroupSelect").value || "__all__";
-      const groups = selected === "__all__"
-        ? groupMessagePayload.groups
-        : groupMessagePayload.groups.filter(group => String(group.group_id) === selected);
+      const selected = document.getElementById("messageGroupSelect").value;
+      const groups = groupMessagePayload.groups.filter(group => String(group.group_id) === selected);
       document.getElementById("groupMessages").innerHTML = groups.map(renderMessageGroup).join("")
         || `<div class="muted">暂无群消息。</div>`;
+    }}
+
+    function selectLatestMessageGroup() {{
+      const latestGroup = groupMessagePayload.groups.reduce((latest, group) => {{
+        const latestMessage = group.messages[group.messages.length - 1];
+        const latestTimestamp = latest.message ? Number(latest.message.timestamp) : -1;
+        const groupTimestamp = latestMessage ? Number(latestMessage.timestamp) : -1;
+        return groupTimestamp > latestTimestamp
+          ? {{ group, message: latestMessage }}
+          : latest;
+      }}, {{ group: groupMessagePayload.groups[0], message: null }});
+      return latestGroup.group ? String(latestGroup.group.group_id) : "";
+    }}
+
+    function getSelectedMessageList() {{
+      return document.querySelector("#groupMessages .message-list");
+    }}
+
+    function isMessageListAtBottom() {{
+      const list = getSelectedMessageList();
+      if (!list) return true;
+      return list.scrollHeight - list.scrollTop - list.clientHeight <= 8;
+    }}
+
+    function scrollSelectedMessageListToBottom() {{
+      const list = getSelectedMessageList();
+      if (list) list.scrollTop = list.scrollHeight;
     }}
 
     function renderMessageGroup(group) {{

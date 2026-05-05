@@ -142,6 +142,10 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "/admin/api/kun/users" in body
     assert "群消息" in body
     assert "/admin/api/group-messages" in body
+    assert "全部群" not in body
+    assert "selectLatestMessageGroup" in body
+    assert "isMessageListAtBottom" in body
+    assert "scrollSelectedMessageListToBottom" in body
     assert "message-row" in body
     assert ".message-row.incoming" in body
     assert ".message-row.bot" in body
