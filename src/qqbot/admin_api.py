@@ -322,26 +322,19 @@ def build_admin_html(settings: RuntimeSettings) -> str:
   </header>
   <div id="adminShell" class="admin-shell">
     <nav class="sidebar" aria-label="管理模块">
-      <button class="tab-button active" data-tab="mainPanel" onclick="showTab('mainPanel')">主控面板</button>
+      <button class="tab-button active" data-tab="realtimePanel" onclick="showTab('realtimePanel')">实时信息</button>
       <button class="tab-button" data-tab="groupControlPanel" onclick="showTab('groupControlPanel')">群管管理</button>
       <button class="tab-button" data-tab="kunPanel" onclick="showTab('kunPanel')">养鲲管理</button>
       <button class="tab-button" data-tab="systemPanel" onclick="showTab('systemPanel')">系统设置</button>
     </nav>
     <main class="content">
-      <section id="mainPanel" class="tab-panel active">
+      <section id="realtimePanel" class="tab-panel active">
         <div class="panel-block">
-          <h2>主控面板</h2>
+          <h2>实时信息</h2>
           <div id="status" class="status"></div>
         </div>
         <div class="panel-block">
-          <h3>运行控制</h3>
-          <div class="control-panel">
-            <button id="restartButton" class="danger" onclick="restartBot()">重启 Bot</button>
-            <span id="restartStatus" class="muted">重启会断开几秒钟，NapCat 会自动重连。</span>
-          </div>
-        </div>
-        <div class="panel-block">
-          <h3>启动日志</h3>
+          <h3>运行日志</h3>
           <div class="row">
             <select id="logRunSelect"></select>
             <select id="logFileSelect"></select>
@@ -399,6 +392,13 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       <section id="systemPanel" class="tab-panel">
         <div class="panel-block">
           <h2>系统设置</h2>
+          <h3>运行控制</h3>
+          <div class="control-panel">
+            <button id="restartButton" class="danger" onclick="restartBot()">重启 Bot</button>
+            <span id="restartStatus" class="muted">重启会断开几秒钟，NapCat 会自动重连。</span>
+          </div>
+        </div>
+        <div class="panel-block">
           <h3>全局插件</h3>
           <div id="pluginGrid" class="grid"></div>
         </div>

@@ -122,13 +122,15 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "/features" not in body
     assert "adminShell" in body
     assert "tab-button" in body
-    assert "data-tab=\"mainPanel\"" in body
+    assert "data-tab=\"realtimePanel\"" in body
     assert "data-tab=\"kunPanel\"" in body
     assert "data-tab=\"groupControlPanel\"" in body
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
-    assert "主控面板" in body
+    assert "实时信息" in body
+    assert "主控面板" not in body
+    assert "id=\"realtimePanel\"" in body
     assert "群管管理" in body
     assert "群管配置" in body
     assert "/admin/api/group-control" in body
