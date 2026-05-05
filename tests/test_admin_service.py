@@ -120,6 +120,47 @@ def test_kun_admin_service_gets_and_updates_user(tmp_path: Path) -> None:
     assert updated["user"]["money"] == 4567
 
 
+def test_kun_admin_service_lists_users_for_selection(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    kun_service = KunService(tmp_path / "run" / "data" / "kun" / "users.json")
+    first = kun_service.ensure_user(10001)
+    first.name = "甲鲲"
+    first.level = 2000
+    first.money = 300
+    second = kun_service.ensure_user(10002)
+    second.name = "乙鲲"
+    second.level = 3000
+    second.money = 200
+    kun_service._save()
+    nick_store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
+    nick_store.record_group_sender(
+        group_id=516286670,
+        qq=10002,
+        card="本群乙",
+        nickname="",
+        updated_at=1,
+    )
+
+    payload = service.list_kun_users()
+
+    assert payload["users"] == [
+        {
+            "qq": 10002,
+            "name": "乙鲲",
+            "level": 3000,
+            "money": 200,
+            "display_name": "本群乙（10002）",
+        },
+        {
+            "qq": 10001,
+            "name": "甲鲲",
+            "level": 2000,
+            "money": 300,
+            "display_name": "10001",
+        },
+    ]
+
+
 def test_admin_list_and_update_use_bot_admin_json(tmp_path: Path) -> None:
     service = build_service(tmp_path)
     nick_store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")

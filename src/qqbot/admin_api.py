@@ -121,6 +121,13 @@ def register_admin_routes(
             payload.max_seconds,
         )
 
+    @app.get("/admin/api/kun/users")
+    async def admin_kun_users(
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.list_kun_users()
+
     @app.get("/admin/api/kun/users/{qq}")
     async def admin_kun_user(
         qq: int,
@@ -225,29 +232,58 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       background: #f6f7f9;
       color: #1f2937;
     }}
-    body {{ margin: 0; }}
+    body {{ margin: 0; min-height: 100vh; }}
     header {{
-      background: #17202a;
+      background: #1e293b;
       color: #f8fafc;
-      padding: 18px 28px;
+      padding: 14px 22px;
       display: flex;
       justify-content: space-between;
       gap: 16px;
       align-items: center;
     }}
     h1 {{ margin: 0; font-size: 22px; }}
-    main {{ max-width: 1180px; margin: 0 auto; padding: 24px; }}
-    section {{
+    h2 {{ margin: 0 0 14px; font-size: 18px; }}
+    h3 {{ margin: 0 0 10px; font-size: 15px; }}
+    .admin-shell {{
+      min-height: calc(100vh - 58px);
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+    }}
+    .sidebar {{
+      background: #e8edf3;
+      border-right: 1px solid #cbd5e1;
+      padding: 16px 12px;
+    }}
+    .tab-button {{
+      width: 100%;
+      min-height: 42px;
+      margin-bottom: 8px;
+      text-align: left;
+      border-color: transparent;
+      background: transparent;
+      color: #334155;
+      font-weight: 600;
+    }}
+    .tab-button.active {{
+      background: #ffffff;
+      border-color: #cbd5e1;
+      color: #0f172a;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }}
+    .content {{ min-width: 0; padding: 22px; }}
+    .tab-panel {{ display: none; max-width: 1180px; }}
+    .tab-panel.active {{ display: block; }}
+    .panel-block {{
       background: #ffffff;
       border: 1px solid #d9dee7;
       border-radius: 8px;
       margin-bottom: 18px;
       padding: 18px;
     }}
-    h2 {{ margin: 0 0 14px; font-size: 18px; }}
     button, select, input {{
       font: inherit;
-      min-height: 34px;
+      min-height: 36px;
       border: 1px solid #c7ced8;
       border-radius: 6px;
       background: #ffffff;
@@ -270,6 +306,13 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     .field label {{ color: #475569; font-size: 13px; }}
     pre {{ white-space: pre-wrap; background: #111827; color: #e5e7eb; padding: 12px; border-radius: 6px; max-height: 420px; overflow: auto; }}
     ul {{ padding-left: 18px; }}
+    @media (max-width: 760px) {{
+      header {{ align-items: flex-start; flex-direction: column; }}
+      .admin-shell {{ grid-template-columns: 1fr; }}
+      .sidebar {{ display: flex; gap: 8px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #cbd5e1; }}
+      .tab-button {{ width: auto; min-width: 112px; margin-bottom: 0; text-align: center; }}
+      .content {{ padding: 16px; }}
+    }}
   </style>
 </head>
 <body>
@@ -277,85 +320,107 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     <h1>{escape(title)}</h1>
     <div>{escape(admin_url)}</div>
   </header>
-  <main>
-    <section>
-      <h2>状态</h2>
-      <div id="status" class="status"></div>
-    </section>
-    <section>
-      <h2>运行控制</h2>
-      <div class="control-panel">
-        <button id="restartButton" class="danger" onclick="restartBot()">重启 Bot</button>
-        <span id="restartStatus" class="muted">重启会断开几秒钟，NapCat 会自动重连。</span>
-      </div>
-    </section>
-    <section>
-      <h2>全局插件</h2>
-      <div id="pluginGrid" class="grid"></div>
-    </section>
-    <section>
-      <h2>群管配置</h2>
-      <div class="row">
-        <button onclick="loadGroupControlConfig()">读取</button>
-        <button onclick="saveGroupControlConfig()">保存</button>
-        <span id="groupControlStatus" class="muted"></span>
-      </div>
-      <div class="form-grid">
-        <div class="field">
-          <label for="rereadProbabilityInput">随机复读概率（%）</label>
-          <input id="rereadProbabilityInput" type="number" min="0.01" max="50" step="0.01">
+  <div id="adminShell" class="admin-shell">
+    <nav class="sidebar" aria-label="管理模块">
+      <button class="tab-button active" data-tab="mainPanel" onclick="showTab('mainPanel')">主控面板</button>
+      <button class="tab-button" data-tab="groupControlPanel" onclick="showTab('groupControlPanel')">群管管理</button>
+      <button class="tab-button" data-tab="kunPanel" onclick="showTab('kunPanel')">养鲲管理</button>
+      <button class="tab-button" data-tab="systemPanel" onclick="showTab('systemPanel')">系统设置</button>
+    </nav>
+    <main class="content">
+      <section id="mainPanel" class="tab-panel active">
+        <div class="panel-block">
+          <h2>主控面板</h2>
+          <div id="status" class="status"></div>
         </div>
-        <div class="field">
-          <label for="thunderProbabilityInput">随机禁言概率（%）</label>
-          <input id="thunderProbabilityInput" type="number" min="0.01" max="50" step="0.01">
+        <div class="panel-block">
+          <h3>运行控制</h3>
+          <div class="control-panel">
+            <button id="restartButton" class="danger" onclick="restartBot()">重启 Bot</button>
+            <span id="restartStatus" class="muted">重启会断开几秒钟，NapCat 会自动重连。</span>
+          </div>
         </div>
-        <div class="field">
-          <label for="thunderMinSecondsInput">最短禁言秒数</label>
-          <input id="thunderMinSecondsInput" type="number" min="1" max="30" step="1">
+        <div class="panel-block">
+          <h3>启动日志</h3>
+          <div class="row">
+            <select id="logRunSelect"></select>
+            <select id="logFileSelect"></select>
+            <button onclick="loadLogContent()">查看</button>
+          </div>
+          <pre id="logContent">请选择日志。</pre>
         </div>
-        <div class="field">
-          <label for="thunderMaxSecondsInput">最长禁言秒数</label>
-          <input id="thunderMaxSecondsInput" type="number" min="1" max="30" step="1">
+      </section>
+      <section id="groupControlPanel" class="tab-panel">
+        <div class="panel-block">
+          <h2>群管管理</h2>
+          <h3>群管配置</h3>
+          <div class="row">
+            <button onclick="loadGroupControlConfig()">读取</button>
+            <button onclick="saveGroupControlConfig()">保存</button>
+            <span id="groupControlStatus" class="muted"></span>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="rereadProbabilityInput">随机复读概率（%）</label>
+              <input id="rereadProbabilityInput" type="number" min="0.01" max="50" step="0.01">
+            </div>
+            <div class="field">
+              <label for="thunderProbabilityInput">随机禁言概率（%）</label>
+              <input id="thunderProbabilityInput" type="number" min="0.01" max="50" step="0.01">
+            </div>
+            <div class="field">
+              <label for="thunderMinSecondsInput">最短禁言秒数</label>
+              <input id="thunderMinSecondsInput" type="number" min="1" max="30" step="1">
+            </div>
+            <div class="field">
+              <label for="thunderMaxSecondsInput">最长禁言秒数</label>
+              <input id="thunderMaxSecondsInput" type="number" min="1" max="30" step="1">
+            </div>
+          </div>
         </div>
-      </div>
-    </section>
-    <section>
-      <h2>养鲲数据</h2>
-      <div class="row">
-        <input id="kunQqInput" inputmode="numeric" placeholder="QQ 号">
-        <button onclick="loadKunUser()">读取</button>
-        <button onclick="saveKunUser()">保存</button>
-        <span id="kunStatus" class="muted"></span>
-      </div>
-      <div id="kunReadonly" class="status"></div>
-      <div id="kunFields" class="form-grid"></div>
-    </section>
-    <section>
-      <h2>AI 模型</h2>
-      <div class="row">
-        <select id="aiProviderSelect"></select>
-        <button onclick="saveAiProvider()">保存</button>
-        <span id="aiProviderStatus" class="muted"></span>
-      </div>
-    </section>
-    <section>
-      <h2>Bot 管理员</h2>
-      <div class="row">
-        <input id="adminInput" inputmode="numeric" placeholder="QQ 号">
-        <button onclick="addAdmin()">添加</button>
-      </div>
-      <ul id="adminList"></ul>
-    </section>
-    <section>
-      <h2>启动日志</h2>
-      <div class="row">
-        <select id="logRunSelect"></select>
-        <select id="logFileSelect"></select>
-        <button onclick="loadLogContent()">查看</button>
-      </div>
-      <pre id="logContent">请选择日志。</pre>
-    </section>
-  </main>
+      </section>
+      <section id="kunPanel" class="tab-panel">
+        <div class="panel-block">
+          <h2>养鲲管理</h2>
+          <h3>养鲲数据</h3>
+          <div class="row">
+            <label for="kunUserSelect">用户选择</label>
+            <select id="kunUserSelect"></select>
+            <button onclick="loadKunUserFromSelect()">选择</button>
+            <input id="kunQqInput" inputmode="numeric" placeholder="QQ 号">
+            <button onclick="loadKunUser()">查询</button>
+            <button onclick="saveKunUser()">保存</button>
+            <span id="kunStatus" class="muted"></span>
+          </div>
+          <div id="kunReadonly" class="status"></div>
+          <div id="kunFields" class="form-grid"></div>
+        </div>
+      </section>
+      <section id="systemPanel" class="tab-panel">
+        <div class="panel-block">
+          <h2>系统设置</h2>
+          <h3>全局插件</h3>
+          <div id="pluginGrid" class="grid"></div>
+        </div>
+        <div class="panel-block">
+          <h3>AI 模型</h3>
+          <div class="row">
+            <select id="aiProviderSelect"></select>
+            <button onclick="saveAiProvider()">保存</button>
+            <span id="aiProviderStatus" class="muted"></span>
+          </div>
+        </div>
+        <div class="panel-block">
+          <h3>Bot 管理员</h3>
+          <div class="row">
+            <input id="adminInput" inputmode="numeric" placeholder="QQ 号">
+            <button onclick="addAdmin()">添加</button>
+          </div>
+          <ul id="adminList"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
   <script>
     const api = (path, options = {{}}) => fetch(path, {{
       headers: {{ "Content-Type": "application/json" }},
@@ -364,6 +429,15 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       if (!response.ok) throw new Error(await response.text());
       return response.json();
     }});
+
+    function showTab(tabId) {{
+      document.querySelectorAll(".tab-panel").forEach(panel => {{
+        panel.classList.toggle("active", panel.id === tabId);
+      }});
+      document.querySelectorAll(".tab-button").forEach(button => {{
+        button.classList.toggle("active", button.dataset.tab === tabId);
+      }});
+    }}
 
     async function loadStatus() {{
       const status = await api("/admin/api/status");
@@ -486,6 +560,8 @@ def build_admin_html(settings: RuntimeSettings) -> str:
 
     function renderKunUser(payload) {{
       const user = payload.user;
+      document.getElementById("kunQqInput").value = user.qq;
+      document.getElementById("kunUserSelect").value = user.qq;
       document.getElementById("kunReadonly").innerHTML = [
         ["QQ", user.qq],
         ["赛季", user.season],
@@ -501,6 +577,30 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         const attrs = field === "name" ? 'maxlength="8"' : 'min="0" step="1"';
         return `<div class="field"><label for="kun_${{field}}">${{escapeHtml(label)}}</label><input id="kun_${{field}}" data-kun-field="${{field}}" type="${{type}}" ${{attrs}} value="${{escapeHtml(value)}}"></div>`;
       }}).join("");
+    }}
+
+    async function loadKunUsers(autoLoadFirst = false) {{
+      const payload = await api("/admin/api/kun/users");
+      const select = document.getElementById("kunUserSelect");
+      const currentQq = document.getElementById("kunQqInput").value;
+      select.innerHTML = payload.users.map(user => {{
+        const label = `${{user.display_name}} / Lv.${{user.level}} / ${{user.name}}`;
+        return `<option value="${{user.qq}}">${{escapeHtml(label)}}</option>`;
+      }}).join("");
+      if (currentQq) select.value = currentQq;
+      if (autoLoadFirst && payload.users.length) {{
+        document.getElementById("kunQqInput").value = payload.users[0].qq;
+        await loadKunUser();
+      }} else {{
+        if (!payload.users.length) select.innerHTML = `<option value="">暂无养鲲用户</option>`;
+      }}
+    }}
+
+    async function loadKunUserFromSelect() {{
+      const qq = document.getElementById("kunUserSelect").value;
+      if (!qq) return;
+      document.getElementById("kunQqInput").value = qq;
+      await loadKunUser();
     }}
 
     async function loadKunUser() {{
@@ -537,6 +637,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         }});
         renderKunUser(payload);
         status.textContent = "已保存。";
+        await loadKunUsers(false);
       }} catch (error) {{
         status.textContent = `保存失败：${{error.message}}`;
       }}
@@ -605,7 +706,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
     }}
-    Promise.all([loadStatus().then(loadGroups), loadPlugins(), loadAiProvider(), loadAdmins(), loadLogs()]).catch(error => {{
+    Promise.all([loadStatus().then(loadGroups), loadPlugins(), loadAiProvider(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
       document.body.insertAdjacentHTML("beforeend", `<pre>${{error.message}}</pre>`);
     }});
   </script>

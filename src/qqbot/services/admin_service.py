@@ -121,6 +121,25 @@ class AdminService:
     def update_kun_user(self, qq: int, updates: dict[str, object]) -> dict[str, object]:
         return self._kun_service().update_admin_user_fields(qq, updates)
 
+    def list_kun_users(self) -> dict[str, object]:
+        service = self._kun_service()
+        nick_store = GroupNickStore(self.settings.data_root / "settings" / "group_nick.json")
+        return {
+            "users": [
+                {
+                    "qq": user.qq,
+                    "name": user.name,
+                    "level": user.level,
+                    "money": user.money,
+                    "display_name": self._format_user_display_name(
+                        user.qq,
+                        nick_store.resolve_display_name(0, user.qq),
+                    ),
+                }
+                for user in service.get_level_rank()
+            ],
+        }
+
     def list_ai(self) -> dict[str, object]:
         profiles = load_ai_profiles(self.settings.ai_profile_file)
         enabled_profiles = list_enabled_profiles(profiles)
@@ -306,6 +325,11 @@ class AdminService:
     @staticmethod
     def _format_group_display_name(group_id: int, group_name: str) -> str:
         return f"{group_name}（{group_id}）" if group_name else str(group_id)
+
+    @staticmethod
+    def _format_user_display_name(qq: int, name: str) -> str:
+        name = name.strip()
+        return f"{name}（{qq}）" if name and name != str(qq) else str(qq)
 
     @staticmethod
     def _build_group_control_config(

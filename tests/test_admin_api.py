@@ -120,13 +120,22 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "/admin/api/ai" in body
     assert "群功能" not in body
     assert "/features" not in body
+    assert "adminShell" in body
+    assert "tab-button" in body
+    assert "data-tab=\"mainPanel\"" in body
+    assert "data-tab=\"kunPanel\"" in body
+    assert "data-tab=\"groupControlPanel\"" in body
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
+    assert "主控面板" in body
+    assert "群管管理" in body
     assert "群管配置" in body
     assert "/admin/api/group-control" in body
     assert "随机复读概率" in body
+    assert "养鲲管理" in body
     assert "养鲲数据" in body
+    assert "用户选择" in body
     assert "/admin/api/kun/users" in body
 
 
@@ -224,6 +233,25 @@ def test_kun_api_gets_and_updates_user(tmp_path: Path) -> None:
     updated = json.loads(update_body)
     assert updated["user"]["level"] == 3210
     assert updated["user"]["money"] == 4567
+
+
+def test_kun_api_lists_users_for_selection(tmp_path: Path) -> None:
+    kun_service = KunService(tmp_path / "run" / "data" / "kun" / "users.json")
+    first = kun_service.ensure_user(10001)
+    first.name = "甲鲲"
+    first.level = 2000
+    second = kun_service.ensure_user(10002)
+    second.name = "乙鲲"
+    second.level = 3000
+    kun_service._save()
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(app, "GET", "/admin/api/kun/users")
+
+    assert status_code == 200
+    payload = json.loads(body)
+    assert [item["qq"] for item in payload["users"]] == [10002, 10001]
+    assert payload["users"][0]["name"] == "乙鲲"
 
 
 def test_ai_api_lists_and_updates_current_provider(tmp_path: Path) -> None:
