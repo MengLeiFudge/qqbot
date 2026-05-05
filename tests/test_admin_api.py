@@ -8,6 +8,7 @@ from qqbot.admin_api import register_admin_routes
 from qqbot.config import RuntimeSettings
 import qqbot.services.admin_service as admin_service_module
 from qqbot.services.admin_service import AdminService
+from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
 from qqbot.services.settings_store import SettingsStore
@@ -139,6 +140,11 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "养鲲数据" in body
     assert "用户选择" in body
     assert "/admin/api/kun/users" in body
+    assert "群消息" in body
+    assert "/admin/api/group-messages" in body
+    assert "message-row" in body
+    assert ".message-row.incoming" in body
+    assert ".message-row.bot" in body
 
 
 def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
@@ -153,6 +159,37 @@ def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
     payload = json.loads(body)[0]
     assert payload["group_id"] == 516286670
     assert payload["display_name"] == "测试群（516286670）"
+
+
+def test_group_messages_api_returns_grouped_realtime_messages(tmp_path: Path) -> None:
+    store = GroupMessageLogStore(tmp_path / "run")
+    store.append_message(
+        group_id=516286670,
+        direction="incoming",
+        user_id=10001,
+        sender_name="群友",
+        text="左侧消息",
+        timestamp=1,
+    )
+    store.append_message(
+        group_id=516286670,
+        direction="bot",
+        user_id=30001,
+        sender_name="Bot",
+        text="右侧消息",
+        timestamp=2,
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(app, "GET", "/admin/api/group-messages")
+
+    assert status_code == 200
+    payload = json.loads(body)
+    assert payload["groups"][0]["display_name"] == "测试群（516286670）"
+    assert [message["direction"] for message in payload["groups"][0]["messages"]] == [
+        "incoming",
+        "bot",
+    ]
 
 
 def test_plugins_api_lists_and_updates_global_state(tmp_path: Path) -> None:

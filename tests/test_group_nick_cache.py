@@ -10,8 +10,13 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qqbot.plugins.group_nick_cache import record_group_message_context, record_group_nick_event
+from qqbot.plugins.group_nick_cache import (
+    record_group_message_context,
+    record_group_message_log,
+    record_group_nick_event,
+)
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 
 
@@ -132,3 +137,22 @@ def test_record_group_message_context_persists_image_outline(tmp_path: Path) -> 
     records = store.load_messages(516286670)
     assert len(records) == 1
     assert records[0].text == "[图片]"
+
+
+def test_record_group_message_log_persists_incoming_message_for_admin_view(tmp_path: Path) -> None:
+    store = GroupMessageLogStore(tmp_path / "run")
+    event = FakeGroupMessageEvent(
+        group_id=516286670,
+        sender=FakeSender(card="", nickname="MLJ"),
+        time=1_800_000_000,
+        user_id=605738729,
+        text="实时消息",
+    )
+
+    record_group_message_log(event, store)
+
+    records = store.load_messages(516286670)
+    assert len(records) == 1
+    assert records[0].direction == "incoming"
+    assert records[0].sender_name == "MLJ"
+    assert records[0].text == "实时消息"

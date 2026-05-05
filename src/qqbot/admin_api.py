@@ -82,6 +82,13 @@ def register_admin_routes(
     ) -> list[dict[str, object]]:
         return admin_service.list_groups(await resolve_group_names())
 
+    @app.get("/admin/api/group-messages")
+    async def admin_group_messages(
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.list_group_messages(await resolve_group_names())
+
     @app.get("/admin/api/plugins")
     async def admin_plugins(
         _: None = Depends(require_local_request),
@@ -304,6 +311,23 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     .form-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 12px; }}
     .field {{ display: flex; flex-direction: column; gap: 5px; }}
     .field label {{ color: #475569; font-size: 13px; }}
+    .message-groups {{ display: grid; gap: 14px; margin-top: 12px; }}
+    .message-group {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }}
+    .message-list {{ display: flex; flex-direction: column; gap: 8px; margin-top: 10px; max-height: 360px; overflow: auto; }}
+    .message-row {{ display: flex; }}
+    .message-row.incoming {{ justify-content: flex-start; }}
+    .message-row.bot {{ justify-content: flex-end; }}
+    .message-bubble {{
+      max-width: min(70%, 720px);
+      border: 1px solid #d7dde6;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #ffffff;
+      box-shadow: 0 1px 1px rgba(15, 23, 42, 0.04);
+    }}
+    .message-row.bot .message-bubble {{ background: #ecfdf5; border-color: #a7f3d0; }}
+    .message-meta {{ color: #64748b; font-size: 12px; margin-bottom: 4px; }}
+    .message-text {{ white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }}
     pre {{ white-space: pre-wrap; background: #111827; color: #e5e7eb; padding: 12px; border-radius: 6px; max-height: 420px; overflow: auto; }}
     ul {{ padding-left: 18px; }}
     @media (max-width: 760px) {{
@@ -332,6 +356,15 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         <div class="panel-block">
           <h2>实时信息</h2>
           <div id="status" class="status"></div>
+        </div>
+        <div class="panel-block">
+          <h3>群消息</h3>
+          <div class="row">
+            <select id="messageGroupSelect" onchange="renderGroupMessages()"></select>
+            <button onclick="loadGroupMessages()">刷新</button>
+            <span id="groupMessageStatus" class="muted"></span>
+          </div>
+          <div id="groupMessages" class="message-groups"></div>
         </div>
         <div class="panel-block">
           <h3>运行日志</h3>
@@ -472,6 +505,66 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         `<div><strong>已知群</strong><br><span>${{groups.length}}</span></div>`
       );
       await loadGroupControlConfig();
+    }}
+
+    let groupMessagePayload = {{ groups: [] }};
+
+    async function loadGroupMessages() {{
+      const status = document.getElementById("groupMessageStatus");
+      status.textContent = "正在刷新...";
+      groupMessagePayload = await api("/admin/api/group-messages");
+      const select = document.getElementById("messageGroupSelect");
+      const currentValue = select.value || "__all__";
+      const options = [`<option value="__all__">全部群</option>`].concat(
+        groupMessagePayload.groups.map(group => (
+          `<option value="${{group.group_id}}">${{escapeHtml(group.display_name)}}（${{group.messages.length}}）</option>`
+        ))
+      );
+      select.innerHTML = options.join("");
+      select.value = [...select.options].some(option => option.value === currentValue)
+        ? currentValue
+        : "__all__";
+      renderGroupMessages();
+      status.textContent = `已刷新：${{formatTime(Date.now() / 1000)}}`;
+    }}
+
+    function renderGroupMessages() {{
+      const selected = document.getElementById("messageGroupSelect").value || "__all__";
+      const groups = selected === "__all__"
+        ? groupMessagePayload.groups
+        : groupMessagePayload.groups.filter(group => String(group.group_id) === selected);
+      document.getElementById("groupMessages").innerHTML = groups.map(renderMessageGroup).join("")
+        || `<div class="muted">暂无群消息。</div>`;
+    }}
+
+    function renderMessageGroup(group) {{
+      const messages = group.messages.map(renderMessageRow).join("")
+        || `<div class="muted">这个群暂时没有消息。</div>`;
+      return `
+        <div class="message-group">
+          <strong>${{escapeHtml(group.display_name)}}</strong>
+          <div class="message-list">${{messages}}</div>
+        </div>
+      `;
+    }}
+
+    function renderMessageRow(message) {{
+      const direction = message.direction === "bot" ? "bot" : "incoming";
+      const sender = direction === "bot" ? "Bot" : message.sender_name;
+      return `
+        <div class="message-row ${{direction}}">
+          <div class="message-bubble">
+            <div class="message-meta">${{escapeHtml(sender)}} · ${{formatTime(message.timestamp)}}</div>
+            <div class="message-text">${{escapeHtml(message.text)}}</div>
+          </div>
+        </div>
+      `;
+    }}
+
+    function formatTime(timestamp) {{
+      if (!timestamp) return "";
+      const date = new Date(Number(timestamp) * 1000);
+      return date.toLocaleTimeString("zh-CN", {{ hour12: false }});
     }}
 
     async function loadPlugins() {{
@@ -706,7 +799,8 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
     }}
-    Promise.all([loadStatus().then(loadGroups), loadPlugins(), loadAiProvider(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
+    setInterval(loadGroupMessages, 3000);
+    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
       document.body.insertAdjacentHTML("beforeend", `<pre>${{error.message}}</pre>`);
     }});
   </script>

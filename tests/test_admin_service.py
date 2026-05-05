@@ -5,6 +5,7 @@ import pytest
 from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
 import qqbot.services.admin_service as admin_service_module
+from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
 from qqbot.services.settings_store import SettingsStore
@@ -205,6 +206,35 @@ def test_admin_author_display_can_use_configured_name(tmp_path: Path) -> None:
         "name": "萌泪酱",
         "display_name": "萌泪酱（605738729）",
     }
+
+
+def test_list_group_messages_returns_recent_messages_with_group_names(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    log_store = GroupMessageLogStore(tmp_path / "run")
+    log_store.append_message(
+        group_id=516286670,
+        direction="incoming",
+        user_id=10001,
+        sender_name="群友",
+        text="左侧消息",
+        timestamp=1,
+    )
+    log_store.append_message(
+        group_id=516286670,
+        direction="bot",
+        user_id=30001,
+        sender_name="Bot",
+        text="右侧消息",
+        timestamp=2,
+    )
+
+    payload = service.list_group_messages({516286670: "测试群"})
+
+    assert payload["groups"][0]["display_name"] == "测试群（516286670）"
+    assert [message["direction"] for message in payload["groups"][0]["messages"]] == [
+        "incoming",
+        "bot",
+    ]
 
 
 def test_log_reading_rejects_unsafe_file_names_and_unknown_runs(tmp_path: Path) -> None:

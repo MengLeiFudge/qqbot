@@ -8,6 +8,7 @@ import subprocess
 from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
+from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
 from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_plugin_specs
@@ -139,6 +140,15 @@ class AdminService:
                 for user in service.get_level_rank()
             ],
         }
+
+    def list_group_messages(
+        self,
+        group_names: dict[int, str] | None = None,
+    ) -> dict[str, object]:
+        return GroupMessageLogStore(self.settings.data_root).list_group_messages(
+            group_names or {},
+            limit_per_group=80,
+        )
 
     def list_ai(self) -> dict[str, object]:
         profiles = load_ai_profiles(self.settings.ai_profile_file)
@@ -302,6 +312,7 @@ class AdminService:
                 group_ids.update(int(group_id) for group_id in nick_store.records if group_id.isdigit())
             except Exception:
                 pass
+        group_ids.update(GroupMessageLogStore(self.settings.data_root).list_group_ids())
 
         root = self.store.func_state_root
         if not root.exists():

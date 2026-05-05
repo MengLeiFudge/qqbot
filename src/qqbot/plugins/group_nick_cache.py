@@ -5,6 +5,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent
 
 from qqbot.config import load_settings
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore, get_group_nick_store
 from qqbot.services.message_normalizer import normalize_onebot_event
 
@@ -43,6 +44,25 @@ def record_group_message_context(event: GroupMessageEvent, store: AiGroupContext
     )
 
 
+def record_group_message_log(event: GroupMessageEvent, store: GroupMessageLogStore) -> None:
+    normalized = normalize_onebot_event(event)
+    outline = normalized.outline.strip()
+    if not outline:
+        return
+
+    card = (event.sender.card or "").strip()
+    nickname = (event.sender.nickname or "").strip()
+    store.append_message(
+        group_id=event.group_id,
+        direction="incoming",
+        user_id=event.get_user_id(),
+        sender_name=card or nickname or event.get_user_id(),
+        text=outline,
+        timestamp=event.time,
+        message_id=getattr(event, "message_id", ""),
+    )
+
+
 @group_nick_cache_matcher.handle()
 async def handle_group_nick_cache(event: GroupMessageEvent) -> None:
     if not isinstance(event, GroupMessageEvent):
@@ -52,4 +72,8 @@ async def handle_group_nick_cache(event: GroupMessageEvent) -> None:
     record_group_message_context(
         event,
         AiGroupContextStore(settings.data_root),
+    )
+    record_group_message_log(
+        event,
+        GroupMessageLogStore(settings.data_root),
     )
