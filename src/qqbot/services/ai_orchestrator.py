@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import time
 
 from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
@@ -13,6 +14,7 @@ from qqbot.services.ai_tool_registry import AiToolContext, build_default_ai_tool
 from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
 from qqbot.services.codex_task_service import (
+    CodexProgressEvent,
     CodexSessionRequest,
     CodexSessionStore,
     CodexTaskStore,
@@ -74,6 +76,13 @@ def extract_style_preference(text: str) -> str:
     preference = re.sub(r"^(以后|之后|今后|每次)(都|要|请)?", "", preference).strip()
     preference = re.sub(r"^(回复|说话|回答)(时|的时候|要)?", "", preference).strip()
     return preference.strip(" ：:，,。")
+
+
+def summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
+    cleaned = " ".join(message.strip().split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"
 
 
 class AiOrchestrator:
@@ -466,6 +475,11 @@ class AiOrchestrator:
                     reply=normalized_message.reply,
                 ),
                 mode=mode,
+                progress_callback=self._build_codex_session_progress_callback(
+                    context=context,
+                    session_id=active_session.session_id,
+                    project_name=project.display_name,
+                ),
             )
         )
         updated = store.append_turn(
@@ -473,9 +487,18 @@ class AiOrchestrator:
             user_message=text,
             codex_message=result.message,
         )
+        pending_messages = store.pop_pending_messages(active_session.session_id)
+        for pending_message in pending_messages:
+            updated = store.append_turn(
+                active_session.session_id,
+                user_message=f"[运行中补充] {pending_message}",
+                codex_message="已收到这条运行中调整。",
+            )
         if mode == "execute":
-            store.mark_status(active_session.session_id, "done" if result.ok else "failed")
+            store.mark_status(active_session.session_id, "discussing")
         message = result.message
+        if pending_messages:
+            message = f"{message}\n已合并 {len(pending_messages)} 条运行中调整，下一轮会优先带给 Codex。"
         if mode == "execute" and result.ok:
             uploaded_count = await self._upload_codex_artifacts_from_text(
                 text=result.message,
@@ -495,6 +518,60 @@ class AiOrchestrator:
                 message = f"{message}\n{restart_message}"
         prefix = f"{updated.session_id} Codex："
         return AiOrchestratorResult(True, f"{prefix}\n{message}")
+
+    def _build_codex_session_progress_callback(
+        self,
+        *,
+        context: AiOrchestratorContext,
+        session_id: str,
+        project_name: str,
+    ):
+        if self.action_executor is None:
+            return None
+        last_sent_at = 0.0
+
+        async def report(event: CodexProgressEvent) -> None:
+            nonlocal last_sent_at
+            now = time.monotonic()
+            if event.phase == "output" and now - last_sent_at < 8:
+                return
+            last_sent_at = now
+            summary = summarize_codex_progress_message(event.message)
+            if event.phase == "output":
+                message = f"{session_id} Codex 还在处理：{project_name}\n{summary}"
+            else:
+                message = f"{session_id} Codex 状态：{project_name}\n{summary}"
+            await self._send_codex_session_progress(context, message)
+
+        return report
+
+    async def _send_codex_session_progress(
+        self,
+        context: AiOrchestratorContext,
+        message: str,
+    ) -> None:
+        if self.action_executor is None:
+            return
+        if context.group_id is not None:
+            await self.action_executor.execute(
+                AiActionRequest(
+                    action_type="send_group_message",
+                    actor_user_id=context.actor_user_id,
+                    target_group_id=context.group_id,
+                    message=message,
+                    is_admin=context.is_admin,
+                )
+            )
+            return
+        await self.action_executor.execute(
+            AiActionRequest(
+                action_type="send_private_message",
+                actor_user_id=context.actor_user_id,
+                target_user_id=context.actor_user_id,
+                message=message,
+                is_admin=context.is_admin,
+            )
+        )
 
     def _build_codex_source_context(
         self,

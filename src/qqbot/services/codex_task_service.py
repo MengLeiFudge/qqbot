@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import json
 import os
@@ -44,6 +45,7 @@ class CodexTaskRequest:
     evidence: str
     model: str = DEFAULT_CODEX_MODEL
     timeout_seconds: int = DEFAULT_CODEX_TIMEOUT_SECONDS
+    progress_callback: Callable[["CodexProgressEvent"], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,7 @@ class CodexSessionRequest:
     mode: str = "discuss"
     model: str = DEFAULT_CODEX_MODEL
     timeout_seconds: int = DEFAULT_CODEX_TIMEOUT_SECONDS
+    progress_callback: Callable[["CodexProgressEvent"], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +68,21 @@ class CodexTaskResult:
     ok: bool
     message: str
     exit_code: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexProgressEvent:
+    phase: str
+    message: str
+    stream: str = ""
+    created_at: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _CodexProcessOutput:
+    stdout: str
+    stderr: str
+    returncode: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -832,21 +850,23 @@ async def run_codex_task(request: CodexTaskRequest) -> CodexTaskResult:
         return CodexTaskResult(False, f"启动 Codex 失败：{exc}")
 
     try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(prompt.encode("utf-8")),
-            timeout=request.timeout_seconds,
+        output = await _communicate_with_codex_process(
+            process,
+            prompt=prompt,
+            timeout_seconds=request.timeout_seconds,
+            progress_callback=request.progress_callback,
         )
     except TimeoutError:
         process.kill()
         await process.wait()
         return CodexTaskResult(False, "Codex 修复任务超时。", exit_code=None)
 
-    output = _tail_text(stdout.decode("utf-8", errors="replace"))
-    error = _tail_text(stderr.decode("utf-8", errors="replace"))
-    if process.returncode == 0:
-        return CodexTaskResult(True, output or "Codex 修复任务已结束。", exit_code=0)
-    message = error or output or "Codex 修复任务失败，但没有输出错误详情。"
-    return CodexTaskResult(False, message, exit_code=process.returncode)
+    stdout = _tail_text(output.stdout)
+    stderr = _tail_text(output.stderr)
+    if output.returncode == 0:
+        return CodexTaskResult(True, stdout or "Codex 修复任务已结束。", exit_code=0)
+    message = stderr or stdout or "Codex 修复任务失败，但没有输出错误详情。"
+    return CodexTaskResult(False, message, exit_code=output.returncode)
 
 
 async def run_codex_session_turn(request: CodexSessionRequest) -> CodexTaskResult:
@@ -867,21 +887,96 @@ async def run_codex_session_turn(request: CodexSessionRequest) -> CodexTaskResul
         return CodexTaskResult(False, f"启动 Codex 失败：{exc}")
 
     try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(prompt.encode("utf-8")),
-            timeout=request.timeout_seconds,
+        output = await _communicate_with_codex_process(
+            process,
+            prompt=prompt,
+            timeout_seconds=request.timeout_seconds,
+            progress_callback=request.progress_callback,
         )
     except TimeoutError:
         process.kill()
         await process.wait()
         return CodexTaskResult(False, "Codex 会话超时。", exit_code=None)
 
-    output = _tail_text(stdout.decode("utf-8", errors="replace"))
-    error = _tail_text(stderr.decode("utf-8", errors="replace"))
-    if process.returncode == 0:
-        return CodexTaskResult(True, output or "Codex 已回复。", exit_code=0)
-    message = error or output or "Codex 会话失败，但没有输出错误详情。"
-    return CodexTaskResult(False, message, exit_code=process.returncode)
+    stdout = _tail_text(output.stdout)
+    stderr = _tail_text(output.stderr)
+    if output.returncode == 0:
+        return CodexTaskResult(True, stdout or "Codex 已回复。", exit_code=0)
+    message = stderr or stdout or "Codex 会话失败，但没有输出错误详情。"
+    return CodexTaskResult(False, message, exit_code=output.returncode)
+
+
+async def _communicate_with_codex_process(
+    process,
+    *,
+    prompt: str,
+    timeout_seconds: int,
+    progress_callback: Callable[[CodexProgressEvent], Awaitable[None]] | None = None,
+) -> _CodexProcessOutput:
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+
+    async def write_prompt() -> None:
+        if process.stdin is None:
+            return
+        process.stdin.write(prompt.encode("utf-8"))
+        await process.stdin.drain()
+        process.stdin.close()
+        if hasattr(process.stdin, "wait_closed"):
+            await process.stdin.wait_closed()
+
+    async def read_stream(stream, stream_name: str, chunks: list[str]) -> None:
+        if stream is None:
+            return
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace")
+            chunks.append(text)
+            cleaned = text.strip()
+            if cleaned:
+                await _emit_codex_progress(
+                    progress_callback,
+                    CodexProgressEvent(
+                        phase="output",
+                        message=cleaned,
+                        stream=stream_name,
+                        created_at=int(time.time()),
+                    ),
+                )
+
+    await _emit_codex_progress(
+        progress_callback,
+        CodexProgressEvent(
+            phase="started",
+            message="Codex 进程已启动，正在等待输出。",
+            created_at=int(time.time()),
+        ),
+    )
+    await asyncio.wait_for(
+        asyncio.gather(
+            write_prompt(),
+            read_stream(process.stdout, "stdout", stdout_chunks),
+            read_stream(process.stderr, "stderr", stderr_chunks),
+            process.wait(),
+        ),
+        timeout=timeout_seconds,
+    )
+    return _CodexProcessOutput(
+        stdout="".join(stdout_chunks),
+        stderr="".join(stderr_chunks),
+        returncode=process.returncode,
+    )
+
+
+async def _emit_codex_progress(
+    progress_callback: Callable[[CodexProgressEvent], Awaitable[None]] | None,
+    event: CodexProgressEvent,
+) -> None:
+    if progress_callback is None:
+        return
+    await progress_callback(event)
 
 
 def _tail_text(text: str, limit: int = 1200) -> str:

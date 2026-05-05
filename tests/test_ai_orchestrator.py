@@ -12,7 +12,7 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
-from qqbot.services.codex_task_service import CodexProjectBinding, get_codex_project_by_id
+from qqbot.services.codex_task_service import CodexProgressEvent, CodexProjectBinding, get_codex_project_by_id
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.settings_store import SettingsStore
@@ -529,6 +529,72 @@ def test_orchestrator_records_admin_adjustment_while_session_is_running(tmp_path
     assert "已收到 Codex 调整" in result.text
     assert updated is not None
     assert updated.pending_messages == ("先不要提交，补一个测试",)
+
+
+def test_orchestrator_merges_pending_adjustments_after_codex_turn(tmp_path: Path) -> None:
+    requests = []
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "已经看完。", "exit_code": 0})()
+
+    async def run() -> None:
+        orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+        context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
+        await orchestrator.handle("codex 分馏", context, NormalizedMessage(text="codex 分馏", outline="codex 分馏"))
+        store = orchestrator._codex_session_store()
+        active = store.get_active_session(actor_user_id="605738729", group_id="319567534")
+        assert active is not None
+        store.append_pending_message(active.session_id, "优先补测试")
+
+        result = await orchestrator.handle(
+            "继续看",
+            context,
+            NormalizedMessage(text="继续看", outline="继续看"),
+        )
+        assert result.handled is True
+        assert "已合并 1 条运行中调整" in result.text
+
+    asyncio.run(run())
+
+    store = AiOrchestrator(data_root=tmp_path)._codex_session_store()
+    active = store.get_active_session(actor_user_id="605738729", group_id="319567534")
+    assert active is not None
+    assert active.pending_messages == ()
+    assert ("user", "[运行中补充] 优先补测试") in active.transcript
+
+
+def test_orchestrator_reports_codex_session_progress_to_group(tmp_path: Path) -> None:
+    bot = FakeBot()
+
+    async def fake_codex_runner(request):
+        assert request.progress_callback is not None
+        await request.progress_callback(
+            CodexProgressEvent(phase="output", message="正在读取计划文件", stream="stdout")
+        )
+        return type("Result", (), {"ok": True, "message": "讨论完成。", "exit_code": 0})()
+
+    async def run() -> None:
+        executor = AiActionExecutor(bot=bot, data_root=tmp_path)
+        orchestrator = AiOrchestrator(
+            data_root=tmp_path,
+            action_executor=executor,
+            codex_session_runner=fake_codex_runner,
+        )
+        context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
+        await orchestrator.handle("codex 分馏", context, NormalizedMessage(text="codex 分馏", outline="codex 分馏"))
+        result = await orchestrator.handle(
+            "看一下方案",
+            context,
+            NormalizedMessage(text="看一下方案", outline="看一下方案"),
+        )
+        assert result.handled is True
+
+    asyncio.run(run())
+
+    assert bot.calls[0][0] == "send_group_msg"
+    assert "Codex 还在处理" in bot.calls[0][1]["message"]
+    assert "正在读取计划文件" in bot.calls[0][1]["message"]
 
 
 def test_orchestrator_restarts_after_successful_qqbot_session_execute(tmp_path: Path) -> None:

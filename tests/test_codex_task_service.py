@@ -1,4 +1,5 @@
 from pathlib import Path
+import asyncio
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,7 @@ from qqbot.services.codex_task_service import (
     CodexSessionRequest,
     CodexTaskResult,
     CodexTaskStore,
+    _communicate_with_codex_process,
     extract_codex_zip_artifacts,
     learn_codex_project_alias,
     get_codex_project_by_id,
@@ -143,6 +145,46 @@ def test_codex_command_loads_nvm_before_running_codex() -> None:
     assert 'NVM_DIR="$HOME/.nvm"' in command[4]
     assert "nvm.sh" in command[4]
     assert "codex_bin" in command[4]
+
+
+def test_codex_process_communication_emits_progress_events() -> None:
+    events = []
+
+    async def progress_callback(event):
+        events.append(event)
+
+    async def run() -> None:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "import sys; print('stdout one'); print('stderr one', file=sys.stderr)",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        output = await _communicate_with_codex_process(
+            process,
+            prompt="",
+            timeout_seconds=5,
+            progress_callback=progress_callback,
+        )
+        assert output.returncode == 0
+        assert "stdout one" in output.stdout
+        assert "stderr one" in output.stderr
+
+    asyncio.run(run())
+
+    assert events[0].phase == "started"
+    assert ("stdout", "stdout one") in {
+        (event.stream, event.message)
+        for event in events
+        if event.phase == "output"
+    }
+    assert ("stderr", "stderr one") in {
+        (event.stream, event.message)
+        for event in events
+        if event.phase == "output"
+    }
 
 
 def test_codex_prompt_only_describes_qqbot_source_context() -> None:

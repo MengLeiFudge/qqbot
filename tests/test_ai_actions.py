@@ -9,7 +9,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
-from qqbot.services.codex_task_service import CodexTaskResult
+from qqbot.services.codex_task_service import CodexProgressEvent, CodexTaskResult
 
 
 class FakeBot:
@@ -242,6 +242,52 @@ def test_codex_task_reports_long_group_result_as_forward_message(tmp_path: Path)
     assert bot.calls[1][0] == "send_group_forward_msg"
     assert bot.calls[1][1]["messages"][0]["type"] == "node"
     assert "长回报" in bot.calls[1][1]["messages"][0]["data"]["content"]
+
+
+def test_codex_task_reports_streaming_progress(tmp_path: Path) -> None:
+    bot = FakeBot()
+    tasks = []
+
+    def task_factory(coro):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
+
+    async def fake_runner(request):
+        assert request.progress_callback is not None
+        await request.progress_callback(
+            CodexProgressEvent(phase="output", message="正在读取 AGENTS.md", stream="stdout")
+        )
+        await request.progress_callback(
+            CodexProgressEvent(phase="output", message="这条会被节流", stream="stdout")
+        )
+        return CodexTaskResult(True, "完成", exit_code=0)
+
+    async def run() -> None:
+        executor = AiActionExecutor(
+            bot=bot,
+            data_root=tmp_path,
+            task_factory=task_factory,
+            codex_runner=fake_runner,
+        )
+        result = await executor.execute(
+            AiActionRequest(
+                action_type="run_codex_task",
+                actor_user_id="605738729",
+                target_group_id="319567534",
+                codex_project_id="mlj_dspmods",
+                codex_prompt="修一下这个",
+                is_admin=True,
+            )
+        )
+        assert result.ok is True
+        await asyncio.gather(*tasks)
+
+    asyncio.run(run())
+
+    messages = [data["message"] for api, data in bot.calls if api == "send_group_msg"]
+    assert any("正在读取 AGENTS.md" in message for message in messages)
+    assert not any("这条会被节流" in message for message in messages)
 
 
 def test_qqbot_codex_task_schedules_self_restart_after_group_report(tmp_path: Path) -> None:

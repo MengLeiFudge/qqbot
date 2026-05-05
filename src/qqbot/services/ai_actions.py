@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from qqbot.services.codex_task_service import (
+    CodexProgressEvent,
     CodexTaskRequest,
     CodexTaskResult,
     CodexTaskStore,
@@ -174,6 +175,7 @@ class AiActionExecutor:
             request,
             f"已交给本地 Codex：{project.display_name}\n正在启动并读取项目上下文。",
         )
+        progress_callback = self._build_codex_progress_callback(request, project.display_name)
         result = await self.codex_runner(
             CodexTaskRequest(
                 project=project,
@@ -181,6 +183,7 @@ class AiActionExecutor:
                 group_id=request.target_group_id,
                 prompt=request.codex_prompt,
                 evidence=request.codex_evidence,
+                progress_callback=progress_callback,
             )
         )
         if request.codex_task_id.strip():
@@ -227,6 +230,24 @@ class AiActionExecutor:
             user_id=int(request.actor_user_id),
             message=message,
         )
+
+    def _build_codex_progress_callback(self, request: AiActionRequest, project_name: str):
+        last_sent_at = 0.0
+
+        async def report(event: CodexProgressEvent) -> None:
+            nonlocal last_sent_at
+            now = time.monotonic()
+            if event.phase == "output" and now - last_sent_at < 8:
+                return
+            last_sent_at = now
+            line = _summarize_codex_progress_message(event.message)
+            if event.phase == "output":
+                line = f"Codex 还在处理：{project_name}\n{line}"
+            else:
+                line = f"Codex 状态：{project_name}\n{line}"
+            await self._send_codex_progress(request, line)
+
+        return report
 
     def _prepare_self_update_restart(self, project, request: AiActionRequest) -> str:
         if project.project_id != "qqbot" or self.self_restart_scheduler is None:
@@ -287,3 +308,10 @@ def _serialize_action(request: AiActionRequest) -> dict[str, object]:
     if nested is not None:
         payload["nested_action"] = _serialize_action(nested)
     return payload
+
+
+def _summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
+    cleaned = " ".join(message.strip().split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"
