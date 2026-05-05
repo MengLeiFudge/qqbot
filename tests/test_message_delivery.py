@@ -2,6 +2,7 @@ import asyncio
 
 from qqbot.services.message_delivery import (
     MAX_TEXT_MESSAGE_CHARS,
+    call_collapsible_text_api,
     call_split_text_api,
     finish_split_text,
     has_waited_group_message_interval,
@@ -25,12 +26,20 @@ class FakeMatcher:
 
 class FakeBot:
     def __init__(self) -> None:
+        self.self_id = 1443944862
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.interval_flags: list[bool] = []
 
     async def call_api(self, api: str, **data: object) -> None:
         self.interval_flags.append(has_waited_group_message_interval())
         self.calls.append((api, data))
+
+
+class FailingForwardBot(FakeBot):
+    async def call_api(self, api: str, **data: object) -> None:
+        if api == "send_group_forward_msg":
+            raise RuntimeError("forward disabled")
+        await super().call_api(api, **data)
 
 
 def test_split_text_message_keeps_short_text_unchanged() -> None:
@@ -87,6 +96,50 @@ def test_call_split_text_api_sends_each_chunk() -> None:
     assert bot.calls[0][1]["message"].startswith("（1/2）\n")
     assert bot.calls[1][1]["message"].startswith("（2/2）\n")
     assert bot.interval_flags == [True, True]
+
+
+def test_call_collapsible_text_api_uses_group_forward_for_long_text() -> None:
+    reset_group_message_interval_state()
+    bot = FakeBot()
+    message = "long text " * 260
+
+    asyncio.run(
+        call_collapsible_text_api(
+            bot,
+            "send_group_msg",
+            group_id=10001,
+            message=message,
+            title="Codex 回报",
+        )
+    )
+
+    assert len(bot.calls) == 1
+    api, data = bot.calls[0]
+    assert api == "send_group_forward_msg"
+    assert data["group_id"] == 10001
+    assert data["messages"][0]["type"] == "node"
+    assert data["messages"][0]["data"]["name"] == "Codex 回报"
+    assert "long text" in data["messages"][0]["data"]["content"]
+    assert bot.interval_flags == [True]
+
+
+def test_call_collapsible_text_api_falls_back_to_split_when_forward_fails() -> None:
+    reset_group_message_interval_state()
+    bot = FailingForwardBot()
+    message = "long text " * 260
+
+    asyncio.run(
+        call_collapsible_text_api(
+            bot,
+            "send_group_msg",
+            group_id=10001,
+            message=message,
+        )
+    )
+
+    assert len(bot.calls) >= 2
+    assert {api for api, _data in bot.calls} == {"send_group_msg"}
+    assert bot.calls[0][1]["message"].startswith("（1/")
 
 
 def test_group_message_interval_waits_for_same_group_only() -> None:

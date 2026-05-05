@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 
 MAX_TEXT_MESSAGE_CHARS = 1000
+COLLAPSIBLE_TEXT_THRESHOLD_CHARS = 1800
+FORWARD_NODE_TEXT_CHARS = 1200
 MIN_GROUP_MESSAGE_INTERVAL_SECONDS = 0.5
 _PART_PREFIX_RESERVE = 24
 _group_locks: dict[str, asyncio.Lock] = {}
@@ -97,6 +99,50 @@ async def call_split_text_api(
         await bot.call_api(api, **data, message=chunk)
 
 
+async def call_collapsible_text_api(
+    bot: Any,
+    api: str,
+    *,
+    message: str,
+    title: str = "棉花糖整理的长消息",
+    group_interval_sleep: Callable[[float], Any] | None = None,
+    **data: object,
+) -> None:
+    if api != "send_group_msg" or len(str(message)) < COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
+        await call_split_text_api(
+            bot,
+            api,
+            message=message,
+            group_interval_sleep=group_interval_sleep,
+            **data,
+        )
+        return
+
+    group_id = data.get("group_id")
+    try:
+        await wait_for_group_message_interval(
+            group_id,
+            sleep=group_interval_sleep or asyncio.sleep,
+        )
+        token = _group_message_interval_already_waited.set(True)
+        try:
+            await bot.call_api(
+                "send_group_forward_msg",
+                group_id=group_id,
+                messages=_build_forward_nodes(bot, message, title=title),
+            )
+        finally:
+            _group_message_interval_already_waited.reset(token)
+    except Exception:
+        await call_split_text_api(
+            bot,
+            api,
+            message=message,
+            group_interval_sleep=group_interval_sleep,
+            **data,
+        )
+
+
 async def wait_for_group_message_interval(
     group_id: int | str | object | None,
     *,
@@ -137,3 +183,19 @@ def _find_split_index(text: str, limit: int) -> int:
         if index >= max(1, limit // 2):
             return index + len(separator)
     return limit
+
+
+def _build_forward_nodes(bot: Any, message: str, *, title: str) -> list[dict[str, object]]:
+    uin = str(getattr(bot, "self_id", "") or "10000")
+    name = title.strip() or "棉花糖整理的长消息"
+    return [
+        {
+            "type": "node",
+            "data": {
+                "name": name,
+                "uin": uin,
+                "content": chunk,
+            },
+        }
+        for chunk in split_text_message(message, limit=FORWARD_NODE_TEXT_CHARS)
+    ]

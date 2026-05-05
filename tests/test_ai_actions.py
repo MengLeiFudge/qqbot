@@ -188,15 +188,60 @@ def test_codex_task_runs_in_background_and_reports_group(tmp_path: Path) -> None
     asyncio.run(run())
 
     assert requests[0].project.repo_path.endswith("MLJ_DSPmods")
-    assert bot.calls == [
-        (
-            "send_group_msg",
-            {
-                "group_id": 319567534,
-                "message": "Codex 修复任务成功：MLJ_DSPmods\n已修改 BuildingManager。",
-            },
+    assert bot.calls[0] == (
+        "send_group_msg",
+        {
+            "group_id": 319567534,
+            "message": "已交给本地 Codex：MLJ_DSPmods\n正在启动并读取项目上下文。",
+        },
+    )
+    assert bot.calls[1] == (
+        "send_group_msg",
+        {
+            "group_id": 319567534,
+            "message": "Codex 修复任务成功：MLJ_DSPmods\n已修改 BuildingManager。",
+        },
+    )
+
+
+def test_codex_task_reports_long_group_result_as_forward_message(tmp_path: Path) -> None:
+    bot = FakeBot()
+    tasks = []
+
+    def task_factory(coro):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
+
+    async def fake_runner(request):
+        return CodexTaskResult(True, "长回报 " * 500, exit_code=0)
+
+    async def run() -> None:
+        executor = AiActionExecutor(
+            bot=bot,
+            data_root=tmp_path,
+            task_factory=task_factory,
+            codex_runner=fake_runner,
         )
-    ]
+        result = await executor.execute(
+            AiActionRequest(
+                action_type="run_codex_task",
+                actor_user_id="605738729",
+                target_group_id="319567534",
+                codex_project_id="mlj_dspmods",
+                codex_prompt="修一下这个",
+                is_admin=True,
+            )
+        )
+        assert result.ok is True
+        await asyncio.gather(*tasks)
+
+    asyncio.run(run())
+
+    assert bot.calls[0][0] == "send_group_msg"
+    assert bot.calls[1][0] == "send_group_forward_msg"
+    assert bot.calls[1][1]["messages"][0]["type"] == "node"
+    assert "长回报" in bot.calls[1][1]["messages"][0]["data"]["content"]
 
 
 def test_qqbot_codex_task_schedules_self_restart_after_group_report(tmp_path: Path) -> None:
@@ -238,7 +283,8 @@ def test_qqbot_codex_task_schedules_self_restart_after_group_report(tmp_path: Pa
 
     assert restart_calls == ["restart"]
     assert bot.calls[0][0] == "send_group_msg"
-    assert "已安排 Bot 重启" in bot.calls[0][1]["message"]
+    assert bot.calls[1][0] == "send_group_msg"
+    assert "已安排 Bot 重启" in bot.calls[1][1]["message"]
     notices = tmp_path / "ai" / "codex_self_update_notices.json"
     assert "1163635014" in notices.read_text(encoding="utf-8")
 

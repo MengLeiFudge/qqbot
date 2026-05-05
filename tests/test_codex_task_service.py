@@ -19,6 +19,7 @@ from qqbot.services.codex_task_service import (
     get_codex_project_for_group,
     load_learned_project_aliases,
     parse_codex_alias_learning_request,
+    resolve_codex_project_for_session_start,
     resolve_codex_project_for_text,
     to_wsl_path,
 )
@@ -30,6 +31,30 @@ def test_codex_project_binding_maps_dsp_group_to_mod_repo() -> None:
     assert project is not None
     assert project.project_id == "mlj_dspmods"
     assert project.repo_path == "/mnt/d/project/csharp/DSP MOD/MLJ_DSPmods"
+
+
+def test_codex_session_start_uses_group_binding_without_project_name(tmp_path: Path) -> None:
+    match = resolve_codex_project_for_session_start(
+        "",
+        group_id="319567534",
+        data_root=tmp_path,
+    )
+
+    assert match is not None
+    assert match.project.project_id == "mlj_dspmods"
+    assert match.reason == "当前群绑定项目"
+
+
+def test_codex_session_start_falls_back_to_qqbot_without_group_binding(tmp_path: Path) -> None:
+    match = resolve_codex_project_for_session_start(
+        "",
+        group_id=None,
+        data_root=tmp_path,
+    )
+
+    assert match is not None
+    assert match.project.project_id == "qqbot"
+    assert match.reason == "当前机器人仓库"
 
 
 def test_codex_project_resolver_matches_factorio_quality_ship_from_index(tmp_path: Path) -> None:
@@ -293,3 +318,22 @@ def test_codex_session_store_closes_session(tmp_path: Path) -> None:
     store.close_session(session.session_id)
 
     assert store.get_active_session(actor_user_id="605738729", group_id=None) is None
+
+
+def test_codex_session_store_persists_and_pops_pending_messages(tmp_path: Path) -> None:
+    project = get_codex_project_by_id("qqbot")
+    assert project is not None
+    store = CodexSessionStore(tmp_path)
+    session = store.create_session(project=project, actor_user_id="605738729", group_id="10001")
+
+    store.append_pending_message(session.session_id, "先别改配置")
+    store.append_pending_message(session.session_id, "改成可中断")
+
+    reloaded = CodexSessionStore(tmp_path).get_session(session.session_id)
+    assert reloaded is not None
+    assert reloaded.pending_messages == ("先别改配置", "改成可中断")
+    assert CodexSessionStore(tmp_path).pop_pending_messages(session.session_id) == (
+        "先别改配置",
+        "改成可中断",
+    )
+    assert CodexSessionStore(tmp_path).get_session(session.session_id).pending_messages == ()

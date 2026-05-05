@@ -92,6 +92,7 @@ class CodexSession:
     created_by: str
     group_id: str | None
     transcript: tuple[tuple[str, str], ...] = ()
+    pending_messages: tuple[str, ...] = ()
     created_at: int = 0
     updated_at: int = 0
 
@@ -401,11 +402,56 @@ class CodexSessionStore:
                 ("user", user_message.strip()),
                 ("codex", codex_message.strip()),
             ),
+            pending_messages=session.pending_messages,
             created_at=session.created_at,
             updated_at=int(time.time()),
         )
         self._replace_session(updated)
         return updated
+
+    def append_pending_message(self, session_id: str, message: str) -> CodexSession:
+        session = self.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Codex 会话不存在：{session_id}")
+        cleaned = message.strip()
+        if not cleaned:
+            return session
+        updated = CodexSession(
+            session_id=session.session_id,
+            project_id=session.project_id,
+            project_display_name=session.project_display_name,
+            status=session.status,
+            created_by=session.created_by,
+            group_id=session.group_id,
+            transcript=session.transcript,
+            pending_messages=(*session.pending_messages, cleaned),
+            created_at=session.created_at,
+            updated_at=int(time.time()),
+        )
+        self._replace_session(updated)
+        return updated
+
+    def pop_pending_messages(self, session_id: str) -> tuple[str, ...]:
+        session = self.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Codex 会话不存在：{session_id}")
+        pending = session.pending_messages
+        if not pending:
+            return ()
+        updated = CodexSession(
+            session_id=session.session_id,
+            project_id=session.project_id,
+            project_display_name=session.project_display_name,
+            status=session.status,
+            created_by=session.created_by,
+            group_id=session.group_id,
+            transcript=session.transcript,
+            pending_messages=(),
+            created_at=session.created_at,
+            updated_at=int(time.time()),
+        )
+        self._replace_session(updated)
+        return pending
 
     def mark_status(self, session_id: str, status: str) -> CodexSession:
         session = self.get_session(session_id)
@@ -419,6 +465,7 @@ class CodexSessionStore:
             created_by=session.created_by,
             group_id=session.group_id,
             transcript=session.transcript,
+            pending_messages=session.pending_messages,
             created_at=session.created_at,
             updated_at=int(time.time()),
         )
@@ -536,6 +583,32 @@ def get_codex_project_for_group(
     if not project_id:
         return None
     return get_codex_project_by_id(project_id, config_file)
+
+
+def resolve_codex_project_for_session_start(
+    project_query: str,
+    *,
+    group_id: str | None,
+    data_root: Path,
+    config_file: Path | None = None,
+) -> CodexProjectMatch | None:
+    cleaned = project_query.strip()
+    if cleaned:
+        return resolve_codex_project_for_text(
+            cleaned,
+            group_id=None,
+            data_root=data_root,
+            config_file=config_file,
+        )
+
+    group_project = get_codex_project_for_group(group_id, config_file)
+    if group_project is not None:
+        return CodexProjectMatch(group_project, 0.35, "当前群绑定项目")
+
+    current_project = get_codex_project_by_id("qqbot", config_file)
+    if current_project is None:
+        return None
+    return CodexProjectMatch(current_project, 0.2, "当前机器人仓库")
 
 
 def resolve_codex_project_for_text(
@@ -903,6 +976,11 @@ def _session_from_json(payload: dict[str, object]) -> CodexSession:
         created_by=str(payload.get("created_by", "")),
         group_id=str(payload["group_id"]) if payload.get("group_id") is not None else None,
         transcript=tuple(transcript),
+        pending_messages=tuple(
+            str(item).strip()
+            for item in payload.get("pending_messages", [])
+            if str(item).strip()
+        ),
         created_at=int(payload.get("created_at", 0) or 0),
         updated_at=int(payload.get("updated_at", 0) or 0),
     )
@@ -920,6 +998,7 @@ def _session_to_json(session: CodexSession) -> dict[str, object]:
             {"role": role, "content": content}
             for role, content in session.transcript
         ],
+        "pending_messages": list(session.pending_messages),
         "created_at": session.created_at,
         "updated_at": session.updated_at,
     }

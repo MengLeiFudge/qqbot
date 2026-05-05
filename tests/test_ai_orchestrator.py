@@ -199,7 +199,7 @@ def test_orchestrator_requires_group_for_latest_zip_upload(tmp_path: Path) -> No
     assert "需要在群聊里使用" in result.text
 
 
-def test_orchestrator_requires_project_after_codex_keyword(tmp_path: Path) -> None:
+def test_orchestrator_enters_group_bound_project_after_codex_keyword(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -211,8 +211,24 @@ def test_orchestrator_requires_project_after_codex_keyword(tmp_path: Path) -> No
     )
 
     assert result.handled is True
-    assert "必须在 codex 后面写项目" in result.text
     assert "MLJ_DSPmods" in result.text
+    assert "已进入 Codex 模式 CODEX-S0001" in result.text
+
+
+def test_orchestrator_enters_current_qqbot_project_without_group_binding(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "codex",
+            AiOrchestratorContext(actor_user_id="605738729", is_admin=True),
+            NormalizedMessage(text="codex", outline="codex"),
+        )
+    )
+
+    assert result.handled is True
+    assert "已进入 Codex 模式 CODEX-S0001" in result.text
+    assert "qqbot" in result.text
 
 
 def test_orchestrator_rejects_unknown_codex_session_project(tmp_path: Path) -> None:
@@ -488,6 +504,33 @@ def test_orchestrator_rejects_execute_when_same_project_is_running(tmp_path: Pat
     assert "CODEX-S0001" in result.text
 
 
+def test_orchestrator_records_admin_adjustment_while_session_is_running(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+    store = orchestrator._codex_session_store()
+    project = get_codex_project_by_id("mlj_dspmods")
+    assert project is not None
+    session = store.create_session(
+        project=project,
+        actor_user_id="605738729",
+        group_id="319567534",
+    )
+    store.mark_status(session.session_id, "running")
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "先不要提交，补一个测试",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="先不要提交，补一个测试", outline="先不要提交，补一个测试"),
+        )
+    )
+
+    updated = store.get_session(session.session_id)
+    assert result.handled is True
+    assert "已收到 Codex 调整" in result.text
+    assert updated is not None
+    assert updated.pending_messages == ("先不要提交，补一个测试",)
+
+
 def test_orchestrator_restarts_after_successful_qqbot_session_execute(tmp_path: Path) -> None:
     tasks = []
     restart_calls = []
@@ -736,7 +779,9 @@ def test_orchestrator_executes_existing_codex_draft_when_confirmed(tmp_path: Pat
     assert requests[0].project.project_id == "factorio_mods"
     assert "异星模组品质飞船" in requests[0].prompt
     assert bot.calls[0][0] == "send_group_msg"
-    assert "Codex 修复任务成功" in bot.calls[0][1]["message"]
+    assert "已交给本地 Codex" in bot.calls[0][1]["message"]
+    assert bot.calls[1][0] == "send_group_msg"
+    assert "Codex 修复任务成功" in bot.calls[1][1]["message"]
 
 
 def test_orchestrator_appends_followup_to_recent_codex_draft(tmp_path: Path) -> None:

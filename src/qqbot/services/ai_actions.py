@@ -18,7 +18,11 @@ from qqbot.services.codex_task_service import (
     run_codex_task,
 )
 from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
-from qqbot.services.message_delivery import call_split_text_api, wait_for_group_message_interval
+from qqbot.services.message_delivery import (
+    call_collapsible_text_api,
+    call_split_text_api,
+    wait_for_group_message_interval,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +161,7 @@ class AiActionExecutor:
         self.task_factory(self._run_codex_task(request, project))
         return AiActionResult(
             True,
-            f"已启动 Codex 修复任务：{project.display_name}。完成后会回报本群。",
+            f"已启动 Codex 修复任务：{project.display_name}。我会先发进度，完成后再回报结果。",
             request.action_type,
         )
 
@@ -166,6 +170,10 @@ class AiActionExecutor:
         await self.execute(nested_action)
 
     async def _run_codex_task(self, request: AiActionRequest, project) -> None:
+        await self._send_codex_progress(
+            request,
+            f"已交给本地 Codex：{project.display_name}\n正在启动并读取项目上下文。",
+        )
         result = await self.codex_runner(
             CodexTaskRequest(
                 project=project,
@@ -185,11 +193,12 @@ class AiActionExecutor:
             if restart_message:
                 message = f"{message}\n{restart_message}"
         if request.target_group_id and request.target_group_id.isdigit():
-            await call_split_text_api(
+            await call_collapsible_text_api(
                 self.bot,
                 "send_group_msg",
                 group_id=int(request.target_group_id),
                 message=message,
+                title=f"Codex 回报：{project.display_name}",
             )
             if result.ok:
                 await self._upload_codex_artifacts(result.message, project.repo_path, request)
@@ -202,6 +211,22 @@ class AiActionExecutor:
             )
         if restart_message:
             self.task_factory(self._run_delayed_self_restart())
+
+    async def _send_codex_progress(self, request: AiActionRequest, message: str) -> None:
+        if request.target_group_id and request.target_group_id.isdigit():
+            await call_split_text_api(
+                self.bot,
+                "send_group_msg",
+                group_id=int(request.target_group_id),
+                message=message,
+            )
+            return
+        await call_split_text_api(
+            self.bot,
+            "send_private_msg",
+            user_id=int(request.actor_user_id),
+            message=message,
+        )
 
     def _prepare_self_update_restart(self, project, request: AiActionRequest) -> str:
         if project.project_id != "qqbot" or self.self_restart_scheduler is None:

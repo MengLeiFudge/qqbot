@@ -22,6 +22,7 @@ from qqbot.services.codex_task_service import (
     learn_codex_project_alias,
     load_codex_projects,
     parse_codex_alias_learning_request,
+    resolve_codex_project_for_session_start,
     resolve_codex_project_for_text,
     run_codex_session_turn,
 )
@@ -403,15 +404,13 @@ class AiOrchestrator:
                     ),
                 )
             project_query = extract_codex_enter_project_query(text)
-            if not project_query:
-                return AiOrchestratorResult(True, build_codex_project_required_reply())
-            project_match = resolve_codex_project_for_text(
+            project_match = resolve_codex_project_for_session_start(
                 project_query,
-                group_id=None,
+                group_id=context.group_id,
                 data_root=self.data_root,
             )
             if project_match is None:
-                return AiOrchestratorResult(True, build_codex_project_not_found_reply(project_query))
+                return AiOrchestratorResult(True, build_codex_project_not_found_reply(project_query or "当前会话"))
             session = store.create_session(
                 project=project_match.project,
                 actor_user_id=context.actor_user_id,
@@ -433,12 +432,17 @@ class AiOrchestrator:
         project = get_codex_project_by_id(active_session.project_id)
         if project is None:
             return AiOrchestratorResult(True, f"Codex 会话 {active_session.session_id} 对应的项目不存在。")
+        if active_session.status == "running":
+            updated = store.append_pending_message(active_session.session_id, text)
+            return AiOrchestratorResult(
+                True,
+                (
+                    f"已收到 Codex 调整：{active_session.session_id}\n"
+                    f"当前还有 {len(updated.pending_messages)} 条调整在队列里，"
+                    "会合并到当前结果后的下一阶段。"
+                ),
+            )
         if mode == "execute":
-            if active_session.status == "running":
-                return AiOrchestratorResult(
-                    True,
-                    f"Codex 会话 {active_session.session_id} 正在执行中，请等待本轮完成。",
-                )
             running = store.get_running_project_session(project.project_id)
             if running is not None:
                 return AiOrchestratorResult(
