@@ -37,12 +37,12 @@ async def handle_thunder_setting(event: GroupMessageEvent) -> None:
     if command.action == "set_probability" and command.probability is not None:
         store.set_thunder_config(event.group_id, command.probability, min_seconds, max_seconds)
         await thunder_setting_matcher.finish(
-            f"已将本群随机禁言概率设为 {command.probability:.3%}！"
+            f"已将全局随机禁言概率设为 {command.probability:.3%}！"
         )
     if command.action == "set_range" and command.min_seconds and command.max_seconds:
         store.set_thunder_config(event.group_id, chance, command.min_seconds, command.max_seconds)
         await thunder_setting_matcher.finish(
-            f"已将本群随机禁言时间设为 {command.min_seconds}s - {command.max_seconds}s！"
+            f"已将全局随机禁言时间设为 {command.min_seconds}s - {command.max_seconds}s！"
         )
 
 

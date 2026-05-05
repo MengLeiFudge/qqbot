@@ -8,6 +8,8 @@ from qqbot.config import load_settings
 from qqbot.services.feature_catalog import FeatureDefinition
 from qqbot.services.plugin_registry import list_visible_plugin_specs
 
+GLOBAL_CONFIG_KEY = "__global__"
+
 
 class SettingsStore:
     def __init__(self, data_root: Path, author_qq: int) -> None:
@@ -77,16 +79,19 @@ class SettingsStore:
 
     def get_reread_chance(self, group_id: int) -> float:
         chances = self._read_json(self.settings_root / "reread.json", {})
-        return float(chances.get(str(group_id), 0.05))
+        return float(self._global_or_legacy_group_value(chances, 0.05))
 
     def set_reread_chance(self, group_id: int, chance: float) -> None:
         chances = self._read_json(self.settings_root / "reread.json", {})
-        chances[str(group_id)] = chance
+        chances[GLOBAL_CONFIG_KEY] = chance
         self._write_json(self.settings_root / "reread.json", chances)
 
     def get_thunder_config(self, group_id: int) -> tuple[float, int, int]:
         configs = self._read_json(self.settings_root / "thunder.json", {})
-        raw = configs.get(str(group_id), {"chance": 0.05, "min_seconds": 5, "max_seconds": 20})
+        raw = self._global_or_legacy_group_value(
+            configs,
+            {"chance": 0.05, "min_seconds": 5, "max_seconds": 20},
+        )
         return float(raw["chance"]), int(raw["min_seconds"]), int(raw["max_seconds"])
 
     def set_thunder_config(
@@ -97,7 +102,7 @@ class SettingsStore:
         max_seconds: int,
     ) -> None:
         configs = self._read_json(self.settings_root / "thunder.json", {})
-        configs[str(group_id)] = {
+        configs[GLOBAL_CONFIG_KEY] = {
             "chance": chance,
             "min_seconds": min_seconds,
             "max_seconds": max_seconds,
@@ -129,6 +134,18 @@ class SettingsStore:
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def _global_or_legacy_group_value(
+        self,
+        payload: dict[str, object],
+        default: object,
+    ) -> object:
+        if GLOBAL_CONFIG_KEY in payload:
+            return payload[GLOBAL_CONFIG_KEY]
+        for key in sorted(payload):
+            if str(key).isdigit():
+                return payload[key]
+        return default
 
 
 @lru_cache(maxsize=1)

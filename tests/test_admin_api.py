@@ -125,6 +125,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "AI 模型" in body
     assert "群管配置" in body
     assert "/admin/api/group-control" in body
+    assert "随机复读概率" in body
     assert "养鲲数据" in body
     assert "/admin/api/kun/users" in body
 
@@ -167,30 +168,37 @@ def test_group_control_api_lists_and_updates_config(tmp_path: Path) -> None:
     list_status, list_body = asgi_request(
         app,
         "GET",
-        "/admin/api/group-control/516286670",
+        "/admin/api/group-control",
     )
     update_status, update_body = asgi_request(
         app,
         "PUT",
-        "/admin/api/group-control/516286670",
-        json_body={"probability_percent": 2.5, "min_seconds": 20, "max_seconds": 5},
+        "/admin/api/group-control",
+        json_body={
+            "reread_probability_percent": 12.5,
+            "thunder_probability_percent": 2.5,
+            "min_seconds": 20,
+            "max_seconds": 5,
+        },
     )
 
     assert list_status == 200
     assert json.loads(list_body) == {
-        "group_id": 516286670,
-        "chance": 0.05,
-        "probability_percent": 5.0,
-        "min_seconds": 5,
-        "max_seconds": 20,
+        "reread_chance": 0.05,
+        "reread_probability_percent": 5.0,
+        "thunder_chance": 0.05,
+        "thunder_probability_percent": 5.0,
+        "thunder_min_seconds": 5,
+        "thunder_max_seconds": 20,
     }
     assert update_status == 200
     assert json.loads(update_body) == {
-        "group_id": 516286670,
-        "chance": 0.025,
-        "probability_percent": 2.5,
-        "min_seconds": 5,
-        "max_seconds": 20,
+        "reread_chance": 0.125,
+        "reread_probability_percent": 12.5,
+        "thunder_chance": 0.025,
+        "thunder_probability_percent": 2.5,
+        "thunder_min_seconds": 5,
+        "thunder_max_seconds": 20,
     }
 
 

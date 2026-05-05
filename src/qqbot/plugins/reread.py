@@ -41,7 +41,7 @@ async def handle_reread_setting(event: GroupMessageEvent) -> None:
     chance = clamp_reread_percent(float(match.group(1)))
     store.set_reread_chance(event.group_id, chance)
     await reread_setting_matcher.finish(
-        f"已将本群复读概率设为 {format_reread_chance(chance)}！"
+        f"已将全局复读概率设为 {format_reread_chance(chance)}！"
     )
 
 

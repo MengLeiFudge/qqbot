@@ -76,31 +76,35 @@ def test_set_plugin_enabled_rejects_unknown_plugin(tmp_path: Path) -> None:
         service.set_plugin_enabled("missing", False)
 
 
-def test_group_control_config_lists_and_updates_thunder_settings(tmp_path: Path) -> None:
+def test_group_control_config_lists_and_updates_global_settings(tmp_path: Path) -> None:
     service = build_service(tmp_path)
 
-    initial = service.get_group_control_config(516286670)
+    initial = service.get_group_control_config()
     updated = service.set_group_control_config(
-        516286670,
-        probability_percent=2.5,
+        reread_probability_percent=12.5,
+        thunder_probability_percent=2.5,
         min_seconds=20,
         max_seconds=5,
     )
 
     assert initial == {
-        "group_id": 516286670,
-        "chance": 0.05,
-        "probability_percent": 5.0,
-        "min_seconds": 5,
-        "max_seconds": 20,
+        "reread_chance": 0.05,
+        "reread_probability_percent": 5.0,
+        "thunder_chance": 0.05,
+        "thunder_probability_percent": 5.0,
+        "thunder_min_seconds": 5,
+        "thunder_max_seconds": 20,
     }
     assert updated == {
-        "group_id": 516286670,
-        "chance": 0.025,
-        "probability_percent": 2.5,
-        "min_seconds": 5,
-        "max_seconds": 20,
+        "reread_chance": 0.125,
+        "reread_probability_percent": 12.5,
+        "thunder_chance": 0.025,
+        "thunder_probability_percent": 2.5,
+        "thunder_min_seconds": 5,
+        "thunder_max_seconds": 20,
     }
+    assert service.store.get_reread_chance(319567534) == 0.125
+    assert service.store.get_thunder_config(319567534) == (0.025, 5, 20)
 
 
 def test_kun_admin_service_gets_and_updates_user(tmp_path: Path) -> None:

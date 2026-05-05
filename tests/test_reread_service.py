@@ -22,14 +22,16 @@ def test_reread_chance_defaults_to_five_percent(tmp_path: Path) -> None:
     assert store.get_reread_chance(516286670) == 0.05
 
 
-def test_set_reread_percent_is_clamped(tmp_path: Path) -> None:
+def test_set_reread_percent_is_global_and_clamped(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path, author_qq=605738729)
 
     store.set_reread_chance(516286670, clamp_reread_percent(0))
     assert store.get_reread_chance(516286670) == 0.0001
+    assert store.get_reread_chance(319567534) == 0.0001
 
     store.set_reread_chance(516286670, clamp_reread_percent(80))
     assert store.get_reread_chance(516286670) == 0.5
+    assert store.get_reread_chance(319567534) == 0.5
 
 
 def test_render_reread_message_reverses_plain_text_when_requested() -> None:

@@ -20,6 +20,15 @@ def test_thunder_defaults_match_old_project(tmp_path: Path) -> None:
     assert store.get_thunder_config(516286670) == (0.05, 5, 20)
 
 
+def test_thunder_config_is_global(tmp_path: Path) -> None:
+    store = SettingsStore(tmp_path, author_qq=605738729)
+
+    store.set_thunder_config(516286670, 0.025, 5, 20)
+
+    assert store.get_thunder_config(516286670) == (0.025, 5, 20)
+    assert store.get_thunder_config(319567534) == (0.025, 5, 20)
+
+
 def test_parse_thunder_probability_command() -> None:
     command = parse_thunder_command("设置禁言概率2.5")
 
