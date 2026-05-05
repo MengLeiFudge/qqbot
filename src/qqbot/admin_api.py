@@ -512,7 +512,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     async function loadGroupMessages() {{
       const status = document.getElementById("groupMessageStatus");
       status.textContent = "正在刷新...";
-      const shouldKeepBottom = isMessageListAtBottom();
+      const scrollState = captureSelectedMessageScroll();
       groupMessagePayload = await api("/admin/api/group-messages");
       const select = document.getElementById("messageGroupSelect");
       const currentValue = select.value;
@@ -523,7 +523,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         ? currentValue
         : selectLatestMessageGroup();
       renderGroupMessages();
-      if (shouldKeepBottom) scrollSelectedMessageListToBottom();
+      restoreSelectedMessageScroll(scrollState);
       status.textContent = `已刷新：${{formatTime(Date.now() / 1000)}}`;
     }}
 
@@ -554,6 +554,30 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       const list = getSelectedMessageList();
       if (!list) return true;
       return list.scrollHeight - list.scrollTop - list.clientHeight <= 8;
+    }}
+
+    function captureSelectedMessageScroll() {{
+      const select = document.getElementById("messageGroupSelect");
+      const list = getSelectedMessageList();
+      if (!list) {{
+        return {{ groupId: select.value, atBottom: true, scrollTop: 0 }};
+      }}
+      return {{
+        groupId: select.value,
+        atBottom: isMessageListAtBottom(),
+        scrollTop: list.scrollTop,
+      }};
+    }}
+
+    function restoreSelectedMessageScroll(scrollState) {{
+      const select = document.getElementById("messageGroupSelect");
+      const list = getSelectedMessageList();
+      if (!list) return;
+      if (scrollState.atBottom || scrollState.groupId !== select.value) {{
+        scrollSelectedMessageListToBottom();
+        return;
+      }}
+      list.scrollTop = scrollState.scrollTop;
     }}
 
     function scrollSelectedMessageListToBottom() {{

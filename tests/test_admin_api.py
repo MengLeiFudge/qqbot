@@ -145,6 +145,9 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "全部群" not in body
     assert "selectLatestMessageGroup" in body
     assert "isMessageListAtBottom" in body
+    assert "captureSelectedMessageScroll" in body
+    assert "restoreSelectedMessageScroll" in body
+    assert "scrollState.scrollTop" in body
     assert "scrollSelectedMessageListToBottom" in body
     assert "message-row" in body
     assert ".message-row.incoming" in body
