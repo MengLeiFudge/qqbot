@@ -8,6 +8,13 @@ from qqbot.services.ai_output_style import sanitize_ai_output_text
 from qqbot.services.plugin_registry import get_plugin_spec_by_id
 
 
+AI_FALLBACK_NOT_CONFIGURED = "棉花糖还没接上线，暂时没法回应喵。"
+AI_FALLBACK_TIMEOUT = "棉花糖等回复等到快化掉啦，稍后再试试喵。"
+AI_FALLBACK_CLIENT_ERROR = "棉花糖刚刚摔了一跤，换个问法再试试喵。"
+AI_FALLBACK_SAFETY_REJECTED = "棉花糖被安全结界拦住啦，这个话题现在不能继续说喵。换个问法吧。"
+AI_FALLBACK_EMPTY = "棉花糖抓到了一团空空的棉花，没有生成出回复喵。再问一次吧。"
+
+
 class AiPermissionError(ValueError):
     pass
 
@@ -86,7 +93,7 @@ class AiGateway:
         if request.capability not in spec.ai_capabilities:
             raise AiPermissionError(f"插件 {request.plugin_id} 未声明 AI 能力：{request.capability}")
         if self.client is None:
-            return AiResponse("AI 服务尚未配置，请稍后再试。", fallback=True)
+            return AiResponse(AI_FALLBACK_NOT_CONFIGURED, fallback=True)
 
         try:
             completion = await asyncio.wait_for(
@@ -94,16 +101,13 @@ class AiGateway:
                 timeout=self.timeout_seconds,
             )
         except TimeoutError:
-            return AiResponse("AI 响应超时，请稍后再试。", fallback=True)
+            return AiResponse(AI_FALLBACK_TIMEOUT, fallback=True)
         except Exception as exc:
-            return AiResponse(f"AI 请求失败：{exc}", fallback=True)
+            return AiResponse(format_ai_exception_fallback(exc), fallback=True)
 
         cleaned = sanitize_ai_output_text(completion.text)
         if not cleaned:
-            return AiResponse(
-                "AI 上游返回了空内容，可能是生成被中断或内容被上游过滤。请稍后重试。",
-                fallback=True,
-            )
+            return AiResponse(AI_FALLBACK_EMPTY, fallback=True)
         return AiResponse(cleaned, metrics=completion.metrics)
 
     async def _complete(self, request: AiRequest) -> AiCompletion:
@@ -121,3 +125,20 @@ class AiGateway:
                 output_chars=len(text),
             ),
         )
+
+
+def format_ai_exception_fallback(exc: Exception) -> str:
+    detail = str(exc).lower()
+    safety_markers = (
+        "high risk",
+        "rejected",
+        "safety",
+        "unsafe",
+        "policy",
+        "风险",
+        "拒绝",
+        "安全",
+    )
+    if any(marker in detail for marker in safety_markers):
+        return AI_FALLBACK_SAFETY_REJECTED
+    return AI_FALLBACK_CLIENT_ERROR

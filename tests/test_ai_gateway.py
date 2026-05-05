@@ -60,6 +60,14 @@ class FailingAiClient:
         raise RuntimeError("boom")
 
 
+class HighRiskRejectedAiClient:
+    async def stream_complete(self, request: AiRequest) -> AiCompletion:
+        raise RuntimeError("The request was rejected because it was considered high risk")
+
+    async def complete(self, request: AiRequest) -> str:
+        raise RuntimeError("The request was rejected because it was considered high risk")
+
+
 class EmptyAiClient:
     async def stream_complete(self, request: AiRequest) -> AiCompletion:
         return AiCompletion(
@@ -129,7 +137,7 @@ def test_gateway_returns_fallback_when_client_is_missing() -> None:
     )
 
     assert response.fallback is True
-    assert "AI 服务尚未配置" in response.text
+    assert response.text == "棉花糖还没接上线，暂时没法回应喵。"
     assert response.metrics is None
 
 
@@ -143,7 +151,7 @@ def test_gateway_returns_fallback_on_timeout() -> None:
     )
 
     assert response.fallback is True
-    assert "AI 响应超时" in response.text
+    assert response.text == "棉花糖等回复等到快化掉啦，稍后再试试喵。"
     assert response.metrics is None
 
 
@@ -157,7 +165,25 @@ def test_gateway_returns_fallback_on_client_error() -> None:
     )
 
     assert response.fallback is True
-    assert "AI 请求失败：boom" in response.text
+    assert response.text == "棉花糖刚刚摔了一跤，换个问法再试试喵。"
+    assert "boom" not in response.text
+    assert "上游" not in response.text
+    assert response.metrics is None
+
+
+def test_gateway_returns_cute_fallback_on_high_risk_rejection() -> None:
+    gateway = AiGateway(client=HighRiskRejectedAiClient())
+
+    response = asyncio.run(
+        gateway.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="你好", user_id="10001")
+        )
+    )
+
+    assert response.fallback is True
+    assert response.text == "棉花糖被安全结界拦住啦，这个话题现在不能继续说喵。换个问法吧。"
+    assert "high risk" not in response.text
+    assert "rejected" not in response.text
     assert response.metrics is None
 
 
@@ -171,7 +197,7 @@ def test_gateway_returns_clear_fallback_on_empty_content() -> None:
     )
 
     assert response.fallback is True
-    assert "AI 上游返回了空内容" in response.text
+    assert response.text == "棉花糖抓到了一团空空的棉花，没有生成出回复喵。再问一次吧。"
     assert response.metrics is None
 
 
