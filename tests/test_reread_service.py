@@ -12,6 +12,7 @@ from qqbot.services.reread_service import (
     clamp_reread_percent,
     format_reread_chance,
     render_reread_message,
+    should_skip_reread_message,
 )
 from qqbot.services.settings_store import SettingsStore
 
@@ -34,12 +35,18 @@ def test_set_reread_percent_is_global_and_clamped(tmp_path: Path) -> None:
     assert store.get_reread_chance(319567534) == 0.5
 
 
-def test_render_reread_message_reverses_plain_text_when_requested() -> None:
+def test_render_reread_message_keeps_plain_text() -> None:
     message = Message("你好世界")
 
-    rendered = render_reread_message(message, reverse_text=True)
+    rendered = render_reread_message(message)
 
-    assert str(rendered) == "界世好你"
+    assert str(rendered) == "你好世界"
+
+
+def test_skip_reread_message_when_image_or_at_is_present() -> None:
+    assert should_skip_reread_message(Message([MessageSegment.image("file:///tmp/a.png")])) is True
+    assert should_skip_reread_message(Message([MessageSegment.at(10001), MessageSegment.text("你好")])) is True
+    assert should_skip_reread_message(Message([MessageSegment.text("你好")])) is False
 
 
 def test_render_reread_message_keeps_mixed_message() -> None:
@@ -48,7 +55,7 @@ def test_render_reread_message_keeps_mixed_message() -> None:
         MessageSegment.face(123),
     ])
 
-    rendered = render_reread_message(message, reverse_text=False)
+    rendered = render_reread_message(message)
 
     assert rendered == message
 

@@ -12,6 +12,7 @@ from qqbot.services.reread_service import (
     clamp_reread_percent,
     format_reread_chance,
     render_reread_message,
+    should_skip_reread_message,
 )
 from qqbot.services.settings_store import get_settings_store
 
@@ -64,13 +65,11 @@ async def handle_reread_message(event: GroupMessageEvent) -> None:
         return
 
     message = event.get_message()
-    if any(segment.type == "file" for segment in message):
+    if should_skip_reread_message(message):
         return
 
     chance = store.get_reread_chance(event.group_id)
     if random.random() > chance:
         return
 
-    await reread_message_matcher.send(
-        render_reread_message(message, reverse_text=random.random() >= 0.5)
-    )
+    await reread_message_matcher.send(render_reread_message(message))

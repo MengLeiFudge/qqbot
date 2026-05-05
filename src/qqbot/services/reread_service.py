@@ -11,9 +11,11 @@ def format_reread_chance(chance: float) -> str:
     return f"{chance:.3%}"
 
 
-def render_reread_message(message: Message, reverse_text: bool) -> Message:
-    # 先保持与旧实现一致：纯文本有机会倒序，混合消息按原样发送，文件消息由插件层提前拦截。
+def should_skip_reread_message(message: Message) -> bool:
+    return any(segment.type in {"at", "file", "image"} for segment in message)
+
+
+def render_reread_message(message: Message) -> Message:
     if all(segment.type == "text" for segment in message):
-        text = message.extract_plain_text()
-        return Message(text[::-1] if reverse_text else text)
+        return Message(message.extract_plain_text())
     return message
