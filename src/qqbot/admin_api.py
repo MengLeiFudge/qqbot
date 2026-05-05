@@ -26,6 +26,16 @@ class AiProviderUpdateRequest(BaseModel):
     profile: str
 
 
+class GroupControlUpdateRequest(BaseModel):
+    probability_percent: float
+    min_seconds: int
+    max_seconds: int
+
+
+class KunUserUpdateRequest(BaseModel):
+    updates: dict[str, object]
+
+
 def register_admin_routes(
     app: FastAPI,
     settings: RuntimeSettings,
@@ -89,6 +99,53 @@ def register_admin_routes(
             return admin_service.set_plugin_enabled(plugin_id, payload.enabled)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/admin/api/group-control/{group_id}")
+    async def admin_group_control(
+        group_id: int,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.get_group_control_config(group_id)
+
+    @app.put("/admin/api/group-control/{group_id}")
+    async def admin_update_group_control(
+        group_id: int,
+        payload: GroupControlUpdateRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.set_group_control_config(
+            group_id,
+            payload.probability_percent,
+            payload.min_seconds,
+            payload.max_seconds,
+        )
+
+    @app.get("/admin/api/kun/users/{qq}")
+    async def admin_kun_user(
+        qq: int,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.get_kun_user(qq)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.put("/admin/api/kun/users/{qq}")
+    async def admin_update_kun_user(
+        qq: int,
+        payload: KunUserUpdateRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.update_kun_user(qq, payload.updates)
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 404 if "not found" in detail else 400
+            raise HTTPException(status_code=status_code, detail=detail) from exc
 
     @app.get("/admin/api/ai")
     async def admin_ai(
@@ -209,6 +266,9 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     .control-panel {{ display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }}
     .status {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }}
     .status div {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; }}
+    .form-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 12px; }}
+    .field {{ display: flex; flex-direction: column; gap: 5px; }}
+    .field label {{ color: #475569; font-size: 13px; }}
     pre {{ white-space: pre-wrap; background: #111827; color: #e5e7eb; padding: 12px; border-radius: 6px; max-height: 420px; overflow: auto; }}
     ul {{ padding-left: 18px; }}
   </style>
@@ -233,6 +293,40 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     <section>
       <h2>全局插件</h2>
       <div id="pluginGrid" class="grid"></div>
+    </section>
+    <section>
+      <h2>群管配置</h2>
+      <div class="row">
+        <select id="groupControlGroupSelect"></select>
+        <button onclick="loadGroupControlConfig()">读取</button>
+        <button onclick="saveGroupControlConfig()">保存</button>
+        <span id="groupControlStatus" class="muted"></span>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label for="thunderProbabilityInput">随机禁言概率（%）</label>
+          <input id="thunderProbabilityInput" type="number" min="0.01" max="50" step="0.01">
+        </div>
+        <div class="field">
+          <label for="thunderMinSecondsInput">最短禁言秒数</label>
+          <input id="thunderMinSecondsInput" type="number" min="1" max="30" step="1">
+        </div>
+        <div class="field">
+          <label for="thunderMaxSecondsInput">最长禁言秒数</label>
+          <input id="thunderMaxSecondsInput" type="number" min="1" max="30" step="1">
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2>养鲲数据</h2>
+      <div class="row">
+        <input id="kunQqInput" inputmode="numeric" placeholder="QQ 号">
+        <button onclick="loadKunUser()">读取</button>
+        <button onclick="saveKunUser()">保存</button>
+        <span id="kunStatus" class="muted"></span>
+      </div>
+      <div id="kunReadonly" class="status"></div>
+      <div id="kunFields" class="form-grid"></div>
     </section>
     <section>
       <h2>AI 模型</h2>
@@ -301,6 +395,12 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         "beforeend",
         `<div><strong>已知群</strong><br><span>${{groups.length}}</span></div>`
       );
+      const select = document.getElementById("groupControlGroupSelect");
+      select.innerHTML = groups.map(group => {{
+        const label = group.display_name || group.group_id;
+        return `<option value="${{group.group_id}}">${{escapeHtml(label)}}</option>`;
+      }}).join("");
+      if (groups.length) await loadGroupControlConfig();
     }}
 
     async function loadPlugins() {{
@@ -343,6 +443,110 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         body: JSON.stringify({{ enabled }}),
       }});
       await loadPlugins();
+    }}
+
+    async function loadGroupControlConfig() {{
+      const groupId = document.getElementById("groupControlGroupSelect").value;
+      const status = document.getElementById("groupControlStatus");
+      if (!groupId) {{
+        status.textContent = "暂无可选群。";
+        return;
+      }}
+      const payload = await api(`/admin/api/group-control/${{groupId}}`);
+      document.getElementById("thunderProbabilityInput").value = Number(payload.probability_percent).toFixed(2);
+      document.getElementById("thunderMinSecondsInput").value = payload.min_seconds;
+      document.getElementById("thunderMaxSecondsInput").value = payload.max_seconds;
+      status.textContent = `当前：${{Number(payload.probability_percent).toFixed(2)}}%，${{payload.min_seconds}}s-${{payload.max_seconds}}s`;
+    }}
+
+    async function saveGroupControlConfig() {{
+      const groupId = document.getElementById("groupControlGroupSelect").value;
+      const status = document.getElementById("groupControlStatus");
+      if (!groupId) return;
+      status.textContent = "正在保存...";
+      const payload = await api(`/admin/api/group-control/${{groupId}}`, {{
+        method: "PUT",
+        body: JSON.stringify({{
+          probability_percent: Number(document.getElementById("thunderProbabilityInput").value),
+          min_seconds: Number(document.getElementById("thunderMinSecondsInput").value),
+          max_seconds: Number(document.getElementById("thunderMaxSecondsInput").value),
+        }}),
+      }});
+      document.getElementById("thunderProbabilityInput").value = Number(payload.probability_percent).toFixed(2);
+      document.getElementById("thunderMinSecondsInput").value = payload.min_seconds;
+      document.getElementById("thunderMaxSecondsInput").value = payload.max_seconds;
+      status.textContent = `已保存：${{Number(payload.probability_percent).toFixed(2)}}%，${{payload.min_seconds}}s-${{payload.max_seconds}}s`;
+    }}
+
+    const kunEditableLabels = {{
+      name: "名称",
+      level: "等级",
+      atk: "攻击",
+      defense: "防御",
+      hp: "血量",
+      money: "萌泪币",
+      rename_card: "改名卡",
+      wash_card: "洗练卡",
+      check_card: "查看卡",
+      challenge_ticket: "挑战券",
+    }};
+
+    function renderKunUser(payload) {{
+      const user = payload.user;
+      document.getElementById("kunReadonly").innerHTML = [
+        ["QQ", user.qq],
+        ["赛季", user.season],
+        ["赛季提示", user.open_new_season_tip ? "开启" : "关闭"],
+        ["摸鲲次数", user.mk_times],
+        ["进击次数", user.jj_times],
+        ["挑战次数", user.tz_times],
+      ].map(([label, value]) => `<div><strong>${{label}}</strong><br><span>${{escapeHtml(value)}}</span></div>`).join("");
+      document.getElementById("kunFields").innerHTML = payload.editable_fields.map(field => {{
+        const label = kunEditableLabels[field] || field;
+        const value = user[field] ?? "";
+        const type = field === "name" ? "text" : "number";
+        const attrs = field === "name" ? 'maxlength="8"' : 'min="0" step="1"';
+        return `<div class="field"><label for="kun_${{field}}">${{escapeHtml(label)}}</label><input id="kun_${{field}}" data-kun-field="${{field}}" type="${{type}}" ${{attrs}} value="${{escapeHtml(value)}}"></div>`;
+      }}).join("");
+    }}
+
+    async function loadKunUser() {{
+      const input = document.getElementById("kunQqInput");
+      const qq = Number(input.value.trim());
+      const status = document.getElementById("kunStatus");
+      if (!qq) return;
+      status.textContent = "正在读取...";
+      try {{
+        const payload = await api(`/admin/api/kun/users/${{qq}}`);
+        renderKunUser(payload);
+        status.textContent = "已读取。";
+      }} catch (error) {{
+        document.getElementById("kunReadonly").innerHTML = "";
+        document.getElementById("kunFields").innerHTML = "";
+        status.textContent = `读取失败：${{error.message}}`;
+      }}
+    }}
+
+    async function saveKunUser() {{
+      const qq = Number(document.getElementById("kunQqInput").value.trim());
+      const status = document.getElementById("kunStatus");
+      if (!qq) return;
+      const updates = {{}};
+      document.querySelectorAll("[data-kun-field]").forEach(input => {{
+        const field = input.dataset.kunField;
+        updates[field] = field === "name" ? input.value : Number(input.value);
+      }});
+      status.textContent = "正在保存...";
+      try {{
+        const payload = await api(`/admin/api/kun/users/${{qq}}`, {{
+          method: "PUT",
+          body: JSON.stringify({{ updates }}),
+        }});
+        renderKunUser(payload);
+        status.textContent = "已保存。";
+      }} catch (error) {{
+        status.textContent = `保存失败：${{error.message}}`;
+      }}
     }}
 
     async function loadAdmins() {{

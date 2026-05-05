@@ -31,6 +31,19 @@ LEGACY_USER_KEYS = {
 
 LEGACY_BOSS_KEYS = {"def": "defense"}
 
+ADMIN_EDITABLE_USER_FIELDS = (
+    "name",
+    "level",
+    "atk",
+    "defense",
+    "hp",
+    "money",
+    "rename_card",
+    "wash_card",
+    "check_card",
+    "challenge_ticket",
+)
+
 
 @dataclass(slots=True)
 class KunUser:
@@ -775,6 +788,38 @@ class KunService:
         self._save()
         return f"已赠送所有人萌泪币{money}枚！"
 
+    def build_admin_user_snapshot(self, qq: int) -> dict[str, object] | None:
+        user = self.get_user(qq)
+        if user is None:
+            return None
+        return {
+            "user": self._admin_user_to_payload(user),
+            "editable_fields": list(ADMIN_EDITABLE_USER_FIELDS),
+        }
+
+    def update_admin_user_fields(
+        self,
+        qq: int,
+        updates: dict[str, object],
+    ) -> dict[str, object]:
+        user = self.get_user(qq)
+        if user is None:
+            raise ValueError(f"Kun user not found: {qq}")
+
+        for key, value in updates.items():
+            if key not in ADMIN_EDITABLE_USER_FIELDS:
+                raise ValueError(f"Unsupported Kun user field: {key}")
+            if key == "name":
+                user.name = str(value).strip()[:8]
+                continue
+            setattr(user, key, max(0, int(value)))
+
+        self._save()
+        return {
+            "user": self._admin_user_to_payload(user),
+            "editable_fields": list(ADMIN_EDITABLE_USER_FIELDS),
+        }
+
     # 核心持久化逻辑：内部字段用 Python 命名，落盘时映射回 mirai 旧字段。
     def _payload_to_user(self, payload: dict[str, object]) -> KunUser:
         data: dict[str, object] = {}
@@ -811,6 +856,31 @@ class KunService:
 
     def _legacy_user_to_record(self, payload: dict[str, object]) -> KunUser:
         return self._payload_to_user(payload)
+
+    def _admin_user_to_payload(self, user: KunUser) -> dict[str, object]:
+        return {
+            "qq": user.qq,
+            "season": user.season,
+            "open_new_season_tip": user.open_new_season_tip,
+            "name": user.name,
+            "level": user.level,
+            "atk": user.atk,
+            "defense": user.defense,
+            "hp": user.hp,
+            "money": user.money,
+            "rename_card": user.rename_card,
+            "wash_card": user.wash_card,
+            "check_card": user.check_card,
+            "challenge_ticket": user.challenge_ticket,
+            "reset_time": user.reset_time,
+            "last_set_time": user.last_set_time,
+            "mk_time": user.mk_time,
+            "mk_times": user.mk_times,
+            "jj_time": user.jj_time,
+            "jj_times": user.jj_times,
+            "tz_time": user.tz_time,
+            "tz_times": user.tz_times,
+        }
 
     def _user_to_payload(self, user: KunUser) -> dict[str, object]:
         return {

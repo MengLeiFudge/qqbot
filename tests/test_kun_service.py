@@ -112,6 +112,40 @@ def test_create_kun_user_uses_legacy_style_name_and_seed_fields(tmp_path: Path) 
     assert payload["tzq"] == 0
 
 
+def test_kun_admin_snapshot_and_update_selected_fields(tmp_path: Path) -> None:
+    service = KunService(tmp_path / "data" / "kun" / "users.json")
+    service.ensure_user(605738729)
+
+    initial = service.build_admin_user_snapshot(605738729)
+    updated = service.update_admin_user_fields(
+        605738729,
+        {"name": "管理鲲", "level": 3000, "money": 12345, "rename_card": 2},
+    )
+    payload = json.loads((tmp_path / "data" / "kun" / "users.json").read_text(encoding="utf-8"))["605738729"]
+
+    assert initial is not None
+    assert initial["editable_fields"] == [
+        "name",
+        "level",
+        "atk",
+        "defense",
+        "hp",
+        "money",
+        "rename_card",
+        "wash_card",
+        "check_card",
+        "challenge_ticket",
+    ]
+    assert updated["user"]["name"] == "管理鲲"
+    assert updated["user"]["level"] == 3000
+    assert updated["user"]["money"] == 12345
+    assert updated["user"]["rename_card"] == 2
+    assert payload["name"] == "管理鲲"
+    assert payload["level"] == 3000
+    assert payload["money"] == 12345
+    assert payload["gmk"] == 2
+
+
 def test_build_attribute_summary_matches_legacy_format(tmp_path: Path) -> None:
     service = KunService(tmp_path / "data" / "kun" / "users.json")
     user = service.ensure_user(10001)

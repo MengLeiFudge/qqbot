@@ -9,6 +9,7 @@ from qqbot.config import RuntimeSettings
 import qqbot.services.admin_service as admin_service_module
 from qqbot.services.admin_service import AdminService
 from qqbot.services.group_nick_store import GroupNickStore
+from qqbot.services.kun_service import KunService
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -122,6 +123,10 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
+    assert "群管配置" in body
+    assert "/admin/api/group-control" in body
+    assert "养鲲数据" in body
+    assert "/admin/api/kun/users" in body
 
 
 def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
@@ -154,6 +159,63 @@ def test_plugins_api_lists_and_updates_global_state(tmp_path: Path) -> None:
     assert arc_plugin["global_enabled"] is True
     assert update_status == 200
     assert json.loads(update_body)["plugin"]["global_enabled"] is False
+
+
+def test_group_control_api_lists_and_updates_config(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    list_status, list_body = asgi_request(
+        app,
+        "GET",
+        "/admin/api/group-control/516286670",
+    )
+    update_status, update_body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/group-control/516286670",
+        json_body={"probability_percent": 2.5, "min_seconds": 20, "max_seconds": 5},
+    )
+
+    assert list_status == 200
+    assert json.loads(list_body) == {
+        "group_id": 516286670,
+        "chance": 0.05,
+        "probability_percent": 5.0,
+        "min_seconds": 5,
+        "max_seconds": 20,
+    }
+    assert update_status == 200
+    assert json.loads(update_body) == {
+        "group_id": 516286670,
+        "chance": 0.025,
+        "probability_percent": 2.5,
+        "min_seconds": 5,
+        "max_seconds": 20,
+    }
+
+
+def test_kun_api_gets_and_updates_user(tmp_path: Path) -> None:
+    KunService(tmp_path / "run" / "data" / "kun" / "users.json").ensure_user(605738729)
+    app = build_app(tmp_path)
+
+    list_status, list_body = asgi_request(
+        app,
+        "GET",
+        "/admin/api/kun/users/605738729",
+    )
+    update_status, update_body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/kun/users/605738729",
+        json_body={"updates": {"level": 3210, "money": 4567}},
+    )
+
+    assert list_status == 200
+    assert json.loads(list_body)["user"]["qq"] == 605738729
+    assert update_status == 200
+    updated = json.loads(update_body)
+    assert updated["user"]["level"] == 3210
+    assert updated["user"]["money"] == 4567
 
 
 def test_ai_api_lists_and_updates_current_provider(tmp_path: Path) -> None:

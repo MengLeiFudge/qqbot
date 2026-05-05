@@ -6,6 +6,7 @@ from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
 import qqbot.services.admin_service as admin_service_module
 from qqbot.services.group_nick_store import GroupNickStore
+from qqbot.services.kun_service import KunService
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -73,6 +74,46 @@ def test_set_plugin_enabled_rejects_unknown_plugin(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         service.set_plugin_enabled("missing", False)
+
+
+def test_group_control_config_lists_and_updates_thunder_settings(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+
+    initial = service.get_group_control_config(516286670)
+    updated = service.set_group_control_config(
+        516286670,
+        probability_percent=2.5,
+        min_seconds=20,
+        max_seconds=5,
+    )
+
+    assert initial == {
+        "group_id": 516286670,
+        "chance": 0.05,
+        "probability_percent": 5.0,
+        "min_seconds": 5,
+        "max_seconds": 20,
+    }
+    assert updated == {
+        "group_id": 516286670,
+        "chance": 0.025,
+        "probability_percent": 2.5,
+        "min_seconds": 5,
+        "max_seconds": 20,
+    }
+
+
+def test_kun_admin_service_gets_and_updates_user(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    kun_service = KunService(tmp_path / "run" / "data" / "kun" / "users.json")
+    kun_service.ensure_user(605738729)
+
+    initial = service.get_kun_user(605738729)
+    updated = service.update_kun_user(605738729, {"level": 3210, "money": 4567})
+
+    assert initial["user"]["qq"] == 605738729
+    assert updated["user"]["level"] == 3210
+    assert updated["user"]["money"] == 4567
 
 
 def test_admin_list_and_update_use_bot_admin_json(tmp_path: Path) -> None:

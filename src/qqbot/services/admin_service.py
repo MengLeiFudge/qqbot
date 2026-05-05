@@ -9,8 +9,10 @@ from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
 from qqbot.services.group_nick_store import GroupNickStore
+from qqbot.services.kun_service import KunService
 from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_plugin_specs
 from qqbot.services.settings_store import SettingsStore
+from qqbot.services.thunder_service import clamp_thunder_percent, normalize_thunder_range
 
 STARTUP_LOG_FILES = {"launcher.log", "qqbot_stdout.log", "qqbot_stderr.log"}
 
@@ -79,6 +81,31 @@ class AdminService:
                 "admin_only": spec.admin_only,
             },
         }
+
+    def get_group_control_config(self, group_id: int) -> dict[str, object]:
+        chance, min_seconds, max_seconds = self.store.get_thunder_config(group_id)
+        return self._build_group_control_config(group_id, chance, min_seconds, max_seconds)
+
+    def set_group_control_config(
+        self,
+        group_id: int,
+        probability_percent: float,
+        min_seconds: int,
+        max_seconds: int,
+    ) -> dict[str, object]:
+        chance = clamp_thunder_percent(probability_percent)
+        min_seconds, max_seconds = normalize_thunder_range(min_seconds, max_seconds)
+        self.store.set_thunder_config(group_id, chance, min_seconds, max_seconds)
+        return self._build_group_control_config(group_id, chance, min_seconds, max_seconds)
+
+    def get_kun_user(self, qq: int) -> dict[str, object]:
+        payload = self._kun_service().build_admin_user_snapshot(qq)
+        if payload is None:
+            raise ValueError(f"Kun user not found: {qq}")
+        return payload
+
+    def update_kun_user(self, qq: int, updates: dict[str, object]) -> dict[str, object]:
+        return self._kun_service().update_admin_user_fields(qq, updates)
 
     def list_ai(self) -> dict[str, object]:
         profiles = load_ai_profiles(self.settings.ai_profile_file)
@@ -255,6 +282,9 @@ class AdminService:
     def _startup_logs_root(self) -> Path:
         return self.project_root / "logs" / "start_all"
 
+    def _kun_service(self) -> KunService:
+        return KunService(self.settings.data_root / "data" / "kun" / "users.json")
+
     @staticmethod
     def _is_safe_run_id(run_id: str) -> bool:
         return bool(run_id) and all(char.isdigit() or char == "-" for char in run_id)
@@ -262,6 +292,21 @@ class AdminService:
     @staticmethod
     def _format_group_display_name(group_id: int, group_name: str) -> str:
         return f"{group_name}（{group_id}）" if group_name else str(group_id)
+
+    @staticmethod
+    def _build_group_control_config(
+        group_id: int,
+        chance: float,
+        min_seconds: int,
+        max_seconds: int,
+    ) -> dict[str, object]:
+        return {
+            "group_id": group_id,
+            "chance": chance,
+            "probability_percent": chance * 100,
+            "min_seconds": min_seconds,
+            "max_seconds": max_seconds,
+        }
 
     def _build_admin_display_item(
         self,
