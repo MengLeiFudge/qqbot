@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
-from qqbot.services.ai_gateway import AiMessage
+from qqbot.services.ai_gateway import AiMessage, is_safety_rejection_text
 
 
 class AiConversationStore:
@@ -28,11 +28,16 @@ class AiConversationStore:
                 continue
             role = str(raw.get("role", ""))
             content = str(raw.get("content", ""))
+            if is_safety_rejection_text(content):
+                continue
             if role in {"user", "assistant"} and content:
                 messages.append(AiMessage(role=role, content=content))
         return tuple(messages[-self.max_messages :])
 
     def append_turn(self, key: str, user_text: str, assistant_text: str) -> tuple[AiMessage, ...]:
+        if is_safety_rejection_text(assistant_text):
+            return self.load_messages(key)
+
         messages = list(self.load_messages(key))
         messages.append(AiMessage(role="user", content=user_text))
         messages.append(AiMessage(role="assistant", content=assistant_text))

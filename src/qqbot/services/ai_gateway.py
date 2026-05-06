@@ -108,6 +108,8 @@ class AiGateway:
         cleaned = sanitize_ai_output_text(completion.text)
         if not cleaned:
             return AiResponse(AI_FALLBACK_EMPTY, fallback=True)
+        if is_safety_rejection_text(cleaned):
+            return AiResponse(AI_FALLBACK_SAFETY_REJECTED, fallback=True)
         return AiResponse(cleaned, metrics=completion.metrics)
 
     async def _complete(self, request: AiRequest) -> AiCompletion:
@@ -128,17 +130,31 @@ class AiGateway:
 
 
 def format_ai_exception_fallback(exc: Exception) -> str:
-    detail = str(exc).lower()
-    safety_markers = (
-        "high risk",
-        "rejected",
-        "safety",
-        "unsafe",
-        "policy",
-        "风险",
-        "拒绝",
-        "安全",
-    )
-    if any(marker in detail for marker in safety_markers):
+    if is_safety_rejection_text(str(exc)):
         return AI_FALLBACK_SAFETY_REJECTED
     return AI_FALLBACK_CLIENT_ERROR
+
+
+def is_safety_rejection_text(text: str) -> bool:
+    detail = text.lower()
+    rejection_markers = (
+        "the request was rejected",
+        "considered high risk",
+        "content policy",
+        "safety policy",
+        "unsafe content",
+        "请求被拒绝",
+        "内容被拒绝",
+        "安全策略",
+        "安全结界",
+        "不能继续说",
+    )
+    if any(marker in detail for marker in rejection_markers):
+        return True
+
+    paired_risk_markers = (
+        "high risk",
+        "rejected",
+        "拒绝",
+    )
+    return sum(1 for marker in paired_risk_markers if marker in detail) >= 2

@@ -47,6 +47,20 @@ def test_ai_group_context_store_skips_empty_text(tmp_path: Path) -> None:
     assert store.load_messages(516286670) == ()
 
 
+def test_ai_group_context_store_filters_high_risk_rejection_text(tmp_path: Path) -> None:
+    store = AiGroupContextStore(tmp_path)
+
+    store.append_message(
+        group_id=516286670,
+        user_id=10001,
+        sender_name="Bot",
+        text="The request was rejected because it was considered high risk",
+        timestamp=1,
+    )
+
+    assert store.load_messages(516286670) == ()
+
+
 def test_ai_group_context_store_loads_legacy_records_without_message_id(tmp_path: Path) -> None:
     path = tmp_path / "ai" / "group_context" / "516286670.json"
     path.parent.mkdir(parents=True)

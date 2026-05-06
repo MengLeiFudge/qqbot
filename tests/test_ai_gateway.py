@@ -68,6 +68,36 @@ class HighRiskRejectedAiClient:
         raise RuntimeError("The request was rejected because it was considered high risk")
 
 
+class HighRiskTextAiClient:
+    async def stream_complete(self, request: AiRequest) -> AiCompletion:
+        return AiCompletion(
+            text="The request was rejected because it was considered high risk",
+            metrics=AiMetrics(
+                first_token_seconds=0.1,
+                total_seconds=0.2,
+                completion_tokens=9,
+                output_chars=60,
+            ),
+        )
+
+    async def complete(self, request: AiRequest) -> str:
+        return "The request was rejected because it was considered high risk"
+
+
+class RiskExplanationAiClient:
+    async def stream_complete(self, request: AiRequest) -> AiCompletion:
+        text = "这个设定有风险，但可以通过限制权限来降低风险。"
+        return AiCompletion(
+            text=text,
+            metrics=AiMetrics(
+                first_token_seconds=0.1,
+                total_seconds=0.2,
+                completion_tokens=12,
+                output_chars=len(text),
+            ),
+        )
+
+
 class EmptyAiClient:
     async def stream_complete(self, request: AiRequest) -> AiCompletion:
         return AiCompletion(
@@ -185,6 +215,36 @@ def test_gateway_returns_cute_fallback_on_high_risk_rejection() -> None:
     assert "high risk" not in response.text
     assert "rejected" not in response.text
     assert response.metrics is None
+
+
+def test_gateway_returns_cute_fallback_when_high_risk_rejection_is_text() -> None:
+    gateway = AiGateway(client=HighRiskTextAiClient())
+
+    response = asyncio.run(
+        gateway.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="你好", user_id="10001")
+        )
+    )
+
+    assert response.fallback is True
+    assert response.text == "棉花糖被安全结界拦住啦，这个话题现在不能继续说喵。换个问法吧。"
+    assert "high risk" not in response.text
+    assert "rejected" not in response.text
+    assert response.metrics is None
+
+
+def test_gateway_keeps_normal_risk_explanations() -> None:
+    gateway = AiGateway(client=RiskExplanationAiClient())
+
+    response = asyncio.run(
+        gateway.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="有什么风险", user_id="10001")
+        )
+    )
+
+    assert response.fallback is False
+    assert response.text == "这个设定有风险，但可以通过限制权限来降低风险。"
+    assert response.metrics is not None
 
 
 def test_gateway_returns_clear_fallback_on_empty_content() -> None:

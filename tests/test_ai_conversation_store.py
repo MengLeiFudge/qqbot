@@ -35,3 +35,15 @@ def test_ai_conversation_store_builds_group_user_key(tmp_path: Path) -> None:
         store.group_user_key("10000", "605738729", "xiaomi")
         == "group_user:10000:605738729:xiaomi"
     )
+
+
+def test_ai_conversation_store_filters_high_risk_rejection_text(tmp_path: Path) -> None:
+    store = AiConversationStore(tmp_path, max_messages=4)
+    key = store.group_user_key("10000", "605738729", "xiaomi")
+    store.append_turn(
+        key,
+        "风险测试",
+        "The request was rejected because it was considered high risk",
+    )
+
+    assert store.load_messages(key) == ()

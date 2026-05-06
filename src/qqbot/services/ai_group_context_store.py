@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
+from qqbot.services.ai_gateway import is_safety_rejection_text
+
 
 @dataclass(frozen=True, slots=True)
 class AiGroupMessageRecord:
@@ -30,7 +32,7 @@ class AiGroupContextStore:
         message_id: int | str | None = None,
     ) -> None:
         normalized_text = text.strip()
-        if not normalized_text:
+        if not normalized_text or is_safety_rejection_text(normalized_text):
             return
 
         records = list(self.load_messages(group_id))
@@ -61,7 +63,7 @@ class AiGroupContextStore:
             if not isinstance(raw, dict):
                 continue
             text = str(raw.get("text", "")).strip()
-            if not text:
+            if not text or is_safety_rejection_text(text):
                 continue
             records.append(
                 AiGroupMessageRecord(
