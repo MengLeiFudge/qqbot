@@ -10,6 +10,7 @@ from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.group_cleanup_service import GroupCleanupService
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
+from qqbot.services.group_nick_store import get_group_nick_store
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -53,3 +54,20 @@ def test_group_cleanup_service_removes_group_scoped_runtime_state(tmp_path: Path
     assert GroupNickStore(data_root / "settings" / "group_nick.json").records == {}
     assert AiGroupContextStore(data_root).load_messages(10001) == ()
     assert GroupMessageLogStore(data_root).load_messages(10001) == ()
+
+
+def test_group_cleanup_service_clears_cached_group_nick_store(tmp_path: Path) -> None:
+    data_root = tmp_path / "run"
+    GroupNickStore(data_root / "settings" / "group_nick.json").record_group_sender(
+        group_id=10001,
+        qq=605738729,
+        card="旧群名片",
+        nickname="",
+        updated_at=1,
+    )
+    get_group_nick_store.cache_clear()
+
+    result = GroupCleanupService(data_root, author_qq=605738729).cleanup_group(10001)
+
+    assert "settings/group_nick.json" in result.removed_items
+    assert GroupNickStore(data_root / "settings" / "group_nick.json").records == {}
