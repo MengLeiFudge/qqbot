@@ -20,6 +20,14 @@ _group_message_interval_already_waited: ContextVar[bool] = ContextVar(
 
 
 def split_text_message(text: str, *, limit: int = MAX_TEXT_MESSAGE_CHARS) -> list[str]:
+    chunks = split_text_message_body(text, limit=limit)
+    total = len(chunks)
+    if total <= 1:
+        return chunks
+    return [f"（{index}/{total}）\n{chunk}" for index, chunk in enumerate(chunks, start=1)]
+
+
+def split_text_message_body(text: str, *, limit: int = MAX_TEXT_MESSAGE_CHARS) -> list[str]:
     text = str(text)
     if len(text) <= limit:
         return [text]
@@ -36,10 +44,7 @@ def split_text_message(text: str, *, limit: int = MAX_TEXT_MESSAGE_CHARS) -> lis
         chunks.append(remaining[:cut].rstrip())
         remaining = remaining[cut:].lstrip()
 
-    total = len(chunks)
-    if total <= 1:
-        return chunks
-    return [f"（{index}/{total}）\n{chunk}" for index, chunk in enumerate(chunks, start=1)]
+    return chunks
 
 
 async def send_split_text(
@@ -210,5 +215,5 @@ def _build_forward_nodes(bot: Any, message: str, *, title: str) -> list[dict[str
                 "content": chunk,
             },
         }
-        for chunk in split_text_message(message, limit=FORWARD_NODE_TEXT_CHARS)
+        for chunk in split_text_message_body(message, limit=FORWARD_NODE_TEXT_CHARS)
     ]

@@ -161,6 +161,27 @@ def test_call_collapsible_text_api_uses_group_forward_for_long_text() -> None:
     assert bot.interval_flags == [True]
 
 
+def test_call_collapsible_text_api_splits_forward_nodes_without_part_markers() -> None:
+    reset_group_message_interval_state()
+    bot = FakeBot()
+    message = "long text " * 260
+
+    asyncio.run(
+        call_collapsible_text_api(
+            bot,
+            "send_group_msg",
+            group_id=10001,
+            message=message,
+        )
+    )
+
+    nodes = bot.calls[0][1]["messages"]
+    assert len(nodes) > 1
+    assert all(len(node["data"]["content"]) <= 1200 for node in nodes)
+    assert not nodes[0]["data"]["content"].startswith("（1/")
+    assert not nodes[1]["data"]["content"].startswith("（2/")
+
+
 def test_call_collapsible_text_api_uses_group_forward_above_200_chars() -> None:
     reset_group_message_interval_state()
     bot = FakeBot()
