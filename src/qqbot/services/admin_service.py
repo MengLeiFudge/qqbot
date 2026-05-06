@@ -355,13 +355,6 @@ class AdminService:
 
     def _list_known_group_ids(self) -> list[int]:
         group_ids: set[int] = set()
-        nick_path = self.store.settings_root / "group_nick.json"
-        if nick_path.exists():
-            try:
-                nick_store = GroupNickStore(nick_path)
-                group_ids.update(int(group_id) for group_id in nick_store.records if group_id.isdigit())
-            except Exception:
-                pass
         group_ids.update(GroupMessageLogStore(self.settings.data_root).list_group_ids())
 
         root = self.store.func_state_root

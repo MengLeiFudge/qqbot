@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from functools import lru_cache
 import json
 from pathlib import Path
 
@@ -125,7 +124,6 @@ class GroupNickStore:
         self.file_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-@lru_cache(maxsize=1)
 def get_group_nick_store() -> GroupNickStore:
     settings = load_settings()
     return GroupNickStore(settings.data_root / "settings" / "group_nick.json")

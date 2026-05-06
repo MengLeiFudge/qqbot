@@ -5,7 +5,7 @@ from pathlib import Path
 
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
-from qqbot.services.group_nick_store import GroupNickStore, get_group_nick_store
+from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -29,7 +29,6 @@ class GroupCleanupService:
         nick_store = GroupNickStore(self.data_root / "settings" / "group_nick.json")
         if nick_store.remove_group(normalized_group_id):
             removed.append("settings/group_nick.json")
-            get_group_nick_store.cache_clear()
 
         if AiGroupContextStore(self.data_root).remove_group(normalized_group_id):
             removed.append(f"ai/group_context/{normalized_group_id}.json")

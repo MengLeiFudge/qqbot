@@ -49,6 +49,20 @@ def test_list_groups_includes_connected_group_names_without_feature_files(tmp_pa
     ]
 
 
+def test_list_groups_does_not_use_group_nick_cache_as_known_group_source(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    nick_store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
+    nick_store.record_group_sender(
+        group_id=10001,
+        qq=605738729,
+        card="旧群名片",
+        nickname="",
+        updated_at=1,
+    )
+
+    assert service.list_groups() == []
+
+
 def test_codex_group_bindings_list_defaults_and_runtime_overrides(tmp_path: Path) -> None:
     service = build_service(tmp_path)
     service.store.set_codex_group_binding(516286670, "qqbot")
