@@ -69,6 +69,43 @@ def test_finish_split_text_sends_prefix_chunks_before_finish() -> None:
     assert matcher.finished[0].startswith("（2/2）\n")
 
 
+def test_finish_split_text_uses_group_forward_when_text_exceeds_200_chars() -> None:
+    reset_group_message_interval_state()
+    bot = FakeBot()
+    matcher = FakeMatcher()
+    message = "x" * 201
+
+    asyncio.run(
+        finish_split_text(
+            matcher,
+            message,
+            group_id=10001,
+            bot=bot,
+            title="AI 回复",
+        )
+    )
+
+    assert matcher.sent == []
+    assert matcher.finished == [""]
+    assert len(bot.calls) == 1
+    api, data = bot.calls[0]
+    assert api == "send_group_forward_msg"
+    assert data["group_id"] == 10001
+    assert data["messages"][0]["data"]["name"] == "AI 回复"
+    assert data["messages"][0]["data"]["content"] == message
+
+
+def test_finish_split_text_keeps_200_chars_as_normal_message() -> None:
+    bot = FakeBot()
+    matcher = FakeMatcher()
+    message = "x" * 200
+
+    asyncio.run(finish_split_text(matcher, message, group_id=10001, bot=bot))
+
+    assert bot.calls == []
+    assert matcher.finished == [message]
+
+
 def test_call_split_text_api_sends_each_chunk() -> None:
     reset_group_message_interval_state()
     sleep_calls: list[float] = []
@@ -121,6 +158,40 @@ def test_call_collapsible_text_api_uses_group_forward_for_long_text() -> None:
     assert data["messages"][0]["data"]["name"] == "Codex 回报"
     assert "long text" in data["messages"][0]["data"]["content"]
     assert bot.interval_flags == [True]
+
+
+def test_call_collapsible_text_api_uses_group_forward_above_200_chars() -> None:
+    reset_group_message_interval_state()
+    bot = FakeBot()
+    message = "x" * 201
+
+    asyncio.run(
+        call_collapsible_text_api(
+            bot,
+            "send_group_msg",
+            group_id=10001,
+            message=message,
+        )
+    )
+
+    assert bot.calls[0][0] == "send_group_forward_msg"
+
+
+def test_call_collapsible_text_api_keeps_200_chars_as_normal_message() -> None:
+    reset_group_message_interval_state()
+    bot = FakeBot()
+    message = "x" * 200
+
+    asyncio.run(
+        call_collapsible_text_api(
+            bot,
+            "send_group_msg",
+            group_id=10001,
+            message=message,
+        )
+    )
+
+    assert bot.calls == [("send_group_msg", {"group_id": 10001, "message": message})]
 
 
 def test_call_collapsible_text_api_falls_back_to_split_when_forward_fails() -> None:

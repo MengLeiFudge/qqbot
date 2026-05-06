@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 
 MAX_TEXT_MESSAGE_CHARS = 1000
-COLLAPSIBLE_TEXT_THRESHOLD_CHARS = 1800
+COLLAPSIBLE_TEXT_THRESHOLD_CHARS = 200
 FORWARD_NODE_TEXT_CHARS = 1200
 MIN_GROUP_MESSAGE_INTERVAL_SECONDS = 0.5
 _PART_PREFIX_RESERVE = 24
@@ -62,10 +62,23 @@ async def finish_split_text(
     message: Any,
     *,
     group_id: int | str | None = None,
+    bot: Any | None = None,
+    title: str = "棉花糖整理的长消息",
 ) -> None:
     if not isinstance(message, str):
         await wait_for_group_message_interval(group_id)
         await matcher.finish(message)
+        return
+
+    if bot is not None and group_id is not None and len(message) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
+        await call_collapsible_text_api(
+            bot,
+            "send_group_msg",
+            group_id=group_id,
+            message=message,
+            title=title,
+        )
+        await matcher.finish("")
         return
 
     chunks = split_text_message(message)
@@ -108,7 +121,7 @@ async def call_collapsible_text_api(
     group_interval_sleep: Callable[[float], Any] | None = None,
     **data: object,
 ) -> None:
-    if api != "send_group_msg" or len(str(message)) < COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
+    if api != "send_group_msg" or len(str(message)) <= COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
         await call_split_text_api(
             bot,
             api,

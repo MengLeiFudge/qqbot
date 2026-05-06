@@ -120,6 +120,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             ai_chat_matcher,
             format_local_ai_result(local_result),
             group_id=group_id,
+            bot=bot,
+            title="棉花糖的本地处理结果",
         )
 
     context_parts.extend(part for part in local_result.extra_context if part.strip())
@@ -152,6 +154,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             show_metrics=settings.ai_show_metrics,
         ),
         group_id=group_id,
+        bot=bot,
+        title="棉花糖的 AI 回复",
     )
 
 
