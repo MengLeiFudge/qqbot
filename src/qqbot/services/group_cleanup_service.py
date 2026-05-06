@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.settings_store import SettingsStore
@@ -35,6 +36,9 @@ class GroupCleanupService:
 
         if GroupMessageLogStore(self.data_root).remove_group(normalized_group_id):
             removed.append(f"admin/group_messages/{normalized_group_id}.json")
+
+        if ChatMemoryStore(self.data_root).remove_group(normalized_group_id):
+            removed.append(f"ai/chat_memory.sqlite3:{normalized_group_id}")
 
         return GroupCleanupResult(
             group_id=normalized_group_id,

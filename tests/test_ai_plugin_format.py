@@ -16,6 +16,7 @@ from qqbot.plugins.ai_test import (
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import normalize_onebot_message
 from qqbot.services.settings_store import SettingsStore
@@ -193,6 +194,39 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "当前发言者：萌泪(605738729)" in joined
     assert "用户A(10001): 今天讨论了机器人接入 AI。" in joined
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
+
+
+def test_ai_context_includes_long_term_memory_search_results(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id=516286670,
+        message_id=10,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="之前讨论过 shapez 数据库要按聊天记录打标签。",
+        timestamp=1,
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(text="shapez 数据库怎么做"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "长期记忆检索结果" in joined
+    assert "可可(10001): 之前讨论过 shapez 数据库要按聊天记录打标签。" in joined
+
+
+def test_ai_context_omits_long_term_memory_when_no_result(tmp_path: Path) -> None:
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(text="今天吃什么"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    assert "长期记忆检索结果" not in "\n".join(context)
 
 
 def test_ai_context_includes_author_and_admin_identity_facts(tmp_path: Path) -> None:

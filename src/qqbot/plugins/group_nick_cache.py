@@ -5,6 +5,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent
 
 from qqbot.config import load_settings
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore, get_group_nick_store
 from qqbot.services.message_normalizer import normalize_onebot_event
@@ -63,6 +64,30 @@ def record_group_message_log(event: GroupMessageEvent, store: GroupMessageLogSto
     )
 
 
+def record_group_chat_memory(event: GroupMessageEvent, store: ChatMemoryStore) -> None:
+    normalized = normalize_onebot_event(event)
+    outline = normalized.outline.strip()
+    if not outline:
+        return
+
+    card = (event.sender.card or "").strip()
+    nickname = (event.sender.nickname or "").strip()
+    store.append_message(
+        group_id=event.group_id,
+        message_id=getattr(event, "message_id", ""),
+        direction="incoming",
+        user_id=event.get_user_id(),
+        sender_name=card or nickname or event.get_user_id(),
+        text=outline,
+        timestamp=event.time,
+        has_image=bool(normalized.image_urls),
+        has_at=bool(normalized.at_user_ids),
+        reply_message_id=normalized.reply.message_id if normalized.reply is not None else "",
+        reply_user_id=normalized.reply.user_id if normalized.reply is not None else "",
+        reply_outline=normalized.reply.message.outline if normalized.reply is not None else "",
+    )
+
+
 @group_nick_cache_matcher.handle()
 async def handle_group_nick_cache(event: GroupMessageEvent) -> None:
     if not isinstance(event, GroupMessageEvent):
@@ -77,3 +102,10 @@ async def handle_group_nick_cache(event: GroupMessageEvent) -> None:
         event,
         GroupMessageLogStore(settings.data_root),
     )
+    try:
+        record_group_chat_memory(
+            event,
+            ChatMemoryStore(settings.data_root),
+        )
+    except Exception:
+        pass

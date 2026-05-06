@@ -7,6 +7,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_cleanup_service import GroupCleanupService
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
@@ -43,6 +44,15 @@ def test_group_cleanup_service_removes_group_scoped_runtime_state(tmp_path: Path
         text="旧消息",
         timestamp=1,
     )
+    ChatMemoryStore(data_root).append_message(
+        group_id=10001,
+        message_id=3,
+        direction="incoming",
+        user_id=605738729,
+        sender_name="萌泪",
+        text="需要删除的长期记忆",
+        timestamp=1,
+    )
 
     result = GroupCleanupService(data_root, author_qq=605738729).cleanup_group(10001)
 
@@ -53,6 +63,8 @@ def test_group_cleanup_service_removes_group_scoped_runtime_state(tmp_path: Path
     assert GroupNickStore(data_root / "settings" / "group_nick.json").records == {}
     assert AiGroupContextStore(data_root).load_messages(10001) == ()
     assert GroupMessageLogStore(data_root).load_messages(10001) == ()
+    assert ChatMemoryStore(data_root).search_messages(10001, "长期记忆") == ()
+    assert "ai/chat_memory.sqlite3:10001" in result.removed_items
 
 
 def test_group_cleanup_service_removes_group_nick_store_records(tmp_path: Path) -> None:

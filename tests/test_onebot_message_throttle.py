@@ -9,6 +9,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import qqbot.services.onebot_message_throttle as throttle_module
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.onebot_message_throttle import (
     extract_group_message_group_id,
@@ -50,6 +51,29 @@ def test_record_bot_group_message_persists_successful_group_send(tmp_path: Path)
     assert records[0].text == "Bot 回复"
     assert records[0].timestamp == int(fixed_time)
     assert records[0].message_id == "7788"
+
+
+def test_record_bot_group_message_persists_chat_memory(tmp_path: Path) -> None:
+    log_store = GroupMessageLogStore(tmp_path / "run")
+    memory_store = ChatMemoryStore(tmp_path / "run")
+
+    record_bot_group_message(
+        store=log_store,
+        memory_store=memory_store,
+        group_id=10001,
+        self_id=30001,
+        message="Bot 回复 shapez 数据库",
+        timestamp=1_800_000_000.1,
+        result={"message_id": 7788},
+    )
+
+    records = memory_store.search_messages(10001, "shapez 数据库", limit=5)
+    assert len(records) == 1
+    assert records[0].direction == "bot"
+    assert records[0].user_id == "30001"
+    assert records[0].sender_name == "Bot"
+    assert records[0].message_id == "7788"
+    assert records[0].text == "Bot 回复 shapez 数据库"
 
 
 def test_installed_throttle_records_bot_message_only_after_send_success(

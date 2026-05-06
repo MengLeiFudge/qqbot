@@ -6,6 +6,7 @@ from typing import Any
 from nonebot.adapters.onebot.v11 import Bot as OneBotV11Bot
 
 from qqbot.config import load_settings
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.message_delivery import (
     has_waited_group_message_interval,
@@ -28,6 +29,10 @@ def get_group_message_log_store() -> GroupMessageLogStore:
     return GroupMessageLogStore(load_settings().data_root)
 
 
+def get_chat_memory_store() -> ChatMemoryStore:
+    return ChatMemoryStore(load_settings().data_root)
+
+
 def render_outgoing_group_message(message: object) -> str:
     try:
         normalized = normalize_onebot_message(message)
@@ -41,6 +46,7 @@ def render_outgoing_group_message(message: object) -> str:
 def record_bot_group_message(
     *,
     store: GroupMessageLogStore,
+    memory_store: ChatMemoryStore | None = None,
     group_id: object,
     self_id: object,
     message: object,
@@ -63,6 +69,16 @@ def record_bot_group_message(
         timestamp=timestamp,
         message_id=message_id,
     )
+    if memory_store is not None:
+        memory_store.append_message(
+            group_id=str(group_id),
+            direction="bot",
+            user_id=str(self_id),
+            sender_name="Bot",
+            text=text,
+            timestamp=timestamp,
+            message_id=message_id,
+        )
 
 
 def install_onebot_group_message_throttle() -> None:
@@ -82,6 +98,7 @@ def install_onebot_group_message_throttle() -> None:
             try:
                 record_bot_group_message(
                     store=get_group_message_log_store(),
+                    memory_store=get_chat_memory_store(),
                     group_id=group_id,
                     self_id=getattr(self, "self_id", ""),
                     message=data.get("message", ""),

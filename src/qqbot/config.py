@@ -30,6 +30,9 @@ DEFAULT_AI_DEFAULT_PROFILE = "default"
 DEFAULT_AI_MAX_CONTEXT_MESSAGES = 12
 DEFAULT_AI_BOT_NAME = "QQBot"
 DEFAULT_AI_GROUP_CONTEXT_MESSAGES = 30
+DEFAULT_AI_MEMORY_ENABLED = True
+DEFAULT_AI_MEMORY_SEARCH_LIMIT = 6
+DEFAULT_AI_MEMORY_CONTEXT_CHARS = 1200
 
 
 def _parse_csv(raw_value: str) -> set[str]:
@@ -73,6 +76,9 @@ class RuntimeSettings:
     ai_show_metrics: bool = False
     ai_bot_name: str = DEFAULT_AI_BOT_NAME
     ai_group_context_messages: int = DEFAULT_AI_GROUP_CONTEXT_MESSAGES
+    ai_memory_enabled: bool = DEFAULT_AI_MEMORY_ENABLED
+    ai_memory_search_limit: int = DEFAULT_AI_MEMORY_SEARCH_LIMIT
+    ai_memory_context_chars: int = DEFAULT_AI_MEMORY_CONTEXT_CHARS
 
     @classmethod
     def from_mapping(cls, mapping: dict[str, str]) -> "RuntimeSettings":
@@ -137,6 +143,25 @@ class RuntimeSettings:
                 mapping.get(
                     "QQBOT_AI_GROUP_CONTEXT_MESSAGES",
                     str(DEFAULT_AI_GROUP_CONTEXT_MESSAGES),
+                )
+            ),
+            ai_memory_enabled=_parse_bool(
+                mapping.get(
+                    "QQBOT_AI_MEMORY_ENABLED",
+                    "true" if DEFAULT_AI_MEMORY_ENABLED else "false",
+                ),
+                default=DEFAULT_AI_MEMORY_ENABLED,
+            ),
+            ai_memory_search_limit=int(
+                mapping.get(
+                    "QQBOT_AI_MEMORY_SEARCH_LIMIT",
+                    str(DEFAULT_AI_MEMORY_SEARCH_LIMIT),
+                )
+            ),
+            ai_memory_context_chars=int(
+                mapping.get(
+                    "QQBOT_AI_MEMORY_CONTEXT_CHARS",
+                    str(DEFAULT_AI_MEMORY_CONTEXT_CHARS),
                 )
             ),
         )
@@ -229,6 +254,9 @@ def _load_config_mapping(config_file: Path) -> dict[str, str]:
             "profile_file": "QQBOT_AI_PROFILE_FILE",
             "max_context_messages": "QQBOT_AI_MAX_CONTEXT_MESSAGES",
             "group_context_messages": "QQBOT_AI_GROUP_CONTEXT_MESSAGES",
+            "memory_enabled": "QQBOT_AI_MEMORY_ENABLED",
+            "memory_search_limit": "QQBOT_AI_MEMORY_SEARCH_LIMIT",
+            "memory_context_chars": "QQBOT_AI_MEMORY_CONTEXT_CHARS",
             "show_metrics": "QQBOT_AI_SHOW_METRICS",
             "bot_name": "QQBOT_AI_BOT_NAME",
             "timeout_seconds": "QQBOT_AI_TIMEOUT_SECONDS",

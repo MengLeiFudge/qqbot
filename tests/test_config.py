@@ -34,6 +34,9 @@ def test_runtime_settings_defaults() -> None:
     assert settings.ai_show_metrics is False
     assert settings.ai_bot_name == "QQBot"
     assert settings.ai_group_context_messages == 30
+    assert settings.ai_memory_enabled is True
+    assert settings.ai_memory_search_limit == 6
+    assert settings.ai_memory_context_chars == 1200
 
 
 def test_runtime_settings_parses_superusers_and_token() -> None:
@@ -58,6 +61,9 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
             "QQBOT_AI_SHOW_METRICS": "true",
             "QQBOT_AI_BOT_NAME": "测试棉花糖",
             "QQBOT_AI_GROUP_CONTEXT_MESSAGES": "16",
+            "QQBOT_AI_MEMORY_ENABLED": "false",
+            "QQBOT_AI_MEMORY_SEARCH_LIMIT": "4",
+            "QQBOT_AI_MEMORY_CONTEXT_CHARS": "800",
         }
     )
 
@@ -81,6 +87,9 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
     assert settings.ai_show_metrics is True
     assert settings.ai_bot_name == "测试棉花糖"
     assert settings.ai_group_context_messages == 16
+    assert settings.ai_memory_enabled is False
+    assert settings.ai_memory_search_limit == 4
+    assert settings.ai_memory_context_chars == 800
 
 
 def test_load_settings_reads_main_config_and_env_overrides(

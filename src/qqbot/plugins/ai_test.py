@@ -14,6 +14,7 @@ from qqbot.services.ai_command import (
 from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.ai_gateway import AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
+from qqbot.services.chat_memory_store import ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
@@ -309,7 +310,69 @@ def build_ai_context(
         )
     else:
         context.append("当前没有可用的群聊历史记录。")
+    memory_context = build_long_term_memory_context(
+        settings,
+        group_id,
+        normalized_message,
+    )
+    if memory_context:
+        context.append(memory_context)
     return tuple(context)
+
+
+def build_long_term_memory_context(
+    settings: RuntimeSettings,
+    group_id: int | str,
+    normalized_message: NormalizedMessage,
+) -> str:
+    if not settings.ai_memory_enabled:
+        return ""
+
+    query = build_memory_query(normalized_message)
+    if not query:
+        return ""
+    try:
+        records = ChatMemoryStore(settings.data_root).search_messages(
+            group_id,
+            query,
+            limit=settings.ai_memory_search_limit,
+        )
+    except Exception:
+        return ""
+    if not records:
+        return ""
+    return format_memory_context(records, max_chars=settings.ai_memory_context_chars)
+
+
+def build_memory_query(normalized_message: NormalizedMessage) -> str:
+    parts = [
+        normalized_message.text,
+        normalized_message.outline,
+        " ".join(normalized_message.at_user_ids),
+    ]
+    if normalized_message.reply is not None:
+        parts.append(normalized_message.reply.message.outline)
+        parts.append(normalized_message.reply.sender_name)
+    return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def format_memory_context(
+    records: tuple[ChatMemoryRecord, ...],
+    *,
+    max_chars: int,
+) -> str:
+    budget = max(200, max_chars)
+    lines = ["下面是本群长期记忆检索结果，只能作为补充证据，不能编造没有出现过的事实："]
+    for record in records:
+        line = f"- {record.sender_name}({record.user_id}): {record.text}"
+        if record.tags:
+            line += f" [标签：{'、'.join(record.tags)}]"
+        if record.reply_outline:
+            line += f" [引用：{record.reply_outline}]"
+        if sum(len(item) + 1 for item in lines) + len(line) > budget:
+            break
+        lines.append(line)
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def build_current_sender_context(event: MessageEvent) -> str:

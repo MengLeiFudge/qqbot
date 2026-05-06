@@ -11,11 +11,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.plugins.group_nick_cache import (
+    record_group_chat_memory,
     record_group_message_context,
     record_group_message_log,
     record_group_nick_event,
 )
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 
@@ -156,3 +158,31 @@ def test_record_group_message_log_persists_incoming_message_for_admin_view(tmp_p
     assert records[0].direction == "incoming"
     assert records[0].sender_name == "MLJ"
     assert records[0].text == "实时消息"
+
+
+def test_record_group_chat_memory_persists_normalized_incoming_message(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    event = FakeGroupMessageEvent(
+        group_id=516286670,
+        sender=FakeSender(card="可可", nickname=""),
+        time=1_800_000_000,
+        user_id=10001,
+        text="",
+        segments=[
+            FakeSegment("at", {"qq": "605738729"}),
+            FakeSegment("text", {"text": " 讨论 shapez 数据库"}),
+            FakeSegment("image", {"url": "https://example.invalid/a.png"}),
+        ],
+    )
+
+    record_group_chat_memory(event, store)
+
+    records = store.search_messages(516286670, "shapez 数据库", limit=5)
+    assert len(records) == 1
+    assert records[0].direction == "incoming"
+    assert records[0].user_id == "10001"
+    assert records[0].sender_name == "可可"
+    assert records[0].message_id == "233"
+    assert records[0].text == "[@605738729] 讨论 shapez 数据库 [图片]"
+    assert records[0].has_at is True
+    assert records[0].has_image is True
