@@ -20,7 +20,7 @@ from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_n
 from qqbot.services.admin_service import AdminService
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.group_nick_store import GroupNickStore
-from qqbot.services.message_delivery import finish_split_text
+from qqbot.services.message_delivery import COLLAPSIBLE_TEXT_THRESHOLD_CHARS, finish_split_text
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_event
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
@@ -115,10 +115,32 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         normalized_message,
     )
     group_id = getattr(event, "group_id", None)
+    message_id = getattr(event, "message_id", None)
+    user_id = event.get_user_id()
     if local_result.handled:
+        local_message = format_local_ai_result(local_result)
+        if (
+            isinstance(local_message, str)
+            and group_id is not None
+            and len(local_message) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS
+        ):
+            await ai_chat_matcher.send(
+                build_ai_reply_notice_message(
+                    group_id=group_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                )
+            )
+        elif isinstance(local_message, str):
+            local_message = build_ai_reply_message(
+                local_message,
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+            )
         await finish_split_text(
             ai_chat_matcher,
-            format_local_ai_result(local_result),
+            local_message,
             group_id=group_id,
             bot=bot,
             title="棉花糖的本地处理结果",
@@ -146,13 +168,31 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     if not response.fallback:
         conversation_store.append_turn(key, prompt, response.text)
 
+    response_text = format_ai_response(
+        profile,
+        response,
+        show_metrics=settings.ai_show_metrics,
+    )
+    if group_id is not None and len(response_text) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
+        await ai_chat_matcher.send(
+            build_ai_reply_notice_message(
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+            )
+        )
+        response_message = response_text
+    else:
+        response_message = build_ai_reply_message(
+            response_text,
+            group_id=group_id,
+            message_id=message_id,
+            user_id=user_id,
+        )
+
     await finish_split_text(
         ai_chat_matcher,
-        format_ai_response(
-            profile,
-            response,
-            show_metrics=settings.ai_show_metrics,
-        ),
+        response_message,
         group_id=group_id,
         bot=bot,
         title="棉花糖的 AI 回复",
@@ -168,6 +208,38 @@ def format_local_ai_result(result) -> str | Message:
             ]
         )
     return result.text
+
+
+def build_ai_reply_message(
+    text: str,
+    *,
+    group_id: int | str | None,
+    message_id: int | str | None,
+    user_id: int | str,
+) -> str | Message:
+    if group_id is None or not str(user_id).isdigit():
+        return text
+
+    message = Message()
+    if message_id not in {None, ""} and str(message_id).isdigit():
+        message += MessageSegment.reply(int(message_id))
+    message += MessageSegment.at(int(user_id))
+    message += MessageSegment.text(f" {text}")
+    return message
+
+
+def build_ai_reply_notice_message(
+    *,
+    group_id: int | str | None,
+    message_id: int | str | None,
+    user_id: int | str,
+) -> str | Message:
+    return build_ai_reply_message(
+        "棉花糖写得有点长，正文放在折叠消息里啦。",
+        group_id=group_id,
+        message_id=message_id,
+        user_id=user_id,
+    )
 
 
 def build_ai_system_context(settings: RuntimeSettings) -> str:

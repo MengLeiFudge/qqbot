@@ -10,6 +10,8 @@ from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
     build_ai_context,
     build_ai_system_context,
+    build_ai_reply_message,
+    build_ai_reply_notice_message,
     format_ai_response,
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
@@ -124,6 +126,37 @@ def test_format_ai_response_can_show_metrics_for_debug() -> None:
     assert formatted.startswith("[xiaomi] TTFT 1.64s / total 2.01s")
     assert formatted.endswith("我是萌萌棉花糖♪。")
     assert "\n\n" not in formatted
+
+
+def test_build_ai_reply_message_quotes_and_mentions_group_sender() -> None:
+    message = build_ai_reply_message(
+        "你好呀",
+        group_id=516286670,
+        message_id=12345,
+        user_id="605738729",
+    )
+
+    assert str(message).startswith("[CQ:reply,id=12345][CQ:at,qq=605738729] ")
+    assert str(message).endswith("你好呀")
+
+
+def test_build_ai_reply_message_keeps_private_response_plain() -> None:
+    assert build_ai_reply_message(
+        "你好呀",
+        group_id=None,
+        message_id=12345,
+        user_id="605738729",
+    ) == "你好呀"
+
+
+def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> None:
+    message = build_ai_reply_notice_message(
+        group_id=516286670,
+        message_id=12345,
+        user_id="605738729",
+    )
+
+    assert str(message) == "[CQ:reply,id=12345][CQ:at,qq=605738729] 棉花糖写得有点长，正文放在折叠消息里啦。"
 
 
 def test_ai_system_context_declares_bot_identity() -> None:
