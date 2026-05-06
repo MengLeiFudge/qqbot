@@ -12,7 +12,12 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
-from qqbot.services.codex_task_service import CodexProgressEvent, CodexProjectBinding, get_codex_project_by_id
+from qqbot.services.codex_task_service import (
+    CodexProgressEvent,
+    CodexProjectBinding,
+    CodexTaskStore,
+    get_codex_project_by_id,
+)
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.settings_store import SettingsStore
@@ -743,9 +748,7 @@ def test_orchestrator_creates_codex_draft_for_bound_dsp_group(tmp_path: Path) ->
                 ),
             ),
         )
-        assert result.handled is True
-        assert "已创建 Codex 草稿 CODEX-0001" in result.text
-        assert "MLJ_DSPmods" in result.text
+        assert result.handled is False
         assert tasks == []
 
     asyncio.run(run())
@@ -787,8 +790,7 @@ def test_orchestrator_routes_factorio_quality_ship_request_to_factorio_repo(tmp_
                 outline="异星模组品质飞船的计算公式改成新的倍率",
             ),
         )
-        assert result.handled is True
-        assert "已创建 Codex 草稿 CODEX-0001" in result.text
+        assert result.handled is False
 
     asyncio.run(run())
 
@@ -822,15 +824,17 @@ def test_orchestrator_executes_existing_codex_draft_when_confirmed(tmp_path: Pat
             group_id="319567534",
             is_admin=True,
         )
-        first = await orchestrator.handle(
-            "异星模组品质飞船的计算公式改成新的倍率",
-            context,
-            NormalizedMessage(
-                text="异星模组品质飞船的计算公式改成新的倍率",
-                outline="异星模组品质飞船的计算公式改成新的倍率",
-            ),
+        project = get_codex_project_by_id("factorio_mods")
+        assert project is not None
+        task = CodexTaskStore(tmp_path).create_draft(
+            project=project,
+            actor_user_id="605738729",
+            group_id="319567534",
+            message="异星模组品质飞船的计算公式改成新的倍率",
+            evidence="",
         )
-        assert "CODEX-0001" in first.text
+        assert task.task_id == "CODEX-0001"
+
         result = await orchestrator.handle(
             "执行 CODEX-0001",
             context,
@@ -850,17 +854,39 @@ def test_orchestrator_executes_existing_codex_draft_when_confirmed(tmp_path: Pat
     assert "Codex 修复任务成功" in bot.calls[1][1]["message"]
 
 
-def test_orchestrator_appends_followup_to_recent_codex_draft(tmp_path: Path) -> None:
+def test_orchestrator_enters_codex_session_only_with_explicit_codex_prefix(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
     context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
 
-    first = asyncio.run(
+    result = asyncio.run(
         orchestrator.handle(
-            "改一下分馏，先讨论计算公式",
+            "codex 异星模组品质飞船的计算公式改成新的倍率",
             context,
-            NormalizedMessage(text="改一下分馏，先讨论计算公式", outline="改一下分馏，先讨论计算公式"),
+            NormalizedMessage(
+                text="codex 异星模组品质飞船的计算公式改成新的倍率",
+                outline="codex 异星模组品质飞船的计算公式改成新的倍率",
+            ),
         )
     )
+
+    assert result.handled is True
+    assert "已进入 Codex 模式 CODEX-S0001" in result.text
+    assert "MLJ_Factorio_Mods" in result.text
+
+
+def test_orchestrator_appends_followup_to_recent_codex_draft(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+    context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
+    project = get_codex_project_by_id("mlj_dspmods")
+    assert project is not None
+    task = CodexTaskStore(tmp_path).create_draft(
+        project=project,
+        actor_user_id="605738729",
+        group_id="319567534",
+        message="改一下分馏，先讨论计算公式",
+        evidence="",
+    )
+
     second = asyncio.run(
         orchestrator.handle(
             "补充一下，公式具体改成 A/B",
@@ -869,11 +895,30 @@ def test_orchestrator_appends_followup_to_recent_codex_draft(tmp_path: Path) -> 
         )
     )
 
-    assert "CODEX-0001" in first.text
+    assert task.task_id == "CODEX-0001"
     assert "已补充 Codex 草稿 CODEX-0001" in second.text
 
 
-def test_orchestrator_treats_revision_version_request_as_codex_draft(tmp_path: Path) -> None:
+def test_orchestrator_enters_codex_session_for_revision_version_request(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "codex 分馏现在一直是2.3.0版本，你看看能不能加一个修订版本号，跟R2兼容不",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(
+                text="codex 分馏现在一直是2.3.0版本，你看看能不能加一个修订版本号，跟R2兼容不",
+                outline="codex 分馏现在一直是2.3.0版本，你看看能不能加一个修订版本号，跟R2兼容不",
+            ),
+        )
+    )
+
+    assert result.handled is True
+    assert "已进入 Codex 模式 CODEX-S0001" in result.text
+    assert "MLJ_DSPmods" in result.text
+
+
+def test_orchestrator_does_not_treat_revision_version_request_as_codex_without_prefix(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -887,12 +932,7 @@ def test_orchestrator_treats_revision_version_request_as_codex_draft(tmp_path: P
         )
     )
 
-    assert result.handled is True
-    assert "已创建 Codex 草稿 CODEX-0001" in result.text
-    assert "MLJ_DSPmods" in result.text
-    assert "当前不会执行" in result.text
-    assert "先确认" in result.text
-    assert "继续补充需求" in result.text
+    assert result.handled is False
 
 
 def test_orchestrator_learns_codex_project_alias_for_admin(tmp_path: Path) -> None:

@@ -673,6 +673,9 @@ class AiOrchestrator:
         if followup_result.handled:
             return followup_result
 
+        if not looks_like_codex_enter_request(text):
+            return AiOrchestratorResult(False)
+
         project_match = resolve_codex_project_for_text(
             f"{text}\n{evidence}",
             group_id=context.group_id,
