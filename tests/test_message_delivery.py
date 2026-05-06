@@ -20,8 +20,9 @@ class FakeMatcher:
     async def send(self, message: str) -> None:
         self.sent.append(message)
 
-    async def finish(self, message: str) -> None:
-        self.finished.append(message)
+    async def finish(self, message: str | None = None) -> None:
+        if message is not None:
+            self.finished.append(message)
 
 
 class FakeBot:
@@ -86,7 +87,7 @@ def test_finish_split_text_uses_group_forward_when_text_exceeds_200_chars() -> N
     )
 
     assert matcher.sent == []
-    assert matcher.finished == [""]
+    assert matcher.finished == []
     assert len(bot.calls) == 1
     api, data = bot.calls[0]
     assert api == "send_group_forward_msg"

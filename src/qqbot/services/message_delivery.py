@@ -78,7 +78,7 @@ async def finish_split_text(
             message=message,
             title=title,
         )
-        await matcher.finish("")
+        await matcher.finish()
         return
 
     chunks = split_text_message(message)
