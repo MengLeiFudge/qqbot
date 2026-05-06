@@ -1,6 +1,7 @@
 import asyncio
 
 from qqbot.services.message_delivery import (
+    FORWARD_NODE_TEXT_CHARS,
     MAX_TEXT_MESSAGE_CHARS,
     call_collapsible_text_api,
     call_split_text_api,
@@ -139,7 +140,7 @@ def test_call_split_text_api_sends_each_chunk() -> None:
 def test_call_collapsible_text_api_uses_group_forward_for_long_text() -> None:
     reset_group_message_interval_state()
     bot = FakeBot()
-    message = "long text " * 260
+    message = "long text " * 500
 
     asyncio.run(
         call_collapsible_text_api(
@@ -164,7 +165,7 @@ def test_call_collapsible_text_api_uses_group_forward_for_long_text() -> None:
 def test_call_collapsible_text_api_splits_forward_nodes_without_part_markers() -> None:
     reset_group_message_interval_state()
     bot = FakeBot()
-    message = "long text " * 260
+    message = "long text " * 500
 
     asyncio.run(
         call_collapsible_text_api(
@@ -177,7 +178,7 @@ def test_call_collapsible_text_api_splits_forward_nodes_without_part_markers() -
 
     nodes = bot.calls[0][1]["messages"]
     assert len(nodes) > 1
-    assert all(len(node["data"]["content"]) <= 1200 for node in nodes)
+    assert all(len(node["data"]["content"]) <= FORWARD_NODE_TEXT_CHARS for node in nodes)
     assert not nodes[0]["data"]["content"].startswith("（1/")
     assert not nodes[1]["data"]["content"].startswith("（2/")
 

@@ -8,7 +8,9 @@ from typing import Any, Callable
 
 MAX_TEXT_MESSAGE_CHARS = 1000
 COLLAPSIBLE_TEXT_THRESHOLD_CHARS = 200
-FORWARD_NODE_TEXT_CHARS = 1200
+# NapCat/QQ forward node text was tested to display up to 4500 chars;
+# keep 4000 as a conservative per-node payload limit.
+FORWARD_NODE_TEXT_CHARS = 4000
 MIN_GROUP_MESSAGE_INTERVAL_SECONDS = 0.5
 _PART_PREFIX_RESERVE = 24
 _group_locks: dict[str, asyncio.Lock] = {}
