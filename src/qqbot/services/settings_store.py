@@ -95,6 +95,26 @@ class SettingsStore:
             bindings.pop(key, None)
         self._write_json(self.settings_root / "codex_group_bindings.json", bindings)
 
+    def remove_group_scoped_settings(self, group_id: int | str) -> list[str]:
+        group_key = str(group_id).strip()
+        removed: list[str] = []
+        if not group_key.isdigit():
+            return removed
+
+        func_state_path = self.func_state_root / f"{group_key}.json"
+        if func_state_path.exists():
+            func_state_path.unlink()
+            removed.append(str(func_state_path))
+
+        for file_name in ("lolicon.json", "codex_group_bindings.json"):
+            path = self.settings_root / file_name
+            payload = self._read_json(path, {})
+            if group_key in payload:
+                payload.pop(group_key, None)
+                self._write_json(path, payload)
+                removed.append(f"{path}:{group_key}")
+        return removed
+
     def get_reread_chance(self, group_id: int) -> float:
         chances = self._read_json(self.settings_root / "reread.json", {})
         return float(self._global_or_legacy_group_value(chances, 0.05))

@@ -111,3 +111,19 @@ def test_group_message_log_store_skips_blank_text_and_bad_direction(tmp_path: Pa
     )
 
     assert store.load_messages(10001) == ()
+
+
+def test_group_message_log_store_removes_group_file(tmp_path: Path) -> None:
+    store = GroupMessageLogStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        direction="incoming",
+        user_id=20001,
+        sender_name="甲",
+        text="你好",
+        timestamp=1,
+    )
+
+    assert store.remove_group(10001) is True
+    assert store.load_messages(10001) == ()
+    assert store.remove_group(10001) is False

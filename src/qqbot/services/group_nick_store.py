@@ -86,6 +86,12 @@ class GroupNickStore:
                 return latest_name
         return str(qq)
 
+    def remove_group(self, group_id: int | str) -> bool:
+        removed = self.records.pop(str(group_id), None) is not None
+        if removed:
+            self._save()
+        return removed
+
     def _pick_best_name(self, record: GroupNickRecord | None) -> str:
         if record is None:
             return ""

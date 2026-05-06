@@ -50,3 +50,19 @@ def test_resolve_display_name_falls_back_to_qq_number(tmp_path: Path) -> None:
     store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
 
     assert store.resolve_display_name(10001, 605738729) == "605738729"
+
+
+def test_group_nick_store_removes_group_records(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "settings" / "group_nick.json"
+    store = GroupNickStore(path)
+    store.record_group_sender(
+        group_id=10001,
+        qq=605738729,
+        card="旧群名片",
+        nickname="",
+        updated_at=1,
+    )
+
+    assert store.remove_group(10001) is True
+    assert GroupNickStore(path).records == {}
+    assert store.remove_group(10001) is False

@@ -132,6 +132,13 @@ class GroupMessageLogStore:
                 group_ids.append(int(path.stem))
         return sorted(group_ids)
 
+    def remove_group(self, group_id: int | str) -> bool:
+        path = self._path_for_group(group_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
     def _write_messages(
         self,
         group_id: int | str,

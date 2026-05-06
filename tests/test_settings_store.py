@@ -93,3 +93,19 @@ def test_ai_provider_defaults_and_can_be_saved(tmp_path: Path) -> None:
     store.set_ai_provider("hicode")
 
     assert store.get_ai_provider("xiaomi") == "hicode"
+
+
+def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: Path) -> None:
+    store = SettingsStore(tmp_path, author_qq=605738729)
+    func_state = tmp_path / "settings" / "func_state" / "10001.json"
+    func_state.parent.mkdir(parents=True)
+    func_state.write_text('{"Arc": true}', encoding="utf-8")
+    store.set_lolicon_config(10001, True, False)
+    store.set_codex_group_binding(10001, "qqbot")
+
+    removed = store.remove_group_scoped_settings(10001)
+
+    assert str(func_state) in removed
+    assert not func_state.exists()
+    assert store.get_lolicon_config(10001) == (False, False)
+    assert store.list_codex_group_bindings() == {}

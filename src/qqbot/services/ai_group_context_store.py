@@ -76,6 +76,13 @@ class AiGroupContextStore:
         effective_limit = self.max_messages if limit is None else max(0, limit)
         return tuple(records[-effective_limit:])
 
+    def remove_group(self, group_id: int | str) -> bool:
+        path = self._path_for_group(group_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
     def _write_messages(
         self,
         group_id: int | str,

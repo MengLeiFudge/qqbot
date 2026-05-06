@@ -69,3 +69,18 @@ def test_ai_group_context_store_loads_legacy_records_without_message_id(tmp_path
 
     assert len(records) == 1
     assert records[0].message_id == ""
+
+
+def test_ai_group_context_store_removes_group_file(tmp_path: Path) -> None:
+    store = AiGroupContextStore(tmp_path)
+    store.append_message(
+        group_id=516286670,
+        user_id=10001,
+        sender_name="萌泪",
+        text="旧消息",
+        timestamp=1,
+    )
+
+    assert store.remove_group(516286670) is True
+    assert store.load_messages(516286670) == ()
+    assert store.remove_group(516286670) is False
