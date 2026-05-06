@@ -154,7 +154,7 @@ class AiActionExecutor:
             return AiActionResult(False, "只有 Bot 管理员才能启动 Codex 修复任务。", request.action_type)
         project = get_codex_project_by_id(request.codex_project_id)
         if project is None:
-            project = get_codex_project_for_group(request.target_group_id)
+            project = get_codex_project_for_group(request.target_group_id, data_root=self.data_root)
         if project is None or project.project_id != request.codex_project_id:
             return AiActionResult(False, "没有找到可修复的代码仓库。", request.action_type)
         if not request.codex_prompt.strip() and not request.codex_evidence.strip():

@@ -26,6 +26,10 @@ class AiProviderUpdateRequest(BaseModel):
     profile: str
 
 
+class CodexGroupBindingUpdateRequest(BaseModel):
+    project_id: str = ""
+
+
 class GroupControlUpdateRequest(BaseModel):
     reread_probability_percent: float
     thunder_probability_percent: float
@@ -178,6 +182,31 @@ def register_admin_routes(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/admin/api/codex/group-bindings")
+    async def admin_codex_group_bindings(
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.list_codex_group_bindings(await resolve_group_names())
+
+    @app.put("/admin/api/codex/group-bindings/{group_id}")
+    async def admin_update_codex_group_binding(
+        group_id: int,
+        payload: CodexGroupBindingUpdateRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.set_codex_group_binding(
+                group_id,
+                payload.project_id,
+                await resolve_group_names(),
+            )
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 404 if "Unknown Codex project" in detail else 400
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
     @app.get("/admin/api/admins")
     async def admin_list_admins(
         _: None = Depends(require_local_request),
@@ -311,6 +340,20 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     .form-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 12px; }}
     .field {{ display: flex; flex-direction: column; gap: 5px; }}
     .field label {{ color: #475569; font-size: 13px; }}
+    .binding-list {{ display: grid; gap: 10px; margin-top: 12px; }}
+    .binding-row {{
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) minmax(180px, 260px) auto;
+      gap: 10px;
+      align-items: center;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px;
+    }}
+    .binding-row select {{ width: 100%; }}
+    .binding-title {{ font-weight: 700; }}
+    .binding-meta {{ color: #64748b; font-size: 12px; margin-top: 4px; }}
     .message-groups {{ display: grid; gap: 14px; margin-top: 12px; }}
     .message-group {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }}
     .message-list {{ display: flex; flex-direction: column; gap: 8px; margin-top: 10px; max-height: 360px; overflow: auto; }}
@@ -336,6 +379,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       .sidebar {{ display: flex; gap: 8px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #cbd5e1; }}
       .tab-button {{ width: auto; min-width: 112px; margin-bottom: 0; text-align: center; }}
       .content {{ padding: 16px; }}
+      .binding-row {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -442,6 +486,14 @@ def build_admin_html(settings: RuntimeSettings) -> str:
             <button onclick="saveAiProvider()">保存</button>
             <span id="aiProviderStatus" class="muted"></span>
           </div>
+        </div>
+        <div class="panel-block">
+          <h3>Codex 群绑定项目</h3>
+          <div class="row">
+            <button onclick="loadCodexGroupBindings()">刷新</button>
+            <span id="codexBindingStatus" class="muted"></span>
+          </div>
+          <div id="codexBindingList" class="binding-list"></div>
         </div>
         <div class="panel-block">
           <h3>Bot 管理员</h3>
@@ -649,6 +701,70 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}`;
     }}
 
+    let codexBindingPayload = {{ groups: [], projects: [] }};
+
+    async function loadCodexGroupBindings() {{
+      const status = document.getElementById("codexBindingStatus");
+      status.textContent = "正在读取...";
+      codexBindingPayload = await api("/admin/api/codex/group-bindings");
+      renderCodexGroupBindings();
+      status.textContent = `已读取：${{codexBindingPayload.groups.length}} 个群，${{codexBindingPayload.projects.length}} 个项目`;
+    }}
+
+    function renderCodexGroupBindings() {{
+      const list = document.getElementById("codexBindingList");
+      if (!codexBindingPayload.groups.length) {{
+        list.innerHTML = `<div class="muted">暂无已知群。</div>`;
+        return;
+      }}
+      list.innerHTML = codexBindingPayload.groups.map(group => renderCodexBindingRow(group)).join("");
+    }}
+
+    function renderCodexBindingRow(group) {{
+      const current = group.project_id || group.effective_project_id || "";
+      const options = [
+        renderCodexProjectOption("", "未绑定", current),
+        ...codexBindingPayload.projects.map(project => renderCodexProjectOption(
+          project.id,
+          `${{project.name}} / ${{project.id}}`,
+          current,
+        )),
+      ].join("");
+      const source = group.source === "runtime" ? "面板设置" : (group.source === "default" ? "默认配置" : "未绑定");
+      const effective = group.effective_project_name || "未绑定";
+      return `
+        <div class="binding-row">
+          <div>
+            <div class="binding-title">${{escapeHtml(group.display_name)}}</div>
+            <div class="binding-meta">当前生效：${{escapeHtml(effective)}} / 来源：${{escapeHtml(source)}}</div>
+          </div>
+          <select id="codex_binding_${{group.group_id}}">${{options}}</select>
+          <button onclick="saveCodexGroupBinding(${{group.group_id}})">保存</button>
+        </div>
+      `;
+    }}
+
+    function renderCodexProjectOption(value, label, current) {{
+      const selected = String(value) === String(current) ? " selected" : "";
+      return `<option value="${{escapeHtml(value)}}"${{selected}}>${{escapeHtml(label)}}</option>`;
+    }}
+
+    async function saveCodexGroupBinding(groupId) {{
+      const status = document.getElementById("codexBindingStatus");
+      const select = document.getElementById(`codex_binding_${{groupId}}`);
+      status.textContent = "正在保存...";
+      try {{
+        codexBindingPayload = await api(`/admin/api/codex/group-bindings/${{groupId}}`, {{
+          method: "PUT",
+          body: JSON.stringify({{ project_id: select.value }}),
+        }});
+        renderCodexGroupBindings();
+        status.textContent = "已保存。";
+      }} catch (error) {{
+        status.textContent = `保存失败：${{error.message}}`;
+      }}
+    }}
+
     async function togglePlugin(pluginId, enabled) {{
       await api(`/admin/api/plugins/${{pluginId}}`, {{
         method: "PUT",
@@ -848,7 +964,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         .replaceAll("'", "&#39;");
     }}
     setInterval(loadGroupMessages, 3000);
-    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
+    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadCodexGroupBindings(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
       document.body.insertAdjacentHTML("beforeend", `<pre>${{error.message}}</pre>`);
     }});
   </script>

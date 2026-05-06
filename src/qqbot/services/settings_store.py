@@ -77,6 +77,24 @@ class SettingsStore:
         settings["provider"] = profile.strip()
         self._write_json(self.settings_root / "ai.json", settings)
 
+    def list_codex_group_bindings(self) -> dict[str, str]:
+        bindings = self._read_json(self.settings_root / "codex_group_bindings.json", {})
+        return {
+            str(group_id): str(project_id).strip()
+            for group_id, project_id in bindings.items()
+            if str(group_id).strip().isdigit() and str(project_id).strip()
+        }
+
+    def set_codex_group_binding(self, group_id: int, project_id: str) -> None:
+        bindings = self.list_codex_group_bindings()
+        cleaned_project = project_id.strip()
+        key = str(group_id)
+        if cleaned_project:
+            bindings[key] = cleaned_project
+        else:
+            bindings.pop(key, None)
+        self._write_json(self.settings_root / "codex_group_bindings.json", bindings)
+
     def get_reread_chance(self, group_id: int) -> float:
         chances = self._read_json(self.settings_root / "reread.json", {})
         return float(self._global_or_legacy_group_value(chances, 0.05))

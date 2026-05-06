@@ -129,6 +129,9 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
+    assert "Codex 群绑定项目" in body
+    assert "/admin/api/codex/group-bindings" in body
+    assert "renderCodexProjectOption" in body
     assert "实时信息" in body
     assert "主控面板" not in body
     assert "id=\"realtimePanel\"" in body
@@ -331,6 +334,44 @@ def test_ai_api_rejects_unknown_provider(tmp_path: Path) -> None:
 
     assert status_code == 404
     assert "Unknown AI profile" in body
+
+
+def test_codex_group_bindings_api_lists_and_updates_runtime_binding(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    list_status, list_body = asgi_request(app, "GET", "/admin/api/codex/group-bindings")
+    update_status, update_body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/codex/group-bindings/516286670",
+        json_body={"project_id": "qqbot"},
+    )
+
+    assert list_status == 200
+    list_payload = json.loads(list_body)
+    default_group = next(group for group in list_payload["groups"] if group["group_id"] == 319567534)
+    assert default_group["effective_project_id"] == "mlj_dspmods"
+    assert default_group["source"] == "default"
+    assert update_status == 200
+    update_payload = json.loads(update_body)
+    updated_group = next(group for group in update_payload["groups"] if group["group_id"] == 516286670)
+    assert updated_group["project_id"] == "qqbot"
+    assert updated_group["effective_project_id"] == "qqbot"
+    assert updated_group["source"] == "runtime"
+
+
+def test_codex_group_bindings_api_rejects_unknown_project(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/codex/group-bindings/516286670",
+        json_body={"project_id": "missing"},
+    )
+
+    assert status_code == 404
+    assert "Unknown Codex project" in body
 
 
 def test_admin_endpoints_update_admin_state(tmp_path: Path) -> None:

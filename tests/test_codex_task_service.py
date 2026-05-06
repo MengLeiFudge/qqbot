@@ -47,6 +47,22 @@ def test_codex_session_start_uses_group_binding_without_project_name(tmp_path: P
     assert match.reason == "当前群绑定项目"
 
 
+def test_codex_session_start_prefers_runtime_group_binding(tmp_path: Path) -> None:
+    from qqbot.services.settings_store import SettingsStore
+
+    SettingsStore(tmp_path, 0).set_codex_group_binding(319567534, "qqbot")
+
+    match = resolve_codex_project_for_session_start(
+        "",
+        group_id="319567534",
+        data_root=tmp_path,
+    )
+
+    assert match is not None
+    assert match.project.project_id == "qqbot"
+    assert get_codex_project_for_group("319567534", data_root=tmp_path).project_id == "qqbot"
+
+
 def test_codex_session_start_falls_back_to_qqbot_without_group_binding(tmp_path: Path) -> None:
     match = resolve_codex_project_for_session_start(
         "",

@@ -49,6 +49,38 @@ def test_list_groups_includes_connected_group_names_without_feature_files(tmp_pa
     ]
 
 
+def test_codex_group_bindings_list_defaults_and_runtime_overrides(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    service.store.set_codex_group_binding(516286670, "qqbot")
+
+    payload = service.list_codex_group_bindings({319567534: "默认群", 516286670: "机器人群"})
+
+    default_group = next(group for group in payload["groups"] if group["group_id"] == 319567534)
+    runtime_group = next(group for group in payload["groups"] if group["group_id"] == 516286670)
+    assert {project["id"] for project in payload["projects"]} >= {"mlj_dspmods", "qqbot"}
+    assert default_group["display_name"] == "默认群（319567534）"
+    assert default_group["project_id"] == ""
+    assert default_group["effective_project_id"] == "mlj_dspmods"
+    assert default_group["source"] == "default"
+    assert runtime_group["display_name"] == "机器人群（516286670）"
+    assert runtime_group["project_id"] == "qqbot"
+    assert runtime_group["effective_project_id"] == "qqbot"
+    assert runtime_group["effective_project_name"] == "qqbot"
+    assert runtime_group["source"] == "runtime"
+
+
+def test_codex_group_binding_update_validates_project(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+
+    updated = service.set_codex_group_binding(516286670, "factorio_mods", {516286670: "异星群"})
+
+    group = next(group for group in updated["groups"] if group["group_id"] == 516286670)
+    assert group["project_id"] == "factorio_mods"
+    assert service.store.list_codex_group_bindings()["516286670"] == "factorio_mods"
+    with pytest.raises(ValueError):
+        service.set_codex_group_binding(516286670, "missing")
+
+
 def test_list_plugins_returns_global_states(tmp_path: Path) -> None:
     service = build_service(tmp_path)
 

@@ -13,6 +13,7 @@ import time
 import tomllib
 
 from qqbot.config import DEFAULT_CONFIG_FILE
+from qqbot.services.settings_store import SettingsStore
 
 
 DEFAULT_CODEX_MODEL = "gpt-5.5"
@@ -591,13 +592,23 @@ def load_codex_group_bindings(config_file: Path | None = None) -> dict[str, str]
     return groups
 
 
+def load_runtime_codex_group_bindings(data_root: Path) -> dict[str, str]:
+    return SettingsStore(Path(data_root), 0).list_codex_group_bindings()
+
+
 def get_codex_project_for_group(
     group_id: str | None,
     config_file: Path | None = None,
+    data_root: Path | None = None,
 ) -> CodexProjectBinding | None:
     if group_id is None:
         return None
-    project_id = load_codex_group_bindings(config_file).get(str(group_id).strip())
+    group_key = str(group_id).strip()
+    project_id = ""
+    if data_root is not None:
+        project_id = load_runtime_codex_group_bindings(data_root).get(group_key, "")
+    if not project_id:
+        project_id = load_codex_group_bindings(config_file).get(group_key, "")
     if not project_id:
         return None
     return get_codex_project_by_id(project_id, config_file)
@@ -619,7 +630,7 @@ def resolve_codex_project_for_session_start(
             config_file=config_file,
         )
 
-    group_project = get_codex_project_for_group(group_id, config_file)
+    group_project = get_codex_project_for_group(group_id, config_file, data_root=data_root)
     if group_project is not None:
         return CodexProjectMatch(group_project, 0.35, "当前群绑定项目")
 
@@ -649,7 +660,7 @@ def resolve_codex_project_for_text(
             best = (score, reason, project)
 
     if best is None:
-        group_project = get_codex_project_for_group(group_id, config_file)
+        group_project = get_codex_project_for_group(group_id, config_file, data_root=data_root)
         if group_project is None:
             return None
         return CodexProjectMatch(group_project, 0.35, "当前群绑定项目")
