@@ -20,7 +20,6 @@ from qqbot.services.codex_task_service import (
     get_codex_project_by_id,
     get_codex_project_for_group,
     load_learned_project_aliases,
-    parse_codex_alias_learning_request,
     resolve_codex_project_for_session_start,
     resolve_codex_project_for_text,
     to_wsl_path,
@@ -99,12 +98,6 @@ def test_codex_project_resolver_uses_learned_alias(tmp_path: Path) -> None:
     assert result is not None
     assert result.project.project_id == "factorio_mods"
     assert load_learned_project_aliases(tmp_path)["品质飞船"] == "factorio_mods"
-
-
-def test_parse_codex_alias_learning_request() -> None:
-    parsed = parse_codex_alias_learning_request("品质飞船是MLJ_Factorio_Mods的一个内容")
-
-    assert parsed == ("品质飞船", "factorio_mods")
 
 
 def test_to_wsl_path_converts_windows_drive_path() -> None:

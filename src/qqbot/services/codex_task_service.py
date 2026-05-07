@@ -691,30 +691,6 @@ def learn_codex_project_alias(data_root: Path, alias: str, project_id: str) -> N
     path.write_text(json.dumps(aliases, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def parse_codex_alias_learning_request(
-    text: str,
-    projects: dict[str, CodexProjectBinding] | None = None,
-) -> tuple[str, str] | None:
-    projects = projects or load_codex_projects()
-    match = re.search(
-        r"(?P<alias>[\w\u4e00-\u9fff][\w\u4e00-\u9fff\s_-]{0,38}?)"
-        r"(?:是|属于)"
-        r"(?P<project>[\w\u4e00-\u9fff.\- ]{2,80})"
-        r"(?:的(?:一个)?(?:内容|东西|模块|模组|项目))?",
-        text,
-    )
-    if match is None:
-        return None
-    alias = match.group("alias").strip(" ：:，,。")
-    if alias in {"这", "这个", "这个问题", "它", "这是", "这个是"}:
-        return None
-    project_text = match.group("project")
-    project = resolve_project_name(project_text, projects)
-    if project is None:
-        return None
-    return alias, project.project_id
-
-
 def resolve_project_name(
     text: str,
     projects: dict[str, CodexProjectBinding] | None = None,

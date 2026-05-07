@@ -17,13 +17,10 @@ from qqbot.services.codex_task_service import (
     CodexProgressEvent,
     CodexSessionRequest,
     CodexSessionStore,
-    CodexTaskStore,
     CodexTaskResult,
     extract_codex_zip_artifacts,
     get_codex_project_by_id,
-    learn_codex_project_alias,
     load_codex_projects,
-    parse_codex_alias_learning_request,
     resolve_codex_project_for_session_start,
     resolve_codex_project_for_text,
     run_codex_session_turn,
@@ -126,10 +123,6 @@ class AiOrchestrator:
         upload_artifact_result = await self._try_upload_latest_project_zip(text, context)
         if upload_artifact_result.handled:
             return upload_artifact_result
-
-        codex_result = await self._try_run_codex_fix(text, context, normalized_message)
-        if codex_result.handled:
-            return codex_result
 
         group_plugins_result = self._try_list_group_plugins(text, context)
         if group_plugins_result.handled:
@@ -402,17 +395,20 @@ class AiOrchestrator:
             )
 
         if looks_like_codex_enter_request(text):
+            initial_prompt = extract_codex_enter_project_query(text)
             if active_session is not None:
-                scope_name = "本群" if context.group_id is not None else "当前私聊"
+                if initial_prompt:
+                    return await self._forward_codex_session_message(
+                        active_session=active_session,
+                        prompt=initial_prompt,
+                        context=context,
+                        normalized_message=normalized_message,
+                    )
                 return AiOrchestratorResult(
                     True,
-                    (
-                        f"{scope_name}已有 Codex 模式 {active_session.session_id}："
-                        f"{active_session.project_display_name}\n"
-                        "请先发送“退出codex”结束当前会话，再开启新项目。"
-                    ),
+                    f"当前已在 Codex 模式 {active_session.session_id}：{active_session.project_display_name}",
                 )
-            project_query = extract_codex_enter_project_query(text)
+            project_query = infer_codex_project_query(initial_prompt)
             project_match = resolve_codex_project_for_session_start(
                 project_query,
                 group_id=context.group_id,
@@ -425,17 +421,49 @@ class AiOrchestrator:
                 actor_user_id=context.actor_user_id,
                 group_id=context.group_id,
             )
-            return AiOrchestratorResult(
-                True,
-                (
-                    f"已进入 Codex 模式 {session.session_id}：{session.project_display_name}\n"
-                    "后续 @ 我的消息会直接转给 Codex，不走普通 AI。\n"
-                    "当前是只读讨论；发送“执行”才允许改代码；发送“退出codex”结束。"
-                ),
+            enter_message = (
+                f"已进入 Codex 模式 {session.session_id}：{session.project_display_name}\n"
+                "后续 @ 我的消息会直接转给 Codex，不走普通 AI。\n"
+                "当前是只读讨论；发送“执行”才允许改代码；发送“退出codex”结束。"
             )
+            if initial_prompt and initial_prompt != project_query:
+                forward_result = await self._forward_codex_session_message(
+                    active_session=session,
+                    prompt=initial_prompt,
+                    context=context,
+                    normalized_message=normalized_message,
+                )
+                return AiOrchestratorResult(
+                    True,
+                    f"{enter_message}\n{forward_result.text}",
+                )
+            return AiOrchestratorResult(True, enter_message)
 
         if active_session is None:
             return AiOrchestratorResult(False)
+
+        return await self._forward_codex_session_message(
+            active_session=active_session,
+            prompt=text,
+            context=context,
+            normalized_message=normalized_message,
+        )
+
+    async def _forward_codex_session_message(
+        self,
+        *,
+        active_session,
+        prompt: str,
+        context: AiOrchestratorContext,
+        normalized_message: NormalizedMessage,
+    ) -> AiOrchestratorResult:
+        store = self._codex_session_store()
+        text = prompt.strip()
+        if not text:
+            return AiOrchestratorResult(
+                True,
+                f"当前 Codex 模式 {active_session.session_id}：{active_session.project_display_name}",
+            )
 
         mode = "execute" if looks_like_codex_execute_request(text) else "discuss"
         project = get_codex_project_by_id(active_session.project_id)
@@ -654,136 +682,6 @@ class AiOrchestrator:
                 uploaded += 1
         return uploaded
 
-    async def _try_run_codex_fix(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-        normalized_message: NormalizedMessage,
-    ) -> AiOrchestratorResult:
-        evidence = build_codex_issue_evidence(normalized_message)
-        learning_result = self._try_learn_codex_alias(text, context)
-        if learning_result.handled:
-            return learning_result
-
-        execute_result = await self._try_execute_codex_draft(text, context)
-        if execute_result.handled:
-            return execute_result
-
-        followup_result = self._try_append_codex_draft(text, context, evidence)
-        if followup_result.handled:
-            return followup_result
-
-        if not looks_like_codex_enter_request(text):
-            return AiOrchestratorResult(False)
-
-        project_match = resolve_codex_project_for_text(
-            f"{text}\n{evidence}",
-            group_id=context.group_id,
-            data_root=self.data_root,
-        )
-        if project_match is None:
-            return AiOrchestratorResult(False)
-        project = project_match.project
-
-        combined = f"{text}\n{evidence}"
-        if not looks_like_codex_fix_request(combined, project_matched=project_match.confidence >= 0.55):
-            return AiOrchestratorResult(False)
-        if not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能启动 Codex 修复任务。")
-
-        store = CodexTaskStore(self.data_root)
-        task = store.create_draft(
-            project=project,
-            actor_user_id=context.actor_user_id,
-            group_id=context.group_id,
-            message=text,
-            evidence=evidence,
-        )
-        return AiOrchestratorResult(
-            True,
-            build_codex_draft_discussion_reply(task.task_id, project.display_name, task.summary),
-        )
-
-    async def _try_execute_codex_draft(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-    ) -> AiOrchestratorResult:
-        task_id = parse_codex_task_id(text)
-        wants_execute = looks_like_codex_execute_request(text)
-        if not wants_execute:
-            return AiOrchestratorResult(False)
-        if not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能执行 Codex 草稿。")
-
-        store = CodexTaskStore(self.data_root)
-        task = store.get_task(task_id) if task_id else store.find_latest_draft(
-            actor_user_id=context.actor_user_id,
-            group_id=context.group_id,
-        )
-        if task is None:
-            if task_id is None:
-                return AiOrchestratorResult(False)
-            return AiOrchestratorResult(True, "没有找到可执行的 Codex 草稿。")
-        project = get_codex_project_by_id(task.project_id)
-        if project is None:
-            return AiOrchestratorResult(True, f"Codex 草稿 {task.task_id} 对应的项目不存在。")
-        if self.action_executor is None:
-            return AiOrchestratorResult(True, "当前没有可用的 Codex 任务执行器。")
-
-        store.mark_running(task.task_id)
-        result = await self.action_executor.execute(
-            AiActionRequest(
-                action_type="run_codex_task",
-                actor_user_id=context.actor_user_id,
-                target_group_id=context.group_id,
-                codex_project_id=project.project_id,
-                codex_task_id=task.task_id,
-                codex_prompt="\n".join(task.raw_messages),
-                codex_evidence="\n".join(task.evidence),
-                is_admin=context.is_admin,
-            )
-        )
-        return AiOrchestratorResult(True, result.message)
-
-    def _try_append_codex_draft(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-        evidence: str,
-    ) -> AiOrchestratorResult:
-        if not context.is_admin:
-            return AiOrchestratorResult(False)
-        if not looks_like_codex_followup_request(text):
-            return AiOrchestratorResult(False)
-        store = CodexTaskStore(self.data_root)
-        task = store.find_latest_draft(
-            actor_user_id=context.actor_user_id,
-            group_id=context.group_id,
-        )
-        if task is None:
-            return AiOrchestratorResult(False)
-        updated = store.append_message(task.task_id, text, evidence=evidence)
-        return AiOrchestratorResult(
-            True,
-            f"已补充 Codex 草稿 {updated.task_id}：{updated.summary}",
-        )
-
-    def _try_learn_codex_alias(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-    ) -> AiOrchestratorResult:
-        parsed = parse_codex_alias_learning_request(text, load_codex_projects())
-        if parsed is None:
-            return AiOrchestratorResult(False)
-        if not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能调整 Codex 项目别名。")
-        alias, project_id = parsed
-        learn_codex_project_alias(self.data_root, alias, project_id)
-        return AiOrchestratorResult(True, f"已记住：{alias} 属于 {project_id}。")
-
-
 def parse_delay_seconds(text: str) -> float | None:
     match = re.search(r"(\d+(?:\.\d+)?)\s*(秒|分钟|分|小时|时)后", text)
     if match is None:
@@ -807,70 +705,12 @@ def extract_quoted_message(text: str) -> str:
     return ""
 
 
-def build_codex_issue_evidence(normalized_message: NormalizedMessage) -> str:
-    parts = [normalized_message.outline]
-    if normalized_message.reply is not None:
-        parts.append(normalized_message.reply.message.outline)
-    return "\n".join(part for part in parts if part.strip())
-
-
-def looks_like_codex_fix_request(text: str, *, project_matched: bool = False) -> bool:
-    compact = re.sub(r"\s+", "", text).lower()
-    wants_fix = any(
-        keyword in compact
-        for keyword in (
-            "codex",
-            "gpt",
-            "修一下",
-            "修复",
-            "看一下这个",
-            "处理这个",
-            "这个报错",
-            "崩溃",
-            "bug",
-            "改一下",
-            "改成",
-            "加一个",
-            "加个",
-            "修改",
-            "调整",
-            "优化",
-            "增加",
-            "删除",
-            "做一个",
-            "计算公式",
-            "公式",
-            "版本号",
-            "修订版本",
-            "兼容",
-        )
-    )
-    has_dsp_evidence = any(
-        keyword.lower() in compact
-        for keyword in (
-            "fractionateeverything",
-            "FE.Logic",
-            "System.IndexOutOfRangeException",
-            "Exception",
-            "Error report",
-        )
-    )
-    return wants_fix and (has_dsp_evidence or project_matched)
-
-
 def looks_like_latest_zip_upload_request(text: str) -> bool:
     compact = re.sub(r"\s+", "", text).lower()
     wants_upload = any(keyword in compact for keyword in ("上传", "发到群", "传到群"))
     wants_latest = "最新" in compact
     wants_zip = any(keyword in compact for keyword in ("压缩包", "zip", "产物"))
     return wants_upload and wants_latest and wants_zip
-
-
-def parse_codex_task_id(text: str) -> str | None:
-    match = re.search(r"\bCODEX-\d{4,}\b", text, flags=re.IGNORECASE)
-    if match is None:
-        return None
-    return match.group(0).upper()
 
 
 def looks_like_codex_enter_request(text: str) -> bool:
@@ -893,10 +733,23 @@ def extract_codex_enter_project_query(text: str) -> str:
     return match.group("query").strip(" ：:，,。")
 
 
+def infer_codex_project_query(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    projects = load_codex_projects()
+    normalized = re.sub(r"\s+", "", stripped).lower()
+    for project in projects.values():
+        names = (project.project_id, project.display_name, Path(project.repo_path).name, *project.aliases)
+        if any(normalized == re.sub(r"\s+", "", name).lower() for name in names if name.strip()):
+            return stripped
+    return ""
+
+
 def build_codex_project_required_reply() -> str:
     return (
-        "进入 Codex 模式必须在 codex 后面写项目，不能只写 codex。\n"
-        "示例：codex qqbot、codex 分馏、codex 异星模组。\n"
+        "进入 Codex 模式可以只写 codex，群聊会使用当前群绑定项目，私聊默认使用 qqbot。\n"
+        "也可以写项目名或直接带首条需求，例如：codex 分馏、codex 看一下这个报错。\n"
         f"可用项目：{format_codex_project_options()}"
     )
 
@@ -904,7 +757,7 @@ def build_codex_project_required_reply() -> str:
 def build_codex_project_not_found_reply(query: str) -> str:
     return (
         f"没有找到 Codex 项目：{query}\n"
-        "请在 codex 后面写明确项目名或别名。\n"
+        "可以只写 codex 使用当前作用域默认项目，或在 codex 后面写明确项目名/别名。\n"
         f"可用项目：{format_codex_project_options()}"
     )
 
@@ -940,36 +793,6 @@ def looks_like_codex_execute_request(text: str) -> bool:
             "交给codex",
             "让codex修",
             "继续修",
-        )
-    )
-
-
-def looks_like_codex_followup_request(text: str) -> bool:
-    compact = re.sub(r"\s+", "", text).lower()
-    return any(
-        keyword in compact
-        for keyword in (
-            "补充",
-            "再加",
-            "还有",
-            "另外",
-            "具体",
-            "指的是",
-            "需求改成",
-            "公式具体",
-        )
-    )
-
-
-def build_codex_draft_discussion_reply(task_id: str, project_name: str, summary: str) -> str:
-    return "\n".join(
-        (
-            f"已创建 Codex 草稿 {task_id}：{project_name}",
-            "当前不会执行，我先把它当成讨论中的代码需求。",
-            f"需求摘要：{summary}",
-            "先确认：目标行为、兼容边界、版本号格式和验证方式是否还有补充？",
-            f"继续补充需求时直接说补充 {task_id} ...",
-            f"讨论清楚后再发送：执行 {task_id}",
         )
     )
 

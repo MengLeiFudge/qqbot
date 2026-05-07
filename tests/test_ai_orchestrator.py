@@ -15,7 +15,6 @@ from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.codex_task_service import (
     CodexProgressEvent,
     CodexProjectBinding,
-    CodexTaskStore,
     get_codex_project_by_id,
 )
 from qqbot.services.feature_catalog import get_feature_by_menu_key
@@ -236,19 +235,29 @@ def test_orchestrator_enters_current_qqbot_project_without_group_binding(tmp_pat
     assert "qqbot" in result.text
 
 
-def test_orchestrator_rejects_unknown_codex_session_project(tmp_path: Path) -> None:
-    orchestrator = AiOrchestrator(data_root=tmp_path)
+def test_orchestrator_uses_bound_project_for_initial_prompt(tmp_path: Path) -> None:
+    requests = []
 
-    result = asyncio.run(
-        orchestrator.handle(
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "收到。", "exit_code": 0})()
+
+    async def run() -> None:
+        orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+        result = await orchestrator.handle(
             "codex 不存在项目",
             AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
             NormalizedMessage(text="codex 不存在项目", outline="codex 不存在项目"),
         )
-    )
 
-    assert result.handled is True
-    assert "没有找到 Codex 项目：不存在项目" in result.text
+        assert result.handled is True
+        assert "已进入 Codex 模式 CODEX-S0001" in result.text
+        assert "收到" in result.text
+
+    asyncio.run(run())
+
+    assert requests[0].project.project_id == "mlj_dspmods"
+    assert requests[0].prompt == "不存在项目"
 
 
 def test_orchestrator_enters_codex_session_mode_with_explicit_project(tmp_path: Path) -> None:
@@ -266,6 +275,32 @@ def test_orchestrator_enters_codex_session_mode_with_explicit_project(tmp_path: 
     assert "已进入 Codex 模式 CODEX-S0001" in result.text
     assert "MLJ_DSPmods" in result.text
     assert "不走普通 AI" in result.text
+
+
+def test_orchestrator_enters_codex_mode_and_forwards_initial_prompt(tmp_path: Path) -> None:
+    requests = []
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "收到首条需求。", "exit_code": 0})()
+
+    async def run() -> None:
+        orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+        result = await orchestrator.handle(
+            "codex 看一下这个报错",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="codex 看一下这个报错", outline="codex 看一下这个报错"),
+        )
+
+        assert result.handled is True
+        assert "已进入 Codex 模式 CODEX-S0001" in result.text
+        assert "收到首条需求" in result.text
+
+    asyncio.run(run())
+
+    assert requests[0].project.project_id == "mlj_dspmods"
+    assert requests[0].prompt == "看一下这个报错"
+    assert requests[0].mode == "discuss"
 
 
 def test_orchestrator_bot_admins_share_active_codex_session(tmp_path: Path) -> None:
@@ -296,8 +331,14 @@ def test_orchestrator_bot_admins_share_active_codex_session(tmp_path: Path) -> N
     assert requests[0].project.project_id == "mlj_dspmods"
 
 
-def test_orchestrator_rejects_new_project_when_group_session_is_active(tmp_path: Path) -> None:
-    orchestrator = AiOrchestrator(data_root=tmp_path)
+def test_orchestrator_forwards_codex_prefixed_message_inside_active_session(tmp_path: Path) -> None:
+    requests = []
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "收到。", "exit_code": 0})()
+
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
     context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
 
     asyncio.run(
@@ -316,8 +357,8 @@ def test_orchestrator_rejects_new_project_when_group_session_is_active(tmp_path:
     )
 
     assert result.handled is True
-    assert "本群已有 Codex 模式 CODEX-S0001" in result.text
-    assert "退出codex" in result.text
+    assert requests[0].project.project_id == "mlj_dspmods"
+    assert requests[0].prompt == "qqbot"
 
 
 def test_orchestrator_lets_non_admin_chat_fall_back_during_active_group_codex_session(tmp_path: Path) -> None:
@@ -797,65 +838,14 @@ def test_orchestrator_routes_factorio_quality_ship_request_to_factorio_repo(tmp_
     assert requests == []
 
 
-def test_orchestrator_executes_existing_codex_draft_when_confirmed(tmp_path: Path) -> None:
-    bot = FakeBot()
-    tasks = []
+def test_orchestrator_enters_codex_session_only_with_explicit_codex_prefix(tmp_path: Path) -> None:
     requests = []
 
-    def task_factory(coro):
-        task = asyncio.create_task(coro)
-        tasks.append(task)
-        return task
-
-    async def fake_runner(request):
+    async def fake_codex_runner(request):
         requests.append(request)
-        return type("Result", (), {"ok": True, "message": "完成", "exit_code": 0})()
+        return type("Result", (), {"ok": True, "message": "已收到。", "exit_code": 0})()
 
-    async def run() -> None:
-        executor = AiActionExecutor(
-            bot=bot,
-            data_root=tmp_path,
-            task_factory=task_factory,
-            codex_runner=fake_runner,
-        )
-        orchestrator = AiOrchestrator(data_root=tmp_path, action_executor=executor)
-        context = AiOrchestratorContext(
-            actor_user_id="605738729",
-            group_id="319567534",
-            is_admin=True,
-        )
-        project = get_codex_project_by_id("factorio_mods")
-        assert project is not None
-        task = CodexTaskStore(tmp_path).create_draft(
-            project=project,
-            actor_user_id="605738729",
-            group_id="319567534",
-            message="异星模组品质飞船的计算公式改成新的倍率",
-            evidence="",
-        )
-        assert task.task_id == "CODEX-0001"
-
-        result = await orchestrator.handle(
-            "执行 CODEX-0001",
-            context,
-            NormalizedMessage(text="执行 CODEX-0001", outline="执行 CODEX-0001"),
-        )
-        assert result.handled is True
-        assert "已启动 Codex 修复任务" in result.text
-        await asyncio.gather(*tasks)
-
-    asyncio.run(run())
-
-    assert requests[0].project.project_id == "factorio_mods"
-    assert "异星模组品质飞船" in requests[0].prompt
-    assert bot.calls[0][0] == "send_group_msg"
-    assert "已交给本地 Codex" in bot.calls[0][1]["message"]
-    assert bot.calls[1][0] == "send_group_msg"
-    assert "Codex 修复任务成功" in bot.calls[1][1]["message"]
-
-
-def test_orchestrator_enters_codex_session_only_with_explicit_codex_prefix(tmp_path: Path) -> None:
-    orchestrator = AiOrchestrator(data_root=tmp_path)
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
     context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
 
     result = asyncio.run(
@@ -871,21 +861,13 @@ def test_orchestrator_enters_codex_session_only_with_explicit_codex_prefix(tmp_p
 
     assert result.handled is True
     assert "已进入 Codex 模式 CODEX-S0001" in result.text
-    assert "MLJ_Factorio_Mods" in result.text
+    assert "MLJ_DSPmods" in result.text
+    assert requests[0].prompt == "异星模组品质飞船的计算公式改成新的倍率"
 
 
-def test_orchestrator_appends_followup_to_recent_codex_draft(tmp_path: Path) -> None:
+def test_orchestrator_does_not_treat_codex_draft_followup_as_plain_chat_command(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
     context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
-    project = get_codex_project_by_id("mlj_dspmods")
-    assert project is not None
-    task = CodexTaskStore(tmp_path).create_draft(
-        project=project,
-        actor_user_id="605738729",
-        group_id="319567534",
-        message="改一下分馏，先讨论计算公式",
-        evidence="",
-    )
 
     second = asyncio.run(
         orchestrator.handle(
@@ -895,12 +877,17 @@ def test_orchestrator_appends_followup_to_recent_codex_draft(tmp_path: Path) -> 
         )
     )
 
-    assert task.task_id == "CODEX-0001"
-    assert "已补充 Codex 草稿 CODEX-0001" in second.text
+    assert second.handled is False
 
 
 def test_orchestrator_enters_codex_session_for_revision_version_request(tmp_path: Path) -> None:
-    orchestrator = AiOrchestrator(data_root=tmp_path)
+    requests = []
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "收到版本号需求。", "exit_code": 0})()
+
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
 
     result = asyncio.run(
         orchestrator.handle(
@@ -916,6 +903,7 @@ def test_orchestrator_enters_codex_session_for_revision_version_request(tmp_path
     assert result.handled is True
     assert "已进入 Codex 模式 CODEX-S0001" in result.text
     assert "MLJ_DSPmods" in result.text
+    assert requests[0].prompt == "分馏现在一直是2.3.0版本，你看看能不能加一个修订版本号，跟R2兼容不"
 
 
 def test_orchestrator_does_not_treat_revision_version_request_as_codex_without_prefix(tmp_path: Path) -> None:
@@ -935,22 +923,21 @@ def test_orchestrator_does_not_treat_revision_version_request_as_codex_without_p
     assert result.handled is False
 
 
-def test_orchestrator_learns_codex_project_alias_for_admin(tmp_path: Path) -> None:
+def test_orchestrator_does_not_treat_plain_chat_as_codex_alias(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
         orchestrator.handle(
-            "品质飞船是MLJ_Factorio_Mods的一个内容",
-            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            "棉花糖也才出生没多久也是个萝莉呢，他在隐晦的对你表白呢",
+            AiOrchestratorContext(actor_user_id="10001", group_id="319567534", is_admin=False),
             NormalizedMessage(
-                text="品质飞船是MLJ_Factorio_Mods的一个内容",
-                outline="品质飞船是MLJ_Factorio_Mods的一个内容",
+                text="棉花糖也才出生没多久也是个萝莉呢，他在隐晦的对你表白呢",
+                outline="棉花糖也才出生没多久也是个萝莉呢，他在隐晦的对你表白呢",
             ),
         )
     )
 
-    assert result.handled is True
-    assert "已记住" in result.text
+    assert result.handled is False
 
 
 def test_orchestrator_creates_requirement_for_admin(tmp_path: Path) -> None:
