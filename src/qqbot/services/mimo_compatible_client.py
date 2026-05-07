@@ -124,7 +124,7 @@ class MimoCompatibleClient(AiClient):
             ],
         ]
         user_content: list[dict[str, object]] = [{"type": "text", "text": request.prompt}]
-        if self.supports_vision:
+        if request.image_urls:
             user_content.extend(
                 {"type": "image_url", "image_url": {"url": image_url}}
                 for image_url in request.image_urls

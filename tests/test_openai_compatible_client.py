@@ -159,13 +159,12 @@ def test_openai_compatible_client_streams_responses_with_metrics() -> None:
     assert call["json"]["input"][1] == {"role": "user", "content": "你好"}
 
 
-def test_openai_compatible_client_includes_images_when_vision_is_enabled() -> None:
+def test_openai_compatible_client_includes_images_when_request_has_images() -> None:
     http_client = FakeHttpClient()
     client = OpenAICompatibleClient(
         base_url="https://example.invalid/v1",
         api_key="secret-key",
         model="vision-model",
-        supports_vision=True,
         http_client=http_client,
     )
 

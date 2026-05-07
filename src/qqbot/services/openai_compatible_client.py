@@ -176,7 +176,7 @@ class OpenAICompatibleClient(AiClient):
                 if message.role in {"user", "assistant"} and message.content.strip()
             ],
         ]
-        if not self.supports_vision or not request.image_urls:
+        if not request.image_urls:
             messages.append({"role": "user", "content": request.prompt})
             return messages
 

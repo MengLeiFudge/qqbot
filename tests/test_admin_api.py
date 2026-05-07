@@ -318,6 +318,7 @@ def test_ai_api_lists_and_updates_current_provider(tmp_path: Path) -> None:
     payload = json.loads(list_body)
     assert payload["current_profile"] == "xiaomi"
     assert [profile["name"] for profile in payload["profiles"]] == ["xiaomi", "hicode"]
+    assert "supports_vision" not in payload["profiles"][0]
     assert update_status == 200
     assert json.loads(update_body)["current_profile"] == "hicode"
 

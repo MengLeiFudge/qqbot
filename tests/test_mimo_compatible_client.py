@@ -85,13 +85,12 @@ def test_mimo_client_streams_chat_completions_with_api_key_header() -> None:
     assert call["json"]["messages"][2]["content"] == [{"type": "text", "text": "你好"}]
 
 
-def test_mimo_client_includes_images_when_vision_is_enabled() -> None:
+def test_mimo_client_includes_images_when_request_has_images() -> None:
     http_client = FakeHttpClient()
     client = MimoCompatibleClient(
         base_url="https://api.xiaomimimo.com/v1",
         api_key="secret-key",
         model="vision-model",
-        supports_vision=True,
         http_client=http_client,
     )
 

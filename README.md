@@ -67,7 +67,6 @@ base_url = "https://api.xiaomimimo.com/v1"
 model = "mimo-v2.5-pro"
 api_key_env = "QQBOT_AI_KEY_XIAOMI"
 timeout_seconds = 15
-supports_vision = false
 ```
 
 ## 启动

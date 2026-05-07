@@ -215,7 +215,6 @@ class AdminService:
                     "model": profile.model,
                     "note": profile.note,
                     "enabled": profile.enabled,
-                    "supports_vision": profile.supports_vision,
                 }
                 for profile in enabled_profiles
             ],

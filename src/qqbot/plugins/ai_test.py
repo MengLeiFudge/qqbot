@@ -465,7 +465,7 @@ def build_message_structure_context(
             )
         )
     if collect_message_image_urls(normalized_message):
-        lines.append("用户本次消息包含图片。当前模型是否能识图取决于所选 provider 的 vision 配置。")
+        lines.append("用户本次消息包含图片；图片会随请求发送给当前 AI provider。")
     if normalized_message.audio_urls:
         lines.append("用户本次消息包含语音。当前链路暂未把语音发送给 provider，只能说明收到了语音。")
     if normalized_message.video_urls:
