@@ -102,6 +102,49 @@ def test_chat_memory_store_searches_user_messages_across_groups(tmp_path: Path) 
     assert records[0].user_id == "20001"
 
 
+def test_chat_memory_store_loads_recent_user_messages_across_groups(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=301,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="喵喵喵",
+        timestamp=300,
+    )
+    store.append_message(
+        group_id=10002,
+        message_id=302,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="我刚刚在另一个群说什么了？",
+        timestamp=301,
+    )
+    store.append_message(
+        group_id=10003,
+        message_id=303,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="路人喵喵喵",
+        timestamp=302,
+    )
+
+    records = store.load_recent_user_messages_across_groups(
+        current_group_id=10002,
+        user_id=20001,
+        limit=5,
+    )
+
+    assert [record.message_id for record in records] == ["301"]
+    assert records[0].group_id == "10001"
+    assert records[0].text == "喵喵喵"
+
+
 def test_chat_memory_store_searches_user_facts_across_groups_without_group_rules(
     tmp_path: Path,
 ) -> None:

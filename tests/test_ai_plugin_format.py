@@ -26,7 +26,6 @@ from qqbot.services.settings_store import SettingsStore
 
 class FakeGroupEvent:
     message_type = "group"
-    group_id = 516286670
 
     def __init__(
         self,
@@ -35,7 +34,9 @@ class FakeGroupEvent:
         reply=None,
         sender=None,
         message=None,
+        group_id: int = 516286670,
     ) -> None:
+        self.group_id = group_id
         self.user_id = user_id
         self.text = text
         self.reply = reply
@@ -349,6 +350,48 @@ def test_ai_context_warns_cross_group_query_cannot_use_current_group_history(
     joined = "\n".join(context)
     assert "当前短期会话历史和本群最近聊天记录都不是其他群证据" in joined
     assert "只能依据明确标注为“当前发言者跨群长期记忆”的内容回答" in joined
+
+
+def test_ai_cross_group_scope_query_includes_recent_sender_messages(
+    tmp_path: Path,
+) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id=10001,
+        message_id=31,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="喵喵喵",
+        timestamp=31,
+    )
+    memory_store.append_message(
+        group_id=10002,
+        message_id=32,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="我刚刚在另一个群说什么了？",
+        timestamp=32,
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            user_id="10001",
+            text="我刚刚在另一个群说什么了？",
+            sender=FakeSender(user_id=10001, card="可可"),
+            group_id=10002,
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "当前发言者跨群长期记忆" in joined
+    assert "可可(10001) 在群 10001 说： 喵喵喵" in joined
+    assert "本群长期记忆" not in joined
+    sender_memory = joined.rsplit("当前发言者跨群长期记忆", 1)[1]
+    assert "我刚刚在另一个群说什么了？" not in sender_memory
 
 
 def test_ai_context_refuses_private_memory_in_group(tmp_path: Path) -> None:

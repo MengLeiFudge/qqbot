@@ -289,6 +289,33 @@ class ChatMemoryStore:
         )
         return records
 
+    def load_recent_user_messages_across_groups(
+        self,
+        *,
+        current_group_id: int | str,
+        user_id: int | str,
+        limit: int = 4,
+    ) -> tuple[ChatMemoryRecord, ...]:
+        normalized_user_id = str(user_id).strip()
+        if not normalized_user_id or limit <= 0 or not self.db_path.exists():
+            return ()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM messages
+                WHERE user_id = ?
+                  AND group_id != ?
+                  AND direction = 'incoming'
+                  AND text != ''
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                (normalized_user_id, str(current_group_id), limit),
+            ).fetchall()
+        return tuple(self._record_from_row(row) for row in rows)
+
     def load_messages_by_message_ids(
         self,
         group_id: int | str,

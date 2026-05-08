@@ -382,32 +382,37 @@ def build_long_term_memory_context(
         return ""
     try:
         memory_store = ChatMemoryStore(settings.data_root)
-        facts = memory_store.search_facts(
-            group_id,
-            query,
-            limit=settings.ai_memory_search_limit,
-        )
-        records = memory_store.search_messages(
-            group_id,
-            query,
-            limit=settings.ai_memory_search_limit,
-        )
-        fact_source_ids = tuple(
-            dict.fromkeys(
-                message_id
-                for fact in facts
-                for message_id in fact.source_message_ids
-                if message_id
+        scope_query = should_omit_ai_history_for_scope_query(event, normalized_message)
+        if scope_query:
+            facts = ()
+            records = ()
+        else:
+            facts = memory_store.search_facts(
+                group_id,
+                query,
+                limit=settings.ai_memory_search_limit,
             )
-        )
-        if fact_source_ids:
-            existing_ids = {record.message_id for record in records}
-            source_records = tuple(
-                record
-                for record in memory_store.load_messages_by_message_ids(group_id, fact_source_ids)
-                if record.message_id not in existing_ids
+            records = memory_store.search_messages(
+                group_id,
+                query,
+                limit=settings.ai_memory_search_limit,
             )
-            records = (*records, *source_records)[: settings.ai_memory_search_limit]
+            fact_source_ids = tuple(
+                dict.fromkeys(
+                    message_id
+                    for fact in facts
+                    for message_id in fact.source_message_ids
+                    if message_id
+                )
+            )
+            if fact_source_ids:
+                existing_ids = {record.message_id for record in records}
+                source_records = tuple(
+                    record
+                    for record in memory_store.load_messages_by_message_ids(group_id, fact_source_ids)
+                    if record.message_id not in existing_ids
+                )
+                records = (*records, *source_records)[: settings.ai_memory_search_limit]
         user_facts, user_records = search_current_sender_memory(
             memory_store,
             settings,
@@ -457,6 +462,21 @@ def search_current_sender_memory(
         query=query,
         limit=limit,
     )
+    if is_cross_group_memory_query(query):
+        recent_records = memory_store.load_recent_user_messages_across_groups(
+            current_group_id=group_id,
+            user_id=user_id,
+            limit=limit,
+        )
+        existing_keys = {(record.group_id, record.message_id, record.id) for record in records}
+        records = (
+            *records,
+            *(
+                record
+                for record in recent_records
+                if (record.group_id, record.message_id, record.id) not in existing_keys
+            ),
+        )[:limit]
     fact_source_ids = tuple(
         dict.fromkeys(
             message_id
