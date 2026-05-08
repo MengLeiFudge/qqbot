@@ -1520,6 +1520,20 @@ class ChatMemoryStore:
 def infer_rule_tags(text: str) -> tuple[str, ...]:
     normalized = text.lower()
     tags: list[str] = []
+    if any(keyword in text for keyword in ("另一个群", "其他群", "别的群", "跨群", "不是这个群")):
+        tags.append("跨群")
+    if "私聊" in text:
+        tags.append("私聊")
+    if any(keyword in text for keyword in ("刚刚", "刚才", "最近", "上一句", "前面")):
+        tags.append("最近消息")
+    if any(keyword in text for keyword in ("吗", "什么", "怎么", "为何", "为什么", "？", "?")):
+        tags.append("提问")
+    if any(keyword in text for keyword in ("图片", "[图片]", "照片", "图")):
+        tags.append("图片")
+    if "@" in text or "[@" in text:
+        tags.append("@")
+    if is_behavior_instruction_text(text):
+        tags.append("行为指令")
     if any(keyword in normalized for keyword in ("知识库", "聊天记录", "历史聊天", "数据库", "标签", "分门别类")):
         tags.append("知识库")
     if any(keyword in normalized for keyword in ("ai", "模型", "prompt", "提示词")):
@@ -1534,6 +1548,12 @@ def infer_rule_tags(text: str) -> tuple[str, ...]:
 def infer_rule_topics(text: str) -> tuple[str, ...]:
     normalized = text.lower()
     topics: list[str] = []
+    if any(keyword in text for keyword in ("另一个群", "其他群", "别的群", "跨群", "不是这个群")):
+        topics.append("跨群记忆")
+    if any(keyword in text for keyword in ("刚刚", "刚才", "最近", "上一句", "前面", "聊天记录", "历史聊天")):
+        topics.append("消息检索")
+    if is_behavior_instruction_text(text):
+        topics.append("行为指令")
     if any(keyword in normalized for keyword in ("知识库", "聊天记录", "历史聊天", "数据库", "标签", "分门别类")):
         topics.append("知识库")
     if any(keyword in normalized for keyword in ("shapez", "异形工厂")):
@@ -1560,6 +1580,8 @@ def extract_rule_entities(text: str) -> tuple[str, ...]:
 def infer_importance(text: str) -> float:
     if is_prompt_injection_like(text):
         return 0.1
+    if is_behavior_instruction_text(text):
+        return 0.75
     if any(keyword in text for keyword in ("记住", "以后", "规则", "主人", "管理员", "配置", "项目")):
         return 0.8
     if any(keyword in text for keyword in ("讨论", "决定", "需要", "数据库", "知识库")):
@@ -1613,16 +1635,46 @@ def is_sensitive_memory_claim_text(text: str) -> bool:
     return any(keyword in text for keyword in ("另一个群", "其他群", "别的群", "私聊内容", "私聊里"))
 
 
+def is_behavior_instruction_text(text: str) -> bool:
+    return any(
+        keyword in text
+        for keyword in (
+            "说话结尾",
+            "回复结尾",
+            "结尾带",
+            "句尾带",
+            "遇到",
+            "看到",
+            "以后说话",
+            "之后说话",
+        )
+    )
+
+
 def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
     text = record.text.strip().strip("。！？!?.")
     if not text or is_prompt_injection_like(text):
         return ()
 
     facts: list[ChatMemoryFact] = []
-    extracted = list(iter_rule_fact_parts(text))
+    extracted = list(iter_behavior_instruction_parts(text))
+    extracted.extend(iter_rule_fact_parts(text))
     for subject, predicate, obj in extracted:
         if not subject or not obj or len(obj) > 80:
             continue
+        topics = record.topics
+        entities = tuple(dict.fromkeys([subject, *record.entities, *extract_rule_entities(obj)]))
+        if predicate == "行为指令":
+            topics = tuple(dict.fromkeys([*topics, "行为指令"]))
+            entities = tuple(
+                dict.fromkeys(
+                    [
+                        *entities,
+                        "临时偏好",
+                        *extract_behavior_instruction_entities(obj),
+                    ]
+                )
+            )
         facts.append(
             ChatMemoryFact(
                 id=0,
@@ -1632,8 +1684,8 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
                 object=obj,
                 confidence=max(0.7, record.confidence),
                 source_message_ids=(record.message_id,) if record.message_id else (),
-                topics=record.topics,
-                entities=tuple(dict.fromkeys([subject, *record.entities, *extract_rule_entities(obj)])),
+                topics=topics,
+                entities=entities,
                 updated_at=record.timestamp,
                 source_type="bot" if record.direction == "bot" else "user",
                 trust_level="chat",
@@ -1641,6 +1693,38 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
             )
         )
     return tuple(facts)
+
+
+def iter_behavior_instruction_parts(text: str) -> tuple[tuple[str, str, str], ...]:
+    normalized = text.strip().strip("。！？!?.")
+    if not normalized:
+        return ()
+    object_text = ""
+    if re.search(r"(?:说话|回复)?结尾带(?P<object>[\w\u4e00-\u9fff]{1,12})", normalized):
+        match = re.search(r"(?:说话|回复)?结尾带(?P<object>[\w\u4e00-\u9fff]{1,12})", normalized)
+        if match is not None:
+            object_text = f"说话结尾带{match.group('object')}"
+    elif re.search(r"遇到(?P<object>.+)", normalized):
+        object_text = normalized
+    elif re.search(r"看到(?P<object>.+)", normalized):
+        object_text = normalized
+    if not object_text:
+        return ()
+    return (("群聊行为偏好", "行为指令", object_text.strip()),)
+
+
+def extract_behavior_instruction_entities(text: str) -> tuple[str, ...]:
+    entities: list[str] = []
+    if "说话结尾" in text or "结尾带" in text:
+        entities.append("说话结尾")
+        entities.append("结尾")
+    match = re.search(r"带(?P<object>[\w\u4e00-\u9fff]{1,12})", text)
+    if match is not None:
+        entities.append(match.group("object"))
+    match = re.search(r"遇到(?P<object>[\w\u4e00-\u9fff]{1,20})", text)
+    if match is not None:
+        entities.append(match.group("object"))
+    return tuple(dict.fromkeys(entity for entity in entities if entity))
 
 
 def iter_rule_fact_parts(text: str) -> tuple[tuple[str, str, str], ...]:
@@ -1788,6 +1872,12 @@ def build_like_terms(query: str) -> list[str]:
         if marker in query:
             terms.append(marker)
     for marker in (
+        "行为指令",
+        "说话结尾",
+        "结尾",
+        "喵",
+        "勺子鱼",
+        "跨群",
         "知识库",
         "聊天记录",
         "历史聊天",

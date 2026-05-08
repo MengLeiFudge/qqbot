@@ -269,6 +269,63 @@ def test_chat_memory_store_searches_rule_tags(tmp_path: Path) -> None:
     assert "知识库" in results[0].tags
 
 
+def test_chat_memory_store_infers_programmatic_scope_and_intent_tags(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=36,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="我刚刚在另一个群发的图片你还记得吗？",
+        timestamp=100,
+        has_image=True,
+        has_at=True,
+    )
+
+    results = store.search_messages(10001, "另一个群 图片", limit=5)
+
+    assert results[0].message_id == "36"
+    assert {"跨群", "图片", "提问", "最近消息"} <= set(results[0].tags)
+    assert {"跨群记忆", "消息检索"} <= set(results[0].topics)
+
+
+def test_chat_memory_store_extracts_behavior_instruction_facts(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=37,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="你以后说话结尾带喵。",
+        timestamp=100,
+    )
+    store.append_message(
+        group_id=10001,
+        message_id=38,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="遇到勺子鱼就吃掉。",
+        timestamp=101,
+    )
+
+    facts = store.search_facts(10001, "说话带喵 勺子鱼", limit=5)
+
+    objects = {fact.object for fact in facts}
+    assert "说话结尾带喵" in objects
+    assert "遇到勺子鱼就吃掉" in objects
+    assert all(fact.subject == "群聊行为偏好" for fact in facts)
+    assert all(fact.predicate == "行为指令" for fact in facts)
+    assert all("行为指令" in fact.topics for fact in facts)
+    assert all("临时偏好" in fact.entities for fact in facts)
+
+
 def test_chat_memory_store_backfills_from_group_message_logs(tmp_path: Path) -> None:
     log_path = tmp_path / "run" / "admin" / "group_messages" / "10001.json"
     log_path.parent.mkdir(parents=True)
