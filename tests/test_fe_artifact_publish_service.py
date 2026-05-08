@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import asyncio
 
 from qqbot.services import fe_artifact_publish_service as service
 
@@ -172,3 +173,70 @@ def test_read_publish_summary_from_afterbuild_result(tmp_path: Path) -> None:
     summary = service.read_publish_summary_from_afterbuild_result(result_path)
 
     assert summary == "原因：用户反馈启动崩溃\n修复：移除静态初始化顺序依赖"
+
+
+def test_find_uploaded_file_message_id_reads_group_history() -> None:
+    class FakeBot:
+        async def call_api(self, api: str, **data: object) -> dict[str, object]:
+            assert api == "get_group_msg_history"
+            assert data["group_id"] == 319567534
+            return {
+                "messages": [
+                    {
+                        "message_id": 10001,
+                        "message": "普通消息",
+                    },
+                    {
+                        "message_id": 10002,
+                        "message": [
+                            {
+                                "type": "file",
+                                "data": {
+                                    "file": "FractionateEverything_2.3.0.zip",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            }
+
+    message_id = asyncio.run(
+        service.find_uploaded_file_message_id(
+            FakeBot(),
+            319567534,
+            "FractionateEverything_2.3.0.zip",
+            retries=1,
+        )
+    )
+
+    assert message_id == "10002"
+
+
+def test_find_uploaded_file_message_id_uses_latest_matching_message() -> None:
+    class FakeBot:
+        async def call_api(self, api: str, **data: object) -> dict[str, object]:
+            return {
+                "data": {
+                    "messages": [
+                        {
+                            "message_id": 10001,
+                            "raw_message": "[文件：FractionateEverything_2.3.0.zip]",
+                        },
+                        {
+                            "message_id": 10002,
+                            "raw_message": "[文件：FractionateEverything_2.3.0.zip]",
+                        },
+                    ],
+                },
+            }
+
+    message_id = asyncio.run(
+        service.find_uploaded_file_message_id(
+            FakeBot(),
+            319567534,
+            "FractionateEverything_2.3.0.zip",
+            retries=1,
+        )
+    )
+
+    assert message_id == "10002"

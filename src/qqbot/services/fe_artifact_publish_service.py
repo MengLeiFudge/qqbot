@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -82,6 +83,12 @@ async def publish_fe_artifact(
         name=package_path.name,
     )
     reply_message_id = _extract_message_id(upload_result)
+    if not reply_message_id:
+        reply_message_id = await find_uploaded_file_message_id(
+            bot,
+            group_id,
+            package_path.name,
+        )
     publish_message = build_publish_message(repo_path, message, reply_message_id=reply_message_id)
     if publish_message:
         await bot.call_api("send_group_msg", group_id=group_id, message=publish_message)
@@ -120,6 +127,26 @@ async def delete_old_fe_group_files(bot: Any, group_id: int) -> list[str]:
 
 def is_fe_artifact_path(path: str | Path) -> bool:
     return FE_ARTIFACT_NAME_RE.fullmatch(Path(str(path)).name) is not None
+
+
+async def find_uploaded_file_message_id(
+    bot: Any,
+    group_id: int,
+    file_name: str,
+    *,
+    retries: int = 5,
+    delay_seconds: float = 0.3,
+) -> str:
+    if not file_name:
+        return ""
+    for attempt in range(max(1, retries)):
+        payload = await _get_recent_group_messages(bot, group_id)
+        message_id = _extract_file_message_id_from_history(payload, file_name)
+        if message_id:
+            return message_id
+        if attempt + 1 < retries:
+            await asyncio.sleep(delay_seconds)
+    return ""
 
 
 def build_publish_message(
@@ -191,6 +218,63 @@ def _extract_message_id(payload: Any) -> str:
     if isinstance(data, dict):
         return _extract_message_id(data)
     return ""
+
+
+async def _get_recent_group_messages(bot: Any, group_id: int) -> Any:
+    for api, data in (
+        ("get_group_msg_history", {"group_id": group_id, "count": 20}),
+        ("get_group_msg_history", {"group_id": group_id}),
+    ):
+        try:
+            return await bot.call_api(api, **data)
+        except Exception:
+            continue
+    return None
+
+
+def _extract_file_message_id_from_history(payload: Any, file_name: str) -> str:
+    target = file_name.strip()
+    for message in reversed(_extract_history_messages(payload)):
+        if _message_contains_file_name(message, target):
+            message_id = _extract_message_id(message)
+            if message_id:
+                return message_id
+    return ""
+
+
+def _extract_history_messages(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("messages", "message", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            nested = _extract_history_messages(value)
+            if nested:
+                return nested
+    return []
+
+
+def _message_contains_file_name(message: Any, file_name: str) -> bool:
+    if not file_name:
+        return False
+    if isinstance(message, str):
+        return file_name in message
+    if isinstance(message, list):
+        return any(_message_contains_file_name(part, file_name) for part in message)
+    if not isinstance(message, dict):
+        return False
+    for key in ("file", "name", "file_name", "text", "raw_message", "message"):
+        value = message.get(key)
+        if isinstance(value, str) and file_name in value:
+            return True
+        if isinstance(value, (dict, list)) and _message_contains_file_name(value, file_name):
+            return True
+    data = message.get("data")
+    return isinstance(data, (dict, list)) and _message_contains_file_name(data, file_name)
 
 
 def _commit_type(title: str) -> str:
