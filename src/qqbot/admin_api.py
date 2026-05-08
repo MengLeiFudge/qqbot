@@ -12,6 +12,11 @@ from pydantic import BaseModel
 from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
 from qqbot.services.codex_task_service import get_codex_project_by_id, normalize_local_path
+from qqbot.services.fe_artifact_publish_service import (
+    is_fe_artifact_path,
+    publish_fe_artifact,
+    select_fe_package_from_afterbuild_result,
+)
 
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -35,7 +40,8 @@ class CodexGroupBindingUpdateRequest(BaseModel):
 class LocalArtifactUploadRequest(BaseModel):
     project_id: str
     group_id: int
-    files: list[str]
+    files: list[str] = []
+    afterbuild_result_path: str = ""
 
 
 class GroupControlUpdateRequest(BaseModel):
@@ -225,8 +231,8 @@ def register_admin_routes(
             raise HTTPException(status_code=404, detail="Unknown Codex project.")
         if payload.group_id <= 0:
             raise HTTPException(status_code=400, detail="Invalid group id.")
-        if not payload.files:
-            raise HTTPException(status_code=400, detail="No files to upload.")
+        if not payload.files and not payload.afterbuild_result_path.strip():
+            raise HTTPException(status_code=400, detail="No artifact source to upload.")
 
         bots = nonebot.get_bots()
         if not bots:
@@ -236,21 +242,12 @@ def register_admin_routes(
         if not repo_path.is_dir():
             raise HTTPException(status_code=404, detail="Project repository does not exist.")
 
-        artifacts = [
-            _validate_local_artifact_path(file_path, repo_path)
-            for file_path in payload.files
-        ]
+        artifact = _resolve_fe_artifact_to_publish(payload, repo_path)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail="No FractionateEverything zip artifact found.")
         bot = next(iter(bots.values()))
-        uploaded: list[dict[str, str]] = []
-        for artifact in artifacts:
-            await bot.call_api(
-                "upload_group_file",
-                group_id=payload.group_id,
-                file=str(artifact),
-                name=artifact.name,
-            )
-            uploaded.append({"file": str(artifact), "name": artifact.name})
-        return {"ok": True, "uploaded": uploaded}
+        result = await publish_fe_artifact(bot, payload.group_id, artifact, repo_path)
+        return {"ok": True, "uploaded": result.uploaded, "deleted": result.deleted}
 
     @app.get("/admin/api/admins")
     async def admin_list_admins(
@@ -1023,11 +1020,31 @@ def _validate_local_artifact_path(raw_path: str, repo_path: Path) -> Path:
         raise HTTPException(status_code=400, detail="Only zip artifacts can be uploaded.")
     if not artifact.is_file():
         raise HTTPException(status_code=404, detail="Artifact file does not exist.")
+    if not is_fe_artifact_path(artifact):
+        raise HTTPException(status_code=400, detail="Only FractionateEverything zip artifacts can be uploaded.")
     try:
         artifact.resolve().relative_to(repo_path.resolve())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Artifact must be inside project repository.") from exc
     return artifact
+
+
+def _resolve_fe_artifact_to_publish(
+    payload: LocalArtifactUploadRequest,
+    repo_path: Path,
+) -> Path | None:
+    if payload.afterbuild_result_path.strip():
+        result = select_fe_package_from_afterbuild_result(payload.afterbuild_result_path, repo_path)
+        if result is not None:
+            return result
+    artifacts = [
+        _validate_local_artifact_path(file_path, repo_path)
+        for file_path in payload.files
+    ]
+    if not artifacts:
+        return None
+    artifacts.sort(key=lambda artifact: (artifact.stat().st_mtime, artifact.name), reverse=True)
+    return artifacts[0]
 
 
 async def get_connected_group_names() -> dict[int, str]:

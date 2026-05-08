@@ -112,7 +112,7 @@
 
 - 普通 AI 回复只负责文本生成和已白名单的本地能力编排。
 - AI 不直接获得 shell、文件系统、群管、重启、上传文件等自由权限。
-- 上传已有项目 zip 产物属于固定白名单能力，只能由 Bot 管理员在群聊触发；机器人只查找项目仓库内真实存在的 `.zip` 并上传，不构建、不改代码、不 push。
+- 上传已有项目 zip 产物属于固定白名单能力，只能由 Bot 管理员在群聊触发；机器人只查找项目仓库内真实存在的 `.zip` 并上传，不构建、不改代码、不 push。MLJ_DSPmods 的 FE 发布流程只上传 `FractionateEverything_*.zip`，上传前删除同一群内由 Bot 上传的旧 `FractionateEverything_*.zip`。
 - 涉及代码修改时，qqbot 只做中转、权限、项目路由、会话记录、结果回传和产物上传。
 - qqbot 给 Codex 的 prompt 不替目标仓库规定 git、分支、提交、测试、构建、输出格式或 Markdown 规则。
 - 目标仓库的 `AGENTS.md` / README / 项目规范决定 Codex 的具体执行规则。
@@ -124,7 +124,7 @@
 - Codex 会话讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
 - Codex 输出的 `.zip` 产物路径可由 qqbot 解析并上传回来源群，但只能上传目标仓库内真实存在的 zip 文件。
 - 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报。
-- 直接在本地 Codex 终端执行的任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only 管理接口上传项目仓库内真实存在的 zip 产物。
+- 直接在本地 Codex 终端执行的任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only 管理接口推送 `afterbuild-result.json`，由 qqbot 完成 FE 产物筛选、旧包清理和上传。
 - Codex 修改 qqbot 自身项目并成功完成后，必须安排 Bot 重启，使新代码实际生效。
 - 通过 qqbot 触发的自我更新，旧进程应先向来源群或私聊提示“已安排重启”，重启后在 OneBot 重新连接时再向相同目标回报连接状态。
 - 直接在本地 Codex 终端修改 qqbot 时，完成提交和验证后必须调用管理端重启入口，并检查 `onebot_connected=true`、`connected_bot_count>=1`。

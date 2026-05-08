@@ -15,11 +15,16 @@ from qqbot.services.settings_store import SettingsStore
 
 
 class FakeUploadBot:
+    self_id = "114514"
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.group_files: list[dict[str, object]] = []
 
     async def call_api(self, api: str, **data: object) -> dict[str, object]:
         self.calls.append((api, data))
+        if api == "get_group_root_files":
+            return {"files": list(self.group_files)}
         return {"status": "ok"}
 
 
@@ -122,7 +127,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
 
     status_code, body = asgi_request(app, "GET", "/admin")
 
-    assert status_code == 200
+    assert status_code == 200, body
     assert "QQBot Admin" in body
     assert "/admin/api/groups" in body
     assert "/admin/api/restart" in body
@@ -174,7 +179,7 @@ def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
 
     status_code, body = asgi_request(app, "GET", "/admin/api/groups")
 
-    assert status_code == 200
+    assert status_code == 200, body
     payload = json.loads(body)[0]
     assert payload["group_id"] == 516286670
     assert payload["display_name"] == "测试群（516286670）"
@@ -244,7 +249,7 @@ def test_upload_local_artifact_api_uploads_repo_zip(tmp_path: Path, monkeypatch)
         },
     )
 
-    assert status_code == 200
+    assert status_code == 200, body
     assert json.loads(body) == {
         "ok": True,
         "uploaded": [
@@ -253,8 +258,15 @@ def test_upload_local_artifact_api_uploads_repo_zip(tmp_path: Path, monkeypatch)
                 "name": "FractionateEverything_2.3.0.zip",
             }
         ],
+        "deleted": [],
     }
     assert bot.calls == [
+        (
+            "get_group_root_files",
+            {
+                "group_id": 319567534,
+            },
+        ),
         (
             "upload_group_file",
             {
@@ -269,7 +281,7 @@ def test_upload_local_artifact_api_uploads_repo_zip(tmp_path: Path, monkeypatch)
 def test_upload_local_artifact_api_rejects_zip_outside_repo(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    package = tmp_path / "outside.zip"
+    package = tmp_path / "FractionateEverything_2.3.0.zip"
     package.write_bytes(b"zip")
     bot = FakeUploadBot()
     monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
@@ -302,6 +314,140 @@ def test_upload_local_artifact_api_rejects_zip_outside_repo(tmp_path: Path, monk
     assert status_code == 400
     assert "Artifact must be inside project repository" in body
     assert bot.calls == []
+
+
+def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    modzips = repo / "AfterBuildEvent" / "bin" / "win" / "Debug" / "ModZips"
+    fe_package = modzips / "FractionateEverything_2.3.0.zip"
+    get_data_package = modzips / "GetDspData_1.0.0.zip"
+    modzips.mkdir(parents=True)
+    fe_package.write_bytes(b"fe")
+    get_data_package.write_bytes(b"get-data")
+    result_path = modzips / "afterbuild-result.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "automation_mode": True,
+                "generated_packages": [str(get_data_package), str(fe_package)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    bot = FakeUploadBot()
+    bot.group_files = [
+        {
+            "file_id": "old-fe-1",
+            "busid": 1,
+            "file_name": "FractionateEverything_2.2.9.zip",
+            "uploader": 114514,
+        },
+        {
+            "file_id": "old-fe-2",
+            "busid": 2,
+            "file_name": "FractionateEverything_2.3.0.zip",
+            "uploader": 114514,
+        },
+        {
+            "file_id": "keep-get-data",
+            "busid": 3,
+            "file_name": "GetDspData_1.0.0.zip",
+            "uploader": 114514,
+        },
+        {
+            "file_id": "keep-user-fe",
+            "busid": 4,
+            "file_name": "FractionateEverything_2.0.0.zip",
+            "uploader": 10001,
+        },
+    ]
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    monkeypatch.setattr(
+        "qqbot.services.fe_artifact_publish_service.build_latest_commit_message",
+        lambda repo_path: "本次构建对应提交：\na178181 功能：自动上传构建产物到QQ群\n\n改动文件：AfterBuildEvent.cs",
+    )
+    monkeypatch.setattr(
+        "qqbot.admin_api.get_codex_project_by_id",
+        lambda project_id: type(
+            "Project",
+            (),
+            {
+                "project_id": project_id,
+                "display_name": "MLJ_DSPmods",
+                "repo_path": str(repo),
+            },
+        )(),
+        raising=False,
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/artifacts/upload-local",
+        json_body={
+            "project_id": "mlj_dspmods",
+            "group_id": 319567534,
+            "afterbuild_result_path": str(result_path),
+        },
+    )
+
+    assert status_code == 200, body
+    assert json.loads(body) == {
+        "ok": True,
+        "uploaded": [
+            {
+                "file": str(fe_package),
+                "name": "FractionateEverything_2.3.0.zip",
+            }
+        ],
+        "deleted": [
+            "FractionateEverything_2.2.9.zip",
+            "FractionateEverything_2.3.0.zip",
+        ],
+    }
+    assert bot.calls == [
+        (
+            "get_group_root_files",
+            {
+                "group_id": 319567534,
+            },
+        ),
+        (
+            "delete_group_file",
+            {
+                "group_id": 319567534,
+                "file_id": "old-fe-1",
+                "busid": 1,
+            },
+        ),
+        (
+            "delete_group_file",
+            {
+                "group_id": 319567534,
+                "file_id": "old-fe-2",
+                "busid": 2,
+            },
+        ),
+        (
+            "upload_group_file",
+            {
+                "group_id": 319567534,
+                "file": str(fe_package),
+                "name": "FractionateEverything_2.3.0.zip",
+            },
+        ),
+        (
+            "send_group_msg",
+            {
+                "group_id": 319567534,
+                "message": "本次构建对应提交：\na178181 功能：自动上传构建产物到QQ群\n\n改动文件：AfterBuildEvent.cs",
+            },
+        ),
+    ]
 
 
 def test_plugins_api_lists_and_updates_global_state(tmp_path: Path) -> None:

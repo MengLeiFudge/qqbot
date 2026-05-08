@@ -23,11 +23,17 @@ from qqbot.services.settings_store import SettingsStore
 
 
 class FakeBot:
+    self_id = "114514"
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.group_files: list[dict[str, object]] = []
 
-    async def call_api(self, api: str, **data: object) -> None:
+    async def call_api(self, api: str, **data: object) -> object:
         self.calls.append((api, data))
+        if api == "get_group_root_files":
+            return {"files": list(self.group_files)}
+        return None
 
 
 def test_orchestrator_schedules_private_message_to_self(tmp_path: Path) -> None:
@@ -136,6 +142,20 @@ def test_orchestrator_uploads_latest_project_zip_for_admin_group(
     wrong_package.write_bytes(b"wrong")
     os.utime(package, (1000, 1000))
     os.utime(wrong_package, (2000, 2000))
+    bot.group_files = [
+        {
+            "file_id": "old-fe",
+            "busid": 1,
+            "file_name": "FractionateEverything_2.2.9.zip",
+            "uploader": 114514,
+        },
+        {
+            "file_id": "keep-get-data",
+            "busid": 2,
+            "file_name": "GetDspData_1.0.0.zip",
+            "uploader": 114514,
+        },
+    ]
     project = CodexProjectBinding(
         project_id="mlj_dspmods",
         display_name="MLJ_DSPmods",
@@ -161,7 +181,22 @@ def test_orchestrator_uploads_latest_project_zip_for_admin_group(
 
     assert result.handled is True
     assert "已上传最新压缩包：FractionateEverything_2.3.0.zip" in result.text
+    assert "已清理旧包 1 个" in result.text
     assert bot.calls == [
+        (
+            "get_group_root_files",
+            {
+                "group_id": 319567534,
+            },
+        ),
+        (
+            "delete_group_file",
+            {
+                "group_id": 319567534,
+                "file_id": "old-fe",
+                "busid": 1,
+            },
+        ),
         (
             "upload_group_file",
             {

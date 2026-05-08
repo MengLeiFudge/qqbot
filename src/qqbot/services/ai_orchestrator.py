@@ -26,6 +26,7 @@ from qqbot.services.codex_task_service import (
     run_codex_session_turn,
 )
 from qqbot.services.feature_catalog import list_visible_features
+from qqbot.services.fe_artifact_publish_service import publish_fe_artifact
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.project_artifact_service import find_latest_project_zip
 from qqbot.services.settings_store import SettingsStore
@@ -207,6 +208,19 @@ class AiOrchestrator:
             return AiOrchestratorResult(
                 True,
                 f"没有找到 {project_match.project.display_name} 的 zip 产物。",
+            )
+        if project_match.project.project_id == "mlj_dspmods":
+            bots = self.action_executor.bot
+            result = await publish_fe_artifact(
+                bots,
+                int(context.group_id),
+                artifact.path,
+                project_match.project.repo_path,
+            )
+            deleted_text = f"，已清理旧包 {len(result.deleted)} 个" if result.deleted else ""
+            return AiOrchestratorResult(
+                True,
+                f"已上传最新压缩包：{artifact.file_name}{deleted_text}",
             )
         result = await self.action_executor.execute(
             AiActionRequest(
