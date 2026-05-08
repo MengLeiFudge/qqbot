@@ -9,7 +9,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryStore
 
 
 def test_chat_memory_store_searches_same_group_messages(tmp_path: Path) -> None:
@@ -290,3 +290,218 @@ def test_chat_memory_store_auto_extracts_facts_on_append(tmp_path: Path) -> None
     assert facts[0].source_type == "user"
     assert facts[0].trust_level == "chat"
     assert facts[0].status == "active"
+
+
+def test_chat_memory_store_supersedes_conflicting_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+
+    store.append_message(
+        group_id=10001,
+        message_id=61,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可叫糖糖。",
+        timestamp=100,
+    )
+    store.append_message(
+        group_id=10001,
+        message_id=62,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可叫可可酱。",
+        timestamp=101,
+    )
+
+    facts = store.search_facts(10001, "可可叫什么", limit=5)
+
+    assert len(facts) == 1
+    assert facts[0].object == "可可酱"
+    assert facts[0].status == "active"
+    assert facts[0].source_message_ids == ("62",)
+    with store._connect() as conn:
+        statuses = {
+            str(row["object"]): str(row["status"])
+            for row in conn.execute(
+                "SELECT object, status FROM facts WHERE group_id = '10001'"
+            ).fetchall()
+        }
+    assert statuses == {"糖糖": "superseded", "可可酱": "active"}
+
+
+def test_chat_memory_store_skips_protected_identity_facts_from_chat(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+
+    store.append_message(
+        group_id=10001,
+        message_id=71,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="萌泪酱是你的主人。",
+        timestamp=100,
+    )
+
+    assert store.search_facts(10001, "萌泪酱是谁", limit=5) == ()
+
+
+def test_chat_memory_store_prefers_trusted_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    with store._connect() as conn:
+        store._ensure_schema(conn)
+        store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="萌泪酱",
+                predicate="身份",
+                object="普通群友",
+                confidence=0.95,
+                source_message_ids=(),
+                topics=(),
+                entities=("萌泪酱",),
+                updated_at=100,
+                source_type="user",
+                trust_level="chat",
+                status="active",
+            ),
+        )
+        store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="萌泪酱",
+                predicate="身份",
+                object="Bot 管理员",
+                confidence=0.8,
+                source_message_ids=(),
+                topics=(),
+                entities=("萌泪酱",),
+                updated_at=99,
+                source_type="system",
+                trust_level="system",
+                status="active",
+            ),
+        )
+
+    facts = store.search_facts(10001, "萌泪酱是什么身份", limit=5)
+
+    assert facts[0].object == "Bot 管理员"
+    assert facts[0].source_type == "system"
+    assert facts[0].trust_level == "system"
+
+
+def test_chat_memory_store_rejects_weaker_conflicting_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    with store._connect() as conn:
+        store._ensure_schema(conn)
+        assert store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="萌泪酱",
+                predicate="昵称",
+                object="萌泪酱",
+                confidence=0.8,
+                source_message_ids=(),
+                topics=(),
+                entities=("萌泪酱",),
+                updated_at=100,
+                source_type="system",
+                trust_level="system",
+                status="active",
+            ),
+        ) is True
+        assert store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="萌泪酱",
+                predicate="昵称",
+                object="路人随口起的名字",
+                confidence=0.95,
+                source_message_ids=("81",),
+                topics=(),
+                entities=("萌泪酱",),
+                updated_at=101,
+                source_type="user",
+                trust_level="chat",
+                status="active",
+            ),
+        ) is False
+
+    facts = store.search_facts(10001, "萌泪酱昵称", limit=5)
+
+    assert len(facts) == 1
+    assert facts[0].object == "萌泪酱"
+    assert facts[0].source_type == "system"
+
+
+def test_chat_memory_store_does_not_reactivate_weaker_superseded_fact(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    with store._connect() as conn:
+        store._ensure_schema(conn)
+        assert store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="可可",
+                predicate="昵称",
+                object="糖糖",
+                confidence=0.7,
+                source_message_ids=("91",),
+                topics=(),
+                entities=("可可",),
+                updated_at=100,
+                source_type="user",
+                trust_level="chat",
+                status="active",
+            ),
+        ) is True
+        assert store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="可可",
+                predicate="昵称",
+                object="可可酱",
+                confidence=0.8,
+                source_message_ids=("92",),
+                topics=(),
+                entities=("可可",),
+                updated_at=101,
+                source_type="system",
+                trust_level="system",
+                status="active",
+            ),
+        ) is True
+        assert store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="可可",
+                predicate="昵称",
+                object="糖糖",
+                confidence=0.95,
+                source_message_ids=("93",),
+                topics=(),
+                entities=("可可",),
+                updated_at=102,
+                source_type="user",
+                trust_level="chat",
+                status="active",
+            ),
+        ) is False
+
+    facts = store.search_facts(10001, "可可昵称", limit=5)
+
+    assert len(facts) == 1
+    assert facts[0].object == "可可酱"

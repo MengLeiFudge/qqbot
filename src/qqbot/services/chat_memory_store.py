@@ -10,6 +10,35 @@ from qqbot.services.ai_gateway import is_safety_rejection_text
 
 
 VALID_DIRECTIONS = {"incoming", "bot"}
+MUTUALLY_EXCLUSIVE_FACT_PREDICATES = {
+    "叫",
+    "身份",
+    "项目",
+    "需求",
+    "昵称",
+}
+PROTECTED_FACT_SUBJECTS = {
+    "bot",
+    "机器人",
+    "棉花糖",
+    "萌萌棉花糖",
+    "萌萌棉花糖♪",
+}
+PROTECTED_FACT_OBJECT_KEYWORDS = (
+    "主人",
+    "管理员",
+    "bot管理员",
+    "Bot 管理员",
+    "系统提示",
+    "开发者",
+)
+PROTECTED_FACT_PREDICATES = {
+    "身份",
+    "是",
+}
+TRUST_LEVEL_WEIGHT = {"chat": 0.0, "bot": 1.5, "admin": 3.0, "system": 4.0}
+SOURCE_TYPE_WEIGHT = {"user": 0.0, "bot": 0.8, "admin": 2.0, "system": 2.5}
+STATUS_WEIGHT = {"active": 0.0, "superseded": -8.0}
 
 
 @dataclass(frozen=True, slots=True)
@@ -545,6 +574,8 @@ class ChatMemoryStore:
         )
 
     def _upsert_fact(self, conn: sqlite3.Connection, fact: ChatMemoryFact) -> bool:
+        if is_protected_chat_fact(fact):
+            return False
         existing = conn.execute(
             """
             SELECT * FROM facts
@@ -554,6 +585,13 @@ class ChatMemoryStore:
         ).fetchone()
         if existing is not None:
             existing_fact = self._fact_from_row(existing)
+            if is_stronger_fact(existing_fact, fact) and existing_fact.object != fact.object:
+                return False
+            if fact.predicate in MUTUALLY_EXCLUSIVE_FACT_PREDICATES:
+                stronger_conflict = self._find_stronger_conflicting_fact(conn, fact)
+                if stronger_conflict is not None:
+                    self._merge_fact_sources(conn, existing_fact, fact, status="superseded")
+                    return False
             source_ids = tuple(
                 dict.fromkeys([*existing_fact.source_message_ids, *fact.source_message_ids])
             )
@@ -584,6 +622,8 @@ class ChatMemoryStore:
             self._index_fact(conn, existing_fact.id)
             return False
 
+        if not self._supersede_conflicting_facts(conn, fact):
+            return False
         cursor = conn.execute(
             """
             INSERT INTO facts (
@@ -610,6 +650,101 @@ class ChatMemoryStore:
         )
         self._index_fact(conn, int(cursor.lastrowid))
         return True
+
+    def _merge_fact_sources(
+        self,
+        conn: sqlite3.Connection,
+        existing_fact: ChatMemoryFact,
+        fact: ChatMemoryFact,
+        *,
+        status: str,
+    ) -> None:
+        source_ids = tuple(dict.fromkeys([*existing_fact.source_message_ids, *fact.source_message_ids]))
+        conn.execute(
+            """
+            UPDATE facts
+            SET confidence = MAX(confidence, ?),
+                source_message_ids = ?,
+                topics = ?,
+                entities = ?,
+                updated_at = MAX(updated_at, ?),
+                source_type = ?,
+                trust_level = ?,
+                status = ?
+            WHERE id = ?
+            """,
+            (
+                fact.confidence,
+                json.dumps(source_ids, ensure_ascii=False),
+                json.dumps(tuple(dict.fromkeys([*existing_fact.topics, *fact.topics])), ensure_ascii=False),
+                json.dumps(tuple(dict.fromkeys([*existing_fact.entities, *fact.entities])), ensure_ascii=False),
+                fact.updated_at,
+                strongest_source_type(existing_fact.source_type, fact.source_type),
+                strongest_trust_level(existing_fact.trust_level, fact.trust_level),
+                status,
+                existing_fact.id,
+            ),
+        )
+        self._index_fact(conn, existing_fact.id)
+
+    def _supersede_conflicting_facts(
+        self,
+        conn: sqlite3.Connection,
+        fact: ChatMemoryFact,
+    ) -> bool:
+        if fact.predicate not in MUTUALLY_EXCLUSIVE_FACT_PREDICATES:
+            return True
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM facts
+            WHERE group_id = ?
+              AND subject = ?
+              AND predicate = ?
+              AND object != ?
+              AND status = 'active'
+            """,
+            (fact.group_id, fact.subject, fact.predicate, fact.object),
+        ).fetchall()
+        superseded_ids: list[int] = []
+        for row in rows:
+            existing_fact = self._fact_from_row(row)
+            if is_stronger_fact(existing_fact, fact):
+                return False
+            superseded_ids.append(existing_fact.id)
+        if not superseded_ids:
+            return True
+        placeholders = ",".join("?" for _ in superseded_ids)
+        conn.execute(
+            f"UPDATE facts SET status = 'superseded' WHERE id IN ({placeholders})",
+            superseded_ids,
+        )
+        for fact_id in superseded_ids:
+            self._index_fact(conn, fact_id)
+        return True
+
+    def _find_stronger_conflicting_fact(
+        self,
+        conn: sqlite3.Connection,
+        fact: ChatMemoryFact,
+    ) -> ChatMemoryFact | None:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM facts
+            WHERE group_id = ?
+              AND subject = ?
+              AND predicate = ?
+              AND object != ?
+              AND status = 'active'
+            """,
+            (fact.group_id, fact.subject, fact.predicate, fact.object),
+        ).fetchall()
+        for row in rows:
+            existing_fact = self._fact_from_row(row)
+            if is_stronger_fact(existing_fact, fact):
+                return existing_fact
+        return None
 
     def _extract_facts_from_record(self, conn: sqlite3.Connection, record: ChatMemoryRecord) -> int:
         inserted = 0
@@ -663,6 +798,7 @@ class ChatMemoryStore:
                     FROM facts_fts
                     JOIN facts ON facts.id = facts_fts.fact_rowid
                     WHERE facts.group_id = ?
+                      AND facts.status = 'active'
                       AND facts_fts MATCH ?
                     ORDER BY bm25(facts_fts), facts.updated_at DESC, facts.id DESC
                     LIMIT ?
@@ -698,6 +834,7 @@ class ChatMemoryStore:
                 SELECT *
                 FROM facts
                 WHERE group_id = ?
+                  AND status = 'active'
                   AND ({' OR '.join(clauses)})
                 ORDER BY updated_at DESC, id DESC
                 LIMIT ?
@@ -992,6 +1129,20 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
     return tuple(facts)
 
 
+def is_protected_chat_fact(fact: ChatMemoryFact) -> bool:
+    if fact.trust_level != "chat" or fact.source_type not in {"user", "bot"}:
+        return False
+    normalized_subject = fact.subject.strip().lower()
+    normalized_object = fact.object.strip().lower()
+    if normalized_subject in {subject.lower() for subject in PROTECTED_FACT_SUBJECTS}:
+        return True
+    if fact.predicate in PROTECTED_FACT_PREDICATES and any(
+        keyword.lower() in normalized_object for keyword in PROTECTED_FACT_OBJECT_KEYWORDS
+    ):
+        return True
+    return False
+
+
 def strongest_source_type(left: str, right: str) -> str:
     order = {"user": 0, "bot": 1, "admin": 2, "system": 3}
     return left if order.get(left, 0) >= order.get(right, 0) else right
@@ -1000,6 +1151,21 @@ def strongest_source_type(left: str, right: str) -> str:
 def strongest_trust_level(left: str, right: str) -> str:
     order = {"chat": 0, "bot": 1, "admin": 2, "system": 3}
     return left if order.get(left, 0) >= order.get(right, 0) else right
+
+
+def fact_strength(fact: ChatMemoryFact) -> tuple[int, int, float, int]:
+    trust_order = {"chat": 0, "bot": 1, "admin": 2, "system": 3}
+    source_order = {"user": 0, "bot": 1, "admin": 2, "system": 3}
+    return (
+        trust_order.get(fact.trust_level, 0),
+        source_order.get(fact.source_type, 0),
+        fact.confidence,
+        fact.updated_at,
+    )
+
+
+def is_stronger_fact(existing: ChatMemoryFact, incoming: ChatMemoryFact) -> bool:
+    return fact_strength(existing) > fact_strength(incoming)
 
 
 def score_fact(fact: ChatMemoryFact, query: str) -> float:
@@ -1013,7 +1179,12 @@ def score_fact(fact: ChatMemoryFact, query: str) -> float:
             " ".join(fact.entities),
         ]
     )
-    score = fact.confidence
+    score = (
+        fact.confidence
+        + TRUST_LEVEL_WEIGHT.get(fact.trust_level, 0.0)
+        + SOURCE_TYPE_WEIGHT.get(fact.source_type, 0.0)
+        + STATUS_WEIGHT.get(fact.status, -4.0)
+    )
     for term in terms:
         if term == fact.subject or term in fact.entities:
             score += 3.0
