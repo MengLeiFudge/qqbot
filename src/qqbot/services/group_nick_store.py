@@ -85,6 +85,20 @@ class GroupNickStore:
                 return latest_name
         return str(qq)
 
+    def build_alias_terms(self, group_id: int | str, query: str) -> tuple[str, ...]:
+        query = query.strip()
+        if not query:
+            return ()
+
+        terms: list[str] = []
+        group_records = self.records.get(str(group_id), {})
+        for qq, record in group_records.items():
+            aliases = tuple(item for item in (qq, record.card, record.nickname) if item)
+            if not any(alias in query for alias in aliases):
+                continue
+            terms.extend(aliases)
+        return tuple(dict.fromkeys(terms))
+
     def remove_group(self, group_id: int | str) -> bool:
         removed = self.records.pop(str(group_id), None) is not None
         if removed:

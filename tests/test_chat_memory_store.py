@@ -222,6 +222,98 @@ def test_chat_memory_store_extracts_rule_facts_and_skips_prompt_injection(tmp_pa
     assert facts[0].confidence >= 0.7
 
 
+def test_chat_memory_store_answers_natural_name_question_from_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=33,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可以后叫可可酱。",
+        timestamp=100,
+    )
+
+    facts = store.search_facts(10001, "可可之前说自己叫什么", limit=5)
+
+    assert len(facts) == 1
+    assert facts[0].subject == "可可"
+    assert facts[0].predicate == "昵称"
+    assert facts[0].object == "可可酱"
+
+
+def test_chat_memory_store_expands_group_nick_aliases_for_search(tmp_path: Path) -> None:
+    run_root = tmp_path / "run"
+    nick_path = run_root / "settings" / "group_nick.json"
+    nick_path.parent.mkdir(parents=True)
+    nick_path.write_text(
+        json.dumps(
+            {
+                "10001": {
+                    "605738729": {
+                        "card": "萌泪酱",
+                        "nickname": "MLJ",
+                        "updated_at": 100,
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    store = ChatMemoryStore(run_root)
+    store.append_message(
+        group_id=10001,
+        message_id=34,
+        direction="incoming",
+        user_id=605738729,
+        sender_name="605738729",
+        text="605738729喜欢维护长期记忆。",
+        timestamp=101,
+    )
+
+    facts = store.search_facts(10001, "萌泪酱喜欢什么", limit=5)
+    records = store.search_messages(10001, "萌泪酱之前说过什么", limit=5)
+
+    assert facts[0].subject == "605738729"
+    assert facts[0].object == "维护长期记忆"
+    assert records[0].message_id == "34"
+
+
+def test_chat_memory_store_extracts_more_rule_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    examples = [
+        (61, "可可不喜欢香菜。"),
+        (62, "可可以后叫可可酱。"),
+        (63, "萌泪酱是棉花糖的主人。"),
+        (64, "以后规则是不要刷屏。"),
+    ]
+    for message_id, text in examples:
+        store.append_message(
+            group_id=10001,
+            message_id=message_id,
+            direction="incoming",
+            user_id=20001,
+            sender_name="可可",
+            text=text,
+            timestamp=message_id,
+        )
+
+    dislike = store.search_facts(10001, "可可不喜欢什么", limit=5)
+    nickname = store.search_facts(10001, "可可叫什么", limit=5)
+    owner = store.search_facts(10001, "萌泪酱是棉花糖的什么人", limit=5)
+    rule = store.search_facts(10001, "群规则是什么", limit=5)
+
+    assert dislike[0].predicate == "不喜欢"
+    assert dislike[0].object == "香菜"
+    assert nickname[0].predicate == "昵称"
+    assert nickname[0].object == "可可酱"
+    assert owner[0].predicate == "主人"
+    assert owner[0].object == "棉花糖"
+    assert rule[0].subject == "群规则"
+    assert rule[0].object == "不要刷屏"
+
+
 def test_chat_memory_store_migrates_legacy_fts_schema(tmp_path: Path) -> None:
     store = ChatMemoryStore(tmp_path / "run")
     with store._connect() as conn:

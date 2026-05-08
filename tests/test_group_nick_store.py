@@ -66,3 +66,17 @@ def test_group_nick_store_removes_group_records(tmp_path: Path) -> None:
     assert store.remove_group(10001) is True
     assert GroupNickStore(path).records == {}
     assert store.remove_group(10001) is False
+
+
+def test_group_nick_store_builds_alias_terms_for_group_member(tmp_path: Path) -> None:
+    store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
+    store.record_group_sender(
+        group_id=10001,
+        qq=605738729,
+        card="萌泪酱",
+        nickname="MLJ",
+        updated_at=1,
+    )
+
+    assert store.build_alias_terms(10001, "萌泪酱是谁") == ("605738729", "萌泪酱", "MLJ")
+    assert store.build_alias_terms(10001, "605738729") == ("605738729", "萌泪酱", "MLJ")

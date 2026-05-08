@@ -275,7 +275,7 @@ def test_ai_context_includes_fact_source_message_even_when_query_matches_only_fa
     )
 
     joined = "\n".join(context)
-    assert "可可 叫 糖糖" in joined
+    assert "可可 昵称 糖糖" in joined
     assert "可可(10001): 可可叫糖糖。" in joined
 
 

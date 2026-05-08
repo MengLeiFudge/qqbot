@@ -7,15 +7,19 @@ import re
 import sqlite3
 
 from qqbot.services.ai_gateway import is_safety_rejection_text
+from qqbot.services.group_nick_store import GroupNickStore
 
 
 VALID_DIRECTIONS = {"incoming", "bot"}
 MUTUALLY_EXCLUSIVE_FACT_PREDICATES = {
     "叫",
+    "不喜欢",
     "身份",
     "项目",
     "需求",
     "昵称",
+    "主人",
+    "规则",
 }
 PROTECTED_FACT_SUBJECTS = {
     "bot",
@@ -35,6 +39,13 @@ PROTECTED_FACT_OBJECT_KEYWORDS = (
 PROTECTED_FACT_PREDICATES = {
     "身份",
     "是",
+}
+PROTECTED_FACT_RELATION_OBJECTS = {
+    "你",
+    "bot",
+    "机器人",
+    "萌萌棉花糖",
+    "萌萌棉花糖♪",
 }
 TRUST_LEVEL_WEIGHT = {"chat": 0.0, "bot": 1.5, "admin": 3.0, "system": 4.0}
 SOURCE_TYPE_WEIGHT = {"user": 0.0, "bot": 0.8, "admin": 2.0, "system": 2.5}
@@ -191,11 +202,12 @@ class ChatMemoryStore:
         normalized_query = query.strip()
         if not normalized_query or limit <= 0 or not self.db_path.exists():
             return ()
+        expanded_query = self._expand_search_query(group_id, normalized_query)
 
         with self._connect() as conn:
             self._ensure_schema(conn)
             search_limit = max(limit * 4, limit)
-            rows = self._search_with_fts(conn, str(group_id), normalized_query, search_limit)
+            rows = self._search_with_fts(conn, str(group_id), expanded_query, search_limit)
             if len(rows) < limit:
                 seen_ids = {int(row["id"]) for row in rows}
                 rows.extend(
@@ -203,7 +215,7 @@ class ChatMemoryStore:
                     for row in self._search_with_like(
                         conn,
                         str(group_id),
-                        normalized_query,
+                        expanded_query,
                         search_limit,
                     )
                     if int(row["id"]) not in seen_ids
@@ -213,7 +225,7 @@ class ChatMemoryStore:
             for _, record in sorted(
                 (
                     (
-                        score_message_record(self._record_from_row(row), normalized_query),
+                        score_message_record(self._record_from_row(row), expanded_query),
                         self._record_from_row(row),
                     )
                     for row in rows
@@ -303,9 +315,10 @@ class ChatMemoryStore:
         normalized_query = query.strip()
         if not normalized_query or limit <= 0 or not self.db_path.exists():
             return ()
+        expanded_query = self._expand_search_query(group_id, normalized_query)
         with self._connect() as conn:
             self._ensure_schema(conn)
-            rows = self._search_facts_with_fts(conn, str(group_id), normalized_query, limit * 4)
+            rows = self._search_facts_with_fts(conn, str(group_id), expanded_query, limit * 4)
             if len(rows) < limit:
                 seen_ids = {int(row["id"]) for row in rows}
                 rows.extend(
@@ -313,7 +326,7 @@ class ChatMemoryStore:
                     for row in self._search_facts_with_like(
                         conn,
                         str(group_id),
-                        normalized_query,
+                        expanded_query,
                         limit * 4,
                     )
                     if int(row["id"]) not in seen_ids
@@ -322,7 +335,7 @@ class ChatMemoryStore:
             fact
             for _, fact in sorted(
                 (
-                    (score_fact(self._fact_from_row(row), normalized_query), self._fact_from_row(row))
+                    (score_fact(self._fact_from_row(row), expanded_query), self._fact_from_row(row))
                     for row in rows
                 ),
                 key=lambda item: (-item[0], -item[1].updated_at, -item[1].id),
@@ -370,6 +383,16 @@ class ChatMemoryStore:
                 "SELECT DISTINCT group_id FROM messages ORDER BY group_id"
             ).fetchall()
         return tuple(int(row["group_id"]) for row in rows if str(row["group_id"]).isdigit())
+
+    def _expand_search_query(self, group_id: int | str, query: str) -> str:
+        terms = list(build_like_terms(query))
+        try:
+            nick_store = GroupNickStore(self.data_root / "settings" / "group_nick.json")
+            if str(group_id).isdigit():
+                terms.extend(nick_store.build_alias_terms(group_id, query))
+        except Exception:
+            pass
+        return " ".join(dict.fromkeys([query, *terms]))
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1095,18 +1118,9 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
     if not text or is_prompt_injection_like(text):
         return ()
 
-    patterns = [
-        r"^(?P<subject>[\w\u4e00-\u9fff]{1,20})(?P<predicate>喜欢|叫|是|在做|正在做|想要|需要)(?P<object>.+)$",
-        r"^(?P<subject>[\w\u4e00-\u9fff]{1,20})的(?P<predicate>身份|项目|需求|昵称)是(?P<object>.+)$",
-    ]
     facts: list[ChatMemoryFact] = []
-    for pattern in patterns:
-        match = re.match(pattern, text)
-        if match is None:
-            continue
-        subject = match.group("subject").strip()
-        predicate = match.group("predicate").strip()
-        obj = match.group("object").strip().strip("，,：:")
+    extracted = list(iter_rule_fact_parts(text))
+    for subject, predicate, obj in extracted:
         if not subject or not obj or len(obj) > 80:
             continue
         facts.append(
@@ -1129,6 +1143,47 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
     return tuple(facts)
 
 
+def iter_rule_fact_parts(text: str) -> tuple[tuple[str, str, str], ...]:
+    patterns = [
+        (
+            r"^(?P<subject>[\w\u4e00-\u9fff]{1,20})不喜欢(?P<object>.+)$",
+            "不喜欢",
+        ),
+        (
+            r"^(?P<subject>[\w\u4e00-\u9fff]{1,20}?)(?:以后|之后|现在)?叫(?P<object>.+)$",
+            "昵称",
+        ),
+        (
+            r"^(?P<subject>[\w\u4e00-\u9fff]{1,20})是(?P<object>.+)的(?P<predicate>主人|管理员|作者)$",
+            None,
+        ),
+        (
+            r"^(?:以后)?规则是(?P<object>.+)$",
+            "规则",
+        ),
+        (
+            r"^(?P<subject>[\w\u4e00-\u9fff]{1,20})(?P<predicate>喜欢|是|在做|正在做|想要|需要)(?P<object>.+)$",
+            None,
+        ),
+        (
+            r"^(?P<subject>[\w\u4e00-\u9fff]{1,20})的(?P<predicate>身份|项目|需求|昵称)是(?P<object>.+)$",
+            None,
+        ),
+    ]
+    parts: list[tuple[str, str, str]] = []
+    for pattern in patterns:
+        expression, fixed_predicate = pattern
+        match = re.match(expression, text)
+        if match is None:
+            continue
+        subject = (match.groupdict().get("subject") or "群规则").strip()
+        predicate = (fixed_predicate or match.groupdict().get("predicate") or "").strip()
+        obj = (match.groupdict().get("object") or "").strip().strip("，,：:")
+        parts.append((subject, predicate, obj))
+        break
+    return tuple(parts)
+
+
 def is_protected_chat_fact(fact: ChatMemoryFact) -> bool:
     if fact.trust_level != "chat" or fact.source_type not in {"user", "bot"}:
         return False
@@ -1139,6 +1194,10 @@ def is_protected_chat_fact(fact: ChatMemoryFact) -> bool:
     if fact.predicate in PROTECTED_FACT_PREDICATES and any(
         keyword.lower() in normalized_object for keyword in PROTECTED_FACT_OBJECT_KEYWORDS
     ):
+        return True
+    if fact.predicate in {"主人", "管理员", "作者"} and normalized_object in {
+        item.lower() for item in PROTECTED_FACT_RELATION_OBJECTS
+    }:
         return True
     return False
 
@@ -1188,6 +1247,8 @@ def score_fact(fact: ChatMemoryFact, query: str) -> float:
     for term in terms:
         if term == fact.subject or term in fact.entities:
             score += 3.0
+        if term == fact.predicate:
+            score += 3.0
         if term in fact.object:
             score += 2.0
         if term in fact.topics:
@@ -1210,6 +1271,16 @@ def build_like_terms(query: str) -> list[str]:
         for phrase in candidate_phrases:
             if phrase.endswith(suffix) and len(phrase) > len(suffix):
                 terms.append(phrase[: -len(suffix)])
+    for suffix, predicate in (
+        ("不喜欢什么", "不喜欢"),
+        ("喜欢什么", "喜欢"),
+        ("叫什么", "昵称"),
+    ):
+        for phrase in candidate_phrases:
+            if suffix == "喜欢什么" and phrase.endswith("不喜欢什么"):
+                continue
+            if phrase.endswith(suffix):
+                terms.append(predicate)
     for marker in (
         "知识库",
         "聊天记录",
