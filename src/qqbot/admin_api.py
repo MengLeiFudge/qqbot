@@ -57,6 +57,32 @@ class KunUserUpdateRequest(BaseModel):
     updates: dict[str, object]
 
 
+class MemoryDebugRequest(BaseModel):
+    group_id: int
+    query: str
+    limit: int = 6
+
+
+class MemoryRebuildRequest(BaseModel):
+    group_id: int
+
+
+class MemoryFactUpsertRequest(BaseModel):
+    group_id: int
+    subject: str
+    predicate: str
+    object: str
+    confidence: float = 1.0
+    source_type: str = "system"
+    trust_level: str = "system"
+    topics: list[str] = []
+    entities: list[str] = []
+
+
+class MemoryFactStatusRequest(BaseModel):
+    status: str
+
+
 def register_admin_routes(
     app: FastAPI,
     settings: RuntimeSettings,
@@ -108,6 +134,45 @@ def register_admin_routes(
         admin_service: AdminService = Depends(service),
     ) -> dict[str, object]:
         return admin_service.list_group_messages(await resolve_group_names())
+
+    @app.post("/admin/api/memory/debug")
+    async def admin_memory_debug(
+        payload: MemoryDebugRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.debug_memory_search(payload.group_id, payload.query, payload.limit)
+
+    @app.post("/admin/api/memory/facts/rebuild")
+    async def admin_memory_rebuild_facts(
+        payload: MemoryRebuildRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, int]:
+        return admin_service.rebuild_memory_facts(payload.group_id)
+
+    @app.post("/admin/api/memory/facts")
+    async def admin_memory_upsert_fact(
+        payload: MemoryFactUpsertRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.upsert_memory_fact(payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/admin/api/memory/facts/{fact_id}")
+    async def admin_memory_update_fact_status(
+        fact_id: int,
+        payload: MemoryFactStatusRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.set_memory_fact_status(fact_id, payload.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/admin/api/plugins")
     async def admin_plugins(
@@ -446,6 +511,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       <button class="tab-button active" data-tab="realtimePanel" onclick="showTab('realtimePanel')">实时信息</button>
       <button class="tab-button" data-tab="groupControlPanel" onclick="showTab('groupControlPanel')">群管管理</button>
       <button class="tab-button" data-tab="kunPanel" onclick="showTab('kunPanel')">养鲲管理</button>
+      <button class="tab-button" data-tab="memoryPanel" onclick="showTab('memoryPanel')">长期记忆</button>
       <button class="tab-button" data-tab="systemPanel" onclick="showTab('systemPanel')">系统设置</button>
     </nav>
     <main class="content">
@@ -517,6 +583,40 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           </div>
           <div id="kunReadonly" class="status"></div>
           <div id="kunFields" class="form-grid"></div>
+        </div>
+      </section>
+      <section id="memoryPanel" class="tab-panel">
+        <div class="panel-block">
+          <h2>长期记忆</h2>
+          <h3>记忆检索调试</h3>
+          <div class="form-grid">
+            <div class="field"><label for="memoryGroupInput">群号</label><input id="memoryGroupInput" inputmode="numeric" placeholder="群号"></div>
+            <div class="field"><label for="memoryQueryInput">问题</label><input id="memoryQueryInput" placeholder="输入要调试的问题"></div>
+            <div class="field"><label for="memoryLimitInput">数量</label><input id="memoryLimitInput" type="number" min="1" max="20" step="1" value="6"></div>
+          </div>
+          <div class="row">
+            <button onclick="debugMemorySearch()">检索调试</button>
+            <button onclick="rebuildMemoryFacts()">重建事实</button>
+            <span id="memoryStatus" class="muted"></span>
+          </div>
+          <pre id="memoryDebugOutput">请输入群号和问题。</pre>
+        </div>
+        <div class="panel-block">
+          <h3>可信事实管理</h3>
+          <div class="form-grid">
+            <div class="field"><label for="memoryFactSubject">主体</label><input id="memoryFactSubject"></div>
+            <div class="field"><label for="memoryFactPredicate">关系</label><input id="memoryFactPredicate"></div>
+            <div class="field"><label for="memoryFactObject">内容</label><input id="memoryFactObject"></div>
+            <div class="field"><label for="memoryFactConfidence">置信度</label><input id="memoryFactConfidence" type="number" min="0" max="1" step="0.05" value="1"></div>
+            <div class="field"><label for="memoryFactSourceType">来源类型</label><select id="memoryFactSourceType"><option value="system">system</option><option value="admin">admin</option></select></div>
+            <div class="field"><label for="memoryFactTrustLevel">信任层级</label><select id="memoryFactTrustLevel"><option value="system">system</option><option value="admin">admin</option></select></div>
+          </div>
+          <div class="row">
+            <button onclick="upsertMemoryFact()">保存可信事实</button>
+            <input id="memoryFactIdInput" inputmode="numeric" placeholder="事实 ID">
+            <select id="memoryFactStatusInput"><option value="disabled">disabled</option><option value="active">active</option><option value="superseded">superseded</option></select>
+            <button onclick="updateMemoryFactStatus()">更新状态</button>
+          </div>
         </div>
       </section>
       <section id="systemPanel" class="tab-panel">
@@ -688,6 +788,90 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     function scrollSelectedMessageListToBottom() {{
       const list = getSelectedMessageList();
       if (list) list.scrollTop = list.scrollHeight;
+    }}
+
+    function readMemoryGroupId() {{
+      const value = Number(document.getElementById("memoryGroupInput").value);
+      if (!Number.isInteger(value) || value <= 0) throw new Error("请输入有效群号。");
+      return value;
+    }}
+
+    async function debugMemorySearch() {{
+      const status = document.getElementById("memoryStatus");
+      status.textContent = "正在检索...";
+      try {{
+        const payload = await api("/admin/api/memory/debug", {{
+          method: "POST",
+          body: JSON.stringify({{
+            group_id: readMemoryGroupId(),
+            query: document.getElementById("memoryQueryInput").value,
+            limit: Number(document.getElementById("memoryLimitInput").value || 6),
+          }}),
+        }});
+        document.getElementById("memoryDebugOutput").textContent = JSON.stringify(payload, null, 2);
+        status.textContent = "检索完成。";
+      }} catch (error) {{
+        status.textContent = `检索失败：${{error.message}}`;
+      }}
+    }}
+
+    async function rebuildMemoryFacts() {{
+      const status = document.getElementById("memoryStatus");
+      status.textContent = "正在重建事实...";
+      try {{
+        const payload = await api("/admin/api/memory/facts/rebuild", {{
+          method: "POST",
+          body: JSON.stringify({{ group_id: readMemoryGroupId() }}),
+        }});
+        document.getElementById("memoryDebugOutput").textContent = JSON.stringify(payload, null, 2);
+        status.textContent = "重建完成。";
+      }} catch (error) {{
+        status.textContent = `重建失败：${{error.message}}`;
+      }}
+    }}
+
+    async function upsertMemoryFact() {{
+      const status = document.getElementById("memoryStatus");
+      status.textContent = "正在保存可信事实...";
+      try {{
+        const payload = await api("/admin/api/memory/facts", {{
+          method: "POST",
+          body: JSON.stringify({{
+            group_id: readMemoryGroupId(),
+            subject: document.getElementById("memoryFactSubject").value,
+            predicate: document.getElementById("memoryFactPredicate").value,
+            object: document.getElementById("memoryFactObject").value,
+            confidence: Number(document.getElementById("memoryFactConfidence").value || 1),
+            source_type: document.getElementById("memoryFactSourceType").value,
+            trust_level: document.getElementById("memoryFactTrustLevel").value,
+            topics: [],
+            entities: [],
+          }}),
+        }});
+        document.getElementById("memoryDebugOutput").textContent = JSON.stringify(payload, null, 2);
+        status.textContent = "可信事实已保存。";
+      }} catch (error) {{
+        status.textContent = `保存失败：${{error.message}}`;
+      }}
+    }}
+
+    async function updateMemoryFactStatus() {{
+      const status = document.getElementById("memoryStatus");
+      const factId = Number(document.getElementById("memoryFactIdInput").value);
+      if (!Number.isInteger(factId) || factId <= 0) {{
+        status.textContent = "请输入有效事实 ID。";
+        return;
+      }}
+      try {{
+        const payload = await api(`/admin/api/memory/facts/${{factId}}`, {{
+          method: "PUT",
+          body: JSON.stringify({{ status: document.getElementById("memoryFactStatusInput").value }}),
+        }});
+        document.getElementById("memoryDebugOutput").textContent = JSON.stringify(payload, null, 2);
+        status.textContent = "事实状态已更新。";
+      }} catch (error) {{
+        status.textContent = `更新失败：${{error.message}}`;
+      }}
     }}
 
     function renderMessageGroup(group) {{

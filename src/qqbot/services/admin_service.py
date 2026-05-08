@@ -8,6 +8,7 @@ import subprocess
 from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.codex_task_service import load_codex_group_bindings, load_codex_projects
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
@@ -199,6 +200,39 @@ class AdminService:
             group_names or {},
             limit_per_group=80,
         )
+
+    def rebuild_memory_facts(self, group_id: int) -> dict[str, int]:
+        return ChatMemoryStore(self.settings.data_root).rebuild_facts(group_id)
+
+    def debug_memory_search(
+        self,
+        group_id: int,
+        query: str,
+        limit: int = 6,
+    ) -> dict[str, object]:
+        return ChatMemoryStore(self.settings.data_root).debug_search(group_id, query, limit=limit)
+
+    def upsert_memory_fact(self, payload: dict[str, object]) -> dict[str, object]:
+        fact = ChatMemoryStore(self.settings.data_root).upsert_trusted_fact(
+            group_id=int(payload.get("group_id", 0)),
+            subject=str(payload.get("subject", "")),
+            predicate=str(payload.get("predicate", "")),
+            object=str(payload.get("object", "")),
+            confidence=float(payload.get("confidence", 1.0)),
+            source_type=str(payload.get("source_type", "system")),
+            trust_level=str(payload.get("trust_level", "system")),
+            topics=tuple(str(item) for item in payload.get("topics", []) if str(item).strip())
+            if isinstance(payload.get("topics", []), list)
+            else (),
+            entities=tuple(str(item) for item in payload.get("entities", []) if str(item).strip())
+            if isinstance(payload.get("entities", []), list)
+            else (),
+        )
+        return {"fact": self._memory_fact_to_payload(fact)}
+
+    def set_memory_fact_status(self, fact_id: int, status: str) -> dict[str, object]:
+        updated = ChatMemoryStore(self.settings.data_root).set_fact_status(fact_id, status)
+        return {"fact_id": fact_id, "status": status, "updated": updated}
 
     def list_ai(self) -> dict[str, object]:
         profiles = load_ai_profiles(self.settings.ai_profile_file)
@@ -454,4 +488,22 @@ class AdminService:
             "effective_project_id": effective_project_id,
             "effective_project_name": getattr(project, "display_name", ""),
             "source": "runtime" if runtime_project_id else ("default" if default_project_id else "none"),
+        }
+
+    @staticmethod
+    def _memory_fact_to_payload(fact: object) -> dict[str, object]:
+        return {
+            "id": getattr(fact, "id"),
+            "group_id": getattr(fact, "group_id"),
+            "subject": getattr(fact, "subject"),
+            "predicate": getattr(fact, "predicate"),
+            "object": getattr(fact, "object"),
+            "confidence": getattr(fact, "confidence"),
+            "source_message_ids": list(getattr(fact, "source_message_ids")),
+            "topics": list(getattr(fact, "topics")),
+            "entities": list(getattr(fact, "entities")),
+            "updated_at": getattr(fact, "updated_at"),
+            "source_type": getattr(fact, "source_type"),
+            "trust_level": getattr(fact, "trust_level"),
+            "status": getattr(fact, "status"),
         }

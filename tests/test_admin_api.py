@@ -1,6 +1,12 @@
 from pathlib import Path
 import asyncio
 import json
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 from fastapi import FastAPI
 
@@ -8,6 +14,7 @@ from qqbot.admin_api import register_admin_routes
 from qqbot.config import RuntimeSettings
 import qqbot.services.admin_service as admin_service_module
 from qqbot.services.admin_service import AdminService
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
@@ -169,6 +176,10 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "message-row" in body
     assert ".message-row.incoming" in body
     assert ".message-row.bot" in body
+    assert "长期记忆" in body
+    assert "/admin/api/memory/debug" in body
+    assert "/admin/api/memory/facts/rebuild" in body
+    assert "/admin/api/memory/facts" in body
 
 
 def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
@@ -214,6 +225,66 @@ def test_group_messages_api_returns_grouped_realtime_messages(tmp_path: Path) ->
         "incoming",
         "bot",
     ]
+
+
+def test_memory_admin_api_debugs_rebuilds_and_updates_facts(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path / "run")
+    memory_store.append_message(
+        group_id=516286670,
+        message_id=221,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    )
+    chat_fact = memory_store.search_facts(516286670, "可可喜欢什么", limit=5)[0]
+    app = build_app(tmp_path)
+
+    debug_status, debug_body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/memory/debug",
+        json_body={"group_id": 516286670, "query": "可可喜欢什么", "limit": 5},
+    )
+    upsert_status, upsert_body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/memory/facts",
+        json_body={
+            "group_id": 516286670,
+            "subject": "萌泪酱",
+            "predicate": "身份",
+            "object": "Bot 管理员",
+            "confidence": 1.0,
+            "source_type": "system",
+            "trust_level": "system",
+            "topics": ["AI"],
+            "entities": ["萌泪酱"],
+        },
+    )
+    disable_status, disable_body = asgi_request(
+        app,
+        "PUT",
+        f"/admin/api/memory/facts/{chat_fact.id}",
+        json_body={"status": "disabled"},
+    )
+    rebuild_status, rebuild_body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/memory/facts/rebuild",
+        json_body={"group_id": 516286670},
+    )
+
+    assert debug_status == 200
+    assert json.loads(debug_body)["facts"][0]["subject"] == "可可"
+    assert rebuild_status == 200
+    assert json.loads(rebuild_body)["messages_scanned"] == 1
+    assert json.loads(rebuild_body)["disabled_facts_restored"] == 1
+    assert upsert_status == 200
+    assert json.loads(upsert_body)["fact"]["object"] == "Bot 管理员"
+    assert disable_status == 200
+    assert json.loads(disable_body) == {"fact_id": chat_fact.id, "status": "disabled", "updated": True}
 
 
 def test_upload_local_artifact_api_uploads_repo_zip(tmp_path: Path, monkeypatch) -> None:

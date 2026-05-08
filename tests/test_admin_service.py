@@ -1,10 +1,17 @@
 from pathlib import Path
+import sys
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
 import qqbot.services.admin_service as admin_service_module
+from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
@@ -281,6 +288,45 @@ def test_list_group_messages_returns_recent_messages_with_group_names(tmp_path: 
         "incoming",
         "bot",
     ]
+
+
+def test_memory_admin_service_rebuilds_debugs_and_updates_facts(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    memory_store = ChatMemoryStore(tmp_path / "run")
+    memory_store.append_message(
+        group_id=10001,
+        message_id=201,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    )
+    chat_fact = memory_store.search_facts(10001, "可可喜欢什么", limit=5)[0]
+
+    debugged = service.debug_memory_search(10001, "可可喜欢什么")
+    trusted = service.upsert_memory_fact(
+        {
+            "group_id": 10001,
+            "subject": "萌泪酱",
+            "predicate": "身份",
+            "object": "Bot 管理员",
+            "confidence": 1.0,
+            "source_type": "system",
+            "trust_level": "system",
+            "topics": ["AI"],
+            "entities": ["萌泪酱"],
+        }
+    )
+    disabled = service.set_memory_fact_status(chat_fact.id, "disabled")
+    rebuilt = service.rebuild_memory_facts(10001)
+
+    assert rebuilt["messages_scanned"] == 1
+    assert rebuilt["disabled_facts_restored"] == 1
+    assert debugged["facts"][0]["subject"] == "可可"
+    assert trusted["fact"]["object"] == "Bot 管理员"
+    assert disabled["updated"] is True
+    assert disabled["fact_id"] == chat_fact.id
 
 
 def test_log_reading_rejects_unsafe_file_names_and_unknown_runs(tmp_path: Path) -> None:
