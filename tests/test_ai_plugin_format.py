@@ -229,6 +229,33 @@ def test_ai_context_omits_long_term_memory_when_no_result(tmp_path: Path) -> Non
     assert "长期记忆检索结果" not in "\n".join(context)
 
 
+def test_ai_context_separates_memory_facts_from_source_messages(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id=516286670,
+        message_id=10,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="可可喜欢研究 shapez 数据库。",
+        timestamp=1,
+    )
+    memory_store.extract_facts_from_recent_messages(516286670, limit=10)
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(text="可可喜欢什么"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "长期事实记忆" in joined
+    assert "相关历史原文" in joined
+    assert joined.index("长期事实记忆") < joined.index("相关历史原文")
+    assert "可可 喜欢 研究 shapez 数据库" in joined
+    assert "可可(10001): 可可喜欢研究 shapez 数据库。" in joined
+
+
 def test_ai_context_includes_author_and_admin_identity_facts(tmp_path: Path) -> None:
     settings = RuntimeSettings(
         data_root=tmp_path,

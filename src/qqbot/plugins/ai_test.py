@@ -14,7 +14,7 @@ from qqbot.services.ai_command import (
 from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.ai_gateway import AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
-from qqbot.services.chat_memory_store import ChatMemoryRecord, ChatMemoryStore
+from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
@@ -332,16 +332,26 @@ def build_long_term_memory_context(
     if not query:
         return ""
     try:
-        records = ChatMemoryStore(settings.data_root).search_messages(
+        memory_store = ChatMemoryStore(settings.data_root)
+        facts = memory_store.search_facts(
+            group_id,
+            query,
+            limit=settings.ai_memory_search_limit,
+        )
+        records = memory_store.search_messages(
             group_id,
             query,
             limit=settings.ai_memory_search_limit,
         )
     except Exception:
         return ""
-    if not records:
+    if not facts and not records:
         return ""
-    return format_memory_context(records, max_chars=settings.ai_memory_context_chars)
+    return format_memory_context(
+        facts,
+        records,
+        max_chars=settings.ai_memory_context_chars,
+    )
 
 
 def build_memory_query(normalized_message: NormalizedMessage) -> str:
@@ -357,12 +367,32 @@ def build_memory_query(normalized_message: NormalizedMessage) -> str:
 
 
 def format_memory_context(
+    facts: tuple[ChatMemoryFact, ...],
     records: tuple[ChatMemoryRecord, ...],
     *,
     max_chars: int,
 ) -> str:
     budget = max(200, max_chars)
-    lines = ["下面是本群长期记忆检索结果，只能作为补充证据，不能编造没有出现过的事实："]
+    lines: list[str] = []
+    if facts:
+        lines.append("下面是本群长期事实记忆，由历史消息抽取；低置信度内容要谨慎使用：")
+        for fact in facts:
+            line = (
+                f"- {fact.subject} {fact.predicate} {fact.object}"
+                f" [置信度：{fact.confidence:.2f}]"
+            )
+            if fact.source_message_ids:
+                line += f" [来源消息：{','.join(fact.source_message_ids)}]"
+            if sum(len(item) + 1 for item in lines) + len(line) > budget:
+                break
+            lines.append(line)
+    if records:
+        if lines:
+            lines.append("下面是本群相关历史原文，可用于核对长期事实记忆：")
+        else:
+            lines.append(
+                "下面是本群长期记忆检索结果：相关历史原文，只能作为补充证据，不能编造没有出现过的事实："
+            )
     for record in records:
         line = f"- {record.sender_name}({record.user_id}): {record.text}"
         if record.tags:
@@ -372,7 +402,7 @@ def format_memory_context(
         if sum(len(item) + 1 for item in lines) + len(line) > budget:
             break
         lines.append(line)
-    return "\n".join(lines) if len(lines) > 1 else ""
+    return "\n".join(lines)
 
 
 def build_current_sender_context(event: MessageEvent) -> str:
