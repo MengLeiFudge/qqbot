@@ -280,6 +280,55 @@ def test_ai_context_includes_fact_source_message_even_when_query_matches_only_fa
     assert "可可(10001): 可可叫糖糖。" in joined
 
 
+def test_ai_context_includes_current_sender_memory_across_groups(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id=10001,
+        message_id=21,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="可可喜欢研究 shapez 存档。",
+        timestamp=1,
+    )
+    memory_store.append_message(
+        group_id=516286670,
+        message_id=22,
+        direction="incoming",
+        user_id=10002,
+        sender_name="路人",
+        text="路人喜欢研究 shapez 存档。",
+        timestamp=2,
+    )
+    memory_store.append_message(
+        group_id=10003,
+        message_id=23,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="以后规则是不要刷屏。",
+        timestamp=3,
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            user_id="10001",
+            text="我之前喜欢研究什么",
+            sender=FakeSender(user_id=10001, card="可可"),
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "当前发言者跨群长期记忆" in joined
+    sender_memory = joined.split("当前发言者跨群长期记忆", 1)[1]
+    assert "可可 喜欢 研究 shapez 存档" in joined
+    assert "可可(10001) 在群 10001 说： 可可喜欢研究 shapez 存档。" in joined
+    assert "路人喜欢研究 shapez 存档" not in sender_memory
+    assert "不要刷屏" not in sender_memory
+
+
 def test_memory_context_budget_keeps_trusted_fact_and_source_before_noise() -> None:
     fact = ChatMemoryFact(
         id=1,

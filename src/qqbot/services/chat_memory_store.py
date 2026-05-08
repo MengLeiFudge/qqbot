@@ -235,6 +235,58 @@ class ChatMemoryStore:
         )
         return records
 
+    def search_user_messages(
+        self,
+        *,
+        current_group_id: int | str,
+        user_id: int | str,
+        query: str,
+        limit: int = 4,
+    ) -> tuple[ChatMemoryRecord, ...]:
+        normalized_query = query.strip()
+        normalized_user_id = str(user_id).strip()
+        if not normalized_query or not normalized_user_id or limit <= 0 or not self.db_path.exists():
+            return ()
+        expanded_query = self._expand_search_query(current_group_id, normalized_query)
+
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            search_limit = max(limit * 4, limit)
+            rows = self._search_user_messages_with_fts(
+                conn,
+                str(current_group_id),
+                normalized_user_id,
+                expanded_query,
+                search_limit,
+            )
+            if len(rows) < limit:
+                seen_ids = {int(row["id"]) for row in rows}
+                rows.extend(
+                    row
+                    for row in self._search_user_messages_with_like(
+                        conn,
+                        str(current_group_id),
+                        normalized_user_id,
+                        expanded_query,
+                        search_limit,
+                    )
+                    if int(row["id"]) not in seen_ids
+                )
+        records = tuple(
+            record
+            for _, record in sorted(
+                (
+                    (
+                        score_message_record(self._record_from_row(row), expanded_query),
+                        self._record_from_row(row),
+                    )
+                    for row in rows
+                ),
+                key=lambda item: (-item[0], -item[1].timestamp, -item[1].id),
+            )[:limit]
+        )
+        return records
+
     def load_messages_by_message_ids(
         self,
         group_id: int | str,
@@ -479,6 +531,47 @@ class ChatMemoryStore:
                     )
                     if int(row["id"]) not in seen_ids
                 )
+        facts = tuple(
+            fact
+            for _, fact in sorted(
+                (
+                    (score_fact(self._fact_from_row(row), expanded_query), self._fact_from_row(row))
+                    for row in rows
+                ),
+                key=lambda item: (-item[0], -item[1].updated_at, -item[1].id),
+            )[:limit]
+        )
+        return facts
+
+    def search_user_facts(
+        self,
+        *,
+        current_group_id: int | str,
+        user_id: int | str,
+        aliases: tuple[str, ...] | list[str],
+        query: str,
+        limit: int = 4,
+    ) -> tuple[ChatMemoryFact, ...]:
+        normalized_query = query.strip()
+        identity_terms = tuple(
+            dict.fromkeys(
+                term.strip()
+                for term in (str(user_id), *aliases)
+                if term and term.strip()
+            )
+        )
+        if not normalized_query or not identity_terms or limit <= 0 or not self.db_path.exists():
+            return ()
+        expanded_query = self._expand_search_query(current_group_id, normalized_query)
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = self._search_user_facts_with_like(
+                conn,
+                str(current_group_id),
+                identity_terms,
+                expanded_query,
+                limit * 4,
+            )
         facts = tuple(
             fact
             for _, fact in sorted(
@@ -1129,6 +1222,49 @@ class ChatMemoryStore:
             ).fetchall()
         )
 
+    def _search_user_facts_with_like(
+        self,
+        conn: sqlite3.Connection,
+        current_group_id: str,
+        identity_terms: tuple[str, ...],
+        query: str,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        query_terms = build_like_terms(query)
+        if not query_terms:
+            return []
+        identity_clauses: list[str] = []
+        params: list[object] = []
+        for term in identity_terms:
+            like = f"%{term}%"
+            identity_clauses.append("(subject = ? OR entities LIKE ?)")
+            params.extend([term, like])
+
+        query_clauses: list[str] = []
+        for term in query_terms:
+            like = f"%{term}%"
+            query_clauses.append(
+                "(subject LIKE ? OR predicate LIKE ? OR object LIKE ? OR topics LIKE ? OR entities LIKE ?)"
+            )
+            params.extend([like, like, like, like, like])
+        params.append(limit)
+        return list(
+            conn.execute(
+                f"""
+                SELECT *
+                FROM facts
+                WHERE status = 'active'
+                  AND group_id != ?
+                  AND subject != '群规则'
+                  AND ({' OR '.join(identity_clauses)})
+                  AND ({' OR '.join(query_clauses)})
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (current_group_id, *params),
+            ).fetchall()
+        )
+
     def _search_with_fts(
         self,
         conn: sqlite3.Connection,
@@ -1154,6 +1290,38 @@ class ChatMemoryStore:
                     LIMIT ?
                     """,
                     (group_id, fts_query, limit),
+                ).fetchall()
+            )
+        except sqlite3.OperationalError:
+            return []
+
+    def _search_user_messages_with_fts(
+        self,
+        conn: sqlite3.Connection,
+        current_group_id: str,
+        user_id: str,
+        query: str,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        if not self._fts_available(conn):
+            return []
+        fts_query = build_fts_query(query)
+        if not fts_query:
+            return []
+        try:
+            return list(
+                conn.execute(
+                    """
+                    SELECT messages.*
+                    FROM messages_fts
+                    JOIN messages ON messages.id = messages_fts.message_rowid
+                    WHERE messages.user_id = ?
+                      AND messages.group_id != ?
+                      AND messages_fts MATCH ?
+                    ORDER BY bm25(messages_fts), messages.timestamp DESC, messages.id DESC
+                    LIMIT ?
+                    """,
+                    (user_id, current_group_id, fts_query, limit),
                 ).fetchall()
             )
         except sqlite3.OperationalError:
@@ -1185,6 +1353,42 @@ class ChatMemoryStore:
                 SELECT *
                 FROM messages
                 WHERE group_id = ?
+                  AND ({' OR '.join(clauses)})
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        )
+
+    def _search_user_messages_with_like(
+        self,
+        conn: sqlite3.Connection,
+        current_group_id: str,
+        user_id: str,
+        query: str,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        terms = build_like_terms(query)
+        if not terms:
+            return []
+
+        clauses: list[str] = []
+        params: list[object] = [user_id, current_group_id]
+        for term in terms:
+            like = f"%{term}%"
+            clauses.append(
+                "(text LIKE ? OR summary LIKE ? OR tags LIKE ? OR topics LIKE ? OR entities LIKE ? OR sender_name LIKE ? OR reply_outline LIKE ?)"
+            )
+            params.extend([like, like, like, like, like, like, like])
+        params.append(limit)
+        return list(
+            conn.execute(
+                f"""
+                SELECT *
+                FROM messages
+                WHERE user_id = ?
+                  AND group_id != ?
                   AND ({' OR '.join(clauses)})
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?
@@ -1540,12 +1744,16 @@ def build_like_terms(query: str) -> list[str]:
         ("不喜欢什么", "不喜欢"),
         ("喜欢什么", "喜欢"),
         ("叫什么", "昵称"),
+        ("研究什么", "研究"),
     ):
         for phrase in candidate_phrases:
             if suffix == "喜欢什么" and phrase.endswith("不喜欢什么"):
                 continue
             if phrase.endswith(suffix):
                 terms.append(predicate)
+    for marker in ("喜欢", "不喜欢", "研究"):
+        if marker in query:
+            terms.append(marker)
     for marker in (
         "知识库",
         "聊天记录",

@@ -60,6 +60,93 @@ def test_chat_memory_store_orders_recent_relevant_messages_first(tmp_path: Path)
     assert [record.message_id for record in results] == ["102", "101"]
 
 
+def test_chat_memory_store_searches_user_messages_across_groups(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=201,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究 shapez 存档。",
+        timestamp=100,
+    )
+    store.append_message(
+        group_id=10002,
+        message_id=202,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可最近在做长期记忆。",
+        timestamp=101,
+    )
+    store.append_message(
+        group_id=10003,
+        message_id=203,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="路人也提到了 shapez 存档。",
+        timestamp=102,
+    )
+
+    records = store.search_user_messages(
+        current_group_id=10002,
+        user_id=20001,
+        query="shapez 存档",
+        limit=5,
+    )
+
+    assert [record.message_id for record in records] == ["201"]
+    assert records[0].group_id == "10001"
+    assert records[0].user_id == "20001"
+
+
+def test_chat_memory_store_searches_user_facts_across_groups_without_group_rules(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=211,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    )
+    store.append_message(
+        group_id=10002,
+        message_id=212,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="路人喜欢研究数据库。",
+        timestamp=101,
+    )
+    store.append_message(
+        group_id=10003,
+        message_id=213,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="以后规则是不要刷屏。",
+        timestamp=102,
+    )
+
+    facts = store.search_user_facts(
+        current_group_id=10002,
+        user_id=20001,
+        aliases=("可可",),
+        query="可可喜欢什么 数据库",
+        limit=5,
+    )
+
+    assert [(fact.group_id, fact.subject, fact.predicate, fact.object) for fact in facts] == [
+        ("10001", "可可", "喜欢", "研究数据库")
+    ]
+
+
 def test_chat_memory_store_keeps_reply_and_media_metadata(tmp_path: Path) -> None:
     store = ChatMemoryStore(tmp_path / "run")
     store.append_message(

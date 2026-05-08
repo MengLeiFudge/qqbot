@@ -314,6 +314,7 @@ def build_ai_context(
         settings,
         group_id,
         normalized_message,
+        event=event,
     )
     if memory_context:
         context.append(memory_context)
@@ -324,6 +325,8 @@ def build_long_term_memory_context(
     settings: RuntimeSettings,
     group_id: int | str,
     normalized_message: NormalizedMessage,
+    *,
+    event: MessageEvent,
 ) -> str:
     if not settings.ai_memory_enabled:
         return ""
@@ -359,14 +362,98 @@ def build_long_term_memory_context(
                 if record.message_id not in existing_ids
             )
             records = (*records, *source_records)[: settings.ai_memory_search_limit]
+        user_facts, user_records = search_current_sender_memory(
+            memory_store,
+            settings,
+            group_id,
+            event,
+            query,
+        )
     except Exception:
         return ""
-    if not facts and not records:
+    if not facts and not records and not user_facts and not user_records:
         return ""
-    return format_memory_context(
+    group_context = format_memory_context(
         facts,
         records,
         max_chars=settings.ai_memory_context_chars,
+    )
+    user_context = format_current_sender_memory_context(
+        user_facts,
+        user_records,
+        max_chars=max(200, settings.ai_memory_context_chars // 2),
+    )
+    return "\n".join(part for part in (group_context, user_context) if part)
+
+
+def search_current_sender_memory(
+    memory_store: ChatMemoryStore,
+    settings: RuntimeSettings,
+    group_id: int | str,
+    event: MessageEvent,
+    query: str,
+) -> tuple[tuple[ChatMemoryFact, ...], tuple[ChatMemoryRecord, ...]]:
+    user_id = event.get_user_id()
+    if not str(user_id).isdigit():
+        return (), ()
+    aliases = build_current_sender_memory_aliases(settings, group_id, event)
+    limit = max(1, settings.ai_memory_search_limit // 2)
+    facts = memory_store.search_user_facts(
+        current_group_id=group_id,
+        user_id=user_id,
+        aliases=aliases,
+        query=query,
+        limit=limit,
+    )
+    records = memory_store.search_user_messages(
+        current_group_id=group_id,
+        user_id=user_id,
+        query=query,
+        limit=limit,
+    )
+    fact_source_ids = tuple(
+        dict.fromkeys(
+            message_id
+            for fact in facts
+            for message_id in fact.source_message_ids
+            if message_id
+        )
+    )
+    if fact_source_ids:
+        existing_ids = {record.message_id for record in records}
+        source_records = tuple(
+            record
+            for fact in facts
+            for record in memory_store.load_messages_by_message_ids(fact.group_id, fact.source_message_ids)
+            if record.message_id not in existing_ids
+        )
+        records = (*records, *source_records)[:limit]
+    return facts, records
+
+
+def build_current_sender_memory_aliases(
+    settings: RuntimeSettings,
+    group_id: int | str,
+    event: MessageEvent,
+) -> tuple[str, ...]:
+    user_id = event.get_user_id()
+    sender = getattr(event, "sender", None)
+    aliases = [
+        str(getattr(sender, "card", "") or "").strip(),
+        str(getattr(sender, "nickname", "") or "").strip(),
+    ]
+    try:
+        nick_store = GroupNickStore(settings.data_root / "settings" / "group_nick.json")
+        if str(group_id).isdigit() and str(user_id).isdigit():
+            aliases.append(nick_store.resolve_display_name(int(group_id), int(user_id)))
+    except Exception:
+        pass
+    return tuple(
+        dict.fromkeys(
+            alias
+            for alias in aliases
+            if alias and alias != str(user_id)
+        )
     )
 
 
@@ -431,6 +518,58 @@ def format_memory_context(
             line += f" [标签：{'、'.join(record.tags)}]"
         if record.reply_outline:
             line += f" [引用：{record.reply_outline}]"
+        if sum(len(item) + 1 for item in lines) + len(line) > budget:
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_current_sender_memory_context(
+    facts: tuple[ChatMemoryFact, ...],
+    records: tuple[ChatMemoryRecord, ...],
+    *,
+    max_chars: int,
+) -> str:
+    if not facts and not records:
+        return ""
+    budget = max(200, max_chars)
+    lines = [
+        "下面是当前发言者跨群长期记忆，只能用于理解这个用户本人；不要把这些内容当成本群规则或其他群成员的信息："
+    ]
+    for fact in facts:
+        line = (
+            f"- {fact.subject} {fact.predicate} {fact.object}"
+            f" [来自群：{fact.group_id}] [置信度：{fact.confidence:.2f}]"
+        )
+        if fact.source_message_ids:
+            line += f" [来源消息：{','.join(fact.source_message_ids)}]"
+        if sum(len(item) + 1 for item in lines) + len(line) > budget:
+            break
+        lines.append(line)
+
+    source_message_ids = {
+        message_id
+        for fact in facts
+        for message_id in fact.source_message_ids
+        if message_id
+    }
+    ordered_records = tuple(
+        sorted(
+            records,
+            key=lambda record: (
+                record.message_id not in source_message_ids,
+                -record.importance,
+                -record.timestamp,
+            ),
+        )
+    )
+    for record in ordered_records:
+        line = (
+            f"- {record.sender_name}({record.user_id}) 在群 {record.group_id} 说："
+            f" {record.text}"
+        )
+        if record.tags:
+            line += f" [标签：{'、'.join(record.tags)}]"
         if sum(len(item) + 1 for item in lines) + len(line) > budget:
             break
         lines.append(line)
