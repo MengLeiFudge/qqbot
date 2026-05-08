@@ -588,6 +588,75 @@ def test_chat_memory_store_auto_extracts_facts_on_append(tmp_path: Path) -> None
     assert facts[0].status == "active"
 
 
+def test_chat_memory_store_persists_explicit_scope_fields(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+
+    store.append_message(
+        group_id=10001,
+        message_id=52,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    )
+
+    record = store.search_messages(10001, "数据库", limit=5)[0]
+    facts = store.search_facts(10001, "可可喜欢什么", limit=5)
+
+    assert record.space_id == "qq:group:10001"
+    assert record.actor_id == "qq:user:20001"
+    assert record.visibility == "group_public"
+    assert record.memory_type == "raw_message"
+    assert facts[0].space_id == "qq:group:10001"
+    assert facts[0].visibility == "group_public"
+    assert facts[0].memory_type == "fact"
+
+
+def test_chat_memory_store_migrates_legacy_scope_fields(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    with store._connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id TEXT NOT NULL,
+                message_id TEXT NOT NULL DEFAULT '',
+                direction TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                text TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '[]',
+                topics TEXT NOT NULL DEFAULT '[]',
+                entities TEXT NOT NULL DEFAULT '[]',
+                importance REAL NOT NULL DEFAULT 0.5,
+                confidence REAL NOT NULL DEFAULT 0.6,
+                timestamp INTEGER NOT NULL,
+                has_image INTEGER NOT NULL DEFAULT 0,
+                has_at INTEGER NOT NULL DEFAULT 0,
+                reply_message_id TEXT NOT NULL DEFAULT '',
+                reply_user_id TEXT NOT NULL DEFAULT '',
+                reply_outline TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO messages (
+                group_id, message_id, direction, user_id, sender_name,
+                text, timestamp
+            )
+            VALUES ('10001', '53', 'incoming', '20001', '可可', '可可喜欢数据库。', 100)
+            """
+        )
+
+    assert store.search_messages(10001, "数据库", limit=5)[0].space_id == "qq:group:10001"
+    with store._connect() as conn:
+        row = conn.execute("SELECT space_id, actor_id, visibility, memory_type FROM messages").fetchone()
+    assert tuple(row) == ("qq:group:10001", "qq:user:20001", "group_public", "raw_message")
+
+
 def test_chat_memory_store_supersedes_conflicting_facts(tmp_path: Path) -> None:
     store = ChatMemoryStore(tmp_path / "run")
 

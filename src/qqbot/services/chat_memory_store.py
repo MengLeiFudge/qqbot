@@ -73,6 +73,10 @@ class ChatMemoryRecord:
     entities: tuple[str, ...] = ()
     importance: float = 0.5
     confidence: float = 0.6
+    space_id: str = ""
+    actor_id: str = ""
+    visibility: str = "group_public"
+    memory_type: str = "raw_message"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +94,9 @@ class ChatMemoryFact:
     source_type: str = "user"
     trust_level: str = "chat"
     status: str = "active"
+    space_id: str = ""
+    visibility: str = "group_public"
+    memory_type: str = "fact"
 
 
 class ChatMemoryStore:
@@ -113,6 +120,10 @@ class ChatMemoryStore:
         entities: tuple[str, ...] | list[str] | None = None,
         importance: float | None = None,
         confidence: float | None = None,
+        space_id: str | None = None,
+        actor_id: str | None = None,
+        visibility: str | None = None,
+        memory_type: str = "raw_message",
         has_image: bool = False,
         has_at: bool = False,
         reply_message_id: int | str | None = None,
@@ -143,9 +154,11 @@ class ChatMemoryStore:
         )
         payload = {
             "group_id": str(group_id),
+            "space_id": space_id or build_group_space_id(group_id),
             "message_id": str(message_id or ""),
             "direction": direction,
             "user_id": str(user_id),
+            "actor_id": actor_id or build_user_actor_id(user_id),
             "sender_name": sender_name.strip() or str(user_id),
             "text": normalized_text,
             "summary": summary.strip(),
@@ -157,6 +170,8 @@ class ChatMemoryStore:
             "timestamp": int(timestamp),
             "has_image": 1 if has_image else 0,
             "has_at": 1 if has_at else 0,
+            "visibility": visibility or ("group_public" if str(group_id).isdigit() else "private"),
+            "memory_type": memory_type,
             "reply_message_id": str(reply_message_id or ""),
             "reply_user_id": str(reply_user_id or ""),
             "reply_outline": reply_outline.strip(),
@@ -174,15 +189,15 @@ class ChatMemoryStore:
             cursor = conn.execute(
                 """
                 INSERT INTO messages (
-                    group_id, message_id, direction, user_id, sender_name,
+                    group_id, space_id, message_id, direction, user_id, actor_id, sender_name,
                     text, summary, tags, topics, entities, importance, confidence,
-                    timestamp, has_image, has_at,
+                    timestamp, has_image, has_at, visibility, memory_type,
                     reply_message_id, reply_user_id, reply_outline
                 )
                 VALUES (
-                    :group_id, :message_id, :direction, :user_id, :sender_name,
+                    :group_id, :space_id, :message_id, :direction, :user_id, :actor_id, :sender_name,
                     :text, :summary, :tags, :topics, :entities, :importance, :confidence,
-                    :timestamp, :has_image, :has_at,
+                    :timestamp, :has_image, :has_at, :visibility, :memory_type,
                     :reply_message_id, :reply_user_id, :reply_outline
                 )
                 """,
@@ -305,14 +320,44 @@ class ChatMemoryStore:
                 """
                 SELECT *
                 FROM messages
-                WHERE user_id = ?
-                  AND group_id != ?
+                WHERE actor_id = ?
+                  AND space_id != ?
                   AND direction = 'incoming'
+                  AND visibility = 'group_public'
                   AND text != ''
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?
                 """,
-                (normalized_user_id, str(current_group_id), limit),
+                (build_user_actor_id(normalized_user_id), build_group_space_id(current_group_id), limit),
+            ).fetchall()
+        return tuple(self._record_from_row(row) for row in rows)
+
+    def load_recent_actor_messages_across_spaces(
+        self,
+        *,
+        actor_id: str,
+        exclude_space_id: str,
+        visibility: str = "group_public",
+        limit: int = 4,
+    ) -> tuple[ChatMemoryRecord, ...]:
+        normalized_actor_id = actor_id.strip()
+        if not normalized_actor_id or limit <= 0 or not self.db_path.exists():
+            return ()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM messages
+                WHERE actor_id = ?
+                  AND space_id != ?
+                  AND direction = 'incoming'
+                  AND visibility = ?
+                  AND text != ''
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                (normalized_actor_id, exclude_space_id, visibility, limit),
             ).fetchall()
         return tuple(self._record_from_row(row) for row in rows)
 
@@ -497,6 +542,9 @@ class ChatMemoryStore:
             source_type=source_type,
             trust_level=trust_level,
             status="active",
+            space_id=build_group_space_id(group_id),
+            visibility="group_public",
+            memory_type="fact",
         )
         if not fact.subject or not fact.predicate or not fact.object:
             raise ValueError("Fact subject, predicate and object are required.")
@@ -673,6 +721,7 @@ class ChatMemoryStore:
         return {
             "id": fact.id,
             "group_id": fact.group_id,
+            "space_id": fact.space_id,
             "subject": fact.subject,
             "predicate": fact.predicate,
             "object": fact.object,
@@ -684,6 +733,8 @@ class ChatMemoryStore:
             "source_type": fact.source_type,
             "trust_level": fact.trust_level,
             "status": fact.status,
+            "visibility": fact.visibility,
+            "memory_type": fact.memory_type,
             "score": score_fact(fact, query),
             "source_records": [
                 self._record_debug_payload(record, query)
@@ -699,9 +750,11 @@ class ChatMemoryStore:
         return {
             "id": record.id,
             "group_id": record.group_id,
+            "space_id": record.space_id,
             "message_id": record.message_id,
             "direction": record.direction,
             "user_id": record.user_id,
+            "actor_id": record.actor_id,
             "sender_name": record.sender_name,
             "text": record.text,
             "summary": record.summary,
@@ -709,6 +762,8 @@ class ChatMemoryStore:
             "topics": list(record.topics),
             "entities": list(record.entities),
             "timestamp": record.timestamp,
+            "visibility": record.visibility,
+            "memory_type": record.memory_type,
             "score": score_message_record(record, query),
         }
 
@@ -724,9 +779,11 @@ class ChatMemoryStore:
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id TEXT NOT NULL,
+                space_id TEXT NOT NULL DEFAULT '',
                 message_id TEXT NOT NULL DEFAULT '',
                 direction TEXT NOT NULL,
                 user_id TEXT NOT NULL,
+                actor_id TEXT NOT NULL DEFAULT '',
                 sender_name TEXT NOT NULL,
                 text TEXT NOT NULL,
                 summary TEXT NOT NULL DEFAULT '',
@@ -738,6 +795,8 @@ class ChatMemoryStore:
                 timestamp INTEGER NOT NULL,
                 has_image INTEGER NOT NULL DEFAULT 0,
                 has_at INTEGER NOT NULL DEFAULT 0,
+                visibility TEXT NOT NULL DEFAULT 'group_public',
+                memory_type TEXT NOT NULL DEFAULT 'raw_message',
                 reply_message_id TEXT NOT NULL DEFAULT '',
                 reply_user_id TEXT NOT NULL DEFAULT '',
                 reply_outline TEXT NOT NULL DEFAULT ''
@@ -758,6 +817,24 @@ class ChatMemoryStore:
         self._ensure_column(conn, "messages", "entities", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column(conn, "messages", "importance", "REAL NOT NULL DEFAULT 0.5")
         self._ensure_column(conn, "messages", "confidence", "REAL NOT NULL DEFAULT 0.6")
+        self._ensure_column(conn, "messages", "space_id", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column(conn, "messages", "actor_id", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column(conn, "messages", "visibility", "TEXT NOT NULL DEFAULT 'group_public'")
+        self._ensure_column(conn, "messages", "memory_type", "TEXT NOT NULL DEFAULT 'raw_message'")
+        conn.execute(
+            "UPDATE messages SET space_id = 'qq:group:' || group_id WHERE space_id = ''"
+        )
+        conn.execute(
+            "UPDATE messages SET actor_id = 'qq:user:' || user_id WHERE actor_id = ''"
+        )
+        conn.execute(
+            "UPDATE messages SET visibility = 'group_public' WHERE visibility = ''"
+        )
+        conn.execute(
+            "UPDATE messages SET memory_type = 'raw_message' WHERE memory_type = ''"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_space_time ON messages(space_id, timestamp DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_actor_space ON messages(actor_id, space_id, timestamp DESC)")
         try:
             conn.execute(
                 """
@@ -790,13 +867,28 @@ class ChatMemoryStore:
                 updated_at INTEGER NOT NULL,
                 source_type TEXT NOT NULL DEFAULT 'user',
                 trust_level TEXT NOT NULL DEFAULT 'chat',
-                status TEXT NOT NULL DEFAULT 'active'
+                status TEXT NOT NULL DEFAULT 'active',
+                space_id TEXT NOT NULL DEFAULT '',
+                visibility TEXT NOT NULL DEFAULT 'group_public',
+                memory_type TEXT NOT NULL DEFAULT 'fact'
             )
             """
         )
         self._ensure_column(conn, "facts", "source_type", "TEXT NOT NULL DEFAULT 'user'")
         self._ensure_column(conn, "facts", "trust_level", "TEXT NOT NULL DEFAULT 'chat'")
         self._ensure_column(conn, "facts", "status", "TEXT NOT NULL DEFAULT 'active'")
+        self._ensure_column(conn, "facts", "space_id", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column(conn, "facts", "visibility", "TEXT NOT NULL DEFAULT 'group_public'")
+        self._ensure_column(conn, "facts", "memory_type", "TEXT NOT NULL DEFAULT 'fact'")
+        conn.execute(
+            "UPDATE facts SET space_id = 'qq:group:' || group_id WHERE space_id = ''"
+        )
+        conn.execute(
+            "UPDATE facts SET visibility = 'group_public' WHERE visibility = ''"
+        )
+        conn.execute(
+            "UPDATE facts SET memory_type = 'fact' WHERE memory_type = ''"
+        )
         conn.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_facts_unique
@@ -946,7 +1038,10 @@ class ChatMemoryStore:
                     updated_at = MAX(updated_at, ?),
                     source_type = ?,
                     trust_level = ?,
-                    status = 'active'
+                    status = 'active',
+                    space_id = ?,
+                    visibility = ?,
+                    memory_type = ?
                 WHERE id = ?
                 """,
                 (
@@ -957,6 +1052,9 @@ class ChatMemoryStore:
                     fact.updated_at,
                     strongest_source_type(existing_fact.source_type, fact.source_type),
                     strongest_trust_level(existing_fact.trust_level, fact.trust_level),
+                    fact.space_id or existing_fact.space_id or build_group_space_id(fact.group_id),
+                    fact.visibility or existing_fact.visibility,
+                    fact.memory_type or existing_fact.memory_type,
                     existing_fact.id,
                 ),
             )
@@ -970,9 +1068,9 @@ class ChatMemoryStore:
             INSERT INTO facts (
                 group_id, subject, predicate, object, confidence,
                 source_message_ids, topics, entities, updated_at,
-                source_type, trust_level, status
+                source_type, trust_level, status, space_id, visibility, memory_type
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fact.group_id,
@@ -987,6 +1085,9 @@ class ChatMemoryStore:
                 fact.source_type,
                 fact.trust_level,
                 fact.status,
+                fact.space_id or build_group_space_id(fact.group_id),
+                fact.visibility,
+                fact.memory_type,
             ),
         )
         self._index_fact(conn, int(cursor.lastrowid))
@@ -1011,7 +1112,10 @@ class ChatMemoryStore:
                 updated_at = MAX(updated_at, ?),
                 source_type = ?,
                 trust_level = ?,
-                status = ?
+                status = ?,
+                space_id = ?,
+                visibility = ?,
+                memory_type = ?
             WHERE id = ?
             """,
             (
@@ -1023,6 +1127,9 @@ class ChatMemoryStore:
                 strongest_source_type(existing_fact.source_type, fact.source_type),
                 strongest_trust_level(existing_fact.trust_level, fact.trust_level),
                 status,
+                fact.space_id or existing_fact.space_id or build_group_space_id(fact.group_id),
+                fact.visibility or existing_fact.visibility,
+                fact.memory_type or existing_fact.memory_type,
                 existing_fact.id,
             ),
         )
@@ -1112,9 +1219,9 @@ class ChatMemoryStore:
                 INSERT INTO facts (
                     group_id, subject, predicate, object, confidence,
                     source_message_ids, topics, entities, updated_at,
-                    source_type, trust_level, status
+                    source_type, trust_level, status, space_id, visibility, memory_type
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'disabled')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'disabled', ?, ?, ?)
                 """,
                 (
                     fact.group_id,
@@ -1128,6 +1235,9 @@ class ChatMemoryStore:
                     fact.updated_at,
                     fact.source_type,
                     fact.trust_level,
+                    fact.space_id or build_group_space_id(fact.group_id),
+                    fact.visibility,
+                    fact.memory_type,
                 ),
             )
             self._index_fact(conn, int(cursor.lastrowid))
@@ -1144,7 +1254,10 @@ class ChatMemoryStore:
                 updated_at = MAX(updated_at, ?),
                 source_type = ?,
                 trust_level = ?,
-                status = 'disabled'
+                status = 'disabled',
+                space_id = ?,
+                visibility = ?,
+                memory_type = ?
             WHERE id = ?
             """,
             (
@@ -1155,6 +1268,9 @@ class ChatMemoryStore:
                 fact.updated_at,
                 strongest_source_type(current_fact.source_type, fact.source_type),
                 strongest_trust_level(current_fact.trust_level, fact.trust_level),
+                fact.space_id or current_fact.space_id or build_group_space_id(fact.group_id),
+                fact.visibility or current_fact.visibility,
+                fact.memory_type or current_fact.memory_type,
                 current_fact.id,
             ),
         )
@@ -1466,6 +1582,10 @@ class ChatMemoryStore:
             entities=tuple(json.loads(str(row["entities"] or "[]"))),
             importance=float(row["importance"] or 0.5),
             confidence=float(row["confidence"] or 0.6),
+            space_id=str(row["space_id"] or build_group_space_id(row["group_id"])),
+            actor_id=str(row["actor_id"] or build_user_actor_id(row["user_id"])),
+            visibility=str(row["visibility"] or "group_public"),
+            memory_type=str(row["memory_type"] or "raw_message"),
         )
 
     @staticmethod
@@ -1484,6 +1604,9 @@ class ChatMemoryStore:
             source_type=str(row["source_type"] or "user"),
             trust_level=str(row["trust_level"] or "chat"),
             status=str(row["status"] or "active"),
+            space_id=str(row["space_id"] or build_group_space_id(row["group_id"])),
+            visibility=str(row["visibility"] or "group_public"),
+            memory_type=str(row["memory_type"] or "fact"),
         )
 
     def _record_from_row_by_id(self, conn: sqlite3.Connection, row_id: int) -> ChatMemoryRecord:
@@ -1502,6 +1625,10 @@ class ChatMemoryStore:
             "entities": json.dumps(record.entities, ensure_ascii=False),
             "sender_name": record.sender_name,
             "reply_outline": record.reply_outline,
+            "space_id": record.space_id,
+            "actor_id": record.actor_id,
+            "visibility": record.visibility,
+            "memory_type": record.memory_type,
         }
 
     @staticmethod
@@ -1651,6 +1778,23 @@ def is_behavior_instruction_text(text: str) -> bool:
     )
 
 
+def build_group_space_id(group_id: int | str) -> str:
+    return f"qq:group:{str(group_id).strip()}"
+
+
+def build_user_actor_id(user_id: int | str) -> str:
+    normalized = str(user_id).strip()
+    if normalized.startswith("qq:user:"):
+        return normalized
+    return f"qq:user:{normalized}"
+
+
+def parse_qq_user_actor_id(actor_id: str) -> str:
+    normalized = actor_id.strip()
+    prefix = "qq:user:"
+    return normalized[len(prefix) :] if normalized.startswith(prefix) else normalized
+
+
 def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
     text = record.text.strip().strip("。！？!?.")
     if not text or is_prompt_injection_like(text):
@@ -1690,6 +1834,9 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
                 source_type="bot" if record.direction == "bot" else "user",
                 trust_level="chat",
                 status="active",
+                space_id=record.space_id or build_group_space_id(record.group_id),
+                visibility=record.visibility,
+                memory_type="behavior_instruction" if predicate == "行为指令" else "fact",
             )
         )
     return tuple(facts)

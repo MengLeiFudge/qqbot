@@ -417,7 +417,7 @@ def test_ai_context_includes_structured_retrieval_plan_for_cross_group_query() -
     context = build_memory_retrieval_plan_context(event, normalized)
 
     assert '"intent": "cross_group_recent_self_messages"' in context
-    assert '"actor_id": "10001"' in context
+    assert '"actor_id": "qq:user:10001"' in context
     assert '"exclude_space_id": "qq:group:10002"' in context
     assert '"visibility": "group_public"' in context
     assert '"forbidden": ["private_messages", "other_users_cross_group_messages"]' in context

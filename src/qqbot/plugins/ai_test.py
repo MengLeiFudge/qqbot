@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from nonebot import on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.rule import Rule
@@ -25,6 +23,10 @@ from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_delivery import COLLAPSIBLE_TEXT_THRESHOLD_CHARS, finish_split_text
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_event
+from qqbot.services.memory_retrieval_service import (
+    RetrievalPlan,
+    retrieve_memory_evidence,
+)
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
@@ -376,56 +378,66 @@ def build_memory_retrieval_plan_context(
     event: MessageEvent,
     normalized_message: NormalizedMessage,
 ) -> str:
+    plan = build_memory_retrieval_plan(event, normalized_message)
+    return (
+        "本轮记忆检索计划："
+        + plan.to_prompt_json()
+        + "。只能使用 allowed 对应的证据回答；forbidden 中的内容即使存在也不能在本轮披露。"
+    )
+
+
+def build_memory_retrieval_plan(
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+    *,
+    limit: int = 6,
+) -> RetrievalPlan:
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
-        return (
-            "本轮记忆检索计划："
-            + json.dumps(
-                {
-                    "intent": "private_conversation",
-                    "actor_id": event.get_user_id(),
-                    "space_id": f"qq:private:{event.get_user_id()}",
-                    "allowed": ["private_messages", "user_profile"],
-                    "forbidden": ["group_private_disclosure"],
-                },
-                ensure_ascii=False,
-                separators=(", ", ": "),
-            )
+        return RetrievalPlan(
+            intent="private_conversation",
+            actor_id=f"qq:user:{event.get_user_id()}",
+            space_id=f"qq:private:{event.get_user_id()}",
+            query=build_memory_query(normalized_message),
+            allowed=("private_messages", "user_profile"),
+            forbidden=("group_private_disclosure",),
+            visibility="private",
+            limit=limit,
         )
 
     text = build_scope_query_text(normalized_message)
     group_id = getattr(event, "group_id")
     actor_id = event.get_user_id()
     if is_private_memory_query(text):
-        plan = {
-            "intent": "forbidden_private_disclosure_in_group",
-            "actor_id": actor_id,
-            "space_id": f"qq:group:{group_id}",
-            "allowed": ["current_group_public_context"],
-            "forbidden": ["private_messages", "private_summary", "private_hint"],
-        }
+        return RetrievalPlan(
+            intent="forbidden_private_disclosure_in_group",
+            actor_id=f"qq:user:{actor_id}",
+            space_id=f"qq:group:{group_id}",
+            query=build_memory_query(normalized_message),
+            allowed=("current_group_public_context",),
+            forbidden=("private_messages", "private_summary", "private_hint"),
+            limit=limit,
+        )
     elif is_cross_group_memory_query(text):
-        plan = {
-            "intent": "cross_group_recent_self_messages",
-            "actor_id": actor_id,
-            "space_id": f"qq:group:{group_id}",
-            "exclude_space_id": f"qq:group:{group_id}",
-            "visibility": "group_public",
-            "allowed": ["current_actor_cross_group_public_messages", "current_actor_profile"],
-            "forbidden": ["private_messages", "other_users_cross_group_messages"],
-        }
-    else:
-        plan = {
-            "intent": "current_group_memory_search",
-            "actor_id": actor_id,
-            "space_id": f"qq:group:{group_id}",
-            "visibility": "group_public",
-            "allowed": ["current_group_recent_messages", "current_group_memory", "current_actor_profile"],
-            "forbidden": ["private_messages", "other_groups_without_explicit_self_query"],
-        }
-    return (
-        "本轮记忆检索计划："
-        + json.dumps(plan, ensure_ascii=False, separators=(", ", ": "))
-        + "。只能使用 allowed 对应的证据回答；forbidden 中的内容即使存在也不能在本轮披露。"
+        return RetrievalPlan(
+            intent="cross_group_recent_self_messages",
+            actor_id=f"qq:user:{actor_id}",
+            space_id=f"qq:group:{group_id}",
+            query=build_memory_query(normalized_message),
+            allowed=("current_actor_cross_group_public_messages", "current_actor_profile"),
+            forbidden=("private_messages", "other_users_cross_group_messages"),
+            exclude_space_id=f"qq:group:{group_id}",
+            visibility="group_public",
+            limit=limit,
+        )
+    return RetrievalPlan(
+        intent="current_group_memory_search",
+        actor_id=f"qq:user:{actor_id}",
+        space_id=f"qq:group:{group_id}",
+        query=build_memory_query(normalized_message),
+        allowed=("current_group_recent_messages", "current_group_memory", "current_actor_profile"),
+        forbidden=("private_messages", "other_groups_without_explicit_self_query"),
+        visibility="group_public",
+        limit=limit,
     )
 
 
@@ -444,21 +456,24 @@ def build_long_term_memory_context(
         return ""
     try:
         memory_store = ChatMemoryStore(settings.data_root)
-        scope_query = should_omit_ai_history_for_scope_query(event, normalized_message)
-        if scope_query:
+        plan = build_memory_retrieval_plan(
+            event,
+            normalized_message,
+            limit=settings.ai_memory_search_limit,
+        )
+        evidence = retrieve_memory_evidence(memory_store, plan)
+        if plan.intent in {
+            "cross_group_recent_self_messages",
+            "forbidden_private_disclosure_in_group",
+            "private_conversation",
+        }:
             facts = ()
             records = ()
+            user_facts = ()
+            user_records = evidence.messages if plan.intent == "cross_group_recent_self_messages" else ()
         else:
-            facts = memory_store.search_facts(
-                group_id,
-                query,
-                limit=settings.ai_memory_search_limit,
-            )
-            records = memory_store.search_messages(
-                group_id,
-                query,
-                limit=settings.ai_memory_search_limit,
-            )
+            facts = evidence.facts
+            records = evidence.messages
             fact_source_ids = tuple(
                 dict.fromkeys(
                     message_id
@@ -475,13 +490,13 @@ def build_long_term_memory_context(
                     if record.message_id not in existing_ids
                 )
                 records = (*records, *source_records)[: settings.ai_memory_search_limit]
-        user_facts, user_records = search_current_sender_memory(
-            memory_store,
-            settings,
-            group_id,
-            event,
-            query,
-        )
+            user_facts, user_records = search_current_sender_memory(
+                memory_store,
+                settings,
+                group_id,
+                event,
+                query,
+            )
     except Exception:
         return ""
     if not facts and not records and not user_facts and not user_records:
