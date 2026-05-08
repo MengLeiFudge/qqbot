@@ -14,10 +14,14 @@ from qqbot.services.arc_event_service import ArcEventService, _fetch_latest_arc_
 from qqbot.services.arc_guess_service import ArcGuessService
 from qqbot.services.codex_self_update_service import publish_pending_codex_self_update_notices
 from qqbot.services.feature_catalog import get_feature_by_menu_key
+from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.services.memory_maintenance_service import MemoryMaintenanceService
+from qqbot.services.memory_vector_store import MemoryVectorStore
 from qqbot.services.settings_store import get_settings_store
 
 driver = get_driver()
 _ARC_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
+_MEMORY_MAINTENANCE_TASKS: dict[str, asyncio.Task] = {}
 
 
 def get_arc_alias_service() -> ArcAliasService:
@@ -74,8 +78,11 @@ async def log_bot_connect(bot: Bot) -> None:
     except Exception as exc:
         logger.exception("Failed to publish Codex self-update notices: {}", exc)
     if bot.self_id in _ARC_BACKGROUND_TASKS:
-        return
-    _ARC_BACKGROUND_TASKS[bot.self_id] = asyncio.create_task(run_arc_background_loop(bot))
+        pass
+    else:
+        _ARC_BACKGROUND_TASKS[bot.self_id] = asyncio.create_task(run_arc_background_loop(bot))
+    if bot.self_id not in _MEMORY_MAINTENANCE_TASKS:
+        _MEMORY_MAINTENANCE_TASKS[bot.self_id] = asyncio.create_task(run_memory_maintenance_loop())
 
 
 @driver.on_bot_disconnect
@@ -84,6 +91,9 @@ async def log_bot_disconnect(bot: Bot) -> None:
     task = _ARC_BACKGROUND_TASKS.pop(bot.self_id, None)
     if task is not None:
         task.cancel()
+    memory_task = _MEMORY_MAINTENANCE_TASKS.pop(bot.self_id, None)
+    if memory_task is not None:
+        memory_task.cancel()
 
 
 async def run_arc_background_loop(bot: Bot) -> None:
@@ -96,3 +106,21 @@ async def run_arc_background_loop(bot: Bot) -> None:
         raise
     except Exception as exc:
         logger.exception("Arc background loop crashed: {}", exc)
+
+
+async def run_memory_maintenance_loop() -> None:
+    settings = load_settings()
+    service = MemoryMaintenanceService(
+        ChatMemoryStore(settings.data_root),
+        MemoryVectorStore(settings.data_root / "ai" / "memory_vectors.json"),
+    )
+    try:
+        while True:
+            for group_id in service.store.list_group_ids():
+                service.summarize_group_topics(group_id, limit=200)
+                service.index_recent_messages(group_id, limit=500)
+            await asyncio.sleep(24 * 60 * 60)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("Memory maintenance loop crashed: {}", exc)

@@ -25,6 +25,7 @@ from qqbot.services.message_delivery import COLLAPSIBLE_TEXT_THRESHOLD_CHARS, fi
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_event
 from qqbot.services.memory_retrieval_service import (
     RetrievalPlan,
+    format_evidence_bundle,
     retrieve_memory_evidence,
 )
 from qqbot.services.settings_store import SettingsStore, get_settings_store
@@ -77,6 +78,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     store = get_settings_store()
     normalized_message = normalize_onebot_event(event)
     prompt = normalized_message.text or normalized_message.outline
+    record_private_chat_memory(settings, event, normalized_message)
 
     if not settings.ai_enabled:
         await ai_chat_matcher.finish("AI 未启用。请设置 QQBOT_AI_ENABLED=true。")
@@ -217,6 +219,39 @@ def format_local_ai_result(result) -> str | Message:
     return result.text
 
 
+def record_private_chat_memory(
+    settings: RuntimeSettings,
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+) -> None:
+    if getattr(event, "message_type", "") == "group" or hasattr(event, "group_id"):
+        return
+    outline = normalized_message.outline.strip()
+    if not outline:
+        return
+    try:
+        ChatMemoryStore(settings.data_root).append_message(
+            group_id=f"private:{event.get_user_id()}",
+            space_id=f"qq:private:{event.get_user_id()}",
+            message_id=getattr(event, "message_id", ""),
+            direction="incoming",
+            user_id=event.get_user_id(),
+            actor_id=f"qq:user:{event.get_user_id()}",
+            sender_name=event.get_user_id(),
+            text=outline,
+            timestamp=getattr(event, "time", 0) or 0,
+            visibility="private",
+            memory_type="raw_message",
+            has_image=bool(normalized_message.image_urls),
+            has_at=bool(normalized_message.at_user_ids),
+            reply_message_id=normalized_message.reply.message_id if normalized_message.reply is not None else "",
+            reply_user_id=normalized_message.reply.user_id if normalized_message.reply is not None else "",
+            reply_outline=normalized_message.reply.message.outline if normalized_message.reply is not None else "",
+        )
+    except Exception:
+        pass
+
+
 def build_ai_reply_message(
     text: str,
     *,
@@ -275,6 +310,9 @@ def build_ai_context(
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         context.append("当前对话场景：私聊。")
         context.append(build_current_sender_context(event))
+        retrieval_plan_context = build_memory_retrieval_plan_context(event, normalized_message)
+        if retrieval_plan_context:
+            context.append(retrieval_plan_context)
         if identity_context:
             context.append(identity_context)
         message_context = build_message_structure_context(normalized_message)
@@ -282,6 +320,9 @@ def build_ai_context(
             context.append(message_context)
         if normalized_message.reply is not None:
             context.append(build_reply_context(normalized_message))
+        memory_context = build_private_memory_context(settings, normalized_message, event=event)
+        if memory_context:
+            context.append(memory_context)
         return tuple(context)
 
     group_id = getattr(event, "group_id")
@@ -511,7 +552,34 @@ def build_long_term_memory_context(
         user_records,
         max_chars=max(200, settings.ai_memory_context_chars // 2),
     )
-    return "\n".join(part for part in (group_context, user_context) if part)
+    evidence_context = format_evidence_bundle(evidence)
+    return "\n".join(part for part in (evidence_context, group_context, user_context) if part)
+
+
+def build_private_memory_context(
+    settings: RuntimeSettings,
+    normalized_message: NormalizedMessage,
+    *,
+    event: MessageEvent,
+) -> str:
+    if not settings.ai_memory_enabled:
+        return ""
+    query = build_memory_query(normalized_message)
+    if not query:
+        return ""
+    try:
+        memory_store = ChatMemoryStore(settings.data_root)
+        plan = build_memory_retrieval_plan(
+            event,
+            normalized_message,
+            limit=settings.ai_memory_search_limit,
+        )
+        evidence = retrieve_memory_evidence(memory_store, plan)
+    except Exception:
+        return ""
+    if not evidence.facts and not evidence.messages:
+        return ""
+    return format_evidence_bundle(evidence)
 
 
 def search_current_sender_memory(

@@ -361,6 +361,80 @@ class ChatMemoryStore:
             ).fetchall()
         return tuple(self._record_from_row(row) for row in rows)
 
+    def load_recent_space_messages(
+        self,
+        *,
+        space_id: str,
+        visibility: str,
+        limit: int = 100,
+    ) -> tuple[ChatMemoryRecord, ...]:
+        if not space_id.strip() or limit <= 0 or not self.db_path.exists():
+            return ()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM messages
+                WHERE space_id = ?
+                  AND visibility = ?
+                  AND text != ''
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                (space_id, visibility, limit),
+            ).fetchall()
+        return tuple(self._record_from_row(row) for row in rows)
+
+    def search_space_messages(
+        self,
+        *,
+        space_id: str,
+        query: str,
+        visibility: str,
+        limit: int = 6,
+    ) -> tuple[ChatMemoryRecord, ...]:
+        normalized_query = query.strip()
+        if not normalized_query or limit <= 0 or not self.db_path.exists():
+            return ()
+        terms = build_like_terms(normalized_query)
+        if not terms:
+            return ()
+        clauses: list[str] = []
+        params: list[object] = [space_id, visibility]
+        for term in terms:
+            like = f"%{term}%"
+            clauses.append(
+                "(text LIKE ? OR summary LIKE ? OR tags LIKE ? OR topics LIKE ? OR entities LIKE ? OR sender_name LIKE ? OR reply_outline LIKE ?)"
+            )
+            params.extend([like, like, like, like, like, like, like])
+        params.append(max(limit * 4, limit))
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM messages
+                WHERE space_id = ?
+                  AND visibility = ?
+                  AND ({' OR '.join(clauses)})
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        records = tuple(
+            record
+            for _, record in sorted(
+                (
+                    (score_message_record(self._record_from_row(row), normalized_query), self._record_from_row(row))
+                    for row in rows
+                ),
+                key=lambda item: (-item[0], -item[1].timestamp, -item[1].id),
+            )[:limit]
+        )
+        return records
+
     def load_messages_by_message_ids(
         self,
         group_id: int | str,
@@ -565,6 +639,39 @@ class ChatMemoryStore:
             if row is None:
                 raise ValueError("Trusted fact was rejected.")
             return self._fact_from_row(row)
+
+    def upsert_memory_summary(
+        self,
+        *,
+        group_id: int | str,
+        topic: str,
+        summary: str,
+        source_message_ids: tuple[str, ...],
+        updated_at: int,
+    ) -> bool:
+        fact = ChatMemoryFact(
+            id=0,
+            group_id=str(group_id),
+            subject="群主题摘要",
+            predicate="摘要",
+            object=summary.strip(),
+            confidence=0.75,
+            source_message_ids=tuple(dict.fromkeys(source_message_ids)),
+            topics=(topic.strip(), "主题摘要"),
+            entities=("群主题摘要", topic.strip()),
+            updated_at=int(updated_at),
+            source_type="system",
+            trust_level="system",
+            status="active",
+            space_id=build_group_space_id(group_id),
+            visibility="group_public",
+            memory_type="summary",
+        )
+        if not fact.object or not topic.strip():
+            return False
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            return self._upsert_fact(conn, fact)
 
     def set_fact_status(self, fact_id: int, status: str) -> bool:
         normalized_status = status.strip()
@@ -1815,6 +1922,9 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
                     [
                         *entities,
                         "临时偏好",
+                        "scope=group",
+                        "permission=user",
+                        "ttl=short",
                         *extract_behavior_instruction_entities(obj),
                     ]
                 )

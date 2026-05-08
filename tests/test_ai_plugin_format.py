@@ -61,6 +61,37 @@ class FakeGroupEvent:
         return self.original_message
 
 
+class FakePrivateEvent:
+    message_type = "private"
+
+    def __init__(
+        self,
+        user_id: str = "605738729",
+        text: str = "你好",
+        message=None,
+    ) -> None:
+        self.user_id = user_id
+        self.text = text
+        self.sender = FakeSender(user_id=int(user_id), card="", nickname=user_id)
+        self._message = message
+
+    def get_user_id(self) -> str:
+        return self.user_id
+
+    def get_plaintext(self) -> str:
+        return self.text
+
+    @property
+    def original_message(self):
+        if self._message is not None:
+            return self._message
+        return FakeMessage(self.text)
+
+    @property
+    def message(self):
+        return self.original_message
+
+
 class FakeSender:
     def __init__(
         self,
@@ -152,6 +183,34 @@ def test_build_ai_reply_message_keeps_private_response_plain() -> None:
         message_id=12345,
         user_id="605738729",
     ) == "你好呀"
+
+
+def test_ai_context_includes_private_memory_only_in_private_chat(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id="private:10001",
+        space_id="qq:private:10001",
+        message_id=8,
+        direction="incoming",
+        user_id=10001,
+        actor_id="qq:user:10001",
+        sender_name="10001",
+        text="我喜欢写小说。",
+        timestamp=8,
+        visibility="private",
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakePrivateEvent(user_id="10001", text="我喜欢什么？"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "当前对话场景：私聊" in joined
+    assert "结构化记忆证据" in joined
+    assert '"space_id": "qq:private:10001"' in joined
+    assert "我喜欢写小说。" in joined
 
 
 def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> None:

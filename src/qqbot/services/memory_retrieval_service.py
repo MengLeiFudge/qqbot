@@ -9,6 +9,7 @@ from qqbot.services.chat_memory_store import (
     ChatMemoryStore,
     parse_qq_user_actor_id,
 )
+from qqbot.services.memory_vector_store import MemoryVectorStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,8 @@ class MemoryEvidenceBundle:
 def retrieve_memory_evidence(
     store: ChatMemoryStore,
     plan: RetrievalPlan,
+    *,
+    vector_store: MemoryVectorStore | None = None,
 ) -> MemoryEvidenceBundle:
     if plan.limit <= 0:
         return MemoryEvidenceBundle(plan=plan, facts=(), messages=(), forbidden=plan.forbidden)
@@ -69,10 +72,65 @@ def retrieve_memory_evidence(
             forbidden=plan.forbidden,
         )
 
+    if plan.intent == "private_conversation":
+        return MemoryEvidenceBundle(
+            plan=plan,
+            facts=(),
+            messages=_rerank_messages_with_vectors(
+                store.search_space_messages(
+                    space_id=plan.space_id,
+                    query=plan.query,
+                    visibility=plan.visibility,
+                    limit=plan.limit,
+                ),
+                plan.query,
+                vector_store,
+            ),
+            forbidden=plan.forbidden,
+        )
+
     group_id = parse_group_id_from_space_id(plan.space_id)
     facts = store.search_facts(group_id, plan.query, limit=plan.limit)
-    messages = store.search_messages(group_id, plan.query, limit=plan.limit)
+    messages = _rerank_messages_with_vectors(
+        store.search_messages(group_id, plan.query, limit=plan.limit),
+        plan.query,
+        vector_store,
+    )
     return MemoryEvidenceBundle(plan=plan, facts=facts, messages=messages, forbidden=plan.forbidden)
+
+
+def format_evidence_bundle(bundle: MemoryEvidenceBundle) -> str:
+    payload = {
+        "plan": json.loads(bundle.plan.to_prompt_json()),
+        "facts": [
+            {
+                "space_id": fact.space_id,
+                "visibility": fact.visibility,
+                "memory_type": fact.memory_type,
+                "subject": fact.subject,
+                "predicate": fact.predicate,
+                "object": fact.object,
+                "confidence": fact.confidence,
+                "source_message_ids": list(fact.source_message_ids),
+            }
+            for fact in bundle.facts
+        ],
+        "messages": [
+            {
+                "space_id": record.space_id,
+                "actor_id": record.actor_id,
+                "visibility": record.visibility,
+                "memory_type": record.memory_type,
+                "sender_name": record.sender_name,
+                "user_id": record.user_id,
+                "text": record.text,
+                "timestamp": record.timestamp,
+            }
+            for record in bundle.messages
+        ],
+        "forbidden": list(bundle.forbidden),
+    }
+    return "结构化记忆证据：" + json.dumps(payload, ensure_ascii=False, separators=(", ", ": "))
 
 
 def parse_group_id_from_space_id(space_id: str) -> str:
@@ -83,3 +141,25 @@ def parse_group_id_from_space_id(space_id: str) -> str:
 def parse_actor_user_id(actor_id: str) -> str:
     return parse_qq_user_actor_id(actor_id)
 
+
+def _rerank_messages_with_vectors(
+    messages: tuple[ChatMemoryRecord, ...],
+    query: str,
+    vector_store: MemoryVectorStore | None,
+) -> tuple[ChatMemoryRecord, ...]:
+    if vector_store is None or not messages:
+        return messages
+    scores = {
+        result.key: result.score
+        for result in vector_store.search(query, limit=max(len(messages) * 2, len(messages)))
+    }
+    return tuple(
+        sorted(
+            messages,
+            key=lambda record: (
+                -scores.get(f"message:{record.id}", -1.0),
+                -record.timestamp,
+                -record.id,
+            ),
+        )
+    )
