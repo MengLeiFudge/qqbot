@@ -15,6 +15,7 @@ from qqbot.services.codex_task_service import get_codex_project_by_id, normalize
 from qqbot.services.fe_artifact_publish_service import (
     is_fe_artifact_path,
     publish_fe_artifact,
+    read_publish_summary_from_afterbuild_result,
     select_fe_package_from_afterbuild_result,
 )
 
@@ -42,6 +43,7 @@ class LocalArtifactUploadRequest(BaseModel):
     group_id: int
     files: list[str] = []
     afterbuild_result_path: str = ""
+    message: str = ""
 
 
 class GroupControlUpdateRequest(BaseModel):
@@ -246,7 +248,16 @@ def register_admin_routes(
         if artifact is None:
             raise HTTPException(status_code=404, detail="No FractionateEverything zip artifact found.")
         bot = next(iter(bots.values()))
-        result = await publish_fe_artifact(bot, payload.group_id, artifact, repo_path)
+        publish_message = payload.message.strip()
+        if not publish_message and payload.afterbuild_result_path.strip():
+            publish_message = read_publish_summary_from_afterbuild_result(payload.afterbuild_result_path)
+        result = await publish_fe_artifact(
+            bot,
+            payload.group_id,
+            artifact,
+            repo_path,
+            message=publish_message,
+        )
         return {"ok": True, "uploaded": result.uploaded, "deleted": result.deleted}
 
     @app.get("/admin/api/admins")

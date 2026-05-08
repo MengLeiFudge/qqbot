@@ -47,11 +47,24 @@ def select_fe_package_from_afterbuild_result(
     return candidates[0]
 
 
+def read_publish_summary_from_afterbuild_result(result_path: str | Path) -> str:
+    path = normalize_local_path(result_path)
+    if not path.is_file():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    summary = payload.get("publish_summary")
+    return summary.strip() if isinstance(summary, str) else ""
+
+
 async def publish_fe_artifact(
     bot: Any,
     group_id: int,
     package: str | Path,
     repo_path: str | Path | None = None,
+    message: str = "",
 ) -> FeArtifactPublishResult:
     package_path = normalize_local_path(package)
     deleted = await delete_old_fe_group_files(bot, group_id)
@@ -61,10 +74,9 @@ async def publish_fe_artifact(
         file=str(package_path),
         name=package_path.name,
     )
-    if repo_path is not None:
-        commit_message = build_latest_commit_message(repo_path)
-        if commit_message:
-            await bot.call_api("send_group_msg", group_id=group_id, message=commit_message)
+    publish_message = build_publish_message(repo_path, message)
+    if publish_message:
+        await bot.call_api("send_group_msg", group_id=group_id, message=publish_message)
     return FeArtifactPublishResult(
         uploaded=[{"file": str(package_path), "name": package_path.name}],
         deleted=deleted,
@@ -102,6 +114,20 @@ def is_fe_artifact_path(path: str | Path) -> bool:
     return FE_ARTIFACT_NAME_RE.fullmatch(Path(str(path)).name) is not None
 
 
+def build_publish_message(repo_path: str | Path | None, message: str = "") -> str:
+    lines: list[str] = []
+    normalized_message = message.strip()
+    if normalized_message:
+        lines.extend(["本次 FE 构建说明：", normalized_message])
+    if repo_path is not None:
+        commit_message = build_latest_commit_message(repo_path)
+        if commit_message:
+            if lines:
+                lines.append("")
+            lines.append(commit_message)
+    return "\n".join(lines).strip()
+
+
 def build_latest_commit_message(repo_path: str | Path) -> str:
     repo = normalize_local_path(repo_path)
     if not repo.is_dir():
@@ -109,7 +135,6 @@ def build_latest_commit_message(repo_path: str | Path) -> str:
     summary = _run_git(repo, "log", "-1", "--pretty=format:%h%n%s%n%b")
     if not summary:
         return ""
-    stats = _run_git(repo, "show", "--stat", "--oneline", "--no-renames", "--format=", "HEAD")
     parts = [part.strip() for part in summary.splitlines()]
     short_hash = parts[0] if parts else ""
     title = parts[1] if len(parts) > 1 else ""
@@ -120,8 +145,6 @@ def build_latest_commit_message(repo_path: str | Path) -> str:
     ]
     if body:
         lines.extend(["", body])
-    if stats:
-        lines.extend(["", "改动统计：", stats.strip()])
     return "\n".join(line for line in lines if line is not None).strip()
 
 
