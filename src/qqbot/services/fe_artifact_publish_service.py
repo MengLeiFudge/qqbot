@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
 from typing import Any
 
+from qqbot.config import load_settings
 from qqbot.services.codex_task_service import normalize_local_path
 
 FE_ARTIFACT_NAME_RE = re.compile(r"^FractionateEverything_\d+(?:\.\d+)*\.zip$", re.IGNORECASE)
@@ -17,6 +19,8 @@ FE_ARTIFACT_NAME_RE = re.compile(r"^FractionateEverything_\d+(?:\.\d+)*\.zip$", 
 class FeArtifactPublishResult:
     uploaded: list[dict[str, str]]
     deleted: list[str]
+    skipped: bool = False
+    reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +77,17 @@ async def publish_fe_artifact(
     package: str | Path,
     repo_path: str | Path | None = None,
     message: str = "",
+    data_root: str | Path | None = None,
 ) -> FeArtifactPublishResult:
     package_path = normalize_local_path(package)
+    package_sha256 = calculate_sha256(package_path)
+    if is_same_as_last_published(group_id, package_sha256, data_root=data_root):
+        return FeArtifactPublishResult(
+            uploaded=[],
+            deleted=[],
+            skipped=True,
+            reason="FE package sha256 unchanged.",
+        )
     deleted = await delete_old_fe_group_files(bot, group_id)
     upload_result = await bot.call_api(
         "upload_group_file",
@@ -92,6 +105,7 @@ async def publish_fe_artifact(
     publish_message = build_publish_message(repo_path, message, reply_message_id=reply_message_id)
     if publish_message:
         await bot.call_api("send_group_msg", group_id=group_id, message=publish_message)
+    save_last_published_sha(group_id, package_sha256, data_root=data_root)
     return FeArtifactPublishResult(
         uploaded=[{"file": str(package_path), "name": package_path.name}],
         deleted=deleted,
@@ -129,6 +143,39 @@ def is_fe_artifact_path(path: str | Path) -> bool:
     return FE_ARTIFACT_NAME_RE.fullmatch(Path(str(path)).name) is not None
 
 
+def calculate_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with normalize_local_path(path).open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def is_same_as_last_published(
+    group_id: int,
+    sha256: str,
+    *,
+    data_root: str | Path | None = None,
+) -> bool:
+    return bool(sha256) and _load_last_published_sha(group_id, data_root=data_root) == sha256
+
+
+def save_last_published_sha(
+    group_id: int,
+    sha256: str,
+    *,
+    data_root: str | Path | None = None,
+) -> None:
+    if not sha256:
+        return
+    path = _last_published_sha_path(group_id, data_root=data_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"sha256": sha256}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 async def find_uploaded_file_message_id(
     bot: Any,
     group_id: int,
@@ -157,11 +204,12 @@ def build_publish_message(
     commit = read_latest_commit_summary(repo_path) if repo_path is not None else None
     if commit is None and not message.strip():
         return ""
-    lines: list[str] = [_build_reply_prefix(reply_message_id)]
+    reply_prefix = _build_reply_prefix(reply_message_id)
+    lines: list[str] = []
     if commit is not None:
-        lines.append(f"{commit.short_hash} {commit.title}".strip())
+        lines.append(f"{reply_prefix}{commit.short_hash} {commit.title}".strip())
     else:
-        lines.append("本次 FE 构建")
+        lines.append(f"{reply_prefix}本次 FE 构建")
 
     normalized_message = message.strip()
     fields = _parse_publish_summary(normalized_message)
@@ -397,8 +445,36 @@ def _sections(sections: list[tuple[str, list[str]]]) -> list[str]:
         if not items:
             continue
         lines.extend(["", f"{title}："])
-        lines.extend(f"{index}.{item}" for index, item in enumerate(items, start=1))
+        if len(items) == 1:
+            lines.append(items[0])
+        else:
+            lines.extend(f"{index}.{item}" for index, item in enumerate(items, start=1))
     return lines
+
+
+def _load_last_published_sha(
+    group_id: int,
+    *,
+    data_root: str | Path | None = None,
+) -> str:
+    path = _last_published_sha_path(group_id, data_root=data_root)
+    if not path.is_file():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    sha256 = payload.get("sha256")
+    return sha256.strip().lower() if isinstance(sha256, str) else ""
+
+
+def _last_published_sha_path(
+    group_id: int,
+    *,
+    data_root: str | Path | None = None,
+) -> Path:
+    root = normalize_local_path(data_root) if data_root is not None else load_settings().data_root
+    return root / "fe_artifacts" / f"{group_id}.json"
 
 
 def _normalize_fe_package(raw_path: str, repo_path: Path) -> Path | None:

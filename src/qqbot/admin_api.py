@@ -257,8 +257,15 @@ def register_admin_routes(
             artifact,
             repo_path,
             message=publish_message,
+            data_root=settings.data_root,
         )
-        return {"ok": True, "uploaded": result.uploaded, "deleted": result.deleted}
+        return {
+            "ok": True,
+            "uploaded": result.uploaded,
+            "deleted": result.deleted,
+            "skipped": result.skipped,
+            "reason": result.reason,
+        }
 
     @app.get("/admin/api/admins")
     async def admin_list_admins(

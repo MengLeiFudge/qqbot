@@ -216,7 +216,10 @@ class AiOrchestrator:
                 int(context.group_id),
                 artifact.path,
                 project_match.project.repo_path,
+                data_root=self.data_root,
             )
+            if result.skipped:
+                return AiOrchestratorResult(True, "FE 压缩包内容没有变化，已跳过上传。")
             deleted_text = f"，已清理旧包 {len(result.deleted)} 个" if result.deleted else ""
             return AiOrchestratorResult(
                 True,

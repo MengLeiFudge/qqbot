@@ -261,6 +261,8 @@ def test_upload_local_artifact_api_uploads_repo_zip(tmp_path: Path, monkeypatch)
             }
         ],
         "deleted": [],
+        "skipped": False,
+        "reason": "",
     }
     assert bot.calls == [
         (
@@ -419,6 +421,8 @@ def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
             "FractionateEverything_2.2.9.zip",
             "FractionateEverything_2.3.0.zip",
         ],
+        "skipped": False,
+        "reason": "",
     }
     assert bot.calls == [
         (
@@ -456,16 +460,78 @@ def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
             {
                 "group_id": 319567534,
                 "message": (
-                    "[CQ:reply,id=24680]\n"
-                    "c251753 修复：避免分馏处理器静态初始化崩溃\n\n"
+                    "[CQ:reply,id=24680]c251753 修复：避免分馏处理器静态初始化崩溃\n\n"
                     "根本原因：\n"
-                    "1.用户反馈启动崩溃\n\n"
+                    "用户反馈启动崩溃\n\n"
                     "修复方式：\n"
-                    "1.避免 ProcessManager 静态初始化读取未就绪字段"
+                    "避免 ProcessManager 静态初始化读取未就绪字段"
                 ),
             },
         ),
     ]
+
+
+def test_publish_fe_artifact_skips_unchanged_fe_zip(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    modzips = repo / "AfterBuildEvent" / "bin" / "win" / "Debug" / "ModZips"
+    fe_package = modzips / "FractionateEverything_2.3.0.zip"
+    modzips.mkdir(parents=True)
+    fe_package.write_bytes(b"same-fe-content")
+    result_path = modzips / "afterbuild-result.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "automation_mode": True,
+                "generated_packages": [str(fe_package)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    sha256 = __import__("hashlib").sha256(fe_package.read_bytes()).hexdigest()
+    state_path = tmp_path / "run" / "fe_artifacts" / "319567534.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({"sha256": sha256}), encoding="utf-8")
+    bot = FakeUploadBot()
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    monkeypatch.setattr(
+        "qqbot.admin_api.get_codex_project_by_id",
+        lambda project_id: type(
+            "Project",
+            (),
+            {
+                "project_id": project_id,
+                "display_name": "MLJ_DSPmods",
+                "repo_path": str(repo),
+            },
+        )(),
+        raising=False,
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/artifacts/upload-local",
+        json_body={
+            "project_id": "mlj_dspmods",
+            "group_id": 319567534,
+            "afterbuild_result_path": str(result_path),
+            "message": "原因：这次 FE 包没变",
+        },
+    )
+
+    assert status_code == 200, body
+    assert json.loads(body) == {
+        "ok": True,
+        "uploaded": [],
+        "deleted": [],
+        "skipped": True,
+        "reason": "FE package sha256 unchanged.",
+    }
+    assert bot.calls == []
 
 
 def test_plugins_api_lists_and_updates_global_state(tmp_path: Path) -> None:

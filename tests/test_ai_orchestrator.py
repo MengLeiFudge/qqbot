@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import hashlib
 import os
 import sys
 
@@ -33,6 +34,8 @@ class FakeBot:
         self.calls.append((api, data))
         if api == "get_group_root_files":
             return {"files": list(self.group_files)}
+        if api == "upload_group_file":
+            return {"message_id": 24680}
         return None
 
 
@@ -206,6 +209,48 @@ def test_orchestrator_uploads_latest_project_zip_for_admin_group(
             },
         )
     ]
+
+
+def test_orchestrator_skips_latest_fe_zip_upload_when_sha_unchanged(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    bot = FakeBot()
+    package = tmp_path / "repo" / "ModZips" / "FractionateEverything_2.3.0.zip"
+    package.parent.mkdir(parents=True)
+    package.write_bytes(b"same-fe-content")
+    state_path = tmp_path / "fe_artifacts" / "319567534.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"sha256": "' + hashlib.sha256(package.read_bytes()).hexdigest() + '"}',
+        encoding="utf-8",
+    )
+    project = CodexProjectBinding(
+        project_id="mlj_dspmods",
+        display_name="MLJ_DSPmods",
+        repo_path=str(tmp_path / "repo"),
+    )
+
+    def fake_resolve(*_args, **_kwargs):
+        return type("Match", (), {"project": project})()
+
+    monkeypatch.setattr(ai_orchestrator_module, "resolve_codex_project_for_text", fake_resolve)
+    orchestrator = AiOrchestrator(
+        data_root=tmp_path,
+        action_executor=AiActionExecutor(bot=bot, data_root=tmp_path),
+    )
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "上传最新分馏压缩包到群里",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="上传最新分馏压缩包到群里", outline="上传最新分馏压缩包到群里"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "FE 压缩包内容没有变化，已跳过上传。"
+    assert bot.calls == []
 
 
 def test_orchestrator_rejects_latest_zip_upload_for_non_admin(tmp_path: Path) -> None:

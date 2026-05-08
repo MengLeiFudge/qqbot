@@ -49,8 +49,7 @@ def test_build_publish_message_formats_fix_summary_and_quotes_upload(
     )
 
     assert message == (
-        "[CQ:reply,id=12345]\n"
-        "c251753 修复：避免分馏处理器静态初始化崩溃\n\n"
+        "[CQ:reply,id=12345]c251753 修复：避免分馏处理器静态初始化崩溃\n\n"
         "根本原因：\n"
         "1.用户反馈启动崩溃\n"
         "2.跨 partial 静态字段初始化顺序不稳定\n\n"
@@ -58,7 +57,7 @@ def test_build_publish_message_formats_fix_summary_and_quotes_upload(
         "1.使用固定建筑类型数量\n"
         "2.移除跨 partial 静态初始化依赖\n\n"
         "验证：\n"
-        "1.MSBuild 0 warning 0 error"
+        "MSBuild 0 warning 0 error"
     )
 
 
@@ -84,15 +83,15 @@ def test_build_publish_message_formats_feature_summary(
     assert message == (
         "2016562 功能：构建上传携带FE发布说明\n\n"
         "背景原因：\n"
-        "1.用户不想手动整理上传说明\n\n"
+        "用户不想手动整理上传说明\n\n"
         "新增能力：\n"
-        "1.上传事件携带发布说明\n\n"
+        "上传事件携带发布说明\n\n"
         "使用方式：\n"
-        "1.AfterBuildEvent 传自然语言说明\n\n"
+        "AfterBuildEvent 传自然语言说明\n\n"
         "影响范围：\n"
-        "1.群消息不再显示文件级 diff\n\n"
+        "群消息不再显示文件级 diff\n\n"
         "验证：\n"
-        "1.qqbot 全量测试通过"
+        "qqbot 全量测试通过"
     )
 
 
@@ -118,13 +117,13 @@ def test_build_publish_message_formats_refactor_summary(
     assert message == (
         "abc1234 重构：整理FE发布说明模板\n\n"
         "调整原因：\n"
-        "1.说明字段逐步变多\n\n"
+        "说明字段逐步变多\n\n"
         "结构变化：\n"
-        "1.按提交类型拆分段落\n\n"
+        "按提交类型拆分段落\n\n"
         "行为影响：\n"
-        "1.不改变上传流程\n\n"
+        "不改变上传流程\n\n"
         "验证：\n"
-        "1.单测通过"
+        "单测通过"
     )
 
 
@@ -150,11 +149,11 @@ def test_build_publish_message_formats_misc_summary(
     assert message == (
         "def5678 杂项：补充FE发布说明约定\n\n"
         "变更内容：\n"
-        "1.记录发布说明格式约定\n\n"
+        "记录发布说明格式约定\n\n"
         "补充说明：\n"
-        "1.不再发送文件级 diff\n\n"
+        "不再发送文件级 diff\n\n"
         "验证：\n"
-        "1.文档检查通过"
+        "文档检查通过"
     )
 
 
@@ -210,6 +209,31 @@ def test_find_uploaded_file_message_id_reads_group_history() -> None:
     )
 
     assert message_id == "10002"
+
+
+def test_publish_fe_artifact_skips_when_sha_unchanged(tmp_path: Path) -> None:
+    class FakeBot:
+        async def call_api(self, api: str, **data: object) -> dict[str, object]:
+            raise AssertionError(f"unexpected api call: {api}")
+
+    package = tmp_path / "FractionateEverything_2.3.0.zip"
+    package.write_bytes(b"same-fe-content")
+    package_sha = service.calculate_sha256(package)
+    service.save_last_published_sha(319567534, package_sha, data_root=tmp_path / "run")
+
+    result = asyncio.run(
+        service.publish_fe_artifact(
+            FakeBot(),
+            319567534,
+            package,
+            data_root=tmp_path / "run",
+        )
+    )
+
+    assert result.skipped is True
+    assert result.uploaded == []
+    assert result.deleted == []
+    assert result.reason == "FE package sha256 unchanged."
 
 
 def test_find_uploaded_file_message_id_uses_latest_matching_message() -> None:
