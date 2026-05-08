@@ -18,6 +18,13 @@ class FeArtifactPublishResult:
     deleted: list[str]
 
 
+@dataclass(frozen=True, slots=True)
+class CommitSummary:
+    short_hash: str
+    title: str
+    body: str
+
+
 def select_fe_package_from_afterbuild_result(
     result_path: str | Path,
     repo_path: str | Path,
@@ -68,13 +75,14 @@ async def publish_fe_artifact(
 ) -> FeArtifactPublishResult:
     package_path = normalize_local_path(package)
     deleted = await delete_old_fe_group_files(bot, group_id)
-    await bot.call_api(
+    upload_result = await bot.call_api(
         "upload_group_file",
         group_id=group_id,
         file=str(package_path),
         name=package_path.name,
     )
-    publish_message = build_publish_message(repo_path, message)
+    reply_message_id = _extract_message_id(upload_result)
+    publish_message = build_publish_message(repo_path, message, reply_message_id=reply_message_id)
     if publish_message:
         await bot.call_api("send_group_msg", group_id=group_id, message=publish_message)
     return FeArtifactPublishResult(
@@ -114,38 +122,199 @@ def is_fe_artifact_path(path: str | Path) -> bool:
     return FE_ARTIFACT_NAME_RE.fullmatch(Path(str(path)).name) is not None
 
 
-def build_publish_message(repo_path: str | Path | None, message: str = "") -> str:
-    lines: list[str] = []
+def build_publish_message(
+    repo_path: str | Path | None,
+    message: str = "",
+    reply_message_id: str = "",
+) -> str:
+    commit = read_latest_commit_summary(repo_path) if repo_path is not None else None
+    if commit is None and not message.strip():
+        return ""
+    lines: list[str] = [_build_reply_prefix(reply_message_id)]
+    if commit is not None:
+        lines.append(f"{commit.short_hash} {commit.title}".strip())
+    else:
+        lines.append("本次 FE 构建")
+
     normalized_message = message.strip()
-    if normalized_message:
-        lines.extend(["本次 FE 构建说明：", normalized_message])
-    if repo_path is not None:
-        commit_message = build_latest_commit_message(repo_path)
-        if commit_message:
-            if lines:
-                lines.append("")
-            lines.append(commit_message)
-    return "\n".join(lines).strip()
+    fields = _parse_publish_summary(normalized_message)
+    if not fields and commit is not None and commit.body:
+        fields = _parse_publish_summary(commit.body)
+    if not fields and normalized_message:
+        fields = {"变更内容": [normalized_message]}
+
+    lines.extend(_build_type_sections(_commit_type(commit.title if commit else ""), fields))
+    return "\n".join(line for line in lines if line is not None).strip()
 
 
 def build_latest_commit_message(repo_path: str | Path) -> str:
+    commit = read_latest_commit_summary(repo_path)
+    if commit is None:
+        return ""
+    lines = [
+        "本次 FE 构建对应提交：",
+        f"{commit.short_hash} {commit.title}".strip(),
+    ]
+    if commit.body:
+        lines.extend(["", commit.body])
+    return "\n".join(line for line in lines if line is not None).strip()
+
+
+def read_latest_commit_summary(repo_path: str | Path | None) -> CommitSummary | None:
+    if repo_path is None:
+        return None
     repo = normalize_local_path(repo_path)
     if not repo.is_dir():
-        return ""
+        return None
     summary = _run_git(repo, "log", "-1", "--pretty=format:%h%n%s%n%b")
     if not summary:
-        return ""
+        return None
     parts = [part.strip() for part in summary.splitlines()]
     short_hash = parts[0] if parts else ""
     title = parts[1] if len(parts) > 1 else ""
     body = "\n".join(part for part in parts[2:] if part).strip()
-    lines = [
-        "本次 FE 构建对应提交：",
-        f"{short_hash} {title}".strip(),
-    ]
-    if body:
-        lines.extend(["", body])
-    return "\n".join(line for line in lines if line is not None).strip()
+    return CommitSummary(short_hash=short_hash, title=title, body=body)
+
+
+def _build_reply_prefix(message_id: str) -> str:
+    return f"[CQ:reply,id={message_id}]" if message_id.isdigit() else ""
+
+
+def _extract_message_id(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("message_id", "msg_id", "id"):
+        value = payload.get(key)
+        if value not in (None, ""):
+            return str(value)
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return _extract_message_id(data)
+    return ""
+
+
+def _commit_type(title: str) -> str:
+    prefix = title.split("：", 1)[0].strip()
+    return prefix if prefix in {"修复", "功能", "重构", "杂项"} else ""
+
+
+def _parse_publish_summary(message: str) -> dict[str, list[str]]:
+    fields: dict[str, list[str]] = {}
+    current_label = ""
+    for raw_line in message.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        label, content = _split_summary_line(line)
+        if label:
+            current_label = label
+            if content:
+                fields.setdefault(current_label, []).append(content)
+            else:
+                fields.setdefault(current_label, [])
+            continue
+        if current_label:
+            fields.setdefault(current_label, []).append(_strip_list_marker(line))
+        else:
+            fields.setdefault("变更内容", []).append(_strip_list_marker(line))
+    return fields
+
+
+def _split_summary_line(line: str) -> tuple[str, str]:
+    for sep in ("：", ":"):
+        if sep not in line:
+            continue
+        raw_label, raw_content = line.split(sep, 1)
+        label = _normalize_label(raw_label)
+        if label:
+            return label, _strip_list_marker(raw_content.strip())
+    return "", ""
+
+
+def _normalize_label(label: str) -> str:
+    cleaned = label.strip().strip("[]【】")
+    aliases = {
+        "原因": "原因",
+        "根本原因": "原因",
+        "问题": "原因",
+        "背景": "原因",
+        "修复": "修复",
+        "修复方式": "修复方式",
+        "怎么修": "修复方式",
+        "方式": "修复方式",
+        "实现": "修复方式",
+        "实现方式": "修复方式",
+        "新增": "新增能力",
+        "新增能力": "新增能力",
+        "功能": "新增能力",
+        "使用": "使用方式",
+        "用法": "使用方式",
+        "使用方式": "使用方式",
+        "影响": "影响范围",
+        "影响范围": "影响范围",
+        "调整": "结构变化",
+        "结构": "结构变化",
+        "结构变化": "结构变化",
+        "行为": "行为影响",
+        "行为影响": "行为影响",
+        "变更": "变更内容",
+        "变更内容": "变更内容",
+        "说明": "补充说明",
+        "补充": "补充说明",
+        "补充说明": "补充说明",
+        "验证": "验证",
+    }
+    return aliases.get(cleaned, "")
+
+
+def _strip_list_marker(text: str) -> str:
+    return re.sub(r"^(?:[-*]\s*|\d+[.)、]\s*)", "", text).strip()
+
+
+def _build_type_sections(commit_type: str, fields: dict[str, list[str]]) -> list[str]:
+    if commit_type == "修复":
+        return _sections([
+            ("根本原因", _collect(fields, "原因")),
+            ("修复方式", _collect(fields, "修复方式", "修复")),
+            ("验证", _collect(fields, "验证")),
+        ])
+    if commit_type == "功能":
+        return _sections([
+            ("背景原因", _collect(fields, "原因")),
+            ("新增能力", _collect(fields, "新增能力", "修复", "变更内容")),
+            ("使用方式", _collect(fields, "使用方式", "修复方式")),
+            ("影响范围", _collect(fields, "影响范围")),
+            ("验证", _collect(fields, "验证")),
+        ])
+    if commit_type == "重构":
+        return _sections([
+            ("调整原因", _collect(fields, "原因")),
+            ("结构变化", _collect(fields, "结构变化", "修复方式", "变更内容")),
+            ("行为影响", _collect(fields, "行为影响", "影响范围")),
+            ("验证", _collect(fields, "验证")),
+        ])
+    return _sections([
+        ("变更内容", _collect(fields, "变更内容", "新增能力", "修复")),
+        ("补充说明", _collect(fields, "补充说明", "修复方式", "影响范围")),
+        ("验证", _collect(fields, "验证")),
+    ])
+
+
+def _collect(fields: dict[str, list[str]], *labels: str) -> list[str]:
+    result: list[str] = []
+    for label in labels:
+        result.extend(item for item in fields.get(label, []) if item)
+    return result
+
+
+def _sections(sections: list[tuple[str, list[str]]]) -> list[str]:
+    lines: list[str] = []
+    for title, items in sections:
+        if not items:
+            continue
+        lines.extend(["", f"{title}："])
+        lines.extend(f"{index}.{item}" for index, item in enumerate(items, start=1))
+    return lines
 
 
 def _normalize_fe_package(raw_path: str, repo_path: Path) -> Path | None:

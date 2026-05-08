@@ -25,6 +25,8 @@ class FakeUploadBot:
         self.calls.append((api, data))
         if api == "get_group_root_files":
             return {"files": list(self.group_files)}
+        if api == "upload_group_file":
+            return {"message_id": 24680}
         return {"status": "ok"}
 
 
@@ -366,8 +368,16 @@ def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
     ]
     monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
     monkeypatch.setattr(
-        "qqbot.services.fe_artifact_publish_service.build_latest_commit_message",
-        lambda repo_path: "本次 FE 构建对应提交：\nc251753 修复：避免分馏处理器静态初始化崩溃",
+        "qqbot.services.fe_artifact_publish_service.read_latest_commit_summary",
+        lambda repo_path: type(
+            "Commit",
+            (),
+            {
+                "short_hash": "c251753",
+                "title": "修复：避免分馏处理器静态初始化崩溃",
+                "body": "",
+            },
+        )(),
     )
     monkeypatch.setattr(
         "qqbot.admin_api.get_codex_project_by_id",
@@ -446,11 +456,12 @@ def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
             {
                 "group_id": 319567534,
                 "message": (
-                    "本次 FE 构建说明：\n"
-                    "原因：用户反馈启动崩溃\n"
-                    "修复：避免 ProcessManager 静态初始化读取未就绪字段\n\n"
-                    "本次 FE 构建对应提交：\n"
-                    "c251753 修复：避免分馏处理器静态初始化崩溃"
+                    "[CQ:reply,id=24680]\n"
+                    "c251753 修复：避免分馏处理器静态初始化崩溃\n\n"
+                    "根本原因：\n"
+                    "1.用户反馈启动崩溃\n\n"
+                    "修复方式：\n"
+                    "1.避免 ProcessManager 静态初始化读取未就绪字段"
                 ),
             },
         ),
