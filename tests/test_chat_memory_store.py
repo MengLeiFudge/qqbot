@@ -213,10 +213,80 @@ def test_chat_memory_store_extracts_rule_facts_and_skips_prompt_injection(tmp_pa
     inserted = store.extract_facts_from_recent_messages(10001, limit=10)
     facts = store.search_facts(10001, "可可喜欢什么", limit=5)
 
-    assert inserted == 1
+    assert inserted == 0
     assert len(facts) == 1
     assert facts[0].subject == "可可"
     assert facts[0].predicate == "喜欢"
     assert facts[0].object == "研究 shapez 数据库"
     assert facts[0].source_message_ids == ("31",)
     assert facts[0].confidence >= 0.7
+
+
+def test_chat_memory_store_migrates_legacy_fts_schema(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    with store._connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id TEXT NOT NULL,
+                message_id TEXT NOT NULL DEFAULT '',
+                direction TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                text TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '[]',
+                timestamp INTEGER NOT NULL,
+                has_image INTEGER NOT NULL DEFAULT 0,
+                has_at INTEGER NOT NULL DEFAULT 0,
+                reply_message_id TEXT NOT NULL DEFAULT '',
+                reply_user_id TEXT NOT NULL DEFAULT '',
+                reply_outline TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE messages_fts USING fts5(
+                message_rowid UNINDEXED,
+                text,
+                summary,
+                tags,
+                sender_name,
+                reply_outline
+            )
+            """
+        )
+
+    assert store.append_message(
+        group_id=10001,
+        message_id=41,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    ) is True
+    assert store.search_messages(10001, "可可 数据库", limit=5)
+
+
+def test_chat_memory_store_auto_extracts_facts_on_append(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+
+    store.append_message(
+        group_id=10001,
+        message_id=51,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    )
+
+    facts = store.search_facts(10001, "可可喜欢什么", limit=5)
+    assert len(facts) == 1
+    assert facts[0].source_message_ids == ("51",)
+    assert facts[0].source_type == "user"
+    assert facts[0].trust_level == "chat"
+    assert facts[0].status == "active"

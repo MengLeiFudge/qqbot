@@ -47,6 +47,9 @@ class ChatMemoryFact:
     topics: tuple[str, ...]
     entities: tuple[str, ...]
     updated_at: int
+    source_type: str = "user"
+    trust_level: str = "chat"
+    status: str = "active"
 
 
 class ChatMemoryStore:
@@ -146,6 +149,7 @@ class ChatMemoryStore:
             row_id = int(cursor.lastrowid)
             if self._fts_available(conn):
                 self._index_fts(conn, row_id, payload)
+            self._extract_facts_from_record(conn, self._record_from_row_by_id(conn, row_id))
             return True
 
     def search_messages(
@@ -189,6 +193,29 @@ class ChatMemoryStore:
             )[:limit]
         )
         return records
+
+    def load_messages_by_message_ids(
+        self,
+        group_id: int | str,
+        message_ids: tuple[str, ...] | list[str],
+    ) -> tuple[ChatMemoryRecord, ...]:
+        normalized_ids = tuple(dict.fromkeys(str(message_id) for message_id in message_ids if str(message_id)))
+        if not normalized_ids or not self.db_path.exists():
+            return ()
+        placeholders = ",".join("?" for _ in normalized_ids)
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM messages
+                WHERE group_id = ?
+                  AND message_id IN ({placeholders})
+                ORDER BY timestamp DESC, id DESC
+                """,
+                (str(group_id), *normalized_ids),
+            ).fetchall()
+        return tuple(self._record_from_row(row) for row in rows)
 
     def remove_group(self, group_id: int | str) -> bool:
         if not self.db_path.exists():
@@ -234,10 +261,7 @@ class ChatMemoryStore:
             ).fetchall()
             inserted = 0
             for row in reversed(rows):
-                record = self._record_from_row(row)
-                for fact in extract_rule_facts(record):
-                    if self._upsert_fact(conn, fact):
-                        inserted += 1
+                inserted += self._extract_facts_from_record(conn, self._record_from_row(row))
             return inserted
 
     def search_facts(
@@ -393,10 +417,16 @@ class ChatMemoryStore:
                 source_message_ids TEXT NOT NULL DEFAULT '[]',
                 topics TEXT NOT NULL DEFAULT '[]',
                 entities TEXT NOT NULL DEFAULT '[]',
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'user',
+                trust_level TEXT NOT NULL DEFAULT 'chat',
+                status TEXT NOT NULL DEFAULT 'active'
             )
             """
         )
+        self._ensure_column(conn, "facts", "source_type", "TEXT NOT NULL DEFAULT 'user'")
+        self._ensure_column(conn, "facts", "trust_level", "TEXT NOT NULL DEFAULT 'chat'")
+        self._ensure_column(conn, "facts", "status", "TEXT NOT NULL DEFAULT 'active'")
         conn.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_facts_unique
@@ -419,6 +449,67 @@ class ChatMemoryStore:
             )
         except sqlite3.OperationalError:
             pass
+        self._ensure_messages_fts_schema(conn)
+        self._ensure_facts_fts_schema(conn)
+
+    def _ensure_messages_fts_schema(self, conn: sqlite3.Connection) -> None:
+        if not self._fts_available(conn):
+            return
+        expected = {
+            "message_rowid",
+            "text",
+            "summary",
+            "tags",
+            "topics",
+            "entities",
+            "sender_name",
+            "reply_outline",
+        }
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(messages_fts)")}
+        if expected.issubset(columns):
+            return
+        conn.execute("DROP TABLE messages_fts")
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE messages_fts USING fts5(
+                message_rowid UNINDEXED,
+                text,
+                summary,
+                tags,
+                topics,
+                entities,
+                sender_name,
+                reply_outline
+            )
+            """
+        )
+        for row in conn.execute("SELECT * FROM messages").fetchall():
+            record = self._record_from_row(row)
+            self._index_fts(conn, record.id, self._payload_from_record(record))
+
+    def _ensure_facts_fts_schema(self, conn: sqlite3.Connection) -> None:
+        if not self._facts_fts_available(conn):
+            return
+        expected = {"fact_rowid", "group_id", "subject", "predicate", "object", "topics", "entities"}
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(facts_fts)")}
+        if expected.issubset(columns):
+            return
+        conn.execute("DROP TABLE facts_fts")
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE facts_fts USING fts5(
+                fact_rowid UNINDEXED,
+                group_id UNINDEXED,
+                subject,
+                predicate,
+                object,
+                topics,
+                entities
+            )
+            """
+        )
+        for row in conn.execute("SELECT id FROM facts").fetchall():
+            self._index_fact(conn, int(row["id"]))
 
     def _fts_available(self, conn: sqlite3.Connection) -> bool:
         row = conn.execute(
@@ -473,7 +564,10 @@ class ChatMemoryStore:
                     source_message_ids = ?,
                     topics = ?,
                     entities = ?,
-                    updated_at = MAX(updated_at, ?)
+                    updated_at = MAX(updated_at, ?),
+                    source_type = ?,
+                    trust_level = ?,
+                    status = 'active'
                 WHERE id = ?
                 """,
                 (
@@ -482,6 +576,8 @@ class ChatMemoryStore:
                     json.dumps(tuple(dict.fromkeys([*existing_fact.topics, *fact.topics])), ensure_ascii=False),
                     json.dumps(tuple(dict.fromkeys([*existing_fact.entities, *fact.entities])), ensure_ascii=False),
                     fact.updated_at,
+                    strongest_source_type(existing_fact.source_type, fact.source_type),
+                    strongest_trust_level(existing_fact.trust_level, fact.trust_level),
                     existing_fact.id,
                 ),
             )
@@ -492,9 +588,10 @@ class ChatMemoryStore:
             """
             INSERT INTO facts (
                 group_id, subject, predicate, object, confidence,
-                source_message_ids, topics, entities, updated_at
+                source_message_ids, topics, entities, updated_at,
+                source_type, trust_level, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fact.group_id,
@@ -506,10 +603,20 @@ class ChatMemoryStore:
                 json.dumps(fact.topics, ensure_ascii=False),
                 json.dumps(fact.entities, ensure_ascii=False),
                 fact.updated_at,
+                fact.source_type,
+                fact.trust_level,
+                fact.status,
             ),
         )
         self._index_fact(conn, int(cursor.lastrowid))
         return True
+
+    def _extract_facts_from_record(self, conn: sqlite3.Connection, record: ChatMemoryRecord) -> int:
+        inserted = 0
+        for fact in extract_rule_facts(record):
+            if self._upsert_fact(conn, fact):
+                inserted += 1
+        return inserted
 
     def _index_fact(self, conn: sqlite3.Connection, fact_id: int) -> None:
         if not self._facts_fts_available(conn):
@@ -718,7 +825,28 @@ class ChatMemoryStore:
             topics=tuple(json.loads(str(row["topics"] or "[]"))),
             entities=tuple(json.loads(str(row["entities"] or "[]"))),
             updated_at=int(row["updated_at"]),
+            source_type=str(row["source_type"] or "user"),
+            trust_level=str(row["trust_level"] or "chat"),
+            status=str(row["status"] or "active"),
         )
+
+    def _record_from_row_by_id(self, conn: sqlite3.Connection, row_id: int) -> ChatMemoryRecord:
+        row = conn.execute("SELECT * FROM messages WHERE id = ?", (row_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Message row not found: {row_id}")
+        return self._record_from_row(row)
+
+    @staticmethod
+    def _payload_from_record(record: ChatMemoryRecord) -> dict[str, object]:
+        return {
+            "text": record.text,
+            "summary": record.summary,
+            "tags": json.dumps(record.tags, ensure_ascii=False),
+            "topics": json.dumps(record.topics, ensure_ascii=False),
+            "entities": json.dumps(record.entities, ensure_ascii=False),
+            "sender_name": record.sender_name,
+            "reply_outline": record.reply_outline,
+        }
 
     @staticmethod
     def _ensure_column(
@@ -856,9 +984,22 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
                 topics=record.topics,
                 entities=tuple(dict.fromkeys([subject, *record.entities, *extract_rule_entities(obj)])),
                 updated_at=record.timestamp,
+                source_type="bot" if record.direction == "bot" else "user",
+                trust_level="chat",
+                status="active",
             )
         )
     return tuple(facts)
+
+
+def strongest_source_type(left: str, right: str) -> str:
+    order = {"user": 0, "bot": 1, "admin": 2, "system": 3}
+    return left if order.get(left, 0) >= order.get(right, 0) else right
+
+
+def strongest_trust_level(left: str, right: str) -> str:
+    order = {"chat": 0, "bot": 1, "admin": 2, "system": 3}
+    return left if order.get(left, 0) >= order.get(right, 0) else right
 
 
 def score_fact(fact: ChatMemoryFact, query: str) -> float:
@@ -891,6 +1032,13 @@ def build_fts_query(query: str) -> str:
 
 def build_like_terms(query: str) -> list[str]:
     terms = [term.strip() for term in query.replace("，", " ").replace(",", " ").split()]
+    normalized_query = query.strip()
+    normalized_parts = [part for part in normalized_query.split() if part]
+    candidate_phrases = [normalized_query, *normalized_parts]
+    for suffix in ("是谁", "是什么", "叫什么", "喜欢什么"):
+        for phrase in candidate_phrases:
+            if phrase.endswith(suffix) and len(phrase) > len(suffix):
+                terms.append(phrase[: -len(suffix)])
     for marker in (
         "知识库",
         "聊天记录",

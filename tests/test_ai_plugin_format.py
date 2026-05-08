@@ -256,6 +256,29 @@ def test_ai_context_separates_memory_facts_from_source_messages(tmp_path: Path) 
     assert "可可(10001): 可可喜欢研究 shapez 数据库。" in joined
 
 
+def test_ai_context_includes_fact_source_message_even_when_query_matches_only_fact(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id=516286670,
+        message_id=11,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="可可叫糖糖。",
+        timestamp=1,
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(text="糖糖是谁"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "可可 叫 糖糖" in joined
+    assert "可可(10001): 可可叫糖糖。" in joined
+
+
 def test_ai_context_includes_author_and_admin_identity_facts(tmp_path: Path) -> None:
     settings = RuntimeSettings(
         data_root=tmp_path,

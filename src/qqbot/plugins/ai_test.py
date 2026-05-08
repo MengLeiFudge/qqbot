@@ -343,6 +343,22 @@ def build_long_term_memory_context(
             query,
             limit=settings.ai_memory_search_limit,
         )
+        fact_source_ids = tuple(
+            dict.fromkeys(
+                message_id
+                for fact in facts
+                for message_id in fact.source_message_ids
+                if message_id
+            )
+        )
+        if fact_source_ids:
+            existing_ids = {record.message_id for record in records}
+            source_records = tuple(
+                record
+                for record in memory_store.load_messages_by_message_ids(group_id, fact_source_ids)
+                if record.message_id not in existing_ids
+            )
+            records = (*records, *source_records)[: settings.ai_memory_search_limit]
     except Exception:
         return ""
     if not facts and not records:
