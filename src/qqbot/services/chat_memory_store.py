@@ -305,6 +305,154 @@ class ChatMemoryStore:
                 inserted += self._extract_facts_from_record(conn, self._record_from_row(row))
             return inserted
 
+    def rebuild_facts(self, group_id: int | str) -> dict[str, int]:
+        normalized_group_id = str(group_id)
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            message_rows = conn.execute(
+                """
+                SELECT *
+                FROM messages
+                WHERE group_id = ?
+                ORDER BY timestamp ASC, id ASC
+                """,
+                (normalized_group_id,),
+            ).fetchall()
+            removable_rows = conn.execute(
+                """
+                SELECT *
+                FROM facts
+                WHERE group_id = ?
+                  AND trust_level = 'chat'
+                """,
+                (normalized_group_id,),
+            ).fetchall()
+            disabled_facts = [self._fact_from_row(row) for row in removable_rows if row["status"] == "disabled"]
+            removable_ids = [int(row["id"]) for row in removable_rows]
+            if removable_ids:
+                placeholders = ",".join("?" for _ in removable_ids)
+                conn.execute(f"DELETE FROM facts WHERE id IN ({placeholders})", removable_ids)
+                if self._facts_fts_available(conn):
+                    conn.execute(
+                        f"DELETE FROM facts_fts WHERE fact_rowid IN ({placeholders})",
+                        removable_ids,
+                    )
+            inserted = 0
+            for row in message_rows:
+                inserted += self._extract_facts_from_record(conn, self._record_from_row(row))
+            disabled_restored = 0
+            for fact in disabled_facts:
+                if self._restore_disabled_fact(conn, fact):
+                    disabled_restored += 1
+            return {
+                "messages_scanned": len(message_rows),
+                "facts_removed": len(removable_ids),
+                "facts_inserted": inserted,
+                "disabled_facts_restored": disabled_restored,
+            }
+
+    def debug_search(
+        self,
+        group_id: int | str,
+        query: str,
+        *,
+        limit: int = 6,
+    ) -> dict[str, object]:
+        normalized_query = query.strip()
+        if not normalized_query or limit <= 0:
+            return {
+                "group_id": str(group_id),
+                "query": normalized_query,
+                "expanded_query": "",
+                "facts": [],
+                "messages": [],
+            }
+        expanded_query = self._expand_search_query(group_id, normalized_query)
+        facts = self.search_facts(group_id, normalized_query, limit=limit)
+        records = self.search_messages(group_id, normalized_query, limit=limit)
+        return {
+            "group_id": str(group_id),
+            "query": normalized_query,
+            "expanded_query": expanded_query,
+            "facts": [
+                self._fact_debug_payload(
+                    fact,
+                    expanded_query,
+                    self.load_messages_by_message_ids(group_id, fact.source_message_ids),
+                )
+                for fact in facts
+            ],
+            "messages": [
+                self._record_debug_payload(record, expanded_query)
+                for record in records
+            ],
+        }
+
+    def upsert_trusted_fact(
+        self,
+        *,
+        group_id: int | str,
+        subject: str,
+        predicate: str,
+        object: str,
+        confidence: float = 1.0,
+        source_type: str = "system",
+        trust_level: str = "system",
+        topics: tuple[str, ...] | list[str] = (),
+        entities: tuple[str, ...] | list[str] = (),
+        updated_at: int = 0,
+    ) -> ChatMemoryFact:
+        fact = ChatMemoryFact(
+            id=0,
+            group_id=str(group_id),
+            subject=subject.strip(),
+            predicate=predicate.strip(),
+            object=object.strip(),
+            confidence=float(confidence),
+            source_message_ids=(),
+            topics=tuple(dict.fromkeys(str(item).strip() for item in topics if str(item).strip())),
+            entities=tuple(dict.fromkeys(str(item).strip() for item in entities if str(item).strip())),
+            updated_at=int(updated_at),
+            source_type=source_type,
+            trust_level=trust_level,
+            status="active",
+        )
+        if not fact.subject or not fact.predicate or not fact.object:
+            raise ValueError("Fact subject, predicate and object are required.")
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            self._upsert_fact(conn, fact)
+            row = conn.execute(
+                """
+                SELECT *
+                FROM facts
+                WHERE group_id = ?
+                  AND subject = ?
+                  AND predicate = ?
+                  AND object = ?
+                """,
+                (fact.group_id, fact.subject, fact.predicate, fact.object),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Trusted fact was rejected.")
+            return self._fact_from_row(row)
+
+    def set_fact_status(self, fact_id: int, status: str) -> bool:
+        normalized_status = status.strip()
+        if normalized_status not in {"active", "disabled", "superseded"}:
+            raise ValueError(f"Unsupported fact status: {status}")
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT id FROM facts WHERE id = ?", (int(fact_id),)).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                "UPDATE facts SET status = ? WHERE id = ?",
+                (normalized_status, int(fact_id)),
+            )
+            self._index_fact(conn, int(fact_id))
+            return True
+
     def search_facts(
         self,
         group_id: int | str,
@@ -393,6 +541,54 @@ class ChatMemoryStore:
         except Exception:
             pass
         return " ".join(dict.fromkeys([query, *terms]))
+
+    def _fact_debug_payload(
+        self,
+        fact: ChatMemoryFact,
+        query: str,
+        source_records: tuple[ChatMemoryRecord, ...],
+    ) -> dict[str, object]:
+        return {
+            "id": fact.id,
+            "group_id": fact.group_id,
+            "subject": fact.subject,
+            "predicate": fact.predicate,
+            "object": fact.object,
+            "confidence": fact.confidence,
+            "source_message_ids": list(fact.source_message_ids),
+            "topics": list(fact.topics),
+            "entities": list(fact.entities),
+            "updated_at": fact.updated_at,
+            "source_type": fact.source_type,
+            "trust_level": fact.trust_level,
+            "status": fact.status,
+            "score": score_fact(fact, query),
+            "source_records": [
+                self._record_debug_payload(record, query)
+                for record in source_records
+            ],
+        }
+
+    def _record_debug_payload(
+        self,
+        record: ChatMemoryRecord,
+        query: str,
+    ) -> dict[str, object]:
+        return {
+            "id": record.id,
+            "group_id": record.group_id,
+            "message_id": record.message_id,
+            "direction": record.direction,
+            "user_id": record.user_id,
+            "sender_name": record.sender_name,
+            "text": record.text,
+            "summary": record.summary,
+            "tags": list(record.tags),
+            "topics": list(record.topics),
+            "entities": list(record.entities),
+            "timestamp": record.timestamp,
+            "score": score_message_record(record, query),
+        }
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -775,6 +971,73 @@ class ChatMemoryStore:
             if self._upsert_fact(conn, fact):
                 inserted += 1
         return inserted
+
+    def _restore_disabled_fact(self, conn: sqlite3.Connection, fact: ChatMemoryFact) -> bool:
+        current = conn.execute(
+            """
+            SELECT *
+            FROM facts
+            WHERE group_id = ?
+              AND subject = ?
+              AND predicate = ?
+              AND object = ?
+            """,
+            (fact.group_id, fact.subject, fact.predicate, fact.object),
+        ).fetchone()
+        if current is None:
+            cursor = conn.execute(
+                """
+                INSERT INTO facts (
+                    group_id, subject, predicate, object, confidence,
+                    source_message_ids, topics, entities, updated_at,
+                    source_type, trust_level, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'disabled')
+                """,
+                (
+                    fact.group_id,
+                    fact.subject,
+                    fact.predicate,
+                    fact.object,
+                    fact.confidence,
+                    json.dumps(fact.source_message_ids, ensure_ascii=False),
+                    json.dumps(fact.topics, ensure_ascii=False),
+                    json.dumps(fact.entities, ensure_ascii=False),
+                    fact.updated_at,
+                    fact.source_type,
+                    fact.trust_level,
+                ),
+            )
+            self._index_fact(conn, int(cursor.lastrowid))
+            return True
+        current_fact = self._fact_from_row(current)
+        source_ids = tuple(dict.fromkeys([*current_fact.source_message_ids, *fact.source_message_ids]))
+        conn.execute(
+            """
+            UPDATE facts
+            SET confidence = MAX(confidence, ?),
+                source_message_ids = ?,
+                topics = ?,
+                entities = ?,
+                updated_at = MAX(updated_at, ?),
+                source_type = ?,
+                trust_level = ?,
+                status = 'disabled'
+            WHERE id = ?
+            """,
+            (
+                fact.confidence,
+                json.dumps(source_ids, ensure_ascii=False),
+                json.dumps(tuple(dict.fromkeys([*current_fact.topics, *fact.topics])), ensure_ascii=False),
+                json.dumps(tuple(dict.fromkeys([*current_fact.entities, *fact.entities])), ensure_ascii=False),
+                fact.updated_at,
+                strongest_source_type(current_fact.source_type, fact.source_type),
+                strongest_trust_level(current_fact.trust_level, fact.trust_level),
+                current_fact.id,
+            ),
+        )
+        self._index_fact(conn, current_fact.id)
+        return True
 
     def _index_fact(self, conn: sqlite3.Connection, fact_id: int) -> None:
         if not self._facts_fts_available(conn):
@@ -1179,6 +1442,8 @@ def iter_rule_fact_parts(text: str) -> tuple[tuple[str, str, str], ...]:
         subject = (match.groupdict().get("subject") or "群规则").strip()
         predicate = (fixed_predicate or match.groupdict().get("predicate") or "").strip()
         obj = (match.groupdict().get("object") or "").strip().strip("，,：:")
+        if predicate == "是" and any(keyword in obj for keyword in ("群友", "管理员", "作者", "主人")):
+            predicate = "身份"
         parts.append((subject, predicate, obj))
         break
     return tuple(parts)
@@ -1191,10 +1456,10 @@ def is_protected_chat_fact(fact: ChatMemoryFact) -> bool:
     normalized_object = fact.object.strip().lower()
     if normalized_subject in {subject.lower() for subject in PROTECTED_FACT_SUBJECTS}:
         return True
-    if fact.predicate in PROTECTED_FACT_PREDICATES and any(
-        keyword.lower() in normalized_object for keyword in PROTECTED_FACT_OBJECT_KEYWORDS
-    ):
-        return True
+        if fact.predicate in PROTECTED_FACT_PREDICATES and any(
+            keyword.lower() == normalized_object for keyword in PROTECTED_FACT_OBJECT_KEYWORDS
+        ):
+            return True
     if fact.predicate in {"主人", "管理员", "作者"} and normalized_object in {
         item.lower() for item in PROTECTED_FACT_RELATION_OBJECTS
     }:

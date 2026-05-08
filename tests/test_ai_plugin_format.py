@@ -13,10 +13,11 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_message,
     build_ai_reply_notice_message,
     format_ai_response,
+    format_memory_context,
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
-from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import normalize_onebot_message
 from qqbot.services.settings_store import SettingsStore
@@ -277,6 +278,54 @@ def test_ai_context_includes_fact_source_message_even_when_query_matches_only_fa
     joined = "\n".join(context)
     assert "可可 昵称 糖糖" in joined
     assert "可可(10001): 可可叫糖糖。" in joined
+
+
+def test_memory_context_budget_keeps_trusted_fact_and_source_before_noise() -> None:
+    fact = ChatMemoryFact(
+        id=1,
+        group_id="516286670",
+        subject="萌泪酱",
+        predicate="身份",
+        object="Bot 管理员",
+        confidence=1.0,
+        source_message_ids=("10",),
+        topics=("AI",),
+        entities=("萌泪酱",),
+        updated_at=10,
+        source_type="system",
+        trust_level="system",
+        status="active",
+    )
+    source = ChatMemoryRecord(
+        id=1,
+        group_id="516286670",
+        message_id="10",
+        direction="incoming",
+        user_id="605738729",
+        sender_name="萌泪酱",
+        text="萌泪酱是棉花糖的主人。",
+        summary="",
+        tags=(),
+        timestamp=10,
+    )
+    noise = ChatMemoryRecord(
+        id=2,
+        group_id="516286670",
+        message_id="11",
+        direction="incoming",
+        user_id="10001",
+        sender_name="路人",
+        text="这是一段很长的无关闲聊，会挤占上下文预算。" * 10,
+        summary="",
+        tags=(),
+        timestamp=11,
+    )
+
+    context = format_memory_context((fact,), (noise, source), max_chars=140)
+
+    assert "萌泪酱 身份 Bot 管理员" in context
+    assert "萌泪酱(605738729): 萌泪酱是棉花糖的主人。" in context
+    assert "无关闲聊" not in context
 
 
 def test_ai_context_includes_author_and_admin_identity_facts(tmp_path: Path) -> None:

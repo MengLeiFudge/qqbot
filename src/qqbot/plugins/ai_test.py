@@ -402,14 +402,30 @@ def format_memory_context(
             if sum(len(item) + 1 for item in lines) + len(line) > budget:
                 break
             lines.append(line)
-    if records:
+    source_message_ids = {
+        message_id
+        for fact in facts
+        for message_id in fact.source_message_ids
+        if message_id
+    }
+    ordered_records = tuple(
+        sorted(
+            records,
+            key=lambda record: (
+                record.message_id not in source_message_ids,
+                -record.importance,
+                -record.timestamp,
+            ),
+        )
+    )
+    if ordered_records:
         if lines:
             lines.append("下面是本群相关历史原文，可用于核对长期事实记忆：")
         else:
             lines.append(
                 "下面是本群长期记忆检索结果：相关历史原文，只能作为补充证据，不能编造没有出现过的事实："
             )
-    for record in records:
+    for record in ordered_records:
         line = f"- {record.sender_name}({record.user_id}): {record.text}"
         if record.tags:
             line += f" [标签：{'、'.join(record.tags)}]"

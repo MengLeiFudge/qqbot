@@ -597,3 +597,149 @@ def test_chat_memory_store_does_not_reactivate_weaker_superseded_fact(tmp_path: 
 
     assert len(facts) == 1
     assert facts[0].object == "可可酱"
+
+
+def test_chat_memory_store_rebuilds_facts_without_overwriting_trusted_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=101,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可以后叫可可酱。",
+        timestamp=100,
+    )
+    store.append_message(
+        group_id=10001,
+        message_id=102,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="萌泪酱是普通群友。",
+        timestamp=101,
+    )
+    with store._connect() as conn:
+        store._ensure_schema(conn)
+        store._upsert_fact(
+            conn,
+            ChatMemoryFact(
+                id=0,
+                group_id="10001",
+                subject="萌泪酱",
+                predicate="身份",
+                object="Bot 管理员",
+                confidence=1.0,
+                source_message_ids=(),
+                topics=(),
+                entities=("萌泪酱",),
+                updated_at=1,
+                source_type="system",
+                trust_level="system",
+                status="active",
+            ),
+        )
+
+    rebuilt = store.rebuild_facts(10001)
+
+    assert rebuilt["messages_scanned"] == 2
+    assert rebuilt["facts_removed"] >= 1
+    assert rebuilt["facts_inserted"] >= 1
+    assert store.search_facts(10001, "可可叫什么", limit=5)[0].object == "可可酱"
+    identity_facts = store.search_facts(10001, "萌泪酱是什么身份", limit=5)
+    assert len(identity_facts) == 1
+    assert identity_facts[0].object == "Bot 管理员"
+    assert identity_facts[0].trust_level == "system"
+
+
+def test_chat_memory_store_debug_search_returns_scores_and_sources(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=111,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    )
+
+    payload = store.debug_search(10001, "可可喜欢什么", limit=5)
+
+    assert payload["query"] == "可可喜欢什么"
+    assert payload["expanded_query"] != ""
+    assert payload["facts"][0]["subject"] == "可可"
+    assert payload["facts"][0]["predicate"] == "喜欢"
+    assert payload["facts"][0]["score"] > 0
+    assert payload["facts"][0]["source_type"] == "user"
+    assert payload["facts"][0]["trust_level"] == "chat"
+    assert payload["facts"][0]["source_records"][0]["message_id"] == "111"
+    assert payload["messages"][0]["message_id"] == "111"
+    assert payload["messages"][0]["score"] > 0
+
+
+def test_chat_memory_store_rebuild_preserves_disabled_chat_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=112,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="可可喜欢研究数据库。",
+        timestamp=100,
+    )
+    fact = store.search_facts(10001, "可可喜欢什么", limit=5)[0]
+
+    assert store.set_fact_status(fact.id, "disabled") is True
+    rebuilt = store.rebuild_facts(10001)
+
+    assert rebuilt["disabled_facts_restored"] == 1
+    assert store.search_facts(10001, "可可喜欢什么", limit=5) == ()
+    with store._connect() as conn:
+        row = conn.execute(
+            """
+            SELECT status
+            FROM facts
+            WHERE group_id = '10001'
+              AND subject = '可可'
+              AND predicate = '喜欢'
+              AND object = '研究数据库'
+            """
+        ).fetchone()
+    assert row["status"] == "disabled"
+
+
+def test_chat_memory_store_manages_trusted_facts_and_disables_chat_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=121,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="萌泪酱是普通群友。",
+        timestamp=100,
+    )
+    chat_fact = store.search_facts(10001, "萌泪酱是谁", limit=5)[0]
+
+    trusted = store.upsert_trusted_fact(
+        group_id=10001,
+        subject="萌泪酱",
+        predicate="身份",
+        object="Bot 管理员",
+        confidence=1.0,
+        source_type="system",
+        trust_level="system",
+        topics=("AI",),
+        entities=("萌泪酱",),
+        updated_at=200,
+    )
+    assert store.set_fact_status(chat_fact.id, "disabled") is True
+
+    facts = store.search_facts(10001, "萌泪酱是什么身份", limit=5)
+
+    assert trusted.object == "Bot 管理员"
+    assert len(facts) == 1
+    assert facts[0].object == "Bot 管理员"
+    assert facts[0].trust_level == "system"

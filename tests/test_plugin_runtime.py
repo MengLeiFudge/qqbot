@@ -216,6 +216,14 @@ class FakeThunderStore:
         return 1.0, 10, 10
 
 
+class FakeSocialStore:
+    def get_group_feature_state(self, group_id: int, feature) -> bool:
+        return True
+
+    def is_bot_admin_or_self(self, qq: int, self_id: object) -> bool:
+        return int(qq) == 605738729 or str(qq) == str(self_id)
+
+
 def test_thunder_does_not_announce_when_group_ban_fails(monkeypatch) -> None:
     sent_messages: list[object] = []
 
@@ -275,6 +283,7 @@ def test_social_group_poke_uses_group_poke_api(monkeypatch) -> None:
 
     monkeypatch.setattr(social.random, "randint", lambda _a, _b: 1)
     monkeypatch.setattr(social, "asyncio", SimpleNamespace(sleep=fake_sleep), raising=False)
+    monkeypatch.setattr(social, "get_settings_store", lambda: FakeSocialStore())
     bot = OrderedBot(self_id="114514")
     event = SimpleNamespace(group_id=2333, user_id=605738729, target_id=114514)
 
@@ -304,6 +313,7 @@ def test_social_group_poke_uses_group_poke_api(monkeypatch) -> None:
 
 def test_social_private_poke_uses_friend_poke_api(monkeypatch) -> None:
     monkeypatch.setattr(social.random, "randint", lambda _a, _b: 4)
+    monkeypatch.setattr(social, "get_settings_store", lambda: FakeSocialStore())
     bot = FakeBot(self_id="114514")
     event = SimpleNamespace(group_id=None, user_id=605738729, target_id=114514)
 
@@ -325,6 +335,7 @@ def test_social_request_only_auto_approves_bot_admin(monkeypatch) -> None:
             self.approved = True
 
     monkeypatch.setattr(social, "FriendRequestEvent", FakeFriendRequest)
+    monkeypatch.setattr(social, "get_settings_store", lambda: FakeSocialStore())
     bot = FakeBot(self_id="114514")
     admin_event = FakeFriendRequest(605738729)
     normal_event = FakeFriendRequest(10001)
