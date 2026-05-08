@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from html import escape
+from pathlib import Path
 
 import nonebot
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 
 from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
+from qqbot.services.codex_task_service import get_codex_project_by_id, normalize_local_path
 
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
@@ -28,6 +30,12 @@ class AiProviderUpdateRequest(BaseModel):
 
 class CodexGroupBindingUpdateRequest(BaseModel):
     project_id: str = ""
+
+
+class LocalArtifactUploadRequest(BaseModel):
+    project_id: str
+    group_id: int
+    files: list[str]
 
 
 class GroupControlUpdateRequest(BaseModel):
@@ -206,6 +214,43 @@ def register_admin_routes(
             detail = str(exc)
             status_code = 404 if "Unknown Codex project" in detail else 400
             raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    @app.post("/admin/api/artifacts/upload-local")
+    async def admin_upload_local_artifacts(
+        payload: LocalArtifactUploadRequest,
+        _: None = Depends(require_local_request),
+    ) -> dict[str, object]:
+        project = get_codex_project_by_id(payload.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Unknown Codex project.")
+        if payload.group_id <= 0:
+            raise HTTPException(status_code=400, detail="Invalid group id.")
+        if not payload.files:
+            raise HTTPException(status_code=400, detail="No files to upload.")
+
+        bots = nonebot.get_bots()
+        if not bots:
+            raise HTTPException(status_code=503, detail="No connected OneBot bot.")
+
+        repo_path = normalize_local_path(project.repo_path)
+        if not repo_path.is_dir():
+            raise HTTPException(status_code=404, detail="Project repository does not exist.")
+
+        artifacts = [
+            _validate_local_artifact_path(file_path, repo_path)
+            for file_path in payload.files
+        ]
+        bot = next(iter(bots.values()))
+        uploaded: list[dict[str, str]] = []
+        for artifact in artifacts:
+            await bot.call_api(
+                "upload_group_file",
+                group_id=payload.group_id,
+                file=str(artifact),
+                name=artifact.name,
+            )
+            uploaded.append({"file": str(artifact), "name": artifact.name})
+        return {"ok": True, "uploaded": uploaded}
 
     @app.get("/admin/api/admins")
     async def admin_list_admins(
@@ -970,6 +1015,19 @@ def build_admin_html(settings: RuntimeSettings) -> str:
   </script>
 </body>
 </html>"""
+
+
+def _validate_local_artifact_path(raw_path: str, repo_path: Path) -> Path:
+    artifact = normalize_local_path(raw_path)
+    if artifact.suffix.lower() != ".zip":
+        raise HTTPException(status_code=400, detail="Only zip artifacts can be uploaded.")
+    if not artifact.is_file():
+        raise HTTPException(status_code=404, detail="Artifact file does not exist.")
+    try:
+        artifact.resolve().relative_to(repo_path.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Artifact must be inside project repository.") from exc
+    return artifact
 
 
 async def get_connected_group_names() -> dict[int, str]:

@@ -123,7 +123,8 @@
 - 执行阶段按项目加锁：同一个项目同时只能有一个 running Codex 会话，不同群可以同时讨论不同项目。
 - Codex 会话讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
 - Codex 输出的 `.zip` 产物路径可由 qqbot 解析并上传回来源群，但只能上传目标仓库内真实存在的 zip 文件。
-- 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报；直接在本地 Codex 终端执行的任务不应主动向 QQ 群发消息。
+- 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报。
+- 直接在本地 Codex 终端执行的任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only 管理接口上传项目仓库内真实存在的 zip 产物。
 - Codex 修改 qqbot 自身项目并成功完成后，必须安排 Bot 重启，使新代码实际生效。
 - 通过 qqbot 触发的自我更新，旧进程应先向来源群或私聊提示“已安排重启”，重启后在 OneBot 重新连接时再向相同目标回报连接状态。
 - 直接在本地 Codex 终端修改 qqbot 时，完成提交和验证后必须调用管理端重启入口，并检查 `onebot_connected=true`、`connected_bot_count>=1`。

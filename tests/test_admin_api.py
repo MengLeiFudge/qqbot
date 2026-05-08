@@ -14,6 +14,15 @@ from qqbot.services.kun_service import KunService
 from qqbot.services.settings_store import SettingsStore
 
 
+class FakeUploadBot:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def call_api(self, api: str, **data: object) -> dict[str, object]:
+        self.calls.append((api, data))
+        return {"status": "ok"}
+
+
 def build_app(tmp_path: Path) -> FastAPI:
     profile_file = tmp_path / "config" / "ai_providers.toml"
     profile_file.parent.mkdir(parents=True)
@@ -200,6 +209,99 @@ def test_group_messages_api_returns_grouped_realtime_messages(tmp_path: Path) ->
         "incoming",
         "bot",
     ]
+
+
+def test_upload_local_artifact_api_uploads_repo_zip(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    package = repo / "AfterBuildEvent" / "bin" / "win" / "Debug" / "ModZips" / "FractionateEverything_2.3.0.zip"
+    package.parent.mkdir(parents=True)
+    package.write_bytes(b"zip")
+    bot = FakeUploadBot()
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    monkeypatch.setattr(
+        "qqbot.admin_api.get_codex_project_by_id",
+        lambda project_id: type(
+            "Project",
+            (),
+            {
+                "project_id": project_id,
+                "display_name": "MLJ_DSPmods",
+                "repo_path": str(repo),
+            },
+        )(),
+        raising=False,
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/artifacts/upload-local",
+        json_body={
+            "project_id": "mlj_dspmods",
+            "group_id": 319567534,
+            "files": [str(package)],
+        },
+    )
+
+    assert status_code == 200
+    assert json.loads(body) == {
+        "ok": True,
+        "uploaded": [
+            {
+                "file": str(package),
+                "name": "FractionateEverything_2.3.0.zip",
+            }
+        ],
+    }
+    assert bot.calls == [
+        (
+            "upload_group_file",
+            {
+                "group_id": 319567534,
+                "file": str(package),
+                "name": "FractionateEverything_2.3.0.zip",
+            },
+        )
+    ]
+
+
+def test_upload_local_artifact_api_rejects_zip_outside_repo(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    package = tmp_path / "outside.zip"
+    package.write_bytes(b"zip")
+    bot = FakeUploadBot()
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    monkeypatch.setattr(
+        "qqbot.admin_api.get_codex_project_by_id",
+        lambda project_id: type(
+            "Project",
+            (),
+            {
+                "project_id": project_id,
+                "display_name": "MLJ_DSPmods",
+                "repo_path": str(repo),
+            },
+        )(),
+        raising=False,
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/artifacts/upload-local",
+        json_body={
+            "project_id": "mlj_dspmods",
+            "group_id": 319567534,
+            "files": [str(package)],
+        },
+    )
+
+    assert status_code == 400
+    assert "Artifact must be inside project repository" in body
+    assert bot.calls == []
 
 
 def test_plugins_api_lists_and_updates_global_state(tmp_path: Path) -> None:
