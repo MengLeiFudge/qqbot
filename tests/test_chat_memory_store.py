@@ -174,6 +174,23 @@ def test_chat_memory_store_keeps_reply_and_media_metadata(tmp_path: Path) -> Non
     assert results[0].reply_outline == "上一条在说知识库"
 
 
+def test_chat_memory_store_skips_bot_sensitive_memory_claims(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+
+    inserted = store.append_message(
+        group_id=10001,
+        message_id=301,
+        direction="bot",
+        user_id=1443944862,
+        sender_name="Bot",
+        text="在另一个群，你说的是“喵喵喵报名”哦。",
+        timestamp=100,
+    )
+
+    assert inserted is False
+    assert store.search_messages(10001, "喵喵喵报名", limit=5) == ()
+
+
 def test_chat_memory_store_removes_group_records(tmp_path: Path) -> None:
     store = ChatMemoryStore(tmp_path / "run")
     store.append_message(

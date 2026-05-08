@@ -86,6 +86,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     )
     key = build_ai_conversation_key(conversation_store, event, profile)
     history = conversation_store.load_messages(key)
+    if should_omit_ai_history_for_scope_query(event, normalized_message):
+        history = ()
     context_parts = list(
         build_ai_context(
             settings,
@@ -287,6 +289,9 @@ def build_ai_context(
     context.append("当前对话场景：QQ群聊。用户是在群里 @ 你。")
     context.append(f"当前群号：{group_id}")
     context.append(build_current_sender_context(event))
+    scope_guard_context = build_memory_scope_guard_context(normalized_message)
+    if scope_guard_context:
+        context.append(scope_guard_context)
     if identity_context:
         context.append(identity_context)
     message_context = build_message_structure_context(
@@ -319,6 +324,47 @@ def build_ai_context(
     if memory_context:
         context.append(memory_context)
     return tuple(context)
+
+
+def should_omit_ai_history_for_scope_query(
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+) -> bool:
+    if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
+        return False
+    text = build_scope_query_text(normalized_message)
+    return is_cross_group_memory_query(text) or is_private_memory_query(text)
+
+
+def build_memory_scope_guard_context(normalized_message: NormalizedMessage) -> str:
+    text = build_scope_query_text(normalized_message)
+    if is_private_memory_query(text):
+        return (
+            "用户在群聊里询问私聊内容。不要在群聊里查看、复述或暗示任何私聊历史；"
+            "如果用户没有主动把私聊内容贴在当前群里，只能说明不能在群里披露私聊内容。"
+        )
+    if is_cross_group_memory_query(text):
+        return (
+            "用户正在询问其他群的历史内容。当前短期会话历史和本群最近聊天记录都不是其他群证据；"
+            "只能依据明确标注为“当前发言者跨群长期记忆”的内容回答。"
+            "如果没有这段证据，就直接说没有记录到其他群内容，不要用当前群或私聊内容猜。"
+        )
+    return ""
+
+
+def build_scope_query_text(normalized_message: NormalizedMessage) -> str:
+    parts = [normalized_message.text, normalized_message.outline]
+    if normalized_message.reply is not None:
+        parts.append(normalized_message.reply.message.outline)
+    return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def is_cross_group_memory_query(text: str) -> bool:
+    return any(keyword in text for keyword in ("另一个群", "其他群", "别的群", "跨群", "不是这个群"))
+
+
+def is_private_memory_query(text: str) -> bool:
+    return "私聊" in text
 
 
 def build_long_term_memory_context(

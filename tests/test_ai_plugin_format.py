@@ -14,6 +14,7 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_notice_message,
     format_ai_response,
     format_memory_context,
+    should_omit_ai_history_for_scope_query,
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
@@ -327,6 +328,38 @@ def test_ai_context_includes_current_sender_memory_across_groups(tmp_path: Path)
     assert "可可(10001) 在群 10001 说： 可可喜欢研究 shapez 存档。" in joined
     assert "路人喜欢研究 shapez 存档" not in sender_memory
     assert "不要刷屏" not in sender_memory
+
+
+def test_ai_scope_query_omits_current_group_short_history() -> None:
+    event = FakeGroupEvent(text="我刚刚和你在另一个群说了什么？")
+    normalized = normalize_onebot_message(FakeMessage("我刚刚和你在另一个群说了什么？"))
+
+    assert should_omit_ai_history_for_scope_query(event, normalized) is True
+
+
+def test_ai_context_warns_cross_group_query_cannot_use_current_group_history(
+    tmp_path: Path,
+) -> None:
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(text="我刚刚和你在另一个群说了什么？"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "当前短期会话历史和本群最近聊天记录都不是其他群证据" in joined
+    assert "只能依据明确标注为“当前发言者跨群长期记忆”的内容回答" in joined
+
+
+def test_ai_context_refuses_private_memory_in_group(tmp_path: Path) -> None:
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(text="我和你私聊里说了什么？"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "不要在群聊里查看、复述或暗示任何私聊历史" in joined
 
 
 def test_memory_context_budget_keeps_trusted_fact_and_source_before_noise() -> None:

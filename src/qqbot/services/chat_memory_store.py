@@ -122,6 +122,8 @@ class ChatMemoryStore:
         normalized_text = text.strip()
         if not normalized_text or is_safety_rejection_text(normalized_text):
             return False
+        if direction == "bot" and is_sensitive_memory_claim_text(normalized_text):
+            return False
         if direction not in VALID_DIRECTIONS:
             raise ValueError(f"Unsupported chat memory direction: {direction}")
 
@@ -1578,6 +1580,10 @@ def is_prompt_injection_like(text: str) -> bool:
             "以后你必须",
         )
     )
+
+
+def is_sensitive_memory_claim_text(text: str) -> bool:
+    return any(keyword in text for keyword in ("另一个群", "其他群", "别的群", "私聊内容", "私聊里"))
 
 
 def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
