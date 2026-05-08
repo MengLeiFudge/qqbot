@@ -315,7 +315,7 @@ def test_chat_memory_store_extracts_behavior_instruction_facts(
         timestamp=101,
     )
 
-    facts = store.search_facts(10001, "说话带喵 勺子鱼", limit=5)
+    facts = store.search_facts(10001, "说话带喵 勺子鱼", limit=5, now=102)
 
     objects = {fact.object for fact in facts}
     assert "说话结尾带喵" in objects

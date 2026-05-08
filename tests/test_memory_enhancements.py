@@ -9,6 +9,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.memory_maintenance_service import MemoryMaintenanceService
 from qqbot.services.memory_retrieval_service import (
     RetrievalPlan,
@@ -66,12 +67,84 @@ def test_behavior_instruction_policy_keeps_user_request_temporary(
         timestamp=100,
     )
 
-    fact = store.search_facts(10001, "说话带喵", limit=5)[0]
+    fact = store.search_facts(10001, "说话带喵", limit=5, now=101)[0]
 
     assert fact.memory_type == "behavior_instruction"
     assert "scope=group" in fact.entities
     assert "permission=user" in fact.entities
     assert "ttl=short" in fact.entities
+
+
+def test_behavior_instruction_policy_hides_expired_user_request(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=303,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="你以后说话结尾带喵。",
+        timestamp=100,
+    )
+
+    facts = store.search_facts(10001, "说话带喵", limit=5, now=100 + 7201)
+
+    assert facts == ()
+
+
+def test_behavior_instruction_policy_keeps_admin_request_after_short_ttl(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.upsert_trusted_fact(
+        group_id=10001,
+        subject="群聊行为偏好",
+        predicate="行为指令",
+        object="说话结尾带喵",
+        source_type="admin",
+        trust_level="admin",
+        topics=("行为指令",),
+        entities=("scope=group", "permission=admin", "ttl=permanent", "说话结尾"),
+        updated_at=100,
+    )
+
+    facts = store.search_facts(10001, "说话带喵", limit=5, now=100 + 7201)
+
+    assert len(facts) == 1
+    assert facts[0].trust_level == "admin"
+    assert facts[0].object == "说话结尾带喵"
+
+
+def test_behavior_instruction_policy_prevents_user_override_of_admin_request(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.upsert_trusted_fact(
+        group_id=10001,
+        subject="群聊行为偏好",
+        predicate="行为指令",
+        object="说话结尾带喵",
+        source_type="admin",
+        trust_level="admin",
+        topics=("行为指令",),
+        entities=("scope=group", "permission=admin", "ttl=permanent", "说话结尾"),
+        updated_at=100,
+    )
+    store.append_message(
+        group_id=10001,
+        message_id=304,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="你以后说话结尾带汪。",
+        timestamp=200,
+    )
+
+    facts = store.search_facts(10001, "说话结尾", limit=5)
+
+    assert [fact.object for fact in facts] == ["说话结尾带喵"]
 
 
 def test_memory_maintenance_service_builds_topic_summaries(tmp_path: Path) -> None:
@@ -113,6 +186,83 @@ def test_optional_vector_store_reranks_with_embeddings(tmp_path: Path) -> None:
 
     assert [result.key for result in results] == ["m1", "m2"]
     assert results[0].score > results[1].score
+
+
+def test_embedding_vector_store_reranks_dense_vectors(tmp_path: Path) -> None:
+    vector_store = EmbeddingVectorStore(tmp_path / "dense_vectors.json")
+    vector_store.upsert_vector("m1", [1.0, 0.0, 0.0])
+    vector_store.upsert_vector("m2", [0.0, 1.0, 0.0])
+
+    results = vector_store.search_vector([0.9, 0.1, 0.0], limit=2)
+
+    assert [result.key for result in results] == ["m1", "m2"]
+    assert results[0].score > results[1].score
+
+
+class FakeEmbeddingClient:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[list[str]] = []
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(texts)
+        if self.fail:
+            raise RuntimeError("embedding upstream failed")
+        return [[float(index + 1), 0.0] for index, _text in enumerate(texts)]
+
+
+def test_memory_maintenance_service_uses_embedding_client_when_available(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=601,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="shapez 存档 数据库",
+        timestamp=100,
+    )
+    embedding_store = EmbeddingVectorStore(tmp_path / "dense_vectors.json")
+    embedding_client = FakeEmbeddingClient()
+
+    result = MemoryMaintenanceService(
+        store,
+        embedding_store,
+        embedding_client=embedding_client,
+    ).index_recent_messages(10001, limit=10)
+
+    assert result["messages_indexed"] == 1
+    assert result["dense_embeddings_indexed"] == 1
+    assert embedding_client.calls == [["shapez 存档 数据库"]]
+    assert embedding_store.search_vector([1.0, 0.0], limit=1)[0].key == "message:1"
+
+
+def test_memory_maintenance_service_falls_back_to_local_vector_on_embedding_error(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=602,
+        direction="incoming",
+        user_id=20001,
+        sender_name="可可",
+        text="shapez 存档 数据库",
+        timestamp=100,
+    )
+    vector_store = MemoryVectorStore(tmp_path / "vectors.json")
+
+    result = MemoryMaintenanceService(
+        store,
+        vector_store,
+        embedding_client=FakeEmbeddingClient(fail=True),
+    ).index_recent_messages(10001, limit=10)
+
+    assert result["messages_indexed"] == 1
+    assert result["dense_embeddings_indexed"] == 0
+    assert vector_store.search("shapez 数据库", limit=1)[0].key == "message:1"
 
 
 def test_retrieval_service_can_rerank_messages_with_vector_store(tmp_path: Path) -> None:

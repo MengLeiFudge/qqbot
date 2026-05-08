@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from nonebot import on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.rule import Rule
@@ -15,6 +17,7 @@ from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.ai_gateway import AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
+from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
@@ -28,6 +31,7 @@ from qqbot.services.memory_retrieval_service import (
     format_evidence_bundle,
     retrieve_memory_evidence,
 )
+from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
@@ -502,7 +506,18 @@ def build_long_term_memory_context(
             normalized_message,
             limit=settings.ai_memory_search_limit,
         )
-        evidence = retrieve_memory_evidence(memory_store, plan)
+        embedding_client = build_openai_embedding_client(settings)
+        vector_store = (
+            EmbeddingVectorStore(settings.data_root / "ai" / "memory_embeddings.json")
+            if embedding_client is not None
+            else None
+        )
+        evidence = retrieve_memory_evidence(
+            memory_store,
+            plan,
+            vector_store=vector_store,
+            embedding_client=embedding_client,
+        )
         if plan.intent in {
             "cross_group_recent_self_messages",
             "forbidden_private_disclosure_in_group",
@@ -574,7 +589,18 @@ def build_private_memory_context(
             normalized_message,
             limit=settings.ai_memory_search_limit,
         )
-        evidence = retrieve_memory_evidence(memory_store, plan)
+        embedding_client = build_openai_embedding_client(settings)
+        vector_store = (
+            EmbeddingVectorStore(settings.data_root / "ai" / "memory_embeddings.json")
+            if embedding_client is not None
+            else None
+        )
+        evidence = retrieve_memory_evidence(
+            memory_store,
+            plan,
+            vector_store=vector_store,
+            embedding_client=embedding_client,
+        )
     except Exception:
         return ""
     if not evidence.facts and not evidence.messages:
@@ -793,6 +819,22 @@ def format_current_sender_memory_context(
             break
         lines.append(line)
     return "\n".join(lines)
+
+
+def build_openai_embedding_client(settings: RuntimeSettings) -> OpenAIEmbeddingClient | None:
+    if not settings.ai_embedding_enabled:
+        return None
+    api_key = settings.ai_embedding_api_key
+    if not api_key and settings.ai_embedding_api_key_env:
+        api_key = os.environ.get(settings.ai_embedding_api_key_env, "").strip()
+    if not settings.ai_embedding_base_url or not settings.ai_embedding_model or not api_key:
+        return None
+    return OpenAIEmbeddingClient(
+        base_url=settings.ai_embedding_base_url,
+        api_key=api_key,
+        model=settings.ai_embedding_model,
+        timeout_seconds=settings.ai_embedding_timeout_seconds,
+    )
 
 
 def build_current_sender_context(event: MessageEvent) -> str:

@@ -24,6 +24,14 @@ max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
 bot_name = "QQBot"
+memory_enabled = true
+memory_search_limit = 6
+memory_context_chars = 1200
+embedding_enabled = false
+embedding_base_url = "https://api.openai.com/v1"
+embedding_model = "text-embedding-3-small"
+embedding_api_key_env = "QQBOT_OPENAI_API_KEY"
+embedding_timeout_seconds = 45
 
 [ai.providers.xiaomi]
 provider = "xiaomi_mimo"

@@ -33,6 +33,9 @@ DEFAULT_AI_GROUP_CONTEXT_MESSAGES = 30
 DEFAULT_AI_MEMORY_ENABLED = True
 DEFAULT_AI_MEMORY_SEARCH_LIMIT = 6
 DEFAULT_AI_MEMORY_CONTEXT_CHARS = 1200
+DEFAULT_AI_EMBEDDING_ENABLED = False
+DEFAULT_AI_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_AI_EMBEDDING_TIMEOUT_SECONDS = 45.0
 
 
 def _parse_csv(raw_value: str) -> set[str]:
@@ -79,6 +82,12 @@ class RuntimeSettings:
     ai_memory_enabled: bool = DEFAULT_AI_MEMORY_ENABLED
     ai_memory_search_limit: int = DEFAULT_AI_MEMORY_SEARCH_LIMIT
     ai_memory_context_chars: int = DEFAULT_AI_MEMORY_CONTEXT_CHARS
+    ai_embedding_enabled: bool = DEFAULT_AI_EMBEDDING_ENABLED
+    ai_embedding_base_url: str = ""
+    ai_embedding_model: str = DEFAULT_AI_EMBEDDING_MODEL
+    ai_embedding_api_key: str = ""
+    ai_embedding_api_key_env: str = ""
+    ai_embedding_timeout_seconds: float = DEFAULT_AI_EMBEDDING_TIMEOUT_SECONDS
 
     @classmethod
     def from_mapping(cls, mapping: dict[str, str]) -> "RuntimeSettings":
@@ -162,6 +171,26 @@ class RuntimeSettings:
                 mapping.get(
                     "QQBOT_AI_MEMORY_CONTEXT_CHARS",
                     str(DEFAULT_AI_MEMORY_CONTEXT_CHARS),
+                )
+            ),
+            ai_embedding_enabled=_parse_bool(
+                mapping.get(
+                    "QQBOT_AI_EMBEDDING_ENABLED",
+                    "true" if DEFAULT_AI_EMBEDDING_ENABLED else "false",
+                ),
+                default=DEFAULT_AI_EMBEDDING_ENABLED,
+            ),
+            ai_embedding_base_url=mapping.get("QQBOT_AI_EMBEDDING_BASE_URL", ""),
+            ai_embedding_model=mapping.get(
+                "QQBOT_AI_EMBEDDING_MODEL",
+                DEFAULT_AI_EMBEDDING_MODEL,
+            ),
+            ai_embedding_api_key=mapping.get("QQBOT_AI_EMBEDDING_API_KEY", ""),
+            ai_embedding_api_key_env=mapping.get("QQBOT_AI_EMBEDDING_API_KEY_ENV", ""),
+            ai_embedding_timeout_seconds=float(
+                mapping.get(
+                    "QQBOT_AI_EMBEDDING_TIMEOUT_SECONDS",
+                    str(DEFAULT_AI_EMBEDDING_TIMEOUT_SECONDS),
                 )
             ),
         )
@@ -263,6 +292,11 @@ def _load_config_mapping(config_file: Path) -> dict[str, str]:
             "provider": "QQBOT_AI_PROVIDER",
             "base_url": "QQBOT_AI_BASE_URL",
             "model": "QQBOT_AI_MODEL",
+            "embedding_enabled": "QQBOT_AI_EMBEDDING_ENABLED",
+            "embedding_base_url": "QQBOT_AI_EMBEDDING_BASE_URL",
+            "embedding_model": "QQBOT_AI_EMBEDDING_MODEL",
+            "embedding_api_key_env": "QQBOT_AI_EMBEDDING_API_KEY_ENV",
+            "embedding_timeout_seconds": "QQBOT_AI_EMBEDDING_TIMEOUT_SECONDS",
         },
     )
     return mapping

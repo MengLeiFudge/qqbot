@@ -37,6 +37,12 @@ def test_runtime_settings_defaults() -> None:
     assert settings.ai_memory_enabled is True
     assert settings.ai_memory_search_limit == 6
     assert settings.ai_memory_context_chars == 1200
+    assert settings.ai_embedding_enabled is False
+    assert settings.ai_embedding_base_url == ""
+    assert settings.ai_embedding_model == "text-embedding-3-small"
+    assert settings.ai_embedding_api_key == ""
+    assert settings.ai_embedding_api_key_env == ""
+    assert settings.ai_embedding_timeout_seconds == 45.0
 
 
 def test_runtime_settings_parses_superusers_and_token() -> None:
@@ -64,6 +70,12 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
             "QQBOT_AI_MEMORY_ENABLED": "false",
             "QQBOT_AI_MEMORY_SEARCH_LIMIT": "4",
             "QQBOT_AI_MEMORY_CONTEXT_CHARS": "800",
+            "QQBOT_AI_EMBEDDING_ENABLED": "true",
+            "QQBOT_AI_EMBEDDING_BASE_URL": "https://api.openai.com/v1",
+            "QQBOT_AI_EMBEDDING_MODEL": "text-embedding-3-small",
+            "QQBOT_AI_EMBEDDING_API_KEY": "embedding-key",
+            "QQBOT_AI_EMBEDDING_API_KEY_ENV": "QQBOT_OPENAI_API_KEY",
+            "QQBOT_AI_EMBEDDING_TIMEOUT_SECONDS": "9.5",
         }
     )
 
@@ -90,6 +102,12 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
     assert settings.ai_memory_enabled is False
     assert settings.ai_memory_search_limit == 4
     assert settings.ai_memory_context_chars == 800
+    assert settings.ai_embedding_enabled is True
+    assert settings.ai_embedding_base_url == "https://api.openai.com/v1"
+    assert settings.ai_embedding_model == "text-embedding-3-small"
+    assert settings.ai_embedding_api_key == "embedding-key"
+    assert settings.ai_embedding_api_key_env == "QQBOT_OPENAI_API_KEY"
+    assert settings.ai_embedding_timeout_seconds == 9.5
 
 
 def test_load_settings_reads_main_config_and_env_overrides(
@@ -119,6 +137,11 @@ default_profile = "xiaomi"
 max_context_messages = 8
 show_metrics = true
 bot_name = "配置机器人"
+embedding_enabled = true
+embedding_base_url = "https://api.openai.com/v1"
+embedding_model = "text-embedding-3-small"
+embedding_api_key_env = "QQBOT_OPENAI_API_KEY"
+embedding_timeout_seconds = 10
 """.strip(),
         encoding="utf-8",
     )
@@ -141,6 +164,11 @@ bot_name = "配置机器人"
     assert settings.ai_max_context_messages == 8
     assert settings.ai_show_metrics is True
     assert settings.ai_bot_name == "环境机器人"
+    assert settings.ai_embedding_enabled is True
+    assert settings.ai_embedding_base_url == "https://api.openai.com/v1"
+    assert settings.ai_embedding_model == "text-embedding-3-small"
+    assert settings.ai_embedding_api_key_env == "QQBOT_OPENAI_API_KEY"
+    assert settings.ai_embedding_timeout_seconds == 10.0
 
 
 def test_load_settings_ignores_missing_legacy_ai_profile_file(

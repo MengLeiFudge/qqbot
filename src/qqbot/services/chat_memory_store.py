@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import time
 
 from qqbot.services.ai_gateway import is_safety_rejection_text
 from qqbot.services.group_nick_store import GroupNickStore
@@ -50,6 +51,7 @@ PROTECTED_FACT_RELATION_OBJECTS = {
 TRUST_LEVEL_WEIGHT = {"chat": 0.0, "bot": 1.5, "admin": 3.0, "system": 4.0}
 SOURCE_TYPE_WEIGHT = {"user": 0.0, "bot": 0.8, "admin": 2.0, "system": 2.5}
 STATUS_WEIGHT = {"active": 0.0, "superseded": -8.0}
+BEHAVIOR_INSTRUCTION_SHORT_TTL_SECONDS = 60 * 60 * 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -695,6 +697,7 @@ class ChatMemoryStore:
         query: str,
         *,
         limit: int = 6,
+        now: int | float | None = None,
     ) -> tuple[ChatMemoryFact, ...]:
         normalized_query = query.strip()
         if not normalized_query or limit <= 0 or not self.db_path.exists():
@@ -715,13 +718,15 @@ class ChatMemoryStore:
                     )
                     if int(row["id"]) not in seen_ids
                 )
+        active_fact_list: list[ChatMemoryFact] = []
+        for row in rows:
+            fact = self._fact_from_row(row)
+            if is_behavior_instruction_active(fact, now=now):
+                active_fact_list.append(fact)
         facts = tuple(
             fact
             for _, fact in sorted(
-                (
-                    (score_fact(self._fact_from_row(row), expanded_query), self._fact_from_row(row))
-                    for row in rows
-                ),
+                ((score_fact(fact, expanded_query), fact) for fact in active_fact_list),
                 key=lambda item: (-item[0], -item[1].updated_at, -item[1].id),
             )[:limit]
         )
@@ -756,13 +761,15 @@ class ChatMemoryStore:
                 expanded_query,
                 limit * 4,
             )
+        active_fact_list: list[ChatMemoryFact] = []
+        for row in rows:
+            fact = self._fact_from_row(row)
+            if is_behavior_instruction_active(fact):
+                active_fact_list.append(fact)
         facts = tuple(
             fact
             for _, fact in sorted(
-                (
-                    (score_fact(self._fact_from_row(row), expanded_query), self._fact_from_row(row))
-                    for row in rows
-                ),
+                ((score_fact(fact, expanded_query), fact) for fact in active_fact_list),
                 key=lambda item: (-item[0], -item[1].updated_at, -item[1].id),
             )[:limit]
         )
@@ -1127,7 +1134,7 @@ class ChatMemoryStore:
             existing_fact = self._fact_from_row(existing)
             if is_stronger_fact(existing_fact, fact) and existing_fact.object != fact.object:
                 return False
-            if fact.predicate in MUTUALLY_EXCLUSIVE_FACT_PREDICATES:
+            if is_mutually_exclusive_fact(fact):
                 stronger_conflict = self._find_stronger_conflicting_fact(conn, fact)
                 if stronger_conflict is not None:
                     self._merge_fact_sources(conn, existing_fact, fact, status="superseded")
@@ -1247,7 +1254,7 @@ class ChatMemoryStore:
         conn: sqlite3.Connection,
         fact: ChatMemoryFact,
     ) -> bool:
-        if fact.predicate not in MUTUALLY_EXCLUSIVE_FACT_PREDICATES:
+        if not is_mutually_exclusive_fact(fact):
             return True
         rows = conn.execute(
             """
@@ -1264,6 +1271,8 @@ class ChatMemoryStore:
         superseded_ids: list[int] = []
         for row in rows:
             existing_fact = self._fact_from_row(row)
+            if not is_behavior_instruction_active(existing_fact):
+                continue
             if is_stronger_fact(existing_fact, fact):
                 return False
             superseded_ids.append(existing_fact.id)
@@ -1283,6 +1292,8 @@ class ChatMemoryStore:
         conn: sqlite3.Connection,
         fact: ChatMemoryFact,
     ) -> ChatMemoryFact | None:
+        if not is_mutually_exclusive_fact(fact):
+            return None
         rows = conn.execute(
             """
             SELECT *
@@ -1297,6 +1308,8 @@ class ChatMemoryStore:
         ).fetchall()
         for row in rows:
             existing_fact = self._fact_from_row(row)
+            if not is_behavior_instruction_active(existing_fact):
+                continue
             if is_stronger_fact(existing_fact, fact):
                 return existing_fact
         return None
@@ -2068,6 +2081,38 @@ def fact_strength(fact: ChatMemoryFact) -> tuple[int, int, float, int]:
 
 def is_stronger_fact(existing: ChatMemoryFact, incoming: ChatMemoryFact) -> bool:
     return fact_strength(existing) > fact_strength(incoming)
+
+
+def is_mutually_exclusive_fact(fact: ChatMemoryFact) -> bool:
+    return fact.predicate in MUTUALLY_EXCLUSIVE_FACT_PREDICATES or fact.memory_type == "behavior_instruction"
+
+
+def is_behavior_instruction_active(
+    fact: ChatMemoryFact,
+    *,
+    now: int | float | None = None,
+) -> bool:
+    if fact.memory_type != "behavior_instruction":
+        return True
+    if fact.trust_level in {"admin", "system"}:
+        return True
+    metadata = parse_behavior_instruction_entities(fact.entities)
+    if metadata.get("ttl") != "short":
+        return True
+    current_time = int(now if now is not None else time.time())
+    # 普通群友临时偏好只保留短时间，避免一句“以后都带喵”长期污染系统提示。
+    return current_time - fact.updated_at <= BEHAVIOR_INSTRUCTION_SHORT_TTL_SECONDS
+
+
+def parse_behavior_instruction_entities(entities: tuple[str, ...]) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for entity in entities:
+        if "=" not in entity:
+            continue
+        key, value = entity.split("=", 1)
+        if key and value:
+            metadata[key] = value
+    return metadata
 
 
 def score_fact(fact: ChatMemoryFact, query: str) -> float:

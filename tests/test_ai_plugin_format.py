@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -493,7 +494,7 @@ def test_ai_context_marks_behavior_instruction_memory_as_chat_preference(
         user_id=10001,
         sender_name="可可",
         text="你以后说话结尾带喵。",
-        timestamp=39,
+        timestamp=int(time.time()),
     )
 
     context = build_ai_context(

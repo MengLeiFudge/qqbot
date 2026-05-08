@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from nonebot import get_driver, logger
 from nonebot.adapters.onebot.v11 import Bot
@@ -15,8 +16,10 @@ from qqbot.services.arc_guess_service import ArcGuessService
 from qqbot.services.codex_self_update_service import publish_pending_codex_self_update_notices
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.memory_maintenance_service import MemoryMaintenanceService
 from qqbot.services.memory_vector_store import MemoryVectorStore
+from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.settings_store import get_settings_store
 
 driver = get_driver()
@@ -110,9 +113,18 @@ async def run_arc_background_loop(bot: Bot) -> None:
 
 async def run_memory_maintenance_loop() -> None:
     settings = load_settings()
+    embedding_client = build_openai_embedding_client()
+    fallback_vector_store = MemoryVectorStore(settings.data_root / "ai" / "memory_vectors.json")
+    vector_store = (
+        EmbeddingVectorStore(settings.data_root / "ai" / "memory_embeddings.json")
+        if embedding_client is not None
+        else fallback_vector_store
+    )
     service = MemoryMaintenanceService(
         ChatMemoryStore(settings.data_root),
-        MemoryVectorStore(settings.data_root / "ai" / "memory_vectors.json"),
+        vector_store,
+        embedding_client=embedding_client,
+        fallback_vector_store=fallback_vector_store,
     )
     try:
         while True:
@@ -124,3 +136,20 @@ async def run_memory_maintenance_loop() -> None:
         raise
     except Exception as exc:
         logger.exception("Memory maintenance loop crashed: {}", exc)
+
+
+def build_openai_embedding_client() -> OpenAIEmbeddingClient | None:
+    settings = load_settings()
+    if not settings.ai_embedding_enabled:
+        return None
+    api_key = settings.ai_embedding_api_key
+    if not api_key and settings.ai_embedding_api_key_env:
+        api_key = os.environ.get(settings.ai_embedding_api_key_env, "").strip()
+    if not settings.ai_embedding_base_url or not settings.ai_embedding_model or not api_key:
+        return None
+    return OpenAIEmbeddingClient(
+        base_url=settings.ai_embedding_base_url,
+        api_key=api_key,
+        model=settings.ai_embedding_model,
+        timeout_seconds=settings.ai_embedding_timeout_seconds,
+    )

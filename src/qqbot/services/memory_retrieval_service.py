@@ -9,7 +9,9 @@ from qqbot.services.chat_memory_store import (
     ChatMemoryStore,
     parse_qq_user_actor_id,
 )
+from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.memory_vector_store import MemoryVectorStore
+from qqbot.services.memory_maintenance_service import EmbeddingClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +53,8 @@ def retrieve_memory_evidence(
     store: ChatMemoryStore,
     plan: RetrievalPlan,
     *,
-    vector_store: MemoryVectorStore | None = None,
+    vector_store: MemoryVectorStore | EmbeddingVectorStore | None = None,
+    embedding_client: EmbeddingClient | None = None,
 ) -> MemoryEvidenceBundle:
     if plan.limit <= 0:
         return MemoryEvidenceBundle(plan=plan, facts=(), messages=(), forbidden=plan.forbidden)
@@ -85,6 +88,7 @@ def retrieve_memory_evidence(
                 ),
                 plan.query,
                 vector_store,
+                embedding_client,
             ),
             forbidden=plan.forbidden,
         )
@@ -95,6 +99,7 @@ def retrieve_memory_evidence(
         store.search_messages(group_id, plan.query, limit=plan.limit),
         plan.query,
         vector_store,
+        embedding_client,
     )
     return MemoryEvidenceBundle(plan=plan, facts=facts, messages=messages, forbidden=plan.forbidden)
 
@@ -145,14 +150,20 @@ def parse_actor_user_id(actor_id: str) -> str:
 def _rerank_messages_with_vectors(
     messages: tuple[ChatMemoryRecord, ...],
     query: str,
-    vector_store: MemoryVectorStore | None,
+    vector_store: MemoryVectorStore | EmbeddingVectorStore | None,
+    embedding_client: EmbeddingClient | None = None,
 ) -> tuple[ChatMemoryRecord, ...]:
     if vector_store is None or not messages:
         return messages
-    scores = {
-        result.key: result.score
-        for result in vector_store.search(query, limit=max(len(messages) * 2, len(messages)))
-    }
+    if isinstance(vector_store, EmbeddingVectorStore) and embedding_client is not None:
+        try:
+            vectors = embedding_client.embed_texts([query])
+            results = vector_store.search_vector(vectors[0], limit=max(len(messages) * 2, len(messages)))
+        except Exception:
+            return messages
+    else:
+        results = vector_store.search(query, limit=max(len(messages) * 2, len(messages)))
+    scores = {result.key: result.score for result in results}
     return tuple(
         sorted(
             messages,
