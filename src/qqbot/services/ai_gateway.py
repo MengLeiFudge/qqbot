@@ -82,9 +82,18 @@ class AiClient(Protocol):
 
 
 class AiGateway:
-    def __init__(self, client: AiClient | None = None, timeout_seconds: float = 45.0) -> None:
+    def __init__(
+        self,
+        client: AiClient | None = None,
+        timeout_seconds: float = 45.0,
+        *,
+        max_attempts: int = 2,
+        first_attempt_timeout_seconds: float | None = None,
+    ) -> None:
         self.client = client
         self.timeout_seconds = timeout_seconds
+        self.max_attempts = max(1, int(max_attempts))
+        self.first_attempt_timeout_seconds = first_attempt_timeout_seconds
 
     async def complete(self, request: AiRequest) -> AiResponse:
         spec = get_plugin_spec_by_id(request.plugin_id)
@@ -95,22 +104,39 @@ class AiGateway:
         if self.client is None:
             return AiResponse(AI_FALLBACK_NOT_CONFIGURED, fallback=True)
 
+        last_fallback = AI_FALLBACK_CLIENT_ERROR
         try:
-            completion = await asyncio.wait_for(
-                self._complete(request),
-                timeout=self.timeout_seconds,
-            )
-        except TimeoutError:
-            return AiResponse(AI_FALLBACK_TIMEOUT, fallback=True)
+            for attempt in range(self.max_attempts):
+                timeout = self._timeout_for_attempt(attempt)
+                try:
+                    completion = await asyncio.wait_for(
+                        self._complete(request),
+                        timeout=timeout,
+                    )
+                except TimeoutError:
+                    last_fallback = AI_FALLBACK_TIMEOUT
+                    continue
+                except Exception as exc:
+                    last_fallback = format_ai_exception_fallback(exc)
+                    if last_fallback == AI_FALLBACK_SAFETY_REJECTED:
+                        return AiResponse(last_fallback, fallback=True)
+                    continue
+
+                cleaned = sanitize_ai_output_text(completion.text)
+                if not cleaned:
+                    last_fallback = AI_FALLBACK_EMPTY
+                    continue
+                if is_safety_rejection_text(cleaned):
+                    return AiResponse(AI_FALLBACK_SAFETY_REJECTED, fallback=True)
+                return AiResponse(cleaned, metrics=completion.metrics)
         except Exception as exc:
             return AiResponse(format_ai_exception_fallback(exc), fallback=True)
+        return AiResponse(last_fallback, fallback=True)
 
-        cleaned = sanitize_ai_output_text(completion.text)
-        if not cleaned:
-            return AiResponse(AI_FALLBACK_EMPTY, fallback=True)
-        if is_safety_rejection_text(cleaned):
-            return AiResponse(AI_FALLBACK_SAFETY_REJECTED, fallback=True)
-        return AiResponse(cleaned, metrics=completion.metrics)
+    def _timeout_for_attempt(self, attempt: int) -> float:
+        if attempt == 0 and self.first_attempt_timeout_seconds is not None:
+            return max(0.001, min(float(self.first_attempt_timeout_seconds), self.timeout_seconds))
+        return self.timeout_seconds
 
     async def _complete(self, request: AiRequest) -> AiCompletion:
         stream_complete = getattr(self.client, "stream_complete", None)

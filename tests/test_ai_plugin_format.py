@@ -214,6 +214,31 @@ def test_ai_context_includes_private_memory_only_in_private_chat(tmp_path: Path)
     assert "我喜欢写小说。" in joined
 
 
+def test_ai_context_includes_same_user_public_group_memory_in_private_chat(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id=516286670,
+        message_id=18,
+        direction="incoming",
+        user_id=10001,
+        sender_name="灵麟",
+        text="我是灵麟，喜欢说喵。",
+        timestamp=18,
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakePrivateEvent(user_id="10001", text="我是谁？"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "结构化记忆证据" in joined
+    assert '"space_id": "qq:group:516286670"' in joined
+    assert '"visibility": "group_public"' in joined
+    assert "我是灵麟，喜欢说喵。" in joined
+
+
 def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> None:
     message = build_ai_reply_notice_message(
         group_id=516286670,
@@ -229,6 +254,7 @@ def test_ai_system_context_declares_bot_identity() -> None:
 
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in context
     assert "必须明确回答你是“萌萌棉花糖♪”" in context
+    assert "用户问“我是谁”" in context
     assert "不要使用 Markdown" in context
     assert "段落之间不要留空行" in context
 
@@ -464,6 +490,52 @@ def test_ai_context_refuses_private_memory_in_group(tmp_path: Path) -> None:
 
     joined = "\n".join(context)
     assert "不要在群聊里查看、复述或暗示任何私聊历史" in joined
+
+
+def test_ai_context_uses_private_profile_facts_without_private_messages_in_group(
+    tmp_path: Path,
+) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id="private:10001",
+        space_id="qq:private:10001",
+        message_id=41,
+        direction="incoming",
+        user_id=10001,
+        actor_id="qq:user:10001",
+        sender_name="灵麟",
+        text="灵麟喜欢说喵。",
+        timestamp=41,
+        visibility="private",
+    )
+    memory_store.append_message(
+        group_id="private:10001",
+        space_id="qq:private:10001",
+        message_id=42,
+        direction="incoming",
+        user_id=10001,
+        actor_id="qq:user:10001",
+        sender_name="灵麟",
+        text="灵麟需要准备秘密计划。",
+        timestamp=42,
+        visibility="private",
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            user_id="10001",
+            text="我是谁？",
+            sender=FakeSender(user_id=10001, card="灵麟"),
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "当前发言者跨群长期记忆" in joined
+    assert "灵麟 喜欢 说喵" in joined
+    assert "秘密计划" not in joined
+    assert "灵麟(10001) 在群 private:10001 说" not in joined
 
 
 def test_ai_context_includes_structured_retrieval_plan_for_cross_group_query() -> None:

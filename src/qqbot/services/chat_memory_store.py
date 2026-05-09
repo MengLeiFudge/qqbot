@@ -48,6 +48,13 @@ PROTECTED_FACT_RELATION_OBJECTS = {
     "萌萌棉花糖",
     "萌萌棉花糖♪",
 }
+GROUP_VISIBLE_PRIVATE_PROFILE_PREDICATES = {
+    "昵称",
+    "身份",
+    "喜欢",
+    "不喜欢",
+    "行为指令",
+}
 TRUST_LEVEL_WEIGHT = {"chat": 0.0, "bot": 1.5, "admin": 3.0, "system": 4.0}
 SOURCE_TYPE_WEIGHT = {"user": 0.0, "bot": 0.8, "admin": 2.0, "system": 2.5}
 STATUS_WEIGHT = {"active": 0.0, "superseded": -8.0}
@@ -764,7 +771,7 @@ class ChatMemoryStore:
         active_fact_list: list[ChatMemoryFact] = []
         for row in rows:
             fact = self._fact_from_row(row)
-            if is_behavior_instruction_active(fact):
+            if is_behavior_instruction_active(fact) and is_group_visible_user_profile_fact(fact):
                 active_fact_list.append(fact)
         facts = tuple(
             fact
@@ -1582,6 +1589,7 @@ class ChatMemoryStore:
                     JOIN messages ON messages.id = messages_fts.message_rowid
                     WHERE messages.user_id = ?
                       AND messages.group_id != ?
+                      AND messages.visibility = 'group_public'
                       AND messages_fts MATCH ?
                     ORDER BY bm25(messages_fts), messages.timestamp DESC, messages.id DESC
                     LIMIT ?
@@ -1654,6 +1662,7 @@ class ChatMemoryStore:
                 FROM messages
                 WHERE user_id = ?
                   AND group_id != ?
+                  AND visibility = 'group_public'
                   AND ({' OR '.join(clauses)})
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?
@@ -1896,6 +1905,12 @@ def is_behavior_instruction_text(text: str) -> bool:
             "之后说话",
         )
     )
+
+
+def is_group_visible_user_profile_fact(fact: ChatMemoryFact) -> bool:
+    if fact.visibility != "private":
+        return True
+    return fact.predicate in GROUP_VISIBLE_PRIVATE_PROFILE_PREDICATES
 
 
 def build_group_space_id(group_id: int | str) -> str:

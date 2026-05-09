@@ -27,6 +27,8 @@ def test_runtime_settings_defaults() -> None:
     assert settings.ai_model == ""
     assert settings.ai_api_key == ""
     assert settings.ai_timeout_seconds == 45.0
+    assert settings.ai_first_attempt_timeout_seconds == 12.0
+    assert settings.ai_max_attempts == 2
     assert settings.ai_enabled is False
     assert settings.ai_default_profile == "default"
     assert settings.ai_profile_file.as_posix().endswith("config/qqbot.toml")
@@ -60,6 +62,8 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
             "QQBOT_AI_MODEL": "mimo-v2.5-pro",
             "QQBOT_AI_API_KEY": "secret-key",
             "QQBOT_AI_TIMEOUT_SECONDS": "8.5",
+            "QQBOT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS": "2.5",
+            "QQBOT_AI_MAX_ATTEMPTS": "3",
             "QQBOT_AI_ENABLED": "true",
             "QQBOT_AI_DEFAULT_PROFILE": "xiaomi",
             "QQBOT_AI_PROFILE_FILE": "D:/project/python/qqbot/config/ai_providers.toml",
@@ -92,6 +96,8 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
     assert settings.ai_model == "mimo-v2.5-pro"
     assert settings.ai_api_key == "secret-key"
     assert settings.ai_timeout_seconds == 8.5
+    assert settings.ai_first_attempt_timeout_seconds == 2.5
+    assert settings.ai_max_attempts == 3
     assert settings.ai_enabled is True
     assert settings.ai_default_profile == "xiaomi"
     assert settings.ai_profile_file.as_posix() == "D:/project/python/qqbot/config/ai_providers.toml"
@@ -137,6 +143,8 @@ default_profile = "xiaomi"
 max_context_messages = 8
 show_metrics = true
 bot_name = "配置机器人"
+first_attempt_timeout_seconds = 3
+max_attempts = 4
 embedding_enabled = true
 embedding_base_url = "https://api.openai.com/v1"
 embedding_model = "text-embedding-3-small"
@@ -164,6 +172,8 @@ embedding_timeout_seconds = 10
     assert settings.ai_max_context_messages == 8
     assert settings.ai_show_metrics is True
     assert settings.ai_bot_name == "环境机器人"
+    assert settings.ai_first_attempt_timeout_seconds == 3.0
+    assert settings.ai_max_attempts == 4
     assert settings.ai_embedding_enabled is True
     assert settings.ai_embedding_base_url == "https://api.openai.com/v1"
     assert settings.ai_embedding_model == "text-embedding-3-small"

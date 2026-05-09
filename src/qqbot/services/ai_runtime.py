@@ -61,4 +61,9 @@ def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
         )
     else:
         raise ValueError(f"暂不支持 AI provider：{resolved.provider}")
-    return AiGateway(client=client, timeout_seconds=resolved.timeout_seconds)
+    return AiGateway(
+        client=client,
+        timeout_seconds=resolved.timeout_seconds,
+        max_attempts=settings.ai_max_attempts,
+        first_attempt_timeout_seconds=settings.ai_first_attempt_timeout_seconds,
+    )

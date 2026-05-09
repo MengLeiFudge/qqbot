@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from nonebot import on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
@@ -291,7 +292,9 @@ def build_ai_reply_notice_message(
 def build_ai_system_context(settings: RuntimeSettings) -> str:
     return (
         f"你是 QQ 机器人“{settings.ai_bot_name}”。"
-        f"当用户问你是谁、叫什么或身份时，必须明确回答你是“{settings.ai_bot_name}”。"
+        f"当用户问“你是谁”、问机器人叫什么或问机器人身份时，必须明确回答你是“{settings.ai_bot_name}”。"
+        "用户问“我是谁”、问“你认识我吗”或询问自己的身份时，问题中的“我”指当前发言者，"
+        "必须优先根据当前发言者信息和记忆证据回答，不要回答成机器人身份。"
         "你可以用轻松自然的语气聊天，但回答要直接、简洁。"
         "不要使用 Markdown 格式，不要使用标题、列表、加粗、引用、代码块或链接语法。"
         "段落之间不要留空行，需要分段时只使用单个换行。"
@@ -565,7 +568,7 @@ def build_long_term_memory_context(
     user_context = format_current_sender_memory_context(
         user_facts,
         user_records,
-        max_chars=max(200, settings.ai_memory_context_chars // 2),
+        max_chars=max(400, settings.ai_memory_context_chars),
     )
     evidence_context = format_evidence_bundle(evidence)
     return "\n".join(part for part in (evidence_context, group_context, user_context) if part)
@@ -619,18 +622,19 @@ def search_current_sender_memory(
     if not str(user_id).isdigit():
         return (), ()
     aliases = build_current_sender_memory_aliases(settings, group_id, event)
+    search_query = expand_current_sender_profile_query(query, aliases, event=event)
     limit = max(1, settings.ai_memory_search_limit // 2)
     facts = memory_store.search_user_facts(
         current_group_id=group_id,
         user_id=user_id,
         aliases=aliases,
-        query=query,
+        query=search_query,
         limit=limit,
     )
     records = memory_store.search_user_messages(
         current_group_id=group_id,
         user_id=user_id,
-        query=query,
+        query=search_query,
         limit=limit,
     )
     if is_cross_group_memory_query(query):
@@ -662,10 +666,54 @@ def search_current_sender_memory(
             record
             for fact in facts
             for record in memory_store.load_messages_by_message_ids(fact.group_id, fact.source_message_ids)
+            if record.visibility != "private"
             if record.message_id not in existing_ids
         )
         records = (*records, *source_records)[:limit]
     return facts, records
+
+
+def expand_current_sender_profile_query(
+    query: str,
+    aliases: tuple[str, ...],
+    *,
+    event: MessageEvent,
+) -> str:
+    if not is_self_profile_query(query):
+        return query
+    sender = getattr(event, "sender", None)
+    sender_names = (
+        str(getattr(sender, "card", "") or "").strip(),
+        str(getattr(sender, "nickname", "") or "").strip(),
+    )
+    return " ".join(
+        dict.fromkeys(
+            [
+                query,
+                *aliases,
+                *(name for name in sender_names if name),
+                "昵称",
+                "身份",
+                "喜欢",
+                "不喜欢",
+                "行为指令",
+            ]
+        )
+    )
+
+
+def is_self_profile_query(query: str) -> bool:
+    compact = re.sub(r"\s+", "", query)
+    return any(
+        keyword in compact
+        for keyword in (
+            "我是谁",
+            "你认识我吗",
+            "你记得我吗",
+            "我喜欢什么",
+            "我是什么人",
+        )
+    ) or ("我" in compact and "谁" in compact)
 
 
 def build_current_sender_memory_aliases(

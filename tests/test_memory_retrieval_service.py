@@ -98,3 +98,51 @@ def test_retrieval_service_supports_private_conversation_memory(
     assert bundle.messages[0].visibility == "private"
     assert bundle.messages[0].text == "我喜欢写小说。"
     assert bundle.forbidden == ("group_private_disclosure",)
+
+
+def test_retrieval_service_private_conversation_includes_actor_public_group_memory(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=301,
+        direction="incoming",
+        user_id=20001,
+        sender_name="灵麟",
+        text="我是灵麟，喜欢说喵。",
+        timestamp=100,
+    )
+    store.append_message(
+        group_id="private:20001",
+        space_id="qq:private:20001",
+        message_id=302,
+        direction="incoming",
+        user_id=20001,
+        actor_id="qq:user:20001",
+        sender_name="20001",
+        text="你认识我吗？",
+        timestamp=101,
+        visibility="private",
+    )
+
+    bundle = retrieve_memory_evidence(
+        store,
+        RetrievalPlan(
+            intent="private_conversation",
+            actor_id="qq:user:20001",
+            space_id="qq:private:20001",
+            query="我是谁",
+            allowed=("private_messages", "user_profile"),
+            forbidden=("group_private_disclosure",),
+            visibility="private",
+            limit=5,
+        ),
+    )
+
+    assert [record.text for record in bundle.messages] == [
+        "你认识我吗？",
+        "我是灵麟，喜欢说喵。",
+    ]
+    assert bundle.messages[1].space_id == "qq:group:10001"
+    assert bundle.messages[1].visibility == "group_public"

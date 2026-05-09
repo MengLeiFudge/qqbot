@@ -76,20 +76,27 @@ def retrieve_memory_evidence(
         )
 
     if plan.intent == "private_conversation":
+        private_messages = _rerank_messages_with_vectors(
+            store.search_space_messages(
+                space_id=plan.space_id,
+                query=plan.query,
+                visibility=plan.visibility,
+                limit=plan.limit,
+            ),
+            plan.query,
+            vector_store,
+            embedding_client,
+        )
+        public_actor_messages = store.load_recent_actor_messages_across_spaces(
+            actor_id=plan.actor_id,
+            exclude_space_id=plan.space_id,
+            visibility="group_public",
+            limit=plan.limit,
+        )
         return MemoryEvidenceBundle(
             plan=plan,
             facts=(),
-            messages=_rerank_messages_with_vectors(
-                store.search_space_messages(
-                    space_id=plan.space_id,
-                    query=plan.query,
-                    visibility=plan.visibility,
-                    limit=plan.limit,
-                ),
-                plan.query,
-                vector_store,
-                embedding_client,
-            ),
+            messages=(*private_messages, *public_actor_messages)[: plan.limit],
             forbidden=plan.forbidden,
         )
 

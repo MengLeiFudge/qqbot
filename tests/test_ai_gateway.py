@@ -114,6 +114,61 @@ class EmptyAiClient:
         return "   "
 
 
+class EmptyThenSuccessAiClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream_complete(self, request: AiRequest) -> AiCompletion:
+        self.calls += 1
+        if self.calls == 1:
+            return AiCompletion(
+                text="   ",
+                metrics=AiMetrics(
+                    first_token_seconds=None,
+                    total_seconds=0.1,
+                    completion_tokens=0,
+                    output_chars=0,
+                ),
+            )
+        return AiCompletion(
+            text="第二次成功",
+            metrics=AiMetrics(
+                first_token_seconds=0.1,
+                total_seconds=0.2,
+                completion_tokens=4,
+                output_chars=5,
+            ),
+        )
+
+
+class TimeoutThenSuccessAiClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream_complete(self, request: AiRequest) -> AiCompletion:
+        self.calls += 1
+        if self.calls == 1:
+            await asyncio.sleep(0.05)
+            return AiCompletion(
+                text="late",
+                metrics=AiMetrics(
+                    first_token_seconds=0.05,
+                    total_seconds=0.05,
+                    completion_tokens=1,
+                    output_chars=4,
+                ),
+            )
+        return AiCompletion(
+            text="重试成功",
+            metrics=AiMetrics(
+                first_token_seconds=0.001,
+                total_seconds=0.001,
+                completion_tokens=4,
+                output_chars=4,
+            ),
+        )
+
+
 def test_gateway_calls_client_for_declared_capability() -> None:
     gateway = AiGateway(client=FakeAiClient())
 
@@ -172,7 +227,7 @@ def test_gateway_returns_fallback_when_client_is_missing() -> None:
 
 
 def test_gateway_returns_fallback_on_timeout() -> None:
-    gateway = AiGateway(client=SlowAiClient(), timeout_seconds=0.01)
+    gateway = AiGateway(client=SlowAiClient(), timeout_seconds=0.01, max_attempts=1)
 
     response = asyncio.run(
         gateway.complete(
@@ -186,7 +241,7 @@ def test_gateway_returns_fallback_on_timeout() -> None:
 
 
 def test_gateway_returns_fallback_on_client_error() -> None:
-    gateway = AiGateway(client=FailingAiClient())
+    gateway = AiGateway(client=FailingAiClient(), max_attempts=1)
 
     response = asyncio.run(
         gateway.complete(
@@ -248,7 +303,7 @@ def test_gateway_keeps_normal_risk_explanations() -> None:
 
 
 def test_gateway_returns_clear_fallback_on_empty_content() -> None:
-    gateway = AiGateway(client=EmptyAiClient())
+    gateway = AiGateway(client=EmptyAiClient(), max_attempts=1)
 
     response = asyncio.run(
         gateway.complete(
@@ -259,6 +314,36 @@ def test_gateway_returns_clear_fallback_on_empty_content() -> None:
     assert response.fallback is True
     assert response.text == "棉花糖抓到了一团空空的棉花，没有生成出回复喵。再问一次吧。"
     assert response.metrics is None
+
+
+def test_gateway_retries_empty_content_before_fallback() -> None:
+    client = EmptyThenSuccessAiClient()
+    gateway = AiGateway(client=client)
+
+    response = asyncio.run(
+        gateway.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="你好", user_id="10001")
+        )
+    )
+
+    assert response.fallback is False
+    assert response.text == "第二次成功"
+    assert client.calls == 2
+
+
+def test_gateway_retries_timeout_with_short_first_attempt() -> None:
+    client = TimeoutThenSuccessAiClient()
+    gateway = AiGateway(client=client, timeout_seconds=1.0, first_attempt_timeout_seconds=0.01)
+
+    response = asyncio.run(
+        gateway.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="你好", user_id="10001")
+        )
+    )
+
+    assert response.fallback is False
+    assert response.text == "重试成功"
+    assert client.calls == 2
 
 
 class MarkdownAiClient:

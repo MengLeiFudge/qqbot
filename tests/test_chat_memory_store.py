@@ -190,6 +190,48 @@ def test_chat_memory_store_searches_user_facts_across_groups_without_group_rules
     ]
 
 
+def test_chat_memory_store_allows_private_profile_facts_in_group_user_profile(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id="private:20001",
+        space_id="qq:private:20001",
+        message_id=221,
+        direction="incoming",
+        user_id=20001,
+        actor_id="qq:user:20001",
+        sender_name="灵麟",
+        text="灵麟喜欢说喵。",
+        timestamp=100,
+        visibility="private",
+    )
+    store.append_message(
+        group_id="private:20001",
+        space_id="qq:private:20001",
+        message_id=222,
+        direction="incoming",
+        user_id=20001,
+        actor_id="qq:user:20001",
+        sender_name="灵麟",
+        text="灵麟需要准备一个秘密计划。",
+        timestamp=101,
+        visibility="private",
+    )
+
+    facts = store.search_user_facts(
+        current_group_id=10002,
+        user_id=20001,
+        aliases=("灵麟",),
+        query="灵麟喜欢什么 秘密计划",
+        limit=5,
+    )
+
+    assert [(fact.visibility, fact.subject, fact.predicate, fact.object) for fact in facts] == [
+        ("private", "灵麟", "喜欢", "说喵")
+    ]
+
+
 def test_chat_memory_store_keeps_reply_and_media_metadata(tmp_path: Path) -> None:
     store = ChatMemoryStore(tmp_path / "run")
     store.append_message(

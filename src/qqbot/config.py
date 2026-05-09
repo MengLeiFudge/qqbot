@@ -25,6 +25,8 @@ DEFAULT_ARCAEA_RECORD_MAVEN = (
 DEFAULT_ARCAEA_RECORD_JAVA_HOME = "C:/path/to/jdk"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_AI_TIMEOUT_SECONDS = 45.0
+DEFAULT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS = 12.0
+DEFAULT_AI_MAX_ATTEMPTS = 2
 DEFAULT_AI_PROFILE_FILE = DEFAULT_CONFIG_FILE
 DEFAULT_AI_DEFAULT_PROFILE = "default"
 DEFAULT_AI_MAX_CONTEXT_MESSAGES = 12
@@ -72,6 +74,8 @@ class RuntimeSettings:
     ai_model: str = ""
     ai_api_key: str = ""
     ai_timeout_seconds: float = DEFAULT_AI_TIMEOUT_SECONDS
+    ai_first_attempt_timeout_seconds: float = DEFAULT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS
+    ai_max_attempts: int = DEFAULT_AI_MAX_ATTEMPTS
     ai_enabled: bool = False
     ai_default_profile: str = DEFAULT_AI_DEFAULT_PROFILE
     ai_profile_file: Path = DEFAULT_AI_PROFILE_FILE
@@ -129,6 +133,13 @@ class RuntimeSettings:
             ai_timeout_seconds=float(
                 mapping.get("QQBOT_AI_TIMEOUT_SECONDS", str(DEFAULT_AI_TIMEOUT_SECONDS))
             ),
+            ai_first_attempt_timeout_seconds=float(
+                mapping.get(
+                    "QQBOT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS",
+                    str(DEFAULT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS),
+                )
+            ),
+            ai_max_attempts=int(mapping.get("QQBOT_AI_MAX_ATTEMPTS", str(DEFAULT_AI_MAX_ATTEMPTS))),
             ai_enabled=_parse_bool(mapping.get("QQBOT_AI_ENABLED", ""), default=False),
             ai_default_profile=mapping.get(
                 "QQBOT_AI_DEFAULT_PROFILE",
@@ -289,6 +300,8 @@ def _load_config_mapping(config_file: Path) -> dict[str, str]:
             "show_metrics": "QQBOT_AI_SHOW_METRICS",
             "bot_name": "QQBOT_AI_BOT_NAME",
             "timeout_seconds": "QQBOT_AI_TIMEOUT_SECONDS",
+            "first_attempt_timeout_seconds": "QQBOT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS",
+            "max_attempts": "QQBOT_AI_MAX_ATTEMPTS",
             "provider": "QQBOT_AI_PROVIDER",
             "base_url": "QQBOT_AI_BASE_URL",
             "model": "QQBOT_AI_MODEL",
