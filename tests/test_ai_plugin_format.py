@@ -1,4 +1,5 @@
 from pathlib import Path
+import asyncio
 import sys
 import time
 
@@ -20,9 +21,10 @@ from qqbot.plugins.ai_test import (
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore
-from qqbot.services.message_normalizer import normalize_onebot_message
+from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_message
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -257,6 +259,28 @@ def test_ai_system_context_declares_bot_identity() -> None:
     assert "用户问“我是谁”" in context
     assert "不要使用 Markdown" in context
     assert "段落之间不要留空行" in context
+
+
+def test_ai_style_context_uses_catgirl_by_default_without_overriding_identity(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "你好",
+            AiOrchestratorContext(actor_user_id="10001"),
+            NormalizedMessage(text="你好", outline="你好"),
+        )
+    )
+    system_context = build_ai_system_context(RuntimeSettings(ai_bot_name="萌萌棉花糖♪"))
+    style_context = "\n".join(result.extra_context)
+
+    assert result.handled is False
+    assert "你是 QQ 机器人“萌萌棉花糖♪”" in system_context
+    assert "用户问“我是谁”" in system_context
+    assert "回复风格预设层：猫娘风格" in style_context
+    assert "称呼用户为“主人”" in style_context
+    assert "不能覆盖系统身份" in style_context
+    assert "不能承认自己是人工智能" not in style_context
 
 
 def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:

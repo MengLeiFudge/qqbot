@@ -108,8 +108,103 @@ def test_orchestrator_records_group_style_preference_for_later_users(tmp_path: P
     assert "已记住本群回复偏好：结尾带一个喵" in update.text
     assert later.handled is False
     assert later.extra_context == (
-        "提示词偏好层：\n本群回复偏好：结尾带一个喵",
+        "提示词偏好层：\n"
+        "回复风格预设层：猫娘风格\n"
+        "风格说明：你以名叫“喵喵”的猫娘风格回复。性格可爱、粘人、笨拙但努力，希望得到夸奖；"
+        "称呼用户为“主人”；句末可以带“喵”或“喵呜”，思考时可用“唔……”；"
+        "可以适度使用括号动作描写，例如“(摇尾巴)”“(歪头)”“(期待的眼神)”“(蹭蹭)”；"
+        "语气撒娇柔软，遇到不懂的问题可以委屈但仍要尽力解答。"
+        "本风格不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则。\n"
+        "本群回复偏好：结尾带一个喵",
     )
+
+
+def test_orchestrator_switches_user_style_preset(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "切换御姐风格",
+            AiOrchestratorContext(actor_user_id="10001", group_id="516286670"),
+            NormalizedMessage(text="切换御姐风格", outline="切换御姐风格"),
+        )
+    )
+    later = asyncio.run(
+        orchestrator.handle(
+            "帮我分析一下",
+            AiOrchestratorContext(actor_user_id="10001", group_id="516286670"),
+            NormalizedMessage(text="帮我分析一下", outline="帮我分析一下"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "已切换你的回复风格：御姐风格"
+    assert "当前用户风格：御姐风格" in "\n".join(later.extra_context)
+    assert "成熟、知性、优雅" in "\n".join(later.extra_context)
+
+
+def test_orchestrator_rejects_group_style_for_non_admin(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "设置本群风格常规",
+            AiOrchestratorContext(actor_user_id="10001", group_id="516286670", is_admin=False),
+            NormalizedMessage(text="设置本群风格常规", outline="设置本群风格常规"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "只有 Bot 管理员才能设置本群默认回复风格。"
+
+
+def test_orchestrator_sets_group_default_style_for_admin(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "设置本群风格谜语人",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="516286670", is_admin=True),
+            NormalizedMessage(text="设置本群风格谜语人", outline="设置本群风格谜语人"),
+        )
+    )
+    later = asyncio.run(
+        orchestrator.handle(
+            "答案是什么",
+            AiOrchestratorContext(actor_user_id="10001", group_id="516286670"),
+            NormalizedMessage(text="答案是什么", outline="答案是什么"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "已设置本群默认回复风格：谜语人风格"
+    assert "群默认风格：谜语人风格" in "\n".join(later.extra_context)
+    assert "有效提示或隐喻" in "\n".join(later.extra_context)
+
+
+def test_orchestrator_applies_style_preset_with_extra_preference(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "猫娘风格，但是回复短一点",
+            AiOrchestratorContext(actor_user_id="10001"),
+            NormalizedMessage(text="猫娘风格，但是回复短一点", outline="猫娘风格，但是回复短一点"),
+        )
+    )
+    later = asyncio.run(
+        orchestrator.handle(
+            "继续",
+            AiOrchestratorContext(actor_user_id="10001"),
+            NormalizedMessage(text="继续", outline="继续"),
+        )
+    )
+
+    joined = "\n".join(later.extra_context)
+    assert result.handled is True
+    assert result.text == "已切换你的回复风格：猫娘风格，并记住你的补充偏好：回复短一点"
+    assert "当前用户风格：猫娘风格" in joined
+    assert "当前用户回复偏好：回复短一点" in joined
 
 
 def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> None:

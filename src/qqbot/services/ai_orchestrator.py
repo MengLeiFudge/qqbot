@@ -11,7 +11,7 @@ from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.ai_requirement_store import AiRequirementStore
 from qqbot.services.ai_tool_registry import AiToolContext, build_default_ai_tool_registry
-from qqbot.services.ai_user_style_store import AiUserStyleStore
+from qqbot.services.ai_user_style_store import AiStylePreset, AiUserStyleStore, resolve_style_preset
 from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
 from qqbot.services.codex_task_service import (
     CodexProgressEvent,
@@ -48,6 +48,13 @@ class AiOrchestratorResult:
     extra_context: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class StylePresetCommand:
+    preset: AiStylePreset
+    scope: str
+    extra_preference: str = ""
+
+
 def _find_group_message_index(records: tuple[AiGroupMessageRecord, ...], message_id: str) -> int | None:
     for index, record in enumerate(records):
         if record.message_id == message_id:
@@ -74,6 +81,29 @@ def extract_style_preference(text: str) -> str:
     preference = re.sub(r"^(以后|之后|今后|每次)(都|要|请)?", "", preference).strip()
     preference = re.sub(r"^(回复|说话|回答)(时|的时候|要)?", "", preference).strip()
     return preference.strip(" ：:，,。")
+
+
+def parse_style_preset_command(text: str) -> StylePresetCommand | None:
+    normalized = text.strip()
+    if not normalized:
+        return None
+    scope = "group" if any(marker in normalized for marker in ("本群", "这个群", "群默认")) else "user"
+    cleaned = re.sub(r"^(请|麻烦|帮我)?", "", normalized).strip()
+    cleaned = re.sub(r"^(设置|切换|改成|换成|使用|启用)", "", cleaned).strip()
+    cleaned = re.sub(r"^(我的|个人|本群|这个群|群默认)", "", cleaned).strip()
+    cleaned = re.sub(r"^(回复|说话|回答)?(风格|模式|口吻|人格)", "", cleaned).strip()
+    if not any(marker in normalized for marker in ("风格", "模式", "口吻", "人格")):
+        return None
+
+    parts = re.split(r"(?:，|,|。|\s)+(?:但是|但|不过|并且|而且)", cleaned, maxsplit=1)
+    style_part = parts[0].strip(" ：:，,。")
+    extra_preference = parts[1].strip(" ：:，,。") if len(parts) > 1 else ""
+    style_part = re.sub(r"(回复|说话|回答)?(风格|模式|口吻|人格)$", "", style_part).strip()
+    try:
+        preset = resolve_style_preset(style_part)
+    except ValueError:
+        return None
+    return StylePresetCommand(preset=preset, scope=scope, extra_preference=extra_preference)
 
 
 def summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
@@ -129,6 +159,10 @@ class AiOrchestrator:
         if group_plugins_result.handled:
             return group_plugins_result
 
+        style_preset_result = self._try_switch_style_preset(text, context)
+        if style_preset_result.handled:
+            return style_preset_result
+
         style_result = self._try_update_style(text, context)
         if style_result.handled:
             return style_result
@@ -180,6 +214,43 @@ class AiOrchestrator:
         if not enabled_names:
             return AiOrchestratorResult(True, "当前没有启用插件。")
         return AiOrchestratorResult(True, "当前启用插件：" + "、".join(enabled_names))
+
+    def _try_switch_style_preset(
+        self,
+        text: str,
+        context: AiOrchestratorContext,
+    ) -> AiOrchestratorResult:
+        command = parse_style_preset_command(text)
+        if command is None:
+            return AiOrchestratorResult(False)
+        if command.scope == "group":
+            if context.group_id is None:
+                return AiOrchestratorResult(True, "设置本群默认回复风格需要在群聊里使用。")
+            if not context.is_admin:
+                return AiOrchestratorResult(True, "只有 Bot 管理员才能设置本群默认回复风格。")
+            preset = self.styles.set_group_preset(context.group_id, command.preset.preset_id)
+            return AiOrchestratorResult(
+                True,
+                f"已设置本群默认回复风格：{preset.display_name}",
+                extra_context=(
+                    self.styles.build_context(context.actor_user_id, group_id=context.group_id),
+                ),
+            )
+
+        preset = self.styles.set_user_preset(context.actor_user_id, command.preset.preset_id)
+        message = f"已切换你的回复风格：{preset.display_name}"
+        if command.extra_preference:
+            preference = command.extra_preference.strip(" ：:，,。")
+            if preference:
+                self.styles.add_user_preference(context.actor_user_id, preference)
+                message += f"，并记住你的补充偏好：{preference}"
+        return AiOrchestratorResult(
+            True,
+            message,
+            extra_context=(
+                self.styles.build_context(context.actor_user_id, group_id=context.group_id),
+            ),
+        )
 
     async def _try_upload_latest_project_zip(
         self,
