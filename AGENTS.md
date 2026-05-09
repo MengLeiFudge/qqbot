@@ -75,6 +75,19 @@
 - 新增插件时，先补服务层，再补 matcher；不要把复杂业务逻辑堆在 matcher 里。
 - 群聊显式命令默认需要 direct-at，避免普通聊天误触发。
 
+### 群聊与私聊对话处理架构
+
+当前对话链路采用 `OneBot V11 事件 -> NoneBot matcher -> 消息规范化 -> 场景分流 -> 服务层编排` 的结构，保持事件入口轻量、业务逻辑可测试：
+
+- `message_normalizer.py` 是 OneBot 消息段到内部消息模型的唯一规范化入口；文本、@、图片、语音、视频、文件和引用消息先统一成 `NormalizedMessage` / `NormalizedReply`，后续 AI、记忆、日志和上下文逻辑不直接解析 CQ 码或 raw segment。
+- 群聊普通消息只做旁路记录：`group_nick_cache.py` 负责记录群名片、最近群上下文、管理端消息日志和长期群聊记忆；不主动触发 AI 回复。
+- 群聊显式命令和 AI 对话必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。
+- 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。
+- AI 短期会话按场景隔离：私聊使用 `private:<user_id>:<profile>`，群聊使用 `group_user:<group_id>:<user_id>:<profile>`，避免不同群或私聊上下文互相污染。
+- 长期记忆检索先生成 `RetrievalPlan`，再按 `space_id`、`actor_id`、`visibility` 和 `forbidden` 边界取证；群聊查询私聊内容时只返回拒绝披露约束，跨群查询只允许当前发言者的公开群聊记忆。
+- AI 回复在群聊中优先引用并 @ 当前发言者，长文本走折叠消息；私聊回复保持普通文本，避免把群聊交互形态带入私聊。
+- 固定命令、白名单本地动作和普通 LLM 回复分层处理；AI 不直接获得 shell、文件系统、群管、重启、上传文件等自由权限。
+
 ## 配置边界
 
 - `.env` 只放敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key。
