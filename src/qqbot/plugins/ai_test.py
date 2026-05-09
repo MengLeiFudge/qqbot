@@ -35,6 +35,7 @@ from qqbot.services.memory_retrieval_service import (
     retrieve_memory_evidence,
 )
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
+from qqbot.services.rightcodes_draw_client import looks_like_rightcodes_draw_command
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
@@ -123,6 +124,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         ),
         self_restart_scheduler=restart_scheduler,
     )
+    if looks_like_rightcodes_draw_command(prompt):
+        await ai_chat_matcher.send("已开始生图任务")
     local_result = await orchestrator.handle(
         prompt,
         AiOrchestratorContext(

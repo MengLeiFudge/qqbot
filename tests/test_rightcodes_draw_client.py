@@ -11,6 +11,9 @@ from qqbot.services.rightcodes_draw_client import (
     RIGHTCODES_DRAW_DEFAULT_MODEL,
     RightCodesDrawClient,
     RightCodesDrawRequest,
+    format_rightcodes_draw_failure,
+    format_rightcodes_draw_success,
+    looks_like_rightcodes_draw_command,
     parse_rightcodes_draw_command,
 )
 
@@ -71,6 +74,11 @@ def test_parse_rightcodes_draw_command_ignores_general_chat() -> None:
     assert parse_rightcodes_draw_command("帮我画一下 CrRgSbWy") is None
 
 
+def test_looks_like_rightcodes_draw_command_matches_draw_commands() -> None:
+    assert looks_like_rightcodes_draw_command("棉花生图 一只猫")
+    assert not looks_like_rightcodes_draw_command("普通聊天")
+
+
 def test_rightcodes_draw_client_streams_chat_completions() -> None:
     http_client = FakeDrawHttpClient()
     client = RightCodesDrawClient(
@@ -103,3 +111,16 @@ def test_rightcodes_draw_client_streams_chat_completions() -> None:
         "type": "image_url",
         "image_url": {"url": "https://example.com/ref.png"},
     }
+
+
+def test_format_rightcodes_draw_success() -> None:
+    result = type("DrawResult", (), {"total_seconds": 53.72})()
+
+    assert (
+        format_rightcodes_draw_success(result, model="nano-banana-2")
+        == "✨ 生成成功！\n📊 耗时: 53.72s\n🖼️ 数量: 1张\n🤖 模型: nano-banana-2"
+    )
+
+
+def test_format_rightcodes_draw_failure() -> None:
+    assert format_rightcodes_draw_failure(RuntimeError("API 错误 (400)")) == "❌ 生成失败: API 错误 (400)"

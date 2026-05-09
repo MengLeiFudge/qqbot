@@ -33,6 +33,8 @@ from qqbot.services.project_artifact_service import find_latest_project_zip
 from qqbot.services.rightcodes_draw_client import (
     RightCodesDrawClient,
     RightCodesDrawRequest,
+    format_rightcodes_draw_failure,
+    format_rightcodes_draw_success,
     parse_rightcodes_draw_command,
 )
 from qqbot.services.settings_store import SettingsStore
@@ -438,10 +440,10 @@ class AiOrchestrator:
                 )
             )
         except Exception as exc:
-            return AiOrchestratorResult(True, f"生图失败：{type(exc).__name__}")
+            return AiOrchestratorResult(True, format_rightcodes_draw_failure(exc))
         return AiOrchestratorResult(
             True,
-            f"已生成图片：{request.model}",
+            format_rightcodes_draw_success(result, model=request.model),
             image_path=result.image_url,
         )
 

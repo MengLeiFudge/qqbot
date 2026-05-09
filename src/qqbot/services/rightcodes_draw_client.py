@@ -5,6 +5,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from urllib.error import HTTPError
 from typing import Any, Protocol
 from urllib.request import Request, urlopen
 
@@ -178,6 +179,38 @@ def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
     return RightCodesDrawRequest(prompt=prompt, model=model)
 
 
+def looks_like_rightcodes_draw_command(text: str) -> bool:
+    return parse_rightcodes_draw_command(text) is not None
+
+
+def format_rightcodes_draw_success(
+    result: RightCodesDrawResult,
+    *,
+    model: str,
+    image_count: int = 1,
+) -> str:
+    return (
+        "✨ 生成成功！\n"
+        f"📊 耗时: {result.total_seconds:.2f}s\n"
+        f"🖼️ 数量: {image_count}张\n"
+        f"🤖 模型: {model}"
+    )
+
+
+def format_rightcodes_draw_failure(exc: Exception) -> str:
+    return f"❌ 生成失败: {extract_rightcodes_draw_error_message(exc)}"
+
+
+def extract_rightcodes_draw_error_message(exc: Exception) -> str:
+    if isinstance(exc, HTTPError):
+        detail = _read_http_error_detail(exc)
+        return f"API 错误 ({exc.code}){(': ' + detail) if detail else ''}"
+    message = str(exc).strip()
+    if message:
+        return message
+    return type(exc).__name__
+
+
 def _stream_json_lines(
     url: str,
     headers: dict[str, str],
@@ -192,6 +225,33 @@ def _stream_json_lines(
             raise RuntimeError(f"RightCodes draw request failed: {status}")
         for raw_line in response:
             yield raw_line.decode("utf-8").strip()
+
+
+def _read_http_error_detail(exc: HTTPError) -> str:
+    try:
+        body = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    if not body:
+        return ""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return body[:200]
+    for path in (
+        ("error", "message"),
+        ("message",),
+        ("detail",),
+    ):
+        value: object = data
+        for key in path:
+            if not isinstance(value, dict):
+                value = None
+                break
+            value = value.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return body[:200]
 
 
 def _next_line(iterator) -> str | None:

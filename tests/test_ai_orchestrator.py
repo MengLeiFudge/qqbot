@@ -1286,12 +1286,40 @@ def test_orchestrator_generates_image_with_rightcodes(
 
     assert result.handled is True
     assert result.image_path == "https://example.com/generated.png"
-    assert result.text == "已生成图片：nano-banana-pro"
+    assert result.text == "✨ 生成成功！\n📊 耗时: 1.00s\n🖼️ 数量: 1张\n🤖 模型: nano-banana-pro"
     api_key, request = FakeDrawClient.requests[0]
     assert api_key == "rc-secret"
     assert request.model == "nano-banana-pro"
     assert request.prompt == "画一个糖果城堡"
     assert request.image_urls == ("https://example.com/ref.png",)
+
+
+def test_orchestrator_reports_rightcodes_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FailingDrawClient:
+        def __init__(self, *, api_key: str) -> None:
+            self.api_key = api_key
+
+        async def draw(self, request):
+            raise RuntimeError("API 错误 (400)")
+
+    monkeypatch.setenv("QQBOT_AI_KEY_RIGHTCODES", "rc-secret")
+    monkeypatch.setattr(ai_orchestrator_module, "RightCodesDrawClient", FailingDrawClient)
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "棉花生图 雌小鬼萝莉",
+            AiOrchestratorContext(actor_user_id="10001"),
+            NormalizedMessage(text="棉花生图 雌小鬼萝莉", outline="棉花生图 雌小鬼萝莉"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.image_path is None
+    assert result.text == "❌ 生成失败: API 错误 (400)"
 
 
 def test_orchestrator_returns_unhandled_for_general_chat(tmp_path: Path) -> None:
