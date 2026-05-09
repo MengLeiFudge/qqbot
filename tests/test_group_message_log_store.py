@@ -113,6 +113,23 @@ def test_group_message_log_store_skips_blank_text_and_bad_direction(tmp_path: Pa
     assert store.load_messages(10001) == ()
 
 
+def test_group_message_log_store_sanitizes_bot_action_descriptions(tmp_path: Path) -> None:
+    store = GroupMessageLogStore(tmp_path / "run")
+
+    store.append_message(
+        group_id=10001,
+        direction="bot",
+        user_id=30001,
+        sender_name="Bot",
+        text="棉花糖会继续认真回答喵~(认真脸)",
+        timestamp=1,
+    )
+
+    records = store.load_messages(10001)
+
+    assert records[0].text == "棉花糖会继续认真回答喵~"
+
+
 def test_group_message_log_store_removes_group_file(tmp_path: Path) -> None:
     store = GroupMessageLogStore(tmp_path / "run")
     store.append_message(

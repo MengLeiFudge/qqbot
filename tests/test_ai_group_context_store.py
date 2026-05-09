@@ -61,6 +61,31 @@ def test_ai_group_context_store_filters_high_risk_rejection_text(tmp_path: Path)
     assert store.load_messages(516286670) == ()
 
 
+def test_ai_group_context_store_sanitizes_legacy_action_descriptions_on_load(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ai" / "group_context" / "516286670.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "user_id": "10001",
+                    "sender_name": "Bot",
+                    "text": "棉花糖会继续认真回答喵~(认真脸)",
+                    "timestamp": 1,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    records = AiGroupContextStore(tmp_path).load_messages(516286670)
+
+    assert records[0].text == "棉花糖会继续认真回答喵~"
+
+
 def test_ai_group_context_store_loads_legacy_records_without_message_id(tmp_path: Path) -> None:
     path = tmp_path / "ai" / "group_context" / "516286670.json"
     path.parent.mkdir(parents=True)

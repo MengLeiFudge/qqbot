@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
+from qqbot.services.ai_output_style import sanitize_ai_output_text
+
 
 VALID_DIRECTIONS = {"incoming", "bot"}
 
@@ -44,7 +46,7 @@ class GroupMessageLogStore:
         timestamp: int | float,
         message_id: int | str | None = None,
     ) -> None:
-        normalized_text = text.strip()
+        normalized_text = sanitize_ai_output_text(text) if direction == "bot" else text.strip()
         if not normalized_text:
             return
         if direction not in VALID_DIRECTIONS:
@@ -80,6 +82,8 @@ class GroupMessageLogStore:
                 continue
             direction = str(raw.get("direction", "")).strip()
             text = str(raw.get("text", "")).strip()
+            if direction == "bot":
+                text = sanitize_ai_output_text(text)
             if direction not in VALID_DIRECTIONS or not text:
                 continue
             records.append(

@@ -42,6 +42,24 @@ def test_chat_memory_store_searches_same_group_messages(tmp_path: Path) -> None:
     assert results[0].text == "我们刚才讨论了 shapez 存档数据库和聊天记录标签。"
 
 
+def test_chat_memory_store_sanitizes_bot_action_descriptions(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+
+    inserted = store.append_message(
+        group_id=10001,
+        message_id=11,
+        direction="bot",
+        user_id=1443944862,
+        sender_name="Bot",
+        text="棉花糖会继续认真回答喵~(认真脸)",
+        timestamp=100,
+    )
+
+    assert inserted is True
+    results = store.search_messages(10001, "棉花糖", limit=5)
+    assert results[0].text == "棉花糖会继续认真回答喵~"
+
+
 def test_chat_memory_store_orders_recent_relevant_messages_first(tmp_path: Path) -> None:
     store = ChatMemoryStore(tmp_path / "run")
     for index in range(3):

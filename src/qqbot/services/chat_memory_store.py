@@ -8,6 +8,7 @@ import sqlite3
 import time
 
 from qqbot.services.ai_gateway import is_safety_rejection_text
+from qqbot.services.ai_output_style import sanitize_ai_output_text
 from qqbot.services.group_nick_store import GroupNickStore
 
 
@@ -139,7 +140,7 @@ class ChatMemoryStore:
         reply_user_id: int | str | None = None,
         reply_outline: str = "",
     ) -> bool:
-        normalized_text = text.strip()
+        normalized_text = sanitize_ai_output_text(text) if direction == "bot" else text.strip()
         if not normalized_text or is_safety_rejection_text(normalized_text):
             return False
         if direction == "bot" and is_sensitive_memory_claim_text(normalized_text):

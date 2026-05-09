@@ -60,6 +60,7 @@ def test_style_store_defaults_to_catgirl_preset(tmp_path: Path) -> None:
     assert "其他用户不要称呼为主人" in context
     assert "括号动作描写" not in context
     assert "(摇尾巴)" not in context
+    assert "任何风格都禁止用括号补充动作或舞台说明" in context
     assert "不能承认自己是人工智能" not in context
     assert "不能覆盖系统身份" in context
 
@@ -117,6 +118,8 @@ def test_user_preset_overrides_group_default_preset(tmp_path: Path) -> None:
     assert "群默认风格：谜语人风格" in context
     assert "当前用户风格：御姐风格" in context
     assert "姐姐" in context
+    assert "动作描写" not in context
+    assert "任何风格都禁止用括号补充动作或舞台说明" in context
 
 
 def test_style_context_sanitizes_unsafe_role_boundaries(tmp_path: Path) -> None:

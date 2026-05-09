@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from qqbot.services.ai_gateway import is_safety_rejection_text
+from qqbot.services.ai_output_style import sanitize_ai_output_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +63,7 @@ class AiGroupContextStore:
         for raw in raw_records:
             if not isinstance(raw, dict):
                 continue
-            text = str(raw.get("text", "")).strip()
+            text = sanitize_ai_output_text(str(raw.get("text", "")))
             if not text or is_safety_rejection_text(text):
                 continue
             records.append(

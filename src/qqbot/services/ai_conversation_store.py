@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 
 from qqbot.services.ai_gateway import AiMessage, is_safety_rejection_text
+from qqbot.services.ai_output_style import sanitize_ai_output_text
 
 
 class AiConversationStore:
@@ -28,6 +29,8 @@ class AiConversationStore:
                 continue
             role = str(raw.get("role", ""))
             content = str(raw.get("content", ""))
+            if role == "assistant":
+                content = sanitize_ai_output_text(content)
             if is_safety_rejection_text(content):
                 continue
             if role in {"user", "assistant"} and content:
@@ -35,6 +38,7 @@ class AiConversationStore:
         return tuple(messages[-self.max_messages :])
 
     def append_turn(self, key: str, user_text: str, assistant_text: str) -> tuple[AiMessage, ...]:
+        assistant_text = sanitize_ai_output_text(assistant_text)
         if is_safety_rejection_text(assistant_text):
             return self.load_messages(key)
 

@@ -47,3 +47,18 @@ def test_ai_conversation_store_filters_high_risk_rejection_text(tmp_path: Path) 
     )
 
     assert store.load_messages(key) == ()
+
+
+def test_ai_conversation_store_sanitizes_action_descriptions(tmp_path: Path) -> None:
+    store = AiConversationStore(tmp_path, max_messages=4)
+    key = store.group_user_key("10000", "605738729", "xiaomi")
+
+    store.append_turn(
+        key,
+        "你怎么也是绿绿的",
+        "喵呜~被你发现了！(尾巴心虚地甩了甩) 🐱",
+    )
+
+    messages = store.load_messages(key)
+
+    assert messages[-1].content == "喵呜~被你发现了！🐱"
