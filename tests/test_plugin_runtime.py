@@ -329,6 +329,7 @@ def test_social_request_only_auto_approves_bot_admin(monkeypatch) -> None:
 
         def __init__(self, user_id: int) -> None:
             self.user_id = user_id
+            self.flag = f"friend-{user_id}"
             self.approved = False
 
         async def approve(self, _bot) -> None:
@@ -344,4 +345,44 @@ def test_social_request_only_auto_approves_bot_admin(monkeypatch) -> None:
     asyncio.run(social.handle_request(bot, admin_event))
 
     assert normal_event.approved is False
-    assert admin_event.approved is True
+    assert admin_event.approved is False
+    assert bot.calls == [
+        (
+            "set_friend_add_request",
+            {"flag": "friend-605738729", "approve": True},
+        )
+    ]
+
+
+def test_social_group_invite_uses_explicit_onebot_api_for_bot_admin(monkeypatch) -> None:
+    class FakeGroupRequest:
+        request_type = "group"
+        sub_type = "invite"
+        group_id = 1093545322
+        user_id = 605738729
+        flag = "1778310891077215"
+
+        def __init__(self) -> None:
+            self.approved = False
+
+        async def approve(self, _bot) -> None:
+            self.approved = True
+
+    monkeypatch.setattr(social, "GroupRequestEvent", FakeGroupRequest)
+    monkeypatch.setattr(social, "get_settings_store", lambda: FakeSocialStore())
+    bot = FakeBot(self_id="114514")
+    event = FakeGroupRequest()
+
+    asyncio.run(social.handle_request(bot, event))
+
+    assert event.approved is False
+    assert bot.calls == [
+        (
+            "set_group_add_request",
+            {
+                "flag": "1778310891077215",
+                "sub_type": "invite",
+                "approve": True,
+            },
+        )
+    ]

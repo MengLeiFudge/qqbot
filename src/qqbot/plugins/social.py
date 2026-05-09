@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 
-from nonebot import on_notice, on_request
+from nonebot import logger, on_notice, on_request
 from nonebot.adapters.onebot.v11 import (
     Bot,
     FriendRequestEvent,
@@ -32,12 +32,12 @@ async def handle_request(bot: Bot, event: RequestEvent) -> None:
 
     if isinstance(event, FriendRequestEvent):
         if should_auto_approve_request(event.request_type, None):
-            await event.approve(bot)
+            await _approve_friend_request(bot, event)
         return
 
     if isinstance(event, GroupRequestEvent):
         if should_auto_approve_request(event.request_type, event.sub_type):
-            await event.approve(bot)
+            await _approve_group_request(bot, event)
 
 
 @poke_matcher.handle()
@@ -85,6 +85,48 @@ async def _send_poke_action(bot: Bot, event: PokeNotifyEvent, target_id: int) ->
         await bot.call_api("group_poke", group_id=str(event.group_id), user_id=str(target_id))
         return
     await bot.call_api("friend_poke", user_id=str(target_id))
+
+
+async def _approve_friend_request(bot: Bot, event: FriendRequestEvent) -> None:
+    try:
+        await bot.call_api("set_friend_add_request", flag=event.flag, approve=True)
+    except Exception as exc:
+        logger.exception(
+            "Failed to approve friend request: user_id={}, flag={}, error={}",
+            event.user_id,
+            event.flag,
+            exc,
+        )
+        return
+    logger.info("Approved friend request: user_id={}, flag={}", event.user_id, event.flag)
+
+
+async def _approve_group_request(bot: Bot, event: GroupRequestEvent) -> None:
+    group_id = getattr(event, "group_id", 0)
+    try:
+        await bot.call_api(
+            "set_group_add_request",
+            flag=event.flag,
+            sub_type=event.sub_type,
+            approve=True,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Failed to approve group request: group_id={}, user_id={}, sub_type={}, flag={}, error={}",
+            group_id,
+            event.user_id,
+            event.sub_type,
+            event.flag,
+            exc,
+        )
+        return
+    logger.info(
+        "Approved group request: group_id={}, user_id={}, sub_type={}, flag={}",
+        group_id,
+        event.user_id,
+        event.sub_type,
+        event.flag,
+    )
 
 
 def _is_group_assistant_enabled(store) -> bool:
