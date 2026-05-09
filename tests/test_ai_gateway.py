@@ -169,6 +169,25 @@ class TimeoutThenSuccessAiClient:
         )
 
 
+class IncompleteThenSuccessAiClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream_complete(self, request: AiRequest) -> AiCompletion:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("incomplete_ai_stream: missing_done")
+        return AiCompletion(
+            text="重试后的完整回复",
+            metrics=AiMetrics(
+                first_token_seconds=0.1,
+                total_seconds=0.2,
+                completion_tokens=8,
+                output_chars=8,
+            ),
+        )
+
+
 def test_gateway_calls_client_for_declared_capability() -> None:
     gateway = AiGateway(client=FakeAiClient())
 
@@ -351,6 +370,22 @@ def test_gateway_retries_timeout_with_short_first_attempt() -> None:
     assert response.text == "重试成功"
     assert client.calls == 2
     assert [attempt.result for attempt in response.attempts] == ["timeout", "success"]
+
+
+def test_gateway_retries_incomplete_stream_before_success() -> None:
+    client = IncompleteThenSuccessAiClient()
+    gateway = AiGateway(client=client)
+
+    response = asyncio.run(
+        gateway.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="你好", user_id="10001")
+        )
+    )
+
+    assert response.fallback is False
+    assert response.text == "重试后的完整回复"
+    assert client.calls == 2
+    assert [attempt.result for attempt in response.attempts] == ["incomplete", "success"]
 
 
 class MarkdownAiClient:

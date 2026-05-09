@@ -8,7 +8,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.ai_gateway import AiMessage, AiRequest
-from qqbot.services.mimo_compatible_client import MimoCompatibleClient
+from qqbot.services.mimo_compatible_client import IncompleteAiStreamError, MimoCompatibleClient
 
 
 class FakeHttpClient:
@@ -165,3 +165,69 @@ def test_mimo_client_includes_function_tools_when_requested() -> None:
         }
     ]
     assert payload["tool_choice"] == "auto"
+
+
+class MissingDoneHttpClient:
+    async def stream(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, object],
+        timeout: float,
+    ):
+        yield 'data: {"choices":[{"delta":{"content":"半截回复"}}]}'
+
+
+class LengthFinishHttpClient:
+    async def stream(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, object],
+        timeout: float,
+    ):
+        yield 'data: {"choices":[{"delta":{"content":"半截回复"}}]}'
+        yield 'data: {"choices":[{"delta":{},"finish_reason":"length"}]}'
+        yield "data: [DONE]"
+
+
+def test_mimo_client_rejects_stream_without_done_marker() -> None:
+    client = MimoCompatibleClient(
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key="secret-key",
+        model="mimo-v2.5-pro",
+        http_client=MissingDoneHttpClient(),
+    )
+
+    try:
+        asyncio.run(
+            client.stream_complete(
+                AiRequest(plugin_id="ai", capability="chat", prompt="你好", user_id="605738729")
+            )
+        )
+    except IncompleteAiStreamError as exc:
+        assert "missing_done" in str(exc)
+    else:
+        raise AssertionError("missing [DONE] should be treated as incomplete")
+
+
+def test_mimo_client_rejects_length_truncated_stream() -> None:
+    client = MimoCompatibleClient(
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key="secret-key",
+        model="mimo-v2.5-pro",
+        http_client=LengthFinishHttpClient(),
+    )
+
+    try:
+        asyncio.run(
+            client.stream_complete(
+                AiRequest(plugin_id="ai", capability="chat", prompt="你好", user_id="605738729")
+            )
+        )
+    except IncompleteAiStreamError as exc:
+        assert "finish_reason=length" in str(exc)
+    else:
+        raise AssertionError("finish_reason=length should be treated as incomplete")

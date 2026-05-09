@@ -133,6 +133,7 @@ class AiGateway:
                     continue
                 except Exception as exc:
                     last_fallback = format_ai_exception_fallback(exc)
+                    result = "incomplete" if is_incomplete_stream_error(exc) else "client_error"
                     if last_fallback == AI_FALLBACK_SAFETY_REJECTED:
                         attempts.append(
                             AiAttemptDiagnostics(
@@ -153,7 +154,7 @@ class AiGateway:
                         AiAttemptDiagnostics(
                             attempt=attempt + 1,
                             timeout_seconds=timeout,
-                            result="client_error",
+                            result=result,
                             total_seconds=time.perf_counter() - attempt_start,
                             error_type=type(exc).__name__,
                         )
@@ -283,3 +284,7 @@ def is_safety_rejection_text(text: str) -> bool:
         "拒绝",
     )
     return sum(1 for marker in paired_risk_markers if marker in detail) >= 2
+
+
+def is_incomplete_stream_error(exc: Exception) -> bool:
+    return "incomplete_ai_stream" in str(exc)

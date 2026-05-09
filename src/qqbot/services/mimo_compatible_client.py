@@ -9,6 +9,10 @@ from urllib.request import Request, urlopen
 from qqbot.services.ai_gateway import AiClient, AiCompletion, AiMetrics, AiRequest
 
 
+class IncompleteAiStreamError(RuntimeError):
+    pass
+
+
 class AsyncStreamClient(Protocol):
     async def stream(
         self,
@@ -55,6 +59,8 @@ class MimoCompatibleClient(AiClient):
         text_parts: list[str] = []
         completion_tokens: int | None = None
         usage: dict[str, object] | None = None
+        received_done = False
+        finish_reason = ""
         async for line in self._stream(
             f"{self.base_url}/chat/completions",
             headers=headers,
@@ -65,6 +71,7 @@ class MimoCompatibleClient(AiClient):
             if event is None:
                 continue
             if event == "[DONE]":
+                received_done = True
                 break
             data = json_module.loads(event)
             token = _extract_delta_text(data)
@@ -78,9 +85,16 @@ class MimoCompatibleClient(AiClient):
                 usage_tokens = _extract_completion_tokens(chunk_usage)
                 if usage_tokens is not None:
                     completion_tokens = usage_tokens
+            chunk_finish_reason = _extract_finish_reason(data)
+            if chunk_finish_reason:
+                finish_reason = chunk_finish_reason
 
         total_seconds = time.perf_counter() - start
         text = "".join(text_parts)
+        if finish_reason == "length":
+            raise IncompleteAiStreamError("incomplete_ai_stream: finish_reason=length")
+        if not received_done:
+            raise IncompleteAiStreamError("incomplete_ai_stream: missing_done")
         return AiCompletion(
             text=text,
             metrics=AiMetrics(
@@ -207,6 +221,17 @@ def _extract_usage(data: dict[str, object]) -> dict[str, object] | None:
     if not isinstance(usage, dict):
         return None
     return usage
+
+
+def _extract_finish_reason(data: dict[str, object]) -> str:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    reason = first.get("finish_reason")
+    return reason if isinstance(reason, str) else ""
 
 
 def _extract_completion_tokens(usage: dict[str, object]) -> int | None:
