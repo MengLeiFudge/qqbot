@@ -16,6 +16,8 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_message,
     build_ai_reply_notice_message,
     format_ai_response,
+    format_draw_quota_exceeded_message,
+    format_draw_start_message,
     format_local_ai_result,
     format_memory_context,
     should_omit_ai_history_for_scope_query,
@@ -203,6 +205,11 @@ def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None
     assert rendered.startswith("[CQ:image,file=https://example.com/a.png")
     assert rendered.endswith("]✨ 生成成功！")
     assert "\n✨ 生成成功！" not in rendered
+
+
+def test_format_draw_quota_messages_show_current_count() -> None:
+    assert format_draw_start_message(3, 5) == "收到，棉花糖开始生图任务啦！这是今天第 3/5 次生图。"
+    assert format_draw_quota_exceeded_message(5, 5) == "今天的生图次数已经用完啦（5/5）。明天再来找棉花糖画图吧！"
 
 
 def test_ai_context_includes_private_memory_only_in_private_chat(tmp_path: Path) -> None:

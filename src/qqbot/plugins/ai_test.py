@@ -36,6 +36,7 @@ from qqbot.services.memory_retrieval_service import (
 )
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.rightcodes_draw_client import looks_like_rightcodes_draw_command
+from qqbot.services.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
@@ -127,8 +128,20 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         ),
         self_restart_scheduler=restart_scheduler,
     )
+    draw_quota_user_id: str | None = None
     if looks_like_rightcodes_draw_command(prompt):
-        start_message: str | Message = "收到，棉花糖开始生图任务啦！"
+        quota = RightCodesDrawQuotaStore(settings.data_root).reserve(user_id)
+        if not quota.allowed:
+            await ai_chat_matcher.finish(
+                build_ai_reply_message(
+                    format_draw_quota_exceeded_message(quota.used, quota.limit),
+                    group_id=group_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                )
+            )
+        draw_quota_user_id = user_id
+        start_message: str | Message = format_draw_start_message(quota.used, quota.limit)
         if group_id is not None:
             start_message = build_ai_reply_message(
                 start_message,
@@ -146,6 +159,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         ),
         normalized_message,
     )
+    if draw_quota_user_id is not None and not local_result.image_path:
+        RightCodesDrawQuotaStore(settings.data_root).refund(draw_quota_user_id)
     if local_result.handled:
         local_message = format_local_ai_result(local_result)
         if (
@@ -294,6 +309,14 @@ def format_local_ai_result(result) -> str | Message:
             ]
         )
     return result.text
+
+
+def format_draw_start_message(used: int, limit: int) -> str:
+    return f"收到，棉花糖开始生图任务啦！这是今天第 {used}/{limit} 次生图。"
+
+
+def format_draw_quota_exceeded_message(used: int, limit: int) -> str:
+    return f"今天的生图次数已经用完啦（{used}/{limit}）。明天再来找棉花糖画图吧！"
 
 
 def record_private_chat_memory(
