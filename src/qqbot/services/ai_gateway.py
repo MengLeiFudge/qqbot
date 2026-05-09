@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import time
 from typing import Protocol
 
+from qqbot.services.ai_diagnostics import AiAttemptDiagnostics
 from qqbot.services.ai_output_style import sanitize_ai_output_text
 from qqbot.services.plugin_registry import get_plugin_spec_by_id
 
@@ -71,6 +73,8 @@ class AiResponse:
     text: str
     fallback: bool = False
     metrics: AiMetrics | None = None
+    attempts: tuple[AiAttemptDiagnostics, ...] = ()
+    fallback_reason: str = ""
 
 
 class AiClient(Protocol):
@@ -105,9 +109,11 @@ class AiGateway:
             return AiResponse(AI_FALLBACK_NOT_CONFIGURED, fallback=True)
 
         last_fallback = AI_FALLBACK_CLIENT_ERROR
+        attempts: list[AiAttemptDiagnostics] = []
         try:
             for attempt in range(self.max_attempts):
                 timeout = self._timeout_for_attempt(attempt)
+                attempt_start = time.perf_counter()
                 try:
                     completion = await asyncio.wait_for(
                         self._complete(request),
@@ -115,23 +121,104 @@ class AiGateway:
                     )
                 except TimeoutError:
                     last_fallback = AI_FALLBACK_TIMEOUT
+                    attempts.append(
+                        AiAttemptDiagnostics(
+                            attempt=attempt + 1,
+                            timeout_seconds=timeout,
+                            result="timeout",
+                            total_seconds=time.perf_counter() - attempt_start,
+                            error_type="TimeoutError",
+                        )
+                    )
                     continue
                 except Exception as exc:
                     last_fallback = format_ai_exception_fallback(exc)
                     if last_fallback == AI_FALLBACK_SAFETY_REJECTED:
-                        return AiResponse(last_fallback, fallback=True)
+                        attempts.append(
+                            AiAttemptDiagnostics(
+                                attempt=attempt + 1,
+                                timeout_seconds=timeout,
+                                result="safety_rejected",
+                                total_seconds=time.perf_counter() - attempt_start,
+                                error_type=type(exc).__name__,
+                            )
+                        )
+                        return AiResponse(
+                            last_fallback,
+                            fallback=True,
+                            attempts=tuple(attempts),
+                            fallback_reason="safety_rejected",
+                        )
+                    attempts.append(
+                        AiAttemptDiagnostics(
+                            attempt=attempt + 1,
+                            timeout_seconds=timeout,
+                            result="client_error",
+                            total_seconds=time.perf_counter() - attempt_start,
+                            error_type=type(exc).__name__,
+                        )
+                    )
                     continue
 
                 cleaned = sanitize_ai_output_text(completion.text)
                 if not cleaned:
                     last_fallback = AI_FALLBACK_EMPTY
+                    attempts.append(
+                        AiAttemptDiagnostics(
+                            attempt=attempt + 1,
+                            timeout_seconds=timeout,
+                            result="empty",
+                            total_seconds=time.perf_counter() - attempt_start,
+                            first_token_seconds=completion.metrics.first_token_seconds,
+                            completion_tokens=completion.metrics.completion_tokens,
+                            output_chars=completion.metrics.output_chars,
+                        )
+                    )
                     continue
                 if is_safety_rejection_text(cleaned):
-                    return AiResponse(AI_FALLBACK_SAFETY_REJECTED, fallback=True)
-                return AiResponse(cleaned, metrics=completion.metrics)
+                    attempts.append(
+                        AiAttemptDiagnostics(
+                            attempt=attempt + 1,
+                            timeout_seconds=timeout,
+                            result="safety_rejected",
+                            total_seconds=time.perf_counter() - attempt_start,
+                            first_token_seconds=completion.metrics.first_token_seconds,
+                            completion_tokens=completion.metrics.completion_tokens,
+                            output_chars=completion.metrics.output_chars,
+                        )
+                    )
+                    return AiResponse(
+                        AI_FALLBACK_SAFETY_REJECTED,
+                        fallback=True,
+                        attempts=tuple(attempts),
+                        fallback_reason="safety_rejected",
+                    )
+                attempts.append(
+                    AiAttemptDiagnostics(
+                        attempt=attempt + 1,
+                        timeout_seconds=timeout,
+                        result="success",
+                        total_seconds=time.perf_counter() - attempt_start,
+                        first_token_seconds=completion.metrics.first_token_seconds,
+                        completion_tokens=completion.metrics.completion_tokens,
+                        output_chars=completion.metrics.output_chars,
+                    )
+                )
+                return AiResponse(cleaned, metrics=completion.metrics, attempts=tuple(attempts))
         except Exception as exc:
-            return AiResponse(format_ai_exception_fallback(exc), fallback=True)
-        return AiResponse(last_fallback, fallback=True)
+            fallback = format_ai_exception_fallback(exc)
+            return AiResponse(
+                fallback,
+                fallback=True,
+                attempts=tuple(attempts),
+                fallback_reason=_fallback_reason(fallback),
+            )
+        return AiResponse(
+            last_fallback,
+            fallback=True,
+            attempts=tuple(attempts),
+            fallback_reason=_fallback_reason(last_fallback),
+        )
 
     def _timeout_for_attempt(self, attempt: int) -> float:
         if attempt == 0 and self.first_attempt_timeout_seconds is not None:
@@ -159,6 +246,18 @@ def format_ai_exception_fallback(exc: Exception) -> str:
     if is_safety_rejection_text(str(exc)):
         return AI_FALLBACK_SAFETY_REJECTED
     return AI_FALLBACK_CLIENT_ERROR
+
+
+def _fallback_reason(text: str) -> str:
+    if text == AI_FALLBACK_TIMEOUT:
+        return "timeout"
+    if text == AI_FALLBACK_EMPTY:
+        return "empty"
+    if text == AI_FALLBACK_SAFETY_REJECTED:
+        return "safety_rejected"
+    if text == AI_FALLBACK_NOT_CONFIGURED:
+        return "not_configured"
+    return "client_error"
 
 
 def is_safety_rejection_text(text: str) -> bool:

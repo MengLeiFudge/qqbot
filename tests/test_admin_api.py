@@ -14,6 +14,11 @@ from qqbot.admin_api import register_admin_routes
 from qqbot.config import RuntimeSettings
 import qqbot.services.admin_service as admin_service_module
 from qqbot.services.admin_service import AdminService
+from qqbot.services.ai_diagnostics import (
+    AiAttemptDiagnostics,
+    AiDiagnosticsStore,
+    build_ai_diagnostics_record,
+)
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
@@ -142,6 +147,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "/admin/api/restart" in body
     assert "/admin/api/plugins" in body
     assert "/admin/api/ai" in body
+    assert "/admin/api/ai/diagnostics" in body
     assert "群功能" not in body
     assert "/features" not in body
     assert "adminShell" in body
@@ -152,6 +158,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
+    assert "AI 诊断" in body
     assert "Codex 群绑定项目" in body
     assert "/admin/api/codex/group-bindings" in body
     assert "renderCodexProjectOption" in body
@@ -175,6 +182,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "restoreSelectedMessageScroll" in body
     assert "scrollState.scrollTop" in body
     assert "scrollSelectedMessageListToBottom" in body
+    assert "loadAiDiagnostics" in body
     assert "message-row" in body
     assert ".message-row.incoming" in body
     assert ".message-row.bot" in body
@@ -738,6 +746,51 @@ def test_ai_api_rejects_unknown_provider(tmp_path: Path) -> None:
 
     assert status_code == 404
     assert "Unknown AI profile" in body
+
+
+def test_ai_diagnostics_api_returns_summary(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    store = AiDiagnosticsStore(tmp_path / "run")
+    store.append(
+        build_ai_diagnostics_record(
+            profile="xiaomi",
+            provider="xiaomi_mimo",
+            model="mimo-v2.5-pro",
+            scope="private",
+            group_id="",
+            user_id="605738729",
+            fallback=False,
+            fallback_reason="",
+            prompt_chars=12,
+            context_chars=34,
+            history_messages=2,
+            image_count=0,
+            local_prepare_seconds=0.25,
+            total_seconds=1.25,
+            attempts=(
+                AiAttemptDiagnostics(
+                    attempt=1,
+                    timeout_seconds=12.0,
+                    result="success",
+                    total_seconds=1.0,
+                    first_token_seconds=0.35,
+                    completion_tokens=5,
+                    output_chars=20,
+                ),
+            ),
+            now=1777777777,
+        )
+    )
+
+    status_code, body = asgi_request(app, "GET", "/admin/api/ai/diagnostics")
+
+    assert status_code == 200
+    payload = json.loads(body)
+    assert payload["count"] == 1
+    assert payload["success_count"] == 1
+    assert payload["avg_first_token_seconds"] == 0.35
+    assert payload["records"][0]["profile"] == "xiaomi"
+    assert payload["records"][0]["prompt_chars"] == 12
 
 
 def test_codex_group_bindings_api_lists_and_updates_runtime_binding(tmp_path: Path) -> None:

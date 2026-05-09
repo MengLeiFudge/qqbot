@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 
 from nonebot import on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
@@ -15,6 +16,7 @@ from qqbot.services.ai_command import (
     should_handle_ai_chat,
 )
 from qqbot.services.ai_conversation_store import AiConversationStore
+from qqbot.services.ai_diagnostics import AiDiagnosticsStore, build_ai_diagnostics_record
 from qqbot.services.ai_gateway import AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
@@ -79,6 +81,7 @@ async def handle_ai_model(event: MessageEvent) -> None:
 
 @ai_chat_matcher.handle()
 async def handle_ai(bot: Bot, event: MessageEvent) -> None:
+    request_started = time.perf_counter()
     settings = load_settings()
     store = get_settings_store()
     normalized_message = normalize_onebot_event(event)
@@ -90,6 +93,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
 
     profiles = load_ai_profiles(settings.ai_profile_file)
     profile = get_current_ai_profile_name(settings, store, profiles)
+    profile_config = profiles.get(profile)
     group_context_store = AiGroupContextStore(settings.data_root)
     conversation_store = AiConversationStore(
         settings.data_root,
@@ -161,6 +165,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         )
 
     context_parts.extend(part for part in local_result.extra_context if part.strip())
+    image_urls = collect_message_image_urls(normalized_message)
+    local_prepare_seconds = time.perf_counter() - request_started
 
     try:
         gateway = build_ai_gateway(settings, profile)
@@ -171,13 +177,28 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 prompt=prompt,
                 user_id=event.get_user_id(),
                 group_id=str(getattr(event, "group_id", "")) or None,
-                image_urls=collect_message_image_urls(normalized_message),
+                image_urls=image_urls,
                 context=tuple(context_parts),
                 history=history,
             )
         )
     except ValueError as exc:
         await ai_chat_matcher.finish(str(exc))
+    total_seconds = time.perf_counter() - request_started
+    record_ai_diagnostics(
+        settings=settings,
+        profile=profile,
+        provider=profile_config.provider if profile_config is not None else "",
+        model=profile_config.model if profile_config is not None else "",
+        event=event,
+        prompt=prompt,
+        context_parts=tuple(context_parts),
+        history_messages=len(history),
+        image_count=len(image_urls),
+        local_prepare_seconds=local_prepare_seconds,
+        total_seconds=total_seconds,
+        response=response,
+    )
 
     if not response.fallback:
         conversation_store.append_turn(key, prompt, response.text)
@@ -211,6 +232,46 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         bot=bot,
         title="棉花糖的 AI 回复",
     )
+
+
+def record_ai_diagnostics(
+    *,
+    settings: RuntimeSettings,
+    profile: str,
+    provider: str,
+    model: str,
+    event: MessageEvent,
+    prompt: str,
+    context_parts: tuple[str, ...],
+    history_messages: int,
+    image_count: int,
+    local_prepare_seconds: float,
+    total_seconds: float,
+    response: AiResponse,
+) -> None:
+    group_id = str(getattr(event, "group_id", "") or "")
+    try:
+        AiDiagnosticsStore(settings.data_root).append(
+            build_ai_diagnostics_record(
+                profile=profile,
+                provider=provider,
+                model=model,
+                scope="group" if group_id else "private",
+                group_id=group_id,
+                user_id=event.get_user_id(),
+                fallback=response.fallback,
+                fallback_reason=response.fallback_reason,
+                prompt_chars=len(prompt),
+                context_chars=sum(len(part) for part in context_parts),
+                history_messages=history_messages,
+                image_count=image_count,
+                local_prepare_seconds=local_prepare_seconds,
+                total_seconds=total_seconds,
+                attempts=response.attempts,
+            )
+        )
+    except Exception:
+        pass
 
 
 def format_local_ai_result(result) -> str | Message:

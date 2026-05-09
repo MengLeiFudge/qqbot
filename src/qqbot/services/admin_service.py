@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 
 from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
+from qqbot.services.ai_diagnostics import AiDiagnosticsStore
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
 from qqbot.services.chat_memory_store import ChatMemoryStore
@@ -260,6 +261,10 @@ class AdminService:
             raise ValueError(f"Unknown AI profile: {profile}")
         self.store.set_ai_provider(profile)
         return self.list_ai()
+
+    def list_ai_diagnostics(self, limit: int = 100) -> dict[str, object]:
+        safe_limit = max(1, min(int(limit), 500))
+        return AiDiagnosticsStore(self.settings.data_root).summary(limit=safe_limit)
 
     def list_admins(self) -> dict[str, object]:
         admins = self.store.list_bot_admins()

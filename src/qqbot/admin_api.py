@@ -263,6 +263,13 @@ def register_admin_routes(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/admin/api/ai/diagnostics")
+    async def admin_ai_diagnostics(
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.list_ai_diagnostics()
+
     @app.get("/admin/api/codex/group-bindings")
     async def admin_codex_group_bindings(
         _: None = Depends(require_local_request),
@@ -479,6 +486,15 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     .binding-row select {{ width: 100%; }}
     .binding-title {{ font-weight: 700; }}
     .binding-meta {{ color: #64748b; font-size: 12px; margin-top: 4px; }}
+    .diagnostic-list {{ display: grid; gap: 10px; margin-top: 12px; }}
+    .diagnostic-row {{
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px;
+    }}
+    .diagnostic-title {{ font-weight: 700; }}
+    .diagnostic-meta {{ color: #64748b; font-size: 12px; margin-top: 5px; line-height: 1.5; }}
     .message-groups {{ display: grid; gap: 14px; margin-top: 12px; }}
     .message-group {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }}
     .message-list {{ display: flex; flex-direction: column; gap: 8px; margin-top: 10px; max-height: 360px; overflow: auto; }}
@@ -646,6 +662,15 @@ def build_admin_html(settings: RuntimeSettings) -> str:
             <button onclick="saveAiProvider()">保存</button>
             <span id="aiProviderStatus" class="muted"></span>
           </div>
+        </div>
+        <div class="panel-block">
+          <h3>AI 诊断</h3>
+          <div class="row">
+            <button onclick="loadAiDiagnostics()">刷新</button>
+            <span id="aiDiagnosticsStatus" class="muted"></span>
+          </div>
+          <div id="aiDiagnosticsSummary" class="status"></div>
+          <div id="aiDiagnosticsList" class="diagnostic-list"></div>
         </div>
         <div class="panel-block">
           <h3>Codex 群绑定项目</h3>
@@ -945,6 +970,71 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}`;
     }}
 
+    async function loadAiDiagnostics() {{
+      const status = document.getElementById("aiDiagnosticsStatus");
+      status.textContent = "正在刷新...";
+      try {{
+        const payload = await api("/admin/api/ai/diagnostics");
+        renderAiDiagnostics(payload);
+        status.textContent = `已刷新：${{formatTime(Date.now() / 1000)}}`;
+      }} catch (error) {{
+        status.textContent = `刷新失败：${{error.message}}`;
+      }}
+    }}
+
+    function renderAiDiagnostics(payload) {{
+      const summary = [
+        ["样本数", payload.count],
+        ["成功 / 兜底", `${{payload.success_count}} / ${{payload.fallback_count}}`],
+        ["重试后成功", payload.retry_success_count],
+        ["本地准备均值", formatDuration(payload.avg_local_prepare_seconds)],
+        ["首字均值", formatDuration(payload.avg_first_token_seconds)],
+        ["首字 P95", formatDuration(payload.p95_first_token_seconds)],
+        ["TPS 均值", formatRate(payload.avg_tokens_per_second)],
+        ["端到端均值", formatDuration(payload.avg_total_seconds)],
+        ["空回复 / 超时", `${{payload.empty_count}} / ${{payload.timeout_count}}`],
+      ];
+      document.getElementById("aiDiagnosticsSummary").innerHTML = summary
+        .map(([label, value]) => `<div><strong>${{label}}</strong><br><span>${{escapeHtml(value ?? "-")}}</span></div>`)
+        .join("");
+      const records = payload.records || [];
+      document.getElementById("aiDiagnosticsList").innerHTML = records
+        .slice(0, 20)
+        .map(renderAiDiagnosticsRecord)
+        .join("") || `<div class="muted">暂无 AI 回复诊断记录。</div>`;
+    }}
+
+    function renderAiDiagnosticsRecord(record) {{
+      const scope = record.scope === "group" ? `群 ${{record.group_id}}` : "私聊";
+      const result = record.fallback
+        ? `兜底${{record.fallback_reason ? ` / ${{record.fallback_reason}}` : ""}}`
+        : "成功";
+      const attempts = (record.attempts || []).map(attempt => {{
+        const ttft = attempt.first_token_seconds == null ? "-" : formatDuration(attempt.first_token_seconds);
+        const tps = attempt.tokens_per_second == null ? "-" : formatRate(attempt.tokens_per_second);
+        return `#${{attempt.attempt}} ${{attempt.result}}，首字 ${{ttft}}，总 ${{formatDuration(attempt.total_seconds)}}，TPS ${{tps}}`;
+      }}).join("；");
+      return `
+        <div class="diagnostic-row">
+          <div class="diagnostic-title">${{escapeHtml(formatTime(record.timestamp))}} · ${{escapeHtml(record.profile)}} / ${{escapeHtml(record.model)}} · ${{escapeHtml(result)}}</div>
+          <div class="diagnostic-meta">
+            ${{escapeHtml(scope)}} · 本地准备 ${{escapeHtml(formatDuration(record.local_prepare_seconds))}} · 端到端 ${{escapeHtml(formatDuration(record.total_seconds))}} · prompt ${{record.prompt_chars}} 字 · context ${{record.context_chars}} 字 · history ${{record.history_messages}} · image ${{record.image_count}}<br>
+            ${{escapeHtml(attempts || "无 provider attempt 记录")}}
+          </div>
+        </div>
+      `;
+    }}
+
+    function formatDuration(value) {{
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+      return `${{Number(value).toFixed(2)}}s`;
+    }}
+
+    function formatRate(value) {{
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+      return `${{Number(value).toFixed(2)}}/s`;
+    }}
+
     let codexBindingPayload = {{ groups: [], projects: [] }};
 
     async function loadCodexGroupBindings() {{
@@ -1208,7 +1298,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         .replaceAll("'", "&#39;");
     }}
     setInterval(loadGroupMessages, 3000);
-    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadCodexGroupBindings(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
+    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadAiDiagnostics(), loadCodexGroupBindings(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
       document.body.insertAdjacentHTML("beforeend", `<pre>${{error.message}}</pre>`);
     }});
   </script>

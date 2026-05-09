@@ -183,6 +183,7 @@ def test_gateway_calls_client_for_declared_capability() -> None:
     assert response.metrics is not None
     assert response.metrics.completion_tokens == 3
     assert response.metrics.tokens_per_second == 10.0
+    assert [attempt.result for attempt in response.attempts] == ["success"]
 
 
 def test_gateway_rejects_undeclared_capability() -> None:
@@ -238,6 +239,8 @@ def test_gateway_returns_fallback_on_timeout() -> None:
     assert response.fallback is True
     assert response.text == "棉花糖等回复等到快化掉啦，稍后再试试喵。"
     assert response.metrics is None
+    assert response.fallback_reason == "timeout"
+    assert [attempt.result for attempt in response.attempts] == ["timeout"]
 
 
 def test_gateway_returns_fallback_on_client_error() -> None:
@@ -314,6 +317,8 @@ def test_gateway_returns_clear_fallback_on_empty_content() -> None:
     assert response.fallback is True
     assert response.text == "棉花糖抓到了一团空空的棉花，没有生成出回复喵。再问一次吧。"
     assert response.metrics is None
+    assert response.fallback_reason == "empty"
+    assert [attempt.result for attempt in response.attempts] == ["empty"]
 
 
 def test_gateway_retries_empty_content_before_fallback() -> None:
@@ -329,6 +334,7 @@ def test_gateway_retries_empty_content_before_fallback() -> None:
     assert response.fallback is False
     assert response.text == "第二次成功"
     assert client.calls == 2
+    assert [attempt.result for attempt in response.attempts] == ["empty", "success"]
 
 
 def test_gateway_retries_timeout_with_short_first_attempt() -> None:
@@ -344,6 +350,7 @@ def test_gateway_retries_timeout_with_short_first_attempt() -> None:
     assert response.fallback is False
     assert response.text == "重试成功"
     assert client.calls == 2
+    assert [attempt.result for attempt in response.attempts] == ["timeout", "success"]
 
 
 class MarkdownAiClient:
