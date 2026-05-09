@@ -113,6 +113,9 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             settings_store=store,
         )
     )
+    group_id = getattr(event, "group_id", None)
+    message_id = getattr(event, "message_id", None)
+    user_id = event.get_user_id()
 
     restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
     orchestrator = AiOrchestrator(
@@ -125,7 +128,15 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         self_restart_scheduler=restart_scheduler,
     )
     if looks_like_rightcodes_draw_command(prompt):
-        await ai_chat_matcher.send("已开始生图任务")
+        start_message: str | Message = "收到，棉花糖开始生图任务啦！"
+        if group_id is not None:
+            start_message = build_ai_reply_message(
+                start_message,
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+            )
+        await ai_chat_matcher.send(start_message)
     local_result = await orchestrator.handle(
         prompt,
         AiOrchestratorContext(
@@ -135,9 +146,6 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         ),
         normalized_message,
     )
-    group_id = getattr(event, "group_id", None)
-    message_id = getattr(event, "message_id", None)
-    user_id = event.get_user_id()
     if local_result.handled:
         local_message = format_local_ai_result(local_result)
         if (
@@ -282,7 +290,7 @@ def format_local_ai_result(result) -> str | Message:
         return Message(
             [
                 MessageSegment.image(result.image_path),
-                MessageSegment.text(f"\n{result.text}"),
+                MessageSegment.text(result.text),
             ]
         )
     return result.text

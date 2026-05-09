@@ -1,6 +1,9 @@
-from pathlib import Path
 import asyncio
+from io import BytesIO
+from pathlib import Path
 import sys
+from urllib.error import HTTPError
+from urllib.request import Request
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -48,6 +51,16 @@ def test_parse_rightcodes_draw_command_uses_default_model() -> None:
 
     assert request == RightCodesDrawRequest(
         prompt="一只拿着糖果的猫娘",
+        model="gpt-image-2",
+    )
+    assert RIGHTCODES_DRAW_DEFAULT_MODEL == "gpt-image-2"
+
+
+def test_parse_rightcodes_draw_command_accepts_natural_draw_prompt() -> None:
+    request = parse_rightcodes_draw_command("生成一个糖果城堡的图片")
+
+    assert request == RightCodesDrawRequest(
+        prompt="一个糖果城堡",
         model=RIGHTCODES_DRAW_DEFAULT_MODEL,
     )
 
@@ -76,6 +89,7 @@ def test_parse_rightcodes_draw_command_ignores_general_chat() -> None:
 
 def test_looks_like_rightcodes_draw_command_matches_draw_commands() -> None:
     assert looks_like_rightcodes_draw_command("棉花生图 一只猫")
+    assert looks_like_rightcodes_draw_command("生成一只猫的图片")
     assert not looks_like_rightcodes_draw_command("普通聊天")
 
 
@@ -124,3 +138,16 @@ def test_format_rightcodes_draw_success() -> None:
 
 def test_format_rightcodes_draw_failure() -> None:
     assert format_rightcodes_draw_failure(RuntimeError("API 错误 (400)")) == "❌ 生成失败: API 错误 (400)"
+
+
+def test_format_rightcodes_draw_failure_uses_upstream_http_body() -> None:
+    request = Request("https://example.com")
+    exc = HTTPError(
+        request.full_url,
+        400,
+        "Bad Request",
+        hdrs={},
+        fp=BytesIO(b'{"error":{"message":"content policy violation"}}'),
+    )
+
+    assert format_rightcodes_draw_failure(exc) == "❌ 生成失败: content policy violation"

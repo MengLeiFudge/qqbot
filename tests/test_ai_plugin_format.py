@@ -16,12 +16,14 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_message,
     build_ai_reply_notice_message,
     format_ai_response,
+    format_local_ai_result,
     format_memory_context,
     should_omit_ai_history_for_scope_query,
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
+from qqbot.services.ai_orchestrator import AiOrchestratorResult
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_message
@@ -186,6 +188,21 @@ def test_build_ai_reply_message_keeps_private_response_plain() -> None:
         message_id=12345,
         user_id="605738729",
     ) == "你好呀"
+
+
+def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None:
+    message = format_local_ai_result(
+        AiOrchestratorResult(
+            True,
+            "✨ 生成成功！",
+            image_path="https://example.com/a.png",
+        )
+    )
+
+    rendered = str(message)
+    assert rendered.startswith("[CQ:image,file=https://example.com/a.png")
+    assert rendered.endswith("]✨ 生成成功！")
+    assert "\n✨ 生成成功！" not in rendered
 
 
 def test_ai_context_includes_private_memory_only_in_private_chat(tmp_path: Path) -> None:

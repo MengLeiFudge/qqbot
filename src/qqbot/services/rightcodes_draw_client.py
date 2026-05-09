@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 
 RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
-RIGHTCODES_DRAW_DEFAULT_MODEL = "nano-banana-2"
+RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
 RIGHTCODES_DRAW_MODELS = {
     "gpt-image-2-vip",
     "gpt-image-2",
@@ -152,10 +152,9 @@ class RightCodesDrawClient:
 
 def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
     normalized = text.strip()
-    match = re.match(r"^(?:棉花糖|棉花)\s*生图\s+(.+)$", normalized)
-    if match is None:
+    rest = _extract_rightcodes_draw_prompt(normalized)
+    if rest is None:
         return None
-    rest = match.group(1).strip()
     if not rest:
         return None
 
@@ -204,11 +203,21 @@ def format_rightcodes_draw_failure(exc: Exception) -> str:
 def extract_rightcodes_draw_error_message(exc: Exception) -> str:
     if isinstance(exc, HTTPError):
         detail = _read_http_error_detail(exc)
-        return f"API 错误 ({exc.code}){(': ' + detail) if detail else ''}"
+        return detail or f"上游返回 HTTP {exc.code}"
     message = str(exc).strip()
     if message:
         return message
     return type(exc).__name__
+
+
+def _extract_rightcodes_draw_prompt(text: str) -> str | None:
+    command_match = re.match(r"^(?:棉花糖|棉花)\s*生图\s+(.+)$", text)
+    if command_match is not None:
+        return command_match.group(1).strip()
+    natural_match = re.match(r"^生成\s*(.+?)(?:的)?(?:图片|图像|图)\s*$", text)
+    if natural_match is not None:
+        return natural_match.group(1).strip()
+    return None
 
 
 def _stream_json_lines(
