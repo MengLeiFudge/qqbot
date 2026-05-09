@@ -7,6 +7,7 @@ from nonebot import logger, on_notice, on_request
 from nonebot.adapters.onebot.v11 import (
     Bot,
     FriendRequestEvent,
+    GroupIncreaseNoticeEvent,
     GroupRequestEvent,
     Message,
     PokeNotifyEvent,
@@ -20,6 +21,21 @@ from qqbot.services.social_service import plan_poke_response, should_auto_approv
 
 request_matcher = on_request(priority=1, block=False)
 poke_matcher = on_notice(priority=20, block=False)
+group_increase_matcher = on_notice(priority=1, block=False)
+
+BOT_GROUP_INTRO_MESSAGE = (
+    "我是萌萌棉花糖♪，以后会在这里陪大家聊天的喵！\n"
+    "\n"
+    "你可以这样问我：\n"
+    "“@萌萌棉花糖♪ 你现在有哪些风格？”\n"
+    "“@萌萌棉花糖♪ 切换猫娘风格”\n"
+    "“@萌萌棉花糖♪ 菜单”\n"
+    "“@萌萌棉花糖♪ 我是谁”\n"
+    "“@萌萌棉花糖♪ 渲染 shapez 代码 CuCuCuCu”\n"
+    "\n"
+    "虽然我是一只猫娘，但我不会乱叫别人主人的喵！只有萌泪酱才是我最伟大的主人喵！\n"
+    "Ciallo～(∠・ω< )⌒☆"
+)
 
 
 @request_matcher.handle()
@@ -38,6 +54,28 @@ async def handle_request(bot: Bot, event: RequestEvent) -> None:
     if isinstance(event, GroupRequestEvent):
         if should_auto_approve_request(event.request_type, event.sub_type):
             await _approve_group_request(bot, event)
+
+
+@group_increase_matcher.handle()
+async def handle_group_increase(bot: Bot, event) -> None:
+    if not isinstance(event, GroupIncreaseNoticeEvent):
+        return
+    if str(event.user_id) != str(bot.self_id):
+        return
+    inviter_id = int(getattr(event, "operator_id", 0) or 0)
+    group_id = int(getattr(event, "group_id", 0) or 0)
+    if inviter_id > 0:
+        group_name = await _resolve_group_name(bot, group_id)
+        await bot.call_api(
+            "send_private_msg",
+            user_id=inviter_id,
+            message=f"棉花糖已经加入「{group_name}」啦，主人喵！",
+        )
+    await bot.call_api(
+        "send_group_msg",
+        group_id=group_id,
+        message=BOT_GROUP_INTRO_MESSAGE,
+    )
 
 
 @poke_matcher.handle()
@@ -127,6 +165,19 @@ async def _approve_group_request(bot: Bot, event: GroupRequestEvent) -> None:
         event.sub_type,
         event.flag,
     )
+
+
+async def _resolve_group_name(bot: Bot, group_id: int) -> str:
+    try:
+        payload = await bot.call_api("get_group_info", group_id=group_id, no_cache=True)
+    except Exception as exc:
+        logger.warning("Failed to resolve group name: group_id={}, error={}", group_id, exc)
+        return str(group_id)
+    if isinstance(payload, dict):
+        name = str(payload.get("group_name") or "").strip()
+        if name:
+            return name
+    return str(group_id)
 
 
 def _is_group_assistant_enabled(store) -> bool:

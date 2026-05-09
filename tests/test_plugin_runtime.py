@@ -193,6 +193,8 @@ class FakeBot:
 
     async def call_api(self, api: str, **data: object) -> None:
         self.calls.append((api, data))
+        if api == "get_group_info":
+            return {"group_id": data.get("group_id"), "group_name": "测试群"}
 
 
 class FakeThunderEvent:
@@ -386,3 +388,35 @@ def test_social_group_invite_uses_explicit_onebot_api_for_bot_admin(monkeypatch)
             },
         )
     ]
+
+
+def test_social_group_increase_sends_inviter_notice_and_group_intro(monkeypatch) -> None:
+    class FakeGroupIncrease:
+        group_id = 1093545322
+        user_id = 114514
+        operator_id = 605738729
+
+    monkeypatch.setattr(social, "GroupIncreaseNoticeEvent", FakeGroupIncrease)
+    bot = FakeBot(self_id="114514")
+
+    asyncio.run(social.handle_group_increase(bot, FakeGroupIncrease()))
+
+    assert bot.calls == [
+        (
+            "get_group_info",
+            {"group_id": 1093545322, "no_cache": True},
+        ),
+        (
+            "send_private_msg",
+            {"user_id": 605738729, "message": "棉花糖已经加入「测试群」啦，主人喵！"},
+        ),
+        (
+            "send_group_msg",
+            {
+                "group_id": 1093545322,
+                "message": social.BOT_GROUP_INTRO_MESSAGE,
+            },
+        ),
+    ]
+    assert "我是萌萌棉花糖♪" in social.BOT_GROUP_INTRO_MESSAGE
+    assert "只有萌泪酱才是我最伟大的主人喵" in social.BOT_GROUP_INTRO_MESSAGE
