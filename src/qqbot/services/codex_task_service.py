@@ -18,6 +18,7 @@ from qqbot.services.settings_store import SettingsStore
 
 DEFAULT_CODEX_MODEL = "gpt-5.5"
 DEFAULT_CODEX_TIMEOUT_SECONDS = 30 * 60
+DEFAULT_CODEX_SESSION_IDLE_TTL_SECONDS = 20 * 60
 PROJECT_INDEX_FILE_NAMES = {"README.md", "AGENTS.md", "info.json", "locale.cfg", "changelog.txt"}
 PROJECT_INDEX_EXTENSIONS = {".md", ".json", ".cfg", ".txt"}
 
@@ -321,8 +322,13 @@ class CodexTaskStore:
 
 
 class CodexSessionStore:
-    def __init__(self, data_root: Path) -> None:
+    def __init__(
+        self,
+        data_root: Path,
+        idle_ttl_seconds: int = DEFAULT_CODEX_SESSION_IDLE_TTL_SECONDS,
+    ) -> None:
         self.path = Path(data_root) / "ai" / "codex_sessions.json"
+        self.idle_ttl_seconds = max(1, int(idle_ttl_seconds))
 
     def list_sessions(self) -> tuple[CodexSession, ...]:
         payload = self._read_payload()
@@ -349,6 +355,7 @@ class CodexSessionStore:
             for session in self.list_sessions()
             if session.status in {"discussing", "running"}
             and session.group_id == group_id
+            and self._is_session_active_by_time(session)
         ]
         return _pick_latest_session(candidates)
 
@@ -359,6 +366,7 @@ class CodexSessionStore:
             if session.status in {"discussing", "running"}
             and session.created_by == actor_user_id
             and session.group_id is None
+            and self._is_session_active_by_time(session)
         ]
         return _pick_latest_session(candidates)
 
@@ -493,6 +501,14 @@ class CodexSessionStore:
 
     def close_session(self, session_id: str) -> CodexSession:
         return self.mark_status(session_id, "closed")
+
+    def _is_session_active_by_time(self, session: CodexSession) -> bool:
+        if session.status == "running":
+            return True
+        updated_at = session.updated_at or session.created_at
+        if updated_at <= 0:
+            return False
+        return int(time.time()) - updated_at <= self.idle_ttl_seconds
 
     def _replace_session(self, updated: CodexSession) -> None:
         payload = self._read_payload()

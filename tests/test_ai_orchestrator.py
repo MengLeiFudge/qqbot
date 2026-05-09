@@ -609,6 +609,53 @@ def test_orchestrator_forwards_active_codex_session_turn_to_codex(tmp_path: Path
     assert "修订版本号" in requests[0].prompt
 
 
+def test_orchestrator_lets_plain_chat_fall_back_after_codex_session_expires(tmp_path: Path) -> None:
+    requests = []
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "不该收到风格切换。", "exit_code": 0})()
+
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+    context = AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True)
+
+    asyncio.run(
+        orchestrator.handle(
+            "codex 分馏",
+            context,
+            NormalizedMessage(text="codex 分馏", outline="codex 分馏"),
+        )
+    )
+    store = orchestrator._codex_session_store()
+    active = store.get_active_session(actor_user_id="605738729", group_id="319567534")
+    assert active is not None
+    stale = active.__class__(
+        session_id=active.session_id,
+        project_id=active.project_id,
+        project_display_name=active.project_display_name,
+        status=active.status,
+        created_by=active.created_by,
+        group_id=active.group_id,
+        transcript=active.transcript,
+        pending_messages=active.pending_messages,
+        created_at=active.created_at - 3600,
+        updated_at=active.updated_at - 3600,
+    )
+    store._replace_session(stale)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "切换谜语人风格",
+            context,
+            NormalizedMessage(text="切换谜语人风格", outline="切换谜语人风格"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "已切换你的回复风格：谜语人风格"
+    assert requests == []
+
+
 def test_orchestrator_forwards_reply_anchored_group_context_to_codex(tmp_path: Path) -> None:
     requests = []
 

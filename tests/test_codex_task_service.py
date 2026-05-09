@@ -346,6 +346,33 @@ def test_codex_session_store_shares_one_active_session_per_group(tmp_path: Path)
     assert active_for_second_admin.session_id == first.session_id
 
 
+def test_codex_session_store_ignores_expired_group_session(tmp_path: Path) -> None:
+    project = get_codex_project_by_id("mlj_dspmods")
+    assert project is not None
+    store = CodexSessionStore(tmp_path)
+
+    session = store.create_session(
+        project=project,
+        actor_user_id="605738729",
+        group_id="319567534",
+    )
+    stale = session.__class__(
+        session_id=session.session_id,
+        project_id=session.project_id,
+        project_display_name=session.project_display_name,
+        status=session.status,
+        created_by=session.created_by,
+        group_id=session.group_id,
+        transcript=session.transcript,
+        pending_messages=session.pending_messages,
+        created_at=session.created_at - 3600,
+        updated_at=session.updated_at - 3600,
+    )
+    store._replace_session(stale)
+
+    assert store.get_active_session(actor_user_id="605738729", group_id="319567534") is None
+
+
 def test_codex_session_store_keeps_private_sessions_per_admin(tmp_path: Path) -> None:
     project = get_codex_project_by_id("qqbot")
     assert project is not None
