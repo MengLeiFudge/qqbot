@@ -34,7 +34,9 @@ from qqbot.services.rightcodes_draw_client import (
     RightCodesDrawClient,
     RightCodesDrawRequest,
     format_rightcodes_draw_failure,
+    format_rightcodes_draw_model_help,
     format_rightcodes_draw_success,
+    looks_like_rightcodes_draw_help_command,
     parse_rightcodes_draw_command,
 )
 from qqbot.services.settings_store import SettingsStore
@@ -186,6 +188,10 @@ class AiOrchestrator:
         requirement_list_result = self._try_list_requirements(text, context)
         if requirement_list_result.handled:
             return requirement_list_result
+
+        draw_help_result = self._try_rightcodes_draw_help(text)
+        if draw_help_result.handled:
+            return draw_help_result
 
         draw_result = await self._try_rightcodes_draw(text, normalized_message)
         if draw_result.handled:
@@ -418,6 +424,11 @@ class AiOrchestrator:
             for proposal in proposals[-10:]
         ]
         return AiOrchestratorResult(True, "待处理需求：\n" + "\n".join(lines))
+
+    def _try_rightcodes_draw_help(self, text: str) -> AiOrchestratorResult:
+        if not looks_like_rightcodes_draw_help_command(text):
+            return AiOrchestratorResult(False)
+        return AiOrchestratorResult(True, format_rightcodes_draw_model_help())
 
     async def _try_rightcodes_draw(
         self,

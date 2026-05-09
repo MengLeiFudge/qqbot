@@ -1294,6 +1294,23 @@ def test_orchestrator_generates_image_with_rightcodes(
     assert request.image_urls == ("https://example.com/ref.png",)
 
 
+def test_orchestrator_returns_rightcodes_model_help(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "生图模型说明",
+            AiOrchestratorContext(actor_user_id="10001"),
+            NormalizedMessage(text="生图模型说明", outline="生图模型说明"),
+        )
+    )
+
+    assert result.handled is True
+    assert "gpt-image-2（默认）：0.04r/张" in result.text
+    assert "nano-banana-pro：0.18r/张" in result.text
+    assert result.image_path is None
+
+
 def test_orchestrator_reports_rightcodes_failure(
     tmp_path: Path,
     monkeypatch,

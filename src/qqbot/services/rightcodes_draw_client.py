@@ -19,6 +19,13 @@ RIGHTCODES_DRAW_MODELS = {
     "nano-banana-2",
     "nano-banana-pro",
 }
+RIGHTCODES_DRAW_MODEL_DESCRIPTIONS = {
+    "gpt-image-2": ("OpenAI 最新的画图模型，特价版，支持分辨率：1K", "0.04r"),
+    "gpt-image-2-vip": ("OpenAI 最新的画图模型，官方直连，支持分辨率：1K、2K、4K", "0.13r"),
+    "nano-banana": ("由 gemini-2.5-flash-image 模型封装而来", "0.14r"),
+    "nano-banana-2": ("nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K", "0.12r"),
+    "nano-banana-pro": ("nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K", "0.18r"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +187,50 @@ def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
 
 def looks_like_rightcodes_draw_command(text: str) -> bool:
     return parse_rightcodes_draw_command(text) is not None
+
+
+def looks_like_rightcodes_draw_help_command(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text.strip())
+    return normalized in {
+        "生图模型说明",
+        "生图模型",
+        "生图价格",
+        "画图模型说明",
+        "画图模型",
+        "画图价格",
+        "棉花糖生图模型说明",
+        "棉花糖生图模型",
+        "棉花糖生图价格",
+        "棉花生图模型说明",
+        "棉花生图模型",
+        "棉花生图价格",
+    }
+
+
+def format_rightcodes_draw_model_help() -> str:
+    lines = [
+        "棉花糖现在支持这些生图模型喵：",
+    ]
+    for model in (
+        "gpt-image-2",
+        "gpt-image-2-vip",
+        "nano-banana",
+        "nano-banana-2",
+        "nano-banana-pro",
+    ):
+        description, price = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[model]
+        default_mark = "（默认）" if model == RIGHTCODES_DRAW_DEFAULT_MODEL else ""
+        lines.append(f"- {model}{default_mark}：{price}/张。{description}")
+    lines.extend(
+        [
+            "",
+            "用法：",
+            "棉花糖生图 [模型名] 提示词",
+            "棉花糖生图 模型名 提示词",
+            "不写模型时默认使用 gpt-image-2。",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def format_rightcodes_draw_success(

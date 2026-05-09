@@ -84,6 +84,23 @@ def test_group_draw_command_enters_ai_chat_without_direct_at() -> None:
     )
 
 
+def test_group_draw_model_help_enters_ai_chat_without_direct_at() -> None:
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=False),
+            "生图模型说明",
+        )
+        is True
+    )
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=False),
+            "棉花糖生图价格",
+        )
+        is True
+    )
+
+
 def test_parse_ai_model_command_lists_or_switches_profile() -> None:
     status_command = parse_ai_model_command("AI模型")
     switch_command = parse_ai_model_command("切换AI xiaomi")

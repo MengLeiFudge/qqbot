@@ -5,7 +5,10 @@ import re
 
 from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.command_guard import is_direct_command_event, is_likely_command
-from qqbot.services.rightcodes_draw_client import looks_like_rightcodes_draw_command
+from qqbot.services.rightcodes_draw_client import (
+    looks_like_rightcodes_draw_command,
+    looks_like_rightcodes_draw_help_command,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,7 +26,7 @@ def should_handle_ai_chat(event, text: str) -> bool:
             return False
     if is_likely_command(prompt) or parse_ai_model_command(prompt) is not None:
         return False
-    if looks_like_rightcodes_draw_command(prompt):
+    if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
         return True
     return is_direct_command_event(event)
 

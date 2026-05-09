@@ -15,7 +15,9 @@ from qqbot.services.rightcodes_draw_client import (
     RightCodesDrawClient,
     RightCodesDrawRequest,
     format_rightcodes_draw_failure,
+    format_rightcodes_draw_model_help,
     format_rightcodes_draw_success,
+    looks_like_rightcodes_draw_help_command,
     looks_like_rightcodes_draw_command,
     parse_rightcodes_draw_command,
 )
@@ -91,6 +93,21 @@ def test_looks_like_rightcodes_draw_command_matches_draw_commands() -> None:
     assert looks_like_rightcodes_draw_command("棉花生图 一只猫")
     assert looks_like_rightcodes_draw_command("生成一只猫的图片")
     assert not looks_like_rightcodes_draw_command("普通聊天")
+
+
+def test_rightcodes_draw_model_help_lists_prices() -> None:
+    assert looks_like_rightcodes_draw_help_command("生图模型说明")
+    assert looks_like_rightcodes_draw_help_command("棉花糖生图价格")
+    assert not looks_like_rightcodes_draw_help_command("棉花糖生图 一只猫")
+
+    help_text = format_rightcodes_draw_model_help()
+
+    assert "gpt-image-2（默认）：0.04r/张" in help_text
+    assert "gpt-image-2-vip：0.13r/张" in help_text
+    assert "nano-banana：0.14r/张" in help_text
+    assert "nano-banana-2：0.12r/张" in help_text
+    assert "nano-banana-pro：0.18r/张" in help_text
+    assert "棉花糖生图 [模型名] 提示词" in help_text
 
 
 def test_rightcodes_draw_client_streams_chat_completions() -> None:

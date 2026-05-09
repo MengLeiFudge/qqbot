@@ -35,7 +35,10 @@ from qqbot.services.memory_retrieval_service import (
     retrieve_memory_evidence,
 )
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
-from qqbot.services.rightcodes_draw_client import looks_like_rightcodes_draw_command
+from qqbot.services.rightcodes_draw_client import (
+    looks_like_rightcodes_draw_command,
+    looks_like_rightcodes_draw_help_command,
+)
 from qqbot.services.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
@@ -129,7 +132,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         self_restart_scheduler=restart_scheduler,
     )
     draw_quota_user_id: str | None = None
-    if looks_like_rightcodes_draw_command(prompt):
+    if looks_like_rightcodes_draw_command(prompt) and not looks_like_rightcodes_draw_help_command(prompt):
         quota = RightCodesDrawQuotaStore(settings.data_root).reserve(user_id)
         if not quota.allowed:
             await ai_chat_matcher.finish(
