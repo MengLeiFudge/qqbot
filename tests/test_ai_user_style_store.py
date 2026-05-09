@@ -69,24 +69,24 @@ def test_style_store_lists_available_presets(tmp_path: Path) -> None:
 
     text = store.build_preset_help("10001", group_id="516286670")
 
-    assert "当前生效风格：猫娘风格" in text
-    assert "同一个问题示例：今天适合做什么？" in text
-    assert "猫娘风格：今天可以先吃点甜甜的东西" in text
-    assert "- 谜语人风格：" in text
-    assert "关键词：谜语人、谜语、先知" in text
-    assert "- 傲娇大小姐风格：" in text
-    assert "关键词：傲娇、大小姐、傲娇大小姐" in text
-    assert "- 御姐风格：" in text
-    assert "- 雌小鬼风格：" in text
-    assert "- 萝莉风格：" in text
-    assert "- 病娇风格：" in text
-    assert "- 中二病风格：" in text
-    assert "- 故障 AI 风格：" in text
-    assert "- 严厉考官风格：" in text
-    assert "- 废柴风格：" in text
-    assert "- 英式管家风格：" in text
-    assert "切换御姐风格" in text
-    assert "设置本群风格谜语人" in text
+    assert "棉花糖有很多种风格可以选择呢！" in text
+    assert "假如你问我，今天适合做什么？那棉花糖就会告诉你——" in text
+    assert "猫娘风格（当前）：今天可以先吃点甜甜的东西" in text
+    assert "谜语人风格：旅人，若晨雾尚未散去" in text
+    assert "傲娇大小姐风格：哼，这种问题还要问？" in text
+    assert "御姐风格：小家伙，今天适合先安顿好状态" in text
+    assert "雌小鬼风格：欸——这都不会选吗？" in text
+    assert "萝莉风格：唔，今天可以先做一件小小的好事呀" in text
+    assert "病娇风格：亲爱的，今天当然适合把注意力留给最重要的事啦" in text
+    assert "中二病风格：契约者，今日命运之门已开" in text
+    assert "故障 AI 风格：[Plan loaded]" in text
+    assert "严厉考官风格：先完成最重要且最容易拖延的任务。" in text
+    assert "废柴风格：哈欠……好麻烦。" in text
+    assert "英式管家风格：如您所愿，阁下。" in text
+    assert "关键词：" not in text
+    assert "用法：" not in text
+    assert "切换御姐风格" not in text
+    assert "设置本群风格谜语人" not in text
     assert "常规风格" not in text
 
 

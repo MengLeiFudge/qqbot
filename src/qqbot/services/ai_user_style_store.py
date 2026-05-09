@@ -294,29 +294,17 @@ class AiUserStyleStore:
     def build_preset_help(self, user_id: int | str, group_id: int | str | None = None) -> str:
         preset = self.get_effective_preset(user_id, group_id=group_id)
         lines = [
-            f"当前生效风格：{preset.display_name}",
-            f"同一个问题示例：{STYLE_HELP_EXAMPLE_QUESTION}",
+            "棉花糖有很多种风格可以选择呢！比如说，"
+            f"假如你问我，{STYLE_HELP_EXAMPLE_QUESTION}那棉花糖就会告诉你——",
         ]
         ordered_presets = (
             STYLE_PRESETS[DEFAULT_STYLE_PRESET_ID],
             *(item for key, item in STYLE_PRESETS.items() if key != DEFAULT_STYLE_PRESET_ID),
         )
         for item in ordered_presets:
-            aliases = "、".join(item.aliases[:3])
             example = STYLE_HELP_EXAMPLES.get(item.preset_id, "")
-            if example:
-                lines.append(f"- {item.display_name}：{example}")
-            else:
-                lines.append(f"- {item.display_name}：{aliases}")
-            lines.append(f"  关键词：{aliases}")
-        lines.extend(
-            (
-                "用法：",
-                "- 切换御姐风格",
-                "- 猫娘风格，但是回复短一点",
-                "- 设置本群风格谜语人（Bot 管理员）",
-            )
-        )
+            current_marker = "（当前）" if item.preset_id == preset.preset_id else ""
+            lines.append(f"{item.display_name}{current_marker}：{example}")
         return "\n".join(lines)
 
     def _read(self) -> dict[str, list[str]]:

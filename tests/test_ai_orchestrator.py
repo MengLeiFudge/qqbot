@@ -232,15 +232,18 @@ def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert "当前生效风格：猫娘风格" in result.text
     assert "猫娘风格" in result.text
     assert "谜语人风格" in result.text
     assert "傲娇大小姐风格" in result.text
     assert "御姐风格" in result.text
     assert "雌小鬼风格" in result.text
-    assert "同一个问题示例：今天适合做什么？" in result.text
+    assert "假如你问我，今天适合做什么？那棉花糖就会告诉你——" in result.text
+    assert "猫娘风格（当前）：今天可以先吃点甜甜的东西" in result.text
+    assert "谜语人风格：旅人，若晨雾尚未散去" in result.text
+    assert "关键词：" not in result.text
+    assert "用法：" not in result.text
     assert "常规风格" not in result.text
-    assert "切换御姐风格" in result.text
+    assert "切换御姐风格" not in result.text
 
 
 def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> None:
