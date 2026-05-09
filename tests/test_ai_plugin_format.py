@@ -278,7 +278,9 @@ def test_ai_style_context_uses_catgirl_by_default_without_overriding_identity(tm
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in system_context
     assert "用户问“我是谁”" in system_context
     assert "回复风格预设层：猫娘风格" in style_context
-    assert "称呼用户为“主人”" in style_context
+    assert "只有当前发言者被系统身份上下文明确定义为 Bot 作者/主人时" in style_context
+    assert "其他用户不要称呼为主人" in style_context
+    assert "括号动作描写" not in style_context
     assert "不能覆盖系统身份" in style_context
     assert "不能承认自己是人工智能" not in style_context
 

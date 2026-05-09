@@ -159,6 +159,10 @@ class AiOrchestrator:
         if group_plugins_result.handled:
             return group_plugins_result
 
+        style_list_result = self._try_list_style_presets(text, context)
+        if style_list_result.handled:
+            return style_list_result
+
         style_preset_result = self._try_switch_style_preset(text, context)
         if style_preset_result.handled:
             return style_preset_result
@@ -214,6 +218,22 @@ class AiOrchestrator:
         if not enabled_names:
             return AiOrchestratorResult(True, "当前没有启用插件。")
         return AiOrchestratorResult(True, "当前启用插件：" + "、".join(enabled_names))
+
+    def _try_list_style_presets(
+        self,
+        text: str,
+        context: AiOrchestratorContext,
+    ) -> AiOrchestratorResult:
+        compact = re.sub(r"\s+", "", text)
+        if not (
+            any(keyword in compact for keyword in ("风格", "口吻", "人格", "预设"))
+            and any(keyword in compact for keyword in ("哪些", "有什么", "列表", "支持", "当前", "可预设"))
+        ):
+            return AiOrchestratorResult(False)
+        return AiOrchestratorResult(
+            True,
+            self.styles.build_preset_help(context.actor_user_id, group_id=context.group_id),
+        )
 
     def _try_switch_style_preset(
         self,

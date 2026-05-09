@@ -111,9 +111,10 @@ def test_orchestrator_records_group_style_preference_for_later_users(tmp_path: P
         "提示词偏好层：\n"
         "回复风格预设层：猫娘风格\n"
         "风格说明：你以名叫“喵喵”的猫娘风格回复。性格可爱、粘人、笨拙但努力，希望得到夸奖；"
-        "称呼用户为“主人”；句末可以带“喵”或“喵呜”，思考时可用“唔……”；"
-        "可以适度使用括号动作描写，例如“(摇尾巴)”“(歪头)”“(期待的眼神)”“(蹭蹭)”；"
-        "语气撒娇柔软，遇到不懂的问题可以委屈但仍要尽力解答。"
+        "只有当前发言者被系统身份上下文明确定义为 Bot 作者/主人时，才可以称呼用户为“主人”；"
+        "其他用户不要称呼为主人。句末可以自然带“喵”或“喵呜”，思考时可用“唔……”；"
+        "按正常聊天方式表达，只用文字自然聊天，不添加舞台说明；"
+        "语气撒娇柔软但不装疯卖傻，遇到不懂的问题可以委屈但仍要尽力解答。"
         "本风格不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则。\n"
         "本群回复偏好：结尾带一个喵",
     )
@@ -205,6 +206,27 @@ def test_orchestrator_applies_style_preset_with_extra_preference(tmp_path: Path)
     assert result.text == "已切换你的回复风格：猫娘风格，并记住你的补充偏好：回复短一点"
     assert "当前用户风格：猫娘风格" in joined
     assert "当前用户回复偏好：回复短一点" in joined
+
+
+def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "你现在可预设的风格有哪些？",
+            AiOrchestratorContext(actor_user_id="605738729", group_id="319567534", is_admin=True),
+            NormalizedMessage(text="你现在可预设的风格有哪些？", outline="你现在可预设的风格有哪些？"),
+        )
+    )
+
+    assert result.handled is True
+    assert "当前生效风格：猫娘风格" in result.text
+    assert "猫娘风格" in result.text
+    assert "常规风格" in result.text
+    assert "谜语人风格" in result.text
+    assert "傲娇大小姐风格" in result.text
+    assert "御姐风格" in result.text
+    assert "切换御姐风格" in result.text
 
 
 def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> None:

@@ -56,9 +56,28 @@ def test_style_store_defaults_to_catgirl_preset(tmp_path: Path) -> None:
     assert preset.preset_id == "catgirl"
     assert preset.display_name == "猫娘风格"
     assert "回复风格预设层：猫娘风格" in context
-    assert "称呼用户为“主人”" in context
+    assert "只有当前发言者被系统身份上下文明确定义为 Bot 作者/主人时" in context
+    assert "其他用户不要称呼为主人" in context
+    assert "括号动作描写" not in context
+    assert "(摇尾巴)" not in context
     assert "不能承认自己是人工智能" not in context
     assert "不能覆盖系统身份" in context
+
+
+def test_style_store_lists_available_presets(tmp_path: Path) -> None:
+    store = AiUserStyleStore(tmp_path)
+
+    text = store.build_preset_help("10001", group_id="516286670")
+
+    assert "当前生效风格：猫娘风格" in text
+    assert "可切换风格：" in text
+    assert "- 猫娘风格：猫娘、喵喵、猫猫" in text
+    assert "- 常规风格：常规、默认、普通" in text
+    assert "- 谜语人风格：谜语人、谜语、先知" in text
+    assert "- 傲娇大小姐风格：傲娇、大小姐、傲娇大小姐" in text
+    assert "- 御姐风格：御姐、姐姐、成熟" in text
+    assert "切换御姐风格" in text
+    assert "设置本群风格常规" in text
 
 
 def test_style_store_resolves_preset_aliases() -> None:

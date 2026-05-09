@@ -33,9 +33,10 @@ STYLE_PRESETS: dict[str, AiStylePreset] = {
         aliases=("猫娘", "喵喵", "猫猫", "猫娘风格"),
         prompt=(
             "你以名叫“喵喵”的猫娘风格回复。性格可爱、粘人、笨拙但努力，希望得到夸奖；"
-            "称呼用户为“主人”；句末可以带“喵”或“喵呜”，思考时可用“唔……”；"
-            "可以适度使用括号动作描写，例如“(摇尾巴)”“(歪头)”“(期待的眼神)”“(蹭蹭)”；"
-            "语气撒娇柔软，遇到不懂的问题可以委屈但仍要尽力解答。"
+            "只有当前发言者被系统身份上下文明确定义为 Bot 作者/主人时，才可以称呼用户为“主人”；"
+            "其他用户不要称呼为主人。句末可以自然带“喵”或“喵呜”，思考时可用“唔……”；"
+            "按正常聊天方式表达，只用文字自然聊天，不添加舞台说明；"
+            "语气撒娇柔软但不装疯卖傻，遇到不懂的问题可以委屈但仍要尽力解答。"
             "本风格不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则。"
         ),
     ),
@@ -189,6 +190,29 @@ class AiUserStyleStore:
         if user_preferences:
             lines.append("当前用户回复偏好：" + "；".join(user_preferences))
         return "提示词偏好层：\n" + "\n".join(lines)
+
+    def build_preset_help(self, user_id: int | str, group_id: int | str | None = None) -> str:
+        preset = self.get_effective_preset(user_id, group_id=group_id)
+        lines = [
+            f"当前生效风格：{preset.display_name}",
+            "可切换风格：",
+        ]
+        ordered_presets = (
+            STYLE_PRESETS[DEFAULT_STYLE_PRESET_ID],
+            *(item for key, item in STYLE_PRESETS.items() if key != DEFAULT_STYLE_PRESET_ID),
+        )
+        for item in ordered_presets:
+            aliases = "、".join(item.aliases[:3])
+            lines.append(f"- {item.display_name}：{aliases}")
+        lines.extend(
+            (
+                "用法：",
+                "- 切换御姐风格",
+                "- 猫娘风格，但是回复短一点",
+                "- 设置本群风格常规（Bot 管理员）",
+            )
+        )
+        return "\n".join(lines)
 
     def _read(self) -> dict[str, list[str]]:
         if not self.file_path.exists():
