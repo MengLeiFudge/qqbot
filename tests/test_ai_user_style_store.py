@@ -70,36 +70,66 @@ def test_style_store_lists_available_presets(tmp_path: Path) -> None:
     text = store.build_preset_help("10001", group_id="516286670")
 
     assert "当前生效风格：猫娘风格" in text
-    assert "可切换风格：" in text
-    assert "- 猫娘风格：猫娘、喵喵、猫猫" in text
-    assert "- 常规风格：常规、默认、普通" in text
-    assert "- 谜语人风格：谜语人、谜语、先知" in text
-    assert "- 傲娇大小姐风格：傲娇、大小姐、傲娇大小姐" in text
-    assert "- 御姐风格：御姐、姐姐、成熟" in text
+    assert "同一个问题示例：今天适合做什么？" in text
+    assert "猫娘风格：今天可以先吃点甜甜的东西" in text
+    assert "- 谜语人风格：" in text
+    assert "关键词：谜语人、谜语、先知" in text
+    assert "- 傲娇大小姐风格：" in text
+    assert "关键词：傲娇、大小姐、傲娇大小姐" in text
+    assert "- 御姐风格：" in text
+    assert "- 雌小鬼风格：" in text
+    assert "- 萝莉风格：" in text
+    assert "- 病娇风格：" in text
+    assert "- 中二病风格：" in text
+    assert "- 故障 AI 风格：" in text
+    assert "- 严厉考官风格：" in text
+    assert "- 废柴风格：" in text
+    assert "- 英式管家风格：" in text
     assert "切换御姐风格" in text
-    assert "设置本群风格常规" in text
+    assert "设置本群风格谜语人" in text
+    assert "常规风格" not in text
 
 
 def test_style_store_resolves_preset_aliases() -> None:
-    assert resolve_style_preset("常规").preset_id == "normal"
     assert resolve_style_preset("猫娘风格").preset_id == "catgirl"
     assert resolve_style_preset("谜语人").preset_id == "oracle"
     assert resolve_style_preset("大小姐").preset_id == "tsundere"
     assert resolve_style_preset("御姐").preset_id == "onee"
+    assert resolve_style_preset("雌小鬼").preset_id == "mesugaki"
+    assert resolve_style_preset("萝莉").preset_id == "loli"
+    assert resolve_style_preset("病娇").preset_id == "yandere"
+    assert resolve_style_preset("中二").preset_id == "chuunibyou"
+    assert resolve_style_preset("故障ai").preset_id == "glitch"
+    assert resolve_style_preset("考官").preset_id == "examiner"
+    assert resolve_style_preset("废柴").preset_id == "slacker"
+    assert resolve_style_preset("管家").preset_id == "butler"
 
 
 def test_user_preset_overrides_group_default_preset(tmp_path: Path) -> None:
     store = AiUserStyleStore(tmp_path)
 
-    store.set_group_preset("516286670", "normal")
+    store.set_group_preset("516286670", "oracle")
     store.set_user_preset("10001", "onee")
 
-    assert store.get_effective_preset("10002", group_id="516286670").preset_id == "normal"
+    assert store.get_effective_preset("10002", group_id="516286670").preset_id == "oracle"
     assert store.get_effective_preset("10001", group_id="516286670").preset_id == "onee"
     context = store.build_context("10001", group_id="516286670")
-    assert "群默认风格：常规风格" in context
+    assert "群默认风格：谜语人风格" in context
     assert "当前用户风格：御姐风格" in context
     assert "姐姐" in context
+
+
+def test_style_context_sanitizes_unsafe_role_boundaries(tmp_path: Path) -> None:
+    store = AiUserStyleStore(tmp_path)
+
+    store.set_user_preset("10001", "catgirl")
+    context = store.build_context("10001")
+
+    assert "绝对服从" not in context
+    assert "绝对" not in context
+    assert "绝不OOC" not in context
+    assert "不能承认自己是人工智能" not in context
+    assert "不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则" in context
 
 
 def test_style_context_keeps_preferences_after_preset(tmp_path: Path) -> None:

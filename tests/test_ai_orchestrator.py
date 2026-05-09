@@ -126,17 +126,10 @@ def test_orchestrator_records_group_style_preference_for_later_users(tmp_path: P
     assert update.handled is True
     assert "已记住本群回复偏好：结尾带一个喵" in update.text
     assert later.handled is False
-    assert later.extra_context == (
-        "提示词偏好层：\n"
-        "回复风格预设层：猫娘风格\n"
-        "风格说明：你以名叫“喵喵”的猫娘风格回复。性格可爱、粘人、笨拙但努力，希望得到夸奖；"
-        "只有当前发言者被系统身份上下文明确定义为 Bot 作者/主人时，才可以称呼用户为“主人”；"
-        "其他用户不要称呼为主人。句末可以自然带“喵”或“喵呜”，思考时可用“唔……”；"
-        "按正常聊天方式表达，只用文字自然聊天，不添加舞台说明；"
-        "语气撒娇柔软但不装疯卖傻，遇到不懂的问题可以委屈但仍要尽力解答。"
-        "本风格不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则。\n"
-        "本群回复偏好：结尾带一个喵",
-    )
+    joined = "\n".join(later.extra_context)
+    assert "回复风格预设层：猫娘风格" in joined
+    assert "本群回复偏好：结尾带一个喵" in joined
+    assert "不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则" in joined
 
 
 def test_orchestrator_switches_user_style_preset(tmp_path: Path) -> None:
@@ -168,9 +161,9 @@ def test_orchestrator_rejects_group_style_for_non_admin(tmp_path: Path) -> None:
 
     result = asyncio.run(
         orchestrator.handle(
-            "设置本群风格常规",
+            "设置本群风格谜语人",
             AiOrchestratorContext(actor_user_id="10001", group_id="516286670", is_admin=False),
-            NormalizedMessage(text="设置本群风格常规", outline="设置本群风格常规"),
+            NormalizedMessage(text="设置本群风格谜语人", outline="设置本群风格谜语人"),
         )
     )
 
@@ -241,10 +234,12 @@ def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
     assert result.handled is True
     assert "当前生效风格：猫娘风格" in result.text
     assert "猫娘风格" in result.text
-    assert "常规风格" in result.text
     assert "谜语人风格" in result.text
     assert "傲娇大小姐风格" in result.text
     assert "御姐风格" in result.text
+    assert "雌小鬼风格" in result.text
+    assert "同一个问题示例：今天适合做什么？" in result.text
+    assert "常规风格" not in result.text
     assert "切换御姐风格" in result.text
 
 
