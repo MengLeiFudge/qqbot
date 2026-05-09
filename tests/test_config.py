@@ -27,7 +27,7 @@ def test_runtime_settings_defaults() -> None:
     assert settings.ai_model == ""
     assert settings.ai_api_key == ""
     assert settings.ai_timeout_seconds == 45.0
-    assert settings.ai_first_attempt_timeout_seconds == 12.0
+    assert settings.ai_first_attempt_timeout_seconds == 0.0
     assert settings.ai_max_attempts == 2
     assert settings.ai_enabled is False
     assert settings.ai_default_profile == "default"

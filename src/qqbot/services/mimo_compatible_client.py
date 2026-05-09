@@ -34,6 +34,7 @@ class MimoCompatibleClient(AiClient):
         model: str,
         vision_model: str = "",
         timeout_seconds: float = 45.0,
+        max_output_tokens: int = 4096,
         supports_vision: bool = False,
         http_client: AsyncStreamClient | None = None,
     ) -> None:
@@ -42,6 +43,7 @@ class MimoCompatibleClient(AiClient):
         self.model = model
         self.vision_model = vision_model.strip() or model
         self.timeout_seconds = timeout_seconds
+        self.max_output_tokens = max(1, int(max_output_tokens))
         self.supports_vision = supports_vision
         self.http_client = http_client
 
@@ -112,7 +114,7 @@ class MimoCompatibleClient(AiClient):
         payload: dict[str, object] = {
             "model": self._select_model(request),
             "messages": self._build_messages(request),
-            "max_completion_tokens": 800,
+            "max_completion_tokens": self.max_output_tokens,
             "temperature": 1.0,
             "top_p": 0.95,
             "stream": True,

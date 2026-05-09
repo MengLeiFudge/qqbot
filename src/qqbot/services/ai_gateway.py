@@ -222,7 +222,11 @@ class AiGateway:
         )
 
     def _timeout_for_attempt(self, attempt: int) -> float:
-        if attempt == 0 and self.first_attempt_timeout_seconds is not None:
+        if (
+            attempt == 0
+            and self.first_attempt_timeout_seconds is not None
+            and self.first_attempt_timeout_seconds > 0
+        ):
             return max(0.001, min(float(self.first_attempt_timeout_seconds), self.timeout_seconds))
         return self.timeout_seconds
 

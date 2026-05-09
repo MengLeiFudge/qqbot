@@ -73,6 +73,7 @@ def test_openai_compatible_client_complete_uses_streaming_responses_request() ->
         api_key="secret-key",
         model="mimo-v2.5-pro",
         timeout_seconds=8.5,
+        max_output_tokens=2048,
         http_client=http_client,
     )
 
@@ -94,6 +95,7 @@ def test_openai_compatible_client_complete_uses_streaming_responses_request() ->
     assert call["headers"]["Authorization"] == "Bearer secret-key"
     assert call["headers"]["User-Agent"] == "codex-cli"
     assert call["json"]["model"] == "mimo-v2.5-pro"
+    assert call["json"]["max_output_tokens"] == 2048
     assert "只用中文回答。" in call["json"]["instructions"]
     assert call["json"]["stream"] is True
     assert call["json"]["store"] is False

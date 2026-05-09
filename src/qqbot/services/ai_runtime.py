@@ -49,6 +49,7 @@ def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
             api_key=resolved.api_key,
             model=resolved.model,
             timeout_seconds=resolved.timeout_seconds,
+            max_output_tokens=resolved.max_output_tokens,
             supports_vision=resolved.supports_vision,
         )
     elif resolved.provider in {"xiaomi_mimo", "mimo_compatible"}:
@@ -58,6 +59,7 @@ def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
             model=resolved.model,
             vision_model=resolved.vision_model,
             timeout_seconds=resolved.timeout_seconds,
+            max_output_tokens=resolved.max_output_tokens,
             supports_vision=resolved.supports_vision,
         )
     else:

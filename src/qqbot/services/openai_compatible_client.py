@@ -39,6 +39,7 @@ class OpenAICompatibleClient(AiClient):
         api_key: str,
         model: str,
         timeout_seconds: float = 45.0,
+        max_output_tokens: int = 4096,
         supports_vision: bool = False,
         http_client: AsyncPostClient | None = None,
     ) -> None:
@@ -46,6 +47,7 @@ class OpenAICompatibleClient(AiClient):
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.max_output_tokens = max(1, int(max_output_tokens))
         self.supports_vision = supports_vision
         self.http_client = http_client
 
@@ -152,7 +154,7 @@ class OpenAICompatibleClient(AiClient):
             "model": self.model,
             "instructions": self._build_instructions(request),
             "input": self._build_input(request),
-            "max_output_tokens": 800,
+            "max_output_tokens": self.max_output_tokens,
             "stream": stream,
             "store": False,
         }

@@ -49,6 +49,7 @@ def test_mimo_client_streams_chat_completions_with_api_key_header() -> None:
         api_key="secret-key",
         model="mimo-v2.5-pro",
         timeout_seconds=8.5,
+        max_output_tokens=2048,
         http_client=http_client,
     )
 
@@ -78,7 +79,7 @@ def test_mimo_client_streams_chat_completions_with_api_key_header() -> None:
     assert "Authorization" not in call["headers"]
     assert call["json"]["model"] == "mimo-v2.5-pro"
     assert call["json"]["stream"] is True
-    assert call["json"]["max_completion_tokens"] == 800
+    assert call["json"]["max_completion_tokens"] == 2048
     assert call["json"]["messages"][0]["role"] == "system"
     assert call["json"]["messages"][1] == {"role": "assistant", "content": "历史回答"}
     assert call["json"]["messages"][2]["role"] == "user"

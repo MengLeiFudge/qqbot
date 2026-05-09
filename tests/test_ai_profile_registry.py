@@ -28,6 +28,7 @@ model = "mimo-v2.5-pro"
 vision_model = "mimo-v2.5"
 api_key_env = "QQBOT_AI_KEY_XIAOMI"
 timeout_seconds = 9
+max_output_tokens = 2048
 supports_vision = true
 note = "xiaomi"
 
@@ -62,6 +63,7 @@ def test_load_ai_profiles_and_resolve_enabled_profile(
     assert resolved.vision_model == "mimo-v2.5"
     assert resolved.api_key == "secret"
     assert resolved.timeout_seconds == 9.0
+    assert resolved.max_output_tokens == 2048
     assert resolved.supports_vision is True
     assert load_ai_default_profile_name(profile_file) == "xiaomi"
 
@@ -125,6 +127,7 @@ model = "main-model"
 vision_model = "main-vision-model"
 api_key_env = "QQBOT_AI_KEY_MAIN"
 timeout_seconds = 12
+max_output_tokens = 3072
 supports_vision = true
 """.strip(),
         encoding="utf-8",
@@ -137,6 +140,7 @@ supports_vision = true
     assert profiles["main"].base_url == "https://main.example/v1"
     assert profiles["main"].vision_model == "main-vision-model"
     assert profiles["main"].timeout_seconds == 12
+    assert profiles["main"].max_output_tokens == 3072
     assert profiles["main"].supports_vision is True
 
 

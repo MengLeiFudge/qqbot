@@ -16,6 +16,7 @@ class AiProfile:
     api_key_env: str
     enabled: bool = True
     timeout_seconds: float = 45.0
+    max_output_tokens: int = 4096
     supports_vision: bool = False
     note: str = ""
 
@@ -29,6 +30,7 @@ class ResolvedAiProfile:
     vision_model: str
     api_key: str
     timeout_seconds: float
+    max_output_tokens: int
     supports_vision: bool = False
     note: str = ""
 
@@ -56,6 +58,7 @@ def load_ai_profiles(path: Path) -> dict[str, AiProfile]:
             api_key_env=str(raw.get("api_key_env", "")).strip(),
             enabled=bool(raw.get("enabled", True)),
             timeout_seconds=float(raw.get("timeout_seconds", 45.0)),
+            max_output_tokens=int(raw.get("max_output_tokens", 4096)),
             supports_vision=bool(raw.get("supports_vision", False)),
             note=str(raw.get("note", "")).strip(),
         )
@@ -104,6 +107,7 @@ def resolve_ai_profile(profiles: dict[str, AiProfile], name: str) -> ResolvedAiP
         vision_model=profile.vision_model or profile.model,
         api_key=api_key,
         timeout_seconds=profile.timeout_seconds,
+        max_output_tokens=max(1, profile.max_output_tokens),
         supports_vision=profile.supports_vision,
         note=profile.note,
     )

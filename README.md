@@ -68,6 +68,7 @@ model = "mimo-v2.5"
 vision_model = "mimo-v2.5"
 api_key_env = "QQBOT_AI_KEY_XIAOMI"
 timeout_seconds = 15
+max_output_tokens = 4096
 ```
 
 ## 启动
