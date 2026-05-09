@@ -52,6 +52,10 @@ api_key_env = "QQBOT_AI_KEY_TOKENFLUX"
 timeout_seconds = 45
 max_output_tokens = 4096
 
+# RightCodes 生图使用 QQBOT_AI_KEY_RIGHTCODES，命令示例：
+# @机器人 棉花生图 一只糖果猫娘
+# @机器人 棉花糖生图 [nano-banana-pro] 赛博城市
+
 [codex.projects.mlj_dspmods]
 display_name = "MLJ_DSPmods"
 repo_path = "/mnt/d/project/csharp/DSP MOD/MLJ_DSPmods"

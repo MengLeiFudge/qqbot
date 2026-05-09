@@ -23,6 +23,25 @@ from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.settings_store import SettingsStore
 
 
+class FakeDrawClient:
+    requests = []
+
+    def __init__(self, *, api_key: str) -> None:
+        self.api_key = api_key
+
+    async def draw(self, request):
+        FakeDrawClient.requests.append((self.api_key, request))
+        return type(
+            "DrawResult",
+            (),
+            {
+                "image_url": "https://example.com/generated.png",
+                "text": "",
+                "total_seconds": 1.0,
+            },
+        )()
+
+
 class FakeBot:
     self_id = "114514"
 
@@ -1242,6 +1261,37 @@ def test_orchestrator_renders_shapez_code(tmp_path: Path) -> None:
     assert result.image_path is not None
     assert Path(result.image_path).exists()
     assert "CrRgSbWy" in result.text
+
+
+def test_orchestrator_generates_image_with_rightcodes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    FakeDrawClient.requests = []
+    monkeypatch.setenv("QQBOT_AI_KEY_RIGHTCODES", "rc-secret")
+    monkeypatch.setattr(ai_orchestrator_module, "RightCodesDrawClient", FakeDrawClient)
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "棉花糖生图 [nano-banana-pro] 画一个糖果城堡",
+            AiOrchestratorContext(actor_user_id="10001"),
+            NormalizedMessage(
+                text="棉花糖生图 [nano-banana-pro] 画一个糖果城堡",
+                outline="棉花糖生图 [nano-banana-pro] 画一个糖果城堡",
+                image_urls=("https://example.com/ref.png",),
+            ),
+        )
+    )
+
+    assert result.handled is True
+    assert result.image_path == "https://example.com/generated.png"
+    assert result.text == "已生成图片：nano-banana-pro"
+    api_key, request = FakeDrawClient.requests[0]
+    assert api_key == "rc-secret"
+    assert request.model == "nano-banana-pro"
+    assert request.prompt == "画一个糖果城堡"
+    assert request.image_urls == ("https://example.com/ref.png",)
 
 
 def test_orchestrator_returns_unhandled_for_general_chat(tmp_path: Path) -> None:

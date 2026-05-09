@@ -15,7 +15,7 @@
 - 群功能：捐献、Lolicon 美图
 - 游戏/工具插件：异形工厂、养鲲、Arc、落樱之都
 - 社交事件：自动同意好友申请、自动同意邀请入群、戳一戳响应
-- AI 接入：多 provider 配置、流式响应、群上下文、个人回复风格、需求提案、Codex 会话中转
+- AI 接入：多 provider 配置、流式响应、群上下文、个人回复风格、RightCodes 生图、需求提案、Codex 会话中转
 
 ## 目录结构
 
@@ -47,6 +47,7 @@ QQBOT_CONFIG_FILE=./config/qqbot.toml
 QQBOT_ONEBOT_ACCESS_TOKEN=你的 OneBot token
 QQBOT_NAPCAT_QQ=你的机器人 QQ
 QQBOT_AI_KEY_XIAOMI=你的 API Key
+QQBOT_AI_KEY_RIGHTCODES=你的 RightCodes API Key
 ```
 
 AI provider 示例：

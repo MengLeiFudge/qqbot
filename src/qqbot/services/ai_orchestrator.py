@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import re
 import time
@@ -29,6 +30,11 @@ from qqbot.services.feature_catalog import list_visible_features
 from qqbot.services.fe_artifact_publish_service import publish_fe_artifact
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.services.project_artifact_service import find_latest_project_zip
+from qqbot.services.rightcodes_draw_client import (
+    RightCodesDrawClient,
+    RightCodesDrawRequest,
+    parse_rightcodes_draw_command,
+)
 from qqbot.services.settings_store import SettingsStore
 from qqbot.services.shapez_service import SHAPE_PATTERN
 
@@ -178,6 +184,10 @@ class AiOrchestrator:
         requirement_list_result = self._try_list_requirements(text, context)
         if requirement_list_result.handled:
             return requirement_list_result
+
+        draw_result = await self._try_rightcodes_draw(text, normalized_message)
+        if draw_result.handled:
+            return draw_result
 
         shapez_result = self._try_render_shapez(text, context)
         if shapez_result.handled:
@@ -406,6 +416,34 @@ class AiOrchestrator:
             for proposal in proposals[-10:]
         ]
         return AiOrchestratorResult(True, "待处理需求：\n" + "\n".join(lines))
+
+    async def _try_rightcodes_draw(
+        self,
+        text: str,
+        normalized_message: NormalizedMessage,
+    ) -> AiOrchestratorResult:
+        request = parse_rightcodes_draw_command(text)
+        if request is None:
+            return AiOrchestratorResult(False)
+        api_key = os.environ.get("QQBOT_AI_KEY_RIGHTCODES", "").strip()
+        if not api_key:
+            return AiOrchestratorResult(True, "RightCodes 生图 API Key 还没配置。")
+        client = RightCodesDrawClient(api_key=api_key)
+        try:
+            result = await client.draw(
+                RightCodesDrawRequest(
+                    prompt=request.prompt,
+                    model=request.model,
+                    image_urls=normalized_message.image_urls,
+                )
+            )
+        except Exception as exc:
+            return AiOrchestratorResult(True, f"生图失败：{type(exc).__name__}")
+        return AiOrchestratorResult(
+            True,
+            f"已生成图片：{request.model}",
+            image_path=result.image_url,
+        )
 
     def _try_render_shapez(
         self,
