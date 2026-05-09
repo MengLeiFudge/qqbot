@@ -1936,8 +1936,16 @@ def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
         return ()
 
     facts: list[ChatMemoryFact] = []
+    bot_target_user_id = extract_leading_at_user_id(text) if record.direction == "bot" else ""
+    if bot_target_user_id:
+        text = strip_leading_at_user(text)
     extracted = list(iter_behavior_instruction_parts(text))
-    extracted.extend(iter_rule_fact_parts(text))
+    bot_target_nickname_parts = ()
+    if bot_target_user_id:
+        bot_target_nickname_parts = iter_bot_target_nickname_parts(bot_target_user_id, text)
+        extracted.extend(bot_target_nickname_parts)
+    if not bot_target_nickname_parts:
+        extracted.extend(iter_rule_fact_parts(text))
     for subject, predicate, obj in extracted:
         if not subject or not obj or len(obj) > 80:
             continue
@@ -2013,6 +2021,8 @@ def extract_behavior_instruction_entities(text: str) -> tuple[str, ...]:
 
 
 def iter_rule_fact_parts(text: str) -> tuple[tuple[str, str, str], ...]:
+    if is_question_like_fact_text(text):
+        return ()
     patterns = [
         (
             r"^(?P<subject>[\w\u4e00-\u9fff]{1,20})不喜欢(?P<object>.+)$",
@@ -2053,6 +2063,40 @@ def iter_rule_fact_parts(text: str) -> tuple[tuple[str, str, str], ...]:
         parts.append((subject, predicate, obj))
         break
     return tuple(parts)
+
+
+def iter_bot_target_nickname_parts(
+    target_user_id: str,
+    text: str,
+) -> tuple[tuple[str, str, str], ...]:
+    match = re.search(
+        r"(?:以后|之后|现在)?叫你(?P<object>[\w\u4e00-\u9fff-]{1,24}?)"
+        r"(?:总行了吧|可以吗|行吗|吧|啦|了|。|！|，|,|$)",
+        text,
+    )
+    if match is None:
+        return ()
+    nickname = match.group("object").strip("，,。！？!?.；;：:")
+    if not nickname:
+        return ()
+    return ((target_user_id, "昵称", nickname),)
+
+
+def extract_leading_at_user_id(text: str) -> str:
+    match = re.match(r"^\[@(?P<user_id>\d{5,12})\]\s*", text.strip())
+    return match.group("user_id") if match is not None else ""
+
+
+def strip_leading_at_user(text: str) -> str:
+    return re.sub(r"^\[@\d{5,12}\]\s*", "", text.strip(), count=1)
+
+
+def is_question_like_fact_text(text: str) -> bool:
+    normalized = text.strip()
+    if any(mark in normalized for mark in ("?", "？")):
+        return True
+    compact = re.sub(r"\s+", "", normalized)
+    return compact.endswith(("是谁", "是什么", "叫什么", "哪位", "哪个", "哪一个"))
 
 
 def is_protected_chat_fact(fact: ChatMemoryFact) -> bool:

@@ -488,6 +488,53 @@ def test_chat_memory_store_answers_natural_name_question_from_facts(tmp_path: Pa
     assert facts[0].object == "可可酱"
 
 
+def test_chat_memory_store_does_not_extract_question_as_fact(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        message_id=35,
+        direction="incoming",
+        user_id=20002,
+        sender_name="路人",
+        text="笨蛋YDC是谁？",
+        timestamp=100,
+    )
+
+    assert store.search_facts(10001, "笨蛋YDC是谁", limit=5) == ()
+
+
+def test_chat_memory_store_extracts_bot_assigned_at_user_nickname(
+    tmp_path: Path,
+) -> None:
+    store = ChatMemoryStore(tmp_path / "run")
+    store.upsert_trusted_fact(
+        group_id=10001,
+        subject="群主题摘要",
+        predicate="摘要",
+        object="近期群聊多次讨论 Codex。",
+        confidence=0.75,
+        source_type="system",
+        trust_level="system",
+        topics=("主题摘要",),
+        entities=("群主题摘要", "Codex"),
+    )
+    store.append_message(
+        group_id=10001,
+        message_id=36,
+        direction="bot",
+        user_id=1443944862,
+        sender_name="Bot",
+        text="[@273548027] 以后叫你YDC总行了吧。",
+        timestamp=100,
+    )
+
+    facts = store.search_facts(10001, "YDC是谁", limit=5)
+
+    assert facts[0].subject == "273548027"
+    assert facts[0].predicate == "昵称"
+    assert facts[0].object == "YDC"
+
+
 def test_chat_memory_store_expands_group_nick_aliases_for_search(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     nick_path = run_root / "settings" / "group_nick.json"
