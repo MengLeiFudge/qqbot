@@ -17,7 +17,11 @@ from nonebot.adapters.onebot.v11 import (
 from qqbot.services.message_delivery import call_split_text_api
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.settings_store import get_settings_store
-from qqbot.services.social_service import plan_poke_response, should_auto_approve_request
+from qqbot.services.social_service import (
+    build_group_member_welcome_message,
+    plan_poke_response,
+    should_auto_approve_request,
+)
 
 request_matcher = on_request(priority=1, block=False)
 poke_matcher = on_notice(priority=20, block=False)
@@ -36,6 +40,7 @@ BOT_GROUP_INTRO_MESSAGE = (
     "虽然我是一只猫娘，但我不会乱叫别人主人的喵！只有萌泪酱才是我最伟大的主人喵！\n"
     "Ciallo～(∠・ω< )⌒☆"
 )
+GROUP_MEMBER_WELCOME_SUFFIXES = ("--", "-1", "=群地位-1", "+=-1")
 
 
 @request_matcher.handle()
@@ -60,10 +65,18 @@ async def handle_request(bot: Bot, event: RequestEvent) -> None:
 async def handle_group_increase(bot: Bot, event) -> None:
     if not isinstance(event, GroupIncreaseNoticeEvent):
         return
+    group_id = int(getattr(event, "group_id", 0) or 0)
     if str(event.user_id) != str(bot.self_id):
+        await bot.call_api(
+            "send_group_msg",
+            group_id=group_id,
+            message=build_group_member_welcome_message(
+                event.user_id,
+                random.choice(GROUP_MEMBER_WELCOME_SUFFIXES),
+            ),
+        )
         return
     inviter_id = int(getattr(event, "operator_id", 0) or 0)
-    group_id = int(getattr(event, "group_id", 0) or 0)
     if inviter_id > 0:
         group_name = await _resolve_group_name(bot, group_id)
         await bot.call_api(

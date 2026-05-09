@@ -6,13 +6,21 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qqbot.services.social_service import plan_poke_response, should_auto_approve_request
+from qqbot.services.social_service import (
+    build_group_member_welcome_message,
+    plan_poke_response,
+    should_auto_approve_request,
+)
 
 
 def test_should_auto_approve_only_friend_and_group_invite() -> None:
     assert should_auto_approve_request("friend", None) is True
     assert should_auto_approve_request("group", "invite") is True
     assert should_auto_approve_request("group", "add") is False
+
+
+def test_build_group_member_welcome_message_mentions_new_member() -> None:
+    assert build_group_member_welcome_message(10001, "+=-1") == "[CQ:at,qq=10001] 欢迎大佬喵！群地位+=-1"
 
 
 def test_plan_poke_response_when_someone_pokes_bot() -> None:

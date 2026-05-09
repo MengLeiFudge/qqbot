@@ -23,6 +23,10 @@ def should_auto_approve_request(request_type: str, sub_type: str | None) -> bool
     return False
 
 
+def build_group_member_welcome_message(user_id: int | str, suffix: str) -> str:
+    return f"[CQ:at,qq={user_id}] 欢迎大佬喵！群地位{suffix}"
+
+
 def plan_poke_response(self_id: int, user_id: int, target_id: int, roll: int) -> PokePlan:
     plan = PokePlan()
     if user_id == self_id or roll > 25:

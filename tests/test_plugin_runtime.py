@@ -420,3 +420,26 @@ def test_social_group_increase_sends_inviter_notice_and_group_intro(monkeypatch)
     ]
     assert "我是萌萌棉花糖♪" in social.BOT_GROUP_INTRO_MESSAGE
     assert "只有萌泪酱才是我最伟大的主人喵" in social.BOT_GROUP_INTRO_MESSAGE
+
+
+def test_social_group_increase_welcomes_new_member(monkeypatch) -> None:
+    class FakeGroupIncrease:
+        group_id = 1093545322
+        user_id = 10001
+        operator_id = 605738729
+
+    monkeypatch.setattr(social, "GroupIncreaseNoticeEvent", FakeGroupIncrease)
+    monkeypatch.setattr(social.random, "choice", lambda suffixes: "+=-1")
+    bot = FakeBot(self_id="114514")
+
+    asyncio.run(social.handle_group_increase(bot, FakeGroupIncrease()))
+
+    assert bot.calls == [
+        (
+            "send_group_msg",
+            {
+                "group_id": 1093545322,
+                "message": "[CQ:at,qq=10001] 欢迎大佬喵！群地位+=-1",
+            },
+        ),
+    ]
