@@ -64,7 +64,8 @@ bot_name = "QQBot"
 enabled = true
 provider = "xiaomi_mimo"
 base_url = "https://api.xiaomimimo.com/v1"
-model = "mimo-v2.5-pro"
+model = "mimo-v2.5"
+vision_model = "mimo-v2.5"
 api_key_env = "QQBOT_AI_KEY_XIAOMI"
 timeout_seconds = 15
 ```
