@@ -12,6 +12,7 @@ class AiProfile:
     provider: str
     base_url: str
     model: str
+    vision_model: str
     api_key_env: str
     enabled: bool = True
     timeout_seconds: float = 45.0
@@ -25,6 +26,7 @@ class ResolvedAiProfile:
     provider: str
     base_url: str
     model: str
+    vision_model: str
     api_key: str
     timeout_seconds: float
     supports_vision: bool = False
@@ -50,6 +52,7 @@ def load_ai_profiles(path: Path) -> dict[str, AiProfile]:
             provider=str(raw.get("provider", "openai_compatible")).strip(),
             base_url=str(raw.get("base_url", "")).strip(),
             model=str(raw.get("model", "")).strip(),
+            vision_model=str(raw.get("vision_model", "")).strip(),
             api_key_env=str(raw.get("api_key_env", "")).strip(),
             enabled=bool(raw.get("enabled", True)),
             timeout_seconds=float(raw.get("timeout_seconds", 45.0)),
@@ -98,6 +101,7 @@ def resolve_ai_profile(profiles: dict[str, AiProfile], name: str) -> ResolvedAiP
         provider=profile.provider,
         base_url=profile.base_url,
         model=profile.model,
+        vision_model=profile.vision_model or profile.model,
         api_key=api_key,
         timeout_seconds=profile.timeout_seconds,
         supports_vision=profile.supports_vision,

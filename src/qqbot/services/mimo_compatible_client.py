@@ -32,6 +32,7 @@ class MimoCompatibleClient(AiClient):
         base_url: str,
         api_key: str,
         model: str,
+        vision_model: str = "",
         timeout_seconds: float = 45.0,
         supports_vision: bool = False,
         http_client: AsyncStreamClient | None = None,
@@ -39,6 +40,7 @@ class MimoCompatibleClient(AiClient):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.vision_model = vision_model.strip() or model
         self.timeout_seconds = timeout_seconds
         self.supports_vision = supports_vision
         self.http_client = http_client
@@ -108,7 +110,7 @@ class MimoCompatibleClient(AiClient):
 
     def _build_chat_payload(self, request: AiRequest) -> dict[str, object]:
         payload: dict[str, object] = {
-            "model": self.model,
+            "model": self._select_model(request),
             "messages": self._build_messages(request),
             "max_completion_tokens": 800,
             "temperature": 1.0,
@@ -120,6 +122,11 @@ class MimoCompatibleClient(AiClient):
             if request.tool_choice is not None:
                 payload["tool_choice"] = request.tool_choice
         return payload
+
+    def _select_model(self, request: AiRequest) -> str:
+        if request.image_urls:
+            return self.vision_model
+        return self.model
 
     def _build_messages(self, request: AiRequest) -> list[dict[str, object]]:
         system_parts = [

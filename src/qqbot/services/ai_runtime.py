@@ -56,6 +56,7 @@ def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
             base_url=resolved.base_url,
             api_key=resolved.api_key,
             model=resolved.model,
+            vision_model=resolved.vision_model,
             timeout_seconds=resolved.timeout_seconds,
             supports_vision=resolved.supports_vision,
         )

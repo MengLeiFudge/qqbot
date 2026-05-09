@@ -25,6 +25,7 @@ model_provider = "xiaomi"
 provider = "openai_compatible"
 base_url = "https://example.com/v1"
 model = "mimo-v2.5-pro"
+vision_model = "mimo-v2.5"
 api_key_env = "QQBOT_AI_KEY_XIAOMI"
 timeout_seconds = 9
 supports_vision = true
@@ -58,6 +59,7 @@ def test_load_ai_profiles_and_resolve_enabled_profile(
     assert resolved.name == "xiaomi"
     assert resolved.base_url == "https://example.com/v1"
     assert resolved.model == "mimo-v2.5-pro"
+    assert resolved.vision_model == "mimo-v2.5"
     assert resolved.api_key == "secret"
     assert resolved.timeout_seconds == 9.0
     assert resolved.supports_vision is True
@@ -120,6 +122,7 @@ default_profile = "main"
 provider = "openai_compatible"
 base_url = "https://main.example/v1"
 model = "main-model"
+vision_model = "main-vision-model"
 api_key_env = "QQBOT_AI_KEY_MAIN"
 timeout_seconds = 12
 supports_vision = true
@@ -132,6 +135,7 @@ supports_vision = true
     assert load_ai_default_profile_name(profile_file) == "main"
     assert set(profiles) == {"main"}
     assert profiles["main"].base_url == "https://main.example/v1"
+    assert profiles["main"].vision_model == "main-vision-model"
     assert profiles["main"].timeout_seconds == 12
     assert profiles["main"].supports_vision is True
 
@@ -165,6 +169,7 @@ def test_load_ai_profiles_accepts_xiaomi_mimo_provider(tmp_path: Path) -> None:
 provider = "xiaomi_mimo"
 base_url = "https://api.xiaomimimo.com/v1"
 model = "mimo-v2.5-pro"
+vision_model = "mimo-v2.5"
 api_key_env = "tp-test-direct-key"
 """.strip(),
         encoding="utf-8",
@@ -175,3 +180,4 @@ api_key_env = "tp-test-direct-key"
 
     assert resolved.provider == "xiaomi_mimo"
     assert resolved.base_url == "https://api.xiaomimimo.com/v1"
+    assert resolved.vision_model == "mimo-v2.5"

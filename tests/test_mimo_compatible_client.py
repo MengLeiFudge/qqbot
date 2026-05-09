@@ -90,7 +90,8 @@ def test_mimo_client_includes_images_when_request_has_images() -> None:
     client = MimoCompatibleClient(
         base_url="https://api.xiaomimimo.com/v1",
         api_key="secret-key",
-        model="vision-model",
+        model="text-model",
+        vision_model="vision-model",
         http_client=http_client,
     )
 
@@ -107,11 +108,31 @@ def test_mimo_client_includes_images_when_request_has_images() -> None:
     )
 
     user_message = http_client.calls[0]["json"]["messages"][1]
+    assert http_client.calls[0]["json"]["model"] == "vision-model"
     assert user_message["role"] == "user"
     assert user_message["content"] == [
         {"type": "text", "text": "看看这个是什么"},
         {"type": "image_url", "image_url": {"url": "https://example.invalid/a.png"}},
     ]
+
+
+def test_mimo_client_keeps_text_model_without_images() -> None:
+    http_client = FakeHttpClient()
+    client = MimoCompatibleClient(
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key="secret-key",
+        model="text-model",
+        vision_model="vision-model",
+        http_client=http_client,
+    )
+
+    asyncio.run(
+        client.stream_complete(
+            AiRequest(plugin_id="ai", capability="chat", prompt="你好", user_id="605738729")
+        )
+    )
+
+    assert http_client.calls[0]["json"]["model"] == "text-model"
 
 
 def test_mimo_client_includes_function_tools_when_requested() -> None:
