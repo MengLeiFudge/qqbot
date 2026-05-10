@@ -27,7 +27,7 @@ class FakeDrawHttpClient:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    async def stream(
+    async def post_json(
         self,
         url: str,
         *,
@@ -43,9 +43,7 @@ class FakeDrawHttpClient:
                 "timeout": timeout,
             }
         )
-        yield 'data: {"choices":[{"delta":{"content":"https://example.com/a.png"}}]}'
-        yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}'
-        yield "data: [DONE]"
+        return {"data": [{"url": "https://example.com/a.png"}]}
 
 
 def test_parse_rightcodes_draw_command_uses_default_model() -> None:
@@ -110,7 +108,7 @@ def test_rightcodes_draw_model_help_lists_prices() -> None:
     assert "棉花糖生图 [模型名] 提示词" in help_text
 
 
-def test_rightcodes_draw_client_streams_chat_completions() -> None:
+def test_rightcodes_draw_client_uses_images_generations() -> None:
     http_client = FakeDrawHttpClient()
     client = RightCodesDrawClient(
         api_key="secret",
@@ -130,18 +128,14 @@ def test_rightcodes_draw_client_streams_chat_completions() -> None:
 
     assert result.image_url == "https://example.com/a.png"
     call = http_client.calls[0]
-    assert call["url"] == "https://www.right.codes/draw/v1/chat/completions"
+    assert call["url"] == "https://www.right.codes/draw/v1/images/generations"
     assert call["headers"]["Authorization"] == "Bearer secret"
     assert call["timeout"] == 99
     assert call["json"]["model"] == "nano-banana-2"
-    assert call["json"]["stream"] is True
-    message = call["json"]["messages"][0]
-    assert message["role"] == "user"
-    assert message["content"][0]["type"] == "text"
-    assert message["content"][1] == {
-        "type": "image_url",
-        "image_url": {"url": "https://example.com/ref.png"},
-    }
+    assert call["json"]["prompt"] == "一张猫娘图片"
+    assert call["json"]["image"] == ["https://example.com/ref.png"]
+    assert call["json"]["size"] == "1024x1024"
+    assert call["json"]["response_format"] == "url"
 
 
 def test_format_rightcodes_draw_success() -> None:

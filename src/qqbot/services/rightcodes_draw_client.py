@@ -42,8 +42,8 @@ class RightCodesDrawResult:
     total_seconds: float
 
 
-class AsyncDrawStreamClient(Protocol):
-    async def stream(
+class AsyncDrawHttpClient(Protocol):
+    async def post_json(
         self,
         url: str,
         *,
@@ -61,7 +61,7 @@ class RightCodesDrawClient:
         api_key: str,
         base_url: str = RIGHTCODES_DRAW_BASE_URL,
         timeout_seconds: float = 180.0,
-        http_client: AsyncDrawStreamClient | None = None,
+        http_client: AsyncDrawHttpClient | None = None,
     ) -> None:
         self.api_key = api_key.strip()
         self.base_url = base_url.rstrip("/")
@@ -78,83 +78,46 @@ class RightCodesDrawClient:
         }
 
         started = time.perf_counter()
-        text_parts: list[str] = []
-        image_url = ""
-        async for line in self._stream(
-            f"{self.base_url}/v1/chat/completions",
+        data = await self._post_json(
+            f"{self.base_url}/v1/images/generations",
             headers=headers,
             json=payload,
             timeout=self.timeout_seconds,
-        ):
-            event = _parse_sse_data(line)
-            if event is None:
-                continue
-            if event == "[DONE]":
-                break
-            data = json.loads(event)
-            for extracted in _extract_strings(data):
-                if extracted:
-                    text_parts.append(extracted)
-                if not image_url:
-                    image_url = _extract_image_url(extracted)
-            if not image_url:
-                image_url = _extract_image_url_from_object(data)
-
-        text = "".join(text_parts).strip()
-        if not image_url:
-            image_url = _extract_image_url(text)
+        )
+        image_url = _extract_image_url_from_object(data)
         if not image_url:
             raise RuntimeError("RightCodes 生图没有返回图片 URL")
         return RightCodesDrawResult(
             image_url=image_url,
-            text=text,
+            text="",
             total_seconds=time.perf_counter() - started,
         )
 
     def _build_payload(self, request: RightCodesDrawRequest) -> dict[str, object]:
-        content: str | list[dict[str, object]]
-        prompt = (
-            "请根据用户提示生成图片。生成完成后只返回最终图片直链，不要解释。\n"
-            f"用户提示：{request.prompt}"
-        )
-        if request.image_urls:
-            content = [{"type": "text", "text": prompt}]
-            content.extend(
-                {"type": "image_url", "image_url": {"url": image_url}}
-                for image_url in request.image_urls
-            )
-        else:
-            content = prompt
         return {
             "model": request.model,
-            "stream": True,
-            "messages": [{"role": "user", "content": content}],
+            "prompt": request.prompt,
+            "image": list(request.image_urls),
+            "size": "1024x1024",
+            "response_format": "url",
         }
 
-    async def _stream(
+    async def _post_json(
         self,
         url: str,
         *,
         headers: dict[str, str],
         json: dict[str, object],
         timeout: float,
-    ) -> Any:
+    ) -> object:
         if self.http_client is not None:
-            async for line in self.http_client.stream(
+            return await self.http_client.post_json(
                 url,
                 headers=headers,
                 json=json,
                 timeout=timeout,
-            ):
-                yield line
-            return
-
-        iterator = _stream_json_lines(url, headers, json, timeout)
-        while True:
-            line = await asyncio.to_thread(_next_line, iterator)
-            if line is None:
-                break
-            yield line
+            )
+        return await _post_json(url, headers, json, timeout)
 
 
 def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
@@ -271,20 +234,27 @@ def _extract_rightcodes_draw_prompt(text: str) -> str | None:
     return None
 
 
-def _stream_json_lines(
+async def _post_json(
     url: str,
     headers: dict[str, str],
     payload: dict[str, object],
     timeout: float,
-):
+) -> object:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(url, data=body, headers=headers, method="POST")
-    with urlopen(request, timeout=timeout) as response:
-        status = int(getattr(response, "status", 200))
-        if status >= 400:
-            raise RuntimeError(f"RightCodes draw request failed: {status}")
-        for raw_line in response:
-            yield raw_line.decode("utf-8").strip()
+    return await _run_urlopen_json(request, timeout)
+
+
+async def _run_urlopen_json(request: Request, timeout: float) -> object:
+    def read_response() -> object:
+        with urlopen(request, timeout=timeout) as response:
+            status = int(getattr(response, "status", 200))
+            if status >= 400:
+                raise RuntimeError(f"RightCodes draw request failed: {status}")
+            body = response.read().decode("utf-8")
+        return json.loads(body)
+
+    return await asyncio.to_thread(read_response)
 
 
 def _read_http_error_detail(exc: HTTPError) -> str:
@@ -314,40 +284,12 @@ def _read_http_error_detail(exc: HTTPError) -> str:
     return body[:200]
 
 
-def _next_line(iterator) -> str | None:
-    try:
-        return next(iterator)
-    except StopIteration:
-        return None
-
-
-def _parse_sse_data(line: str) -> str | None:
-    normalized = line.strip()
-    if not normalized or not normalized.startswith("data:"):
-        return None
-    return normalized.removeprefix("data:").strip()
-
-
-def _extract_strings(data: object) -> tuple[str, ...]:
-    strings: list[str] = []
-    _walk_strings(data, strings)
-    return tuple(strings)
-
-
-def _walk_strings(value: object, strings: list[str]) -> None:
-    if isinstance(value, str):
-        strings.append(value)
-    elif isinstance(value, dict):
-        for child in value.values():
-            _walk_strings(child, strings)
-    elif isinstance(value, list):
-        for child in value:
-            _walk_strings(child, strings)
-
-
 def _extract_image_url_from_object(data: object) -> str:
     if isinstance(data, dict):
-        for key in ("url", "b64_json"):
+        value = data.get("b64_json")
+        if isinstance(value, str) and value.strip():
+            return f"data:image/png;base64,{value.strip()}"
+        for key in ("url",):
             value = data.get(key)
             if isinstance(value, str):
                 extracted = _extract_image_url(value)

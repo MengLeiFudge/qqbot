@@ -192,6 +192,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             bot=bot,
             title="棉花糖的本地处理结果",
         )
+        return
 
     context_parts.extend(part for part in local_result.extra_context if part.strip())
     image_urls = collect_message_image_urls(normalized_message)
