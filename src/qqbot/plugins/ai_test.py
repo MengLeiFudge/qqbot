@@ -4,7 +4,7 @@ import os
 import re
 import time
 
-from nonebot import on_message, on_regex
+from nonebot import logger, on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.rule import Rule
 
@@ -87,10 +87,31 @@ async def handle_ai_model(event: MessageEvent) -> None:
 @ai_chat_matcher.handle()
 async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     request_started = time.perf_counter()
+    request_wall_started = time.time()
     settings = load_settings()
     store = get_settings_store()
     normalized_message = normalize_onebot_event(event)
     prompt = normalized_message.text or normalized_message.outline
+    event_time = getattr(event, "time", None)
+    message_id = getattr(event, "message_id", None)
+    group_id = getattr(event, "group_id", None)
+    user_id = event.get_user_id()
+    if event_time is not None:
+        logger.info(
+            "AI message received: user_id={}, group_id={}, message_id={}, event_time={}, receive_lag={:.3f}s",
+            user_id,
+            group_id,
+            message_id,
+            event_time,
+            request_wall_started - float(event_time),
+        )
+    else:
+        logger.info(
+            "AI message received: user_id={}, group_id={}, message_id={}, event_time=None",
+            user_id,
+            group_id,
+            message_id,
+        )
     record_private_chat_memory(settings, event, normalized_message)
 
     if not settings.ai_enabled:
@@ -117,10 +138,6 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             settings_store=store,
         )
     )
-    group_id = getattr(event, "group_id", None)
-    message_id = getattr(event, "message_id", None)
-    user_id = event.get_user_id()
-
     restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
     orchestrator = AiOrchestrator(
         data_root=settings.data_root,
@@ -133,6 +150,13 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     )
     draw_quota_user_id: str | None = None
     if looks_like_rightcodes_draw_command(prompt) and not looks_like_rightcodes_draw_help_command(prompt):
+        logger.info(
+            "RightCodes draw command detected: user_id={}, group_id={}, message_id={}, local_prepare={:.3f}s",
+            user_id,
+            group_id,
+            message_id,
+            time.perf_counter() - request_started,
+        )
         quota = RightCodesDrawQuotaStore(settings.data_root).reserve(user_id)
         if not quota.allowed:
             await ai_chat_matcher.finish(
@@ -152,7 +176,23 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 message_id=message_id,
                 user_id=user_id,
             )
+        draw_start_send_started = time.perf_counter()
+        logger.info(
+            "RightCodes draw start notice sending: user_id={}, group_id={}, message_id={}, quota={}/{}",
+            user_id,
+            group_id,
+            message_id,
+            quota.used,
+            quota.limit,
+        )
         await ai_chat_matcher.send(start_message)
+        logger.info(
+            "RightCodes draw start notice sent: user_id={}, group_id={}, message_id={}, send_seconds={:.3f}",
+            user_id,
+            group_id,
+            message_id,
+            time.perf_counter() - draw_start_send_started,
+        )
     local_result = await orchestrator.handle(
         prompt,
         AiOrchestratorContext(

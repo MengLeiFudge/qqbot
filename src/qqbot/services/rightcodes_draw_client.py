@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ RIGHTCODES_DRAW_MODEL_DESCRIPTIONS = {
     "nano-banana-2": ("nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K", "0.12r"),
     "nano-banana-pro": ("nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K", "0.18r"),
 }
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,19 +80,40 @@ class RightCodesDrawClient:
         }
 
         started = time.perf_counter()
-        data = await self._post_json(
-            f"{self.base_url}/v1/images/generations",
-            headers=headers,
-            json=payload,
-            timeout=self.timeout_seconds,
+        url = f"{self.base_url}/v1/images/generations"
+        logger.info(
+            "RightCodes draw request started: model=%s image_count=%s timeout=%.1fs",
+            request.model,
+            len(request.image_urls),
+            self.timeout_seconds,
         )
+        try:
+            data = await self._post_json(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout_seconds,
+            )
+        except Exception:
+            logger.exception(
+                "RightCodes draw request failed: model=%s elapsed=%.3fs",
+                request.model,
+                time.perf_counter() - started,
+            )
+            raise
         image_url = _extract_image_url_from_object(data)
         if not image_url:
             raise RuntimeError("RightCodes 生图没有返回图片 URL")
+        total_seconds = time.perf_counter() - started
+        logger.info(
+            "RightCodes draw request succeeded: model=%s elapsed=%.3fs",
+            request.model,
+            total_seconds,
+        )
         return RightCodesDrawResult(
             image_url=image_url,
             text="",
-            total_seconds=time.perf_counter() - started,
+            total_seconds=total_seconds,
         )
 
     def _build_payload(self, request: RightCodesDrawRequest) -> dict[str, object]:
