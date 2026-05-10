@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 RIGHTCODES_DRAW_DAILY_LIMIT = 5
@@ -75,7 +75,18 @@ class RightCodesDrawQuotaStore:
 
 
 def current_draw_quota_date_key() -> str:
-    return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
+    return datetime.now(_resolve_zone("Asia/Shanghai")).strftime("%Y-%m-%d")
+
+
+def _resolve_zone(timezone_name: str):
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        if timezone_name == "Asia/Shanghai":
+            return timezone(timedelta(hours=8), name=timezone_name)
+        if timezone_name == "UTC":
+            return timezone.utc
+        return datetime.now().astimezone().tzinfo or timezone.utc
 
 
 def _get_day_payload(payload: dict[str, object], date_key: str) -> dict[str, int]:

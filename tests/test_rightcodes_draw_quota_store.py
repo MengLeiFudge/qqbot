@@ -6,7 +6,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qqbot.services.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
+from qqbot.services import rightcodes_draw_quota_store as quota_module
+from qqbot.services.rightcodes_draw_quota_store import (
+    RightCodesDrawQuotaStore,
+    current_draw_quota_date_key,
+)
 
 
 def test_rightcodes_draw_quota_counts_per_user_per_day(tmp_path: Path) -> None:
@@ -48,3 +52,13 @@ def test_rightcodes_draw_quota_resets_by_date(tmp_path: Path) -> None:
 
     assert next_day.allowed is True
     assert next_day.used == 1
+
+
+def test_current_draw_quota_date_key_falls_back_without_tzdata(monkeypatch) -> None:
+    class BrokenZoneInfo:
+        def __init__(self, timezone_name: str) -> None:
+            raise quota_module.ZoneInfoNotFoundError(timezone_name)
+
+    monkeypatch.setattr(quota_module, "ZoneInfo", BrokenZoneInfo)
+
+    assert current_draw_quota_date_key()
