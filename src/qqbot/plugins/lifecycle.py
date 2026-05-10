@@ -128,14 +128,21 @@ async def run_memory_maintenance_loop() -> None:
     )
     try:
         while True:
-            for group_id in service.store.list_group_ids():
-                service.summarize_group_topics(group_id, limit=200)
-                service.index_recent_messages(group_id, limit=500)
+            await asyncio.to_thread(run_memory_maintenance_once, service)
             await asyncio.sleep(24 * 60 * 60)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         logger.exception("Memory maintenance loop crashed: {}", exc)
+
+
+def run_memory_maintenance_once(service: MemoryMaintenanceService) -> None:
+    group_ids = service.store.list_group_ids()
+    logger.info("Memory maintenance started: group_count={}", len(group_ids))
+    for group_id in group_ids:
+        service.summarize_group_topics(group_id, limit=200)
+        service.index_recent_messages(group_id, limit=500)
+    logger.info("Memory maintenance finished: group_count={}", len(group_ids))
 
 
 def build_openai_embedding_client() -> OpenAIEmbeddingClient | None:
