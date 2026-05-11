@@ -80,3 +80,29 @@ def test_group_nick_store_builds_alias_terms_for_group_member(tmp_path: Path) ->
 
     assert store.build_alias_terms(10001, "萌泪酱是谁") == ("605738729", "萌泪酱", "MLJ")
     assert store.build_alias_terms(10001, "605738729") == ("605738729", "萌泪酱", "MLJ")
+
+
+def test_resolve_call_name_strips_shapez_decorations(tmp_path: Path) -> None:
+    store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
+    store.record_group_sender(
+        group_id=1163635014,
+        qq=1728704949,
+        card="୧⍤⃝୨鱼子勺：[聊天记录]",
+        nickname="LiAuO₂ ⁧~喵喵喵 ⁦",
+        updated_at=1_800_000_000_000,
+    )
+
+    assert store.resolve_call_name(1163635014, 1728704949) == "鱼子勺"
+
+
+def test_resolve_call_name_keeps_plain_shapez_name(tmp_path: Path) -> None:
+    store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
+    store.record_group_sender(
+        group_id=1163635014,
+        qq=3120618805,
+        card="",
+        nickname="୧⍤⃝୨勺子鱼",
+        updated_at=1_800_000_000_000,
+    )
+
+    assert store.resolve_call_name(1163635014, 3120618805) == "勺子鱼"

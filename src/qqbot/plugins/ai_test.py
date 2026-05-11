@@ -480,6 +480,9 @@ def build_ai_context(
     context.append("当前对话场景：QQ群聊。用户是在群里 @ 你。")
     context.append(f"当前群号：{group_id}")
     context.append(build_current_sender_context(event))
+    current_sender_call_name_context = build_current_sender_call_name_context(settings, event)
+    if current_sender_call_name_context:
+        context.append(current_sender_call_name_context)
     retrieval_plan_context = build_memory_retrieval_plan_context(event, normalized_message)
     if retrieval_plan_context:
         context.append(retrieval_plan_context)
@@ -1031,6 +1034,27 @@ def build_current_sender_context(event: MessageEvent) -> str:
     nickname = str(getattr(sender, "nickname", "") or "").strip()
     display_name = card or nickname or user_id
     return f"当前发言者：{display_name}({user_id})"
+
+
+def build_current_sender_call_name_context(
+    settings: RuntimeSettings,
+    event: MessageEvent,
+) -> str:
+    group_id = getattr(event, "group_id", None)
+    user_id = event.get_user_id()
+    if group_id is None or not str(group_id).isdigit() or not str(user_id).isdigit():
+        return ""
+    call_name = GroupNickStore(
+        settings.data_root / "settings" / "group_nick.json"
+    ).resolve_call_name(int(group_id), int(user_id))
+    if not call_name or call_name == str(user_id):
+        return ""
+    return (
+        f"建议称呼当前发言者：{call_name}。"
+        "QQ号是区分群成员的稳定身份锚点；群名片相似时不要把不同QQ号的人混为一人。"
+        "不要把其他群友对第三人的称呼纠正当成当前发言者的名字，"
+        "除非当前发言者本人明确要求你这样称呼自己。"
+    )
 
 
 def build_ai_identity_context(

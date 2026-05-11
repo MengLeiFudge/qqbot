@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
+import re
 
 from qqbot.config import load_settings
 
@@ -85,6 +86,12 @@ class GroupNickStore:
                 return latest_name
         return str(qq)
 
+    def resolve_call_name(self, group_id: int, qq: int) -> str:
+        display_name = self.resolve_display_name(group_id, qq)
+        if display_name == str(qq):
+            return display_name
+        return normalize_call_name(display_name) or display_name
+
     def build_alias_terms(self, group_id: int | str, query: str) -> tuple[str, ...]:
         query = query.strip()
         if not query:
@@ -141,3 +148,16 @@ class GroupNickStore:
 def get_group_nick_store() -> GroupNickStore:
     settings = load_settings()
     return GroupNickStore(settings.data_root / "settings" / "group_nick.json")
+
+
+def normalize_call_name(name: str) -> str:
+    cleaned = name.strip()
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"[\u2066-\u2069]", "", cleaned)
+    cleaned = re.sub(r"^[^A-Za-z0-9_\u4e00-\u9fff]+", "", cleaned)
+    cleaned = re.split(r"[:：]", cleaned, maxsplit=1)[0].strip()
+    cleaned = re.sub(r"^[^A-Za-z0-9_\u4e00-\u9fff]+", "", cleaned)
+    cleaned = re.sub(r"[\[\(（【].*?[\]\)）】]$", "", cleaned).strip()
+    return cleaned

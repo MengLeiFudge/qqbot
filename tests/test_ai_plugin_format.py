@@ -336,6 +336,35 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
 
 
+def test_ai_context_includes_current_sender_call_name(tmp_path: Path) -> None:
+    GroupNickStore(tmp_path / "settings" / "group_nick.json").record_group_sender(
+        group_id=1163635014,
+        qq=1728704949,
+        card="୧⍤⃝୨鱼子勺：[聊天记录]",
+        nickname="LiAuO₂ ⁧~喵喵喵 ⁦",
+        updated_at=1_800_000_000_000,
+    )
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            group_id=1163635014,
+            user_id="1728704949",
+            text="我是谁",
+            sender=FakeSender(
+                user_id=1728704949,
+                card="୧⍤⃝୨鱼子勺：[聊天记录]",
+                nickname="LiAuO₂ ⁧~喵喵喵 ⁦",
+            ),
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "当前发言者：୧⍤⃝୨鱼子勺：[聊天记录](1728704949)" in joined
+    assert "建议称呼当前发言者：鱼子勺" in joined
+    assert "不要把其他群友对第三人的称呼纠正当成当前发言者的名字" in joined
+
+
 def test_ai_context_includes_long_term_memory_search_results(tmp_path: Path) -> None:
     memory_store = ChatMemoryStore(tmp_path)
     memory_store.append_message(
