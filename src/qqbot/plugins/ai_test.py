@@ -499,6 +499,13 @@ def build_ai_context(
     )
     if message_context:
         context.append(message_context)
+    at_target_context = build_at_target_identity_context(
+        settings,
+        event,
+        normalized_message,
+    )
+    if at_target_context:
+        context.append(at_target_context)
     reply_context = build_reply_context(normalized_message)
     if reply_context:
         context.append(reply_context)
@@ -1096,6 +1103,51 @@ def format_nickname_usage_summary(summary: NicknameUsageSummary) -> str:
         + "；".join(fragments)
         + "。"
     )
+
+
+def build_at_target_identity_context(
+    settings: RuntimeSettings,
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+) -> str:
+    group_id = getattr(event, "group_id", None)
+    if group_id is None or not str(group_id).isdigit():
+        return ""
+    self_id = str(getattr(event, "self_id", "") or "")
+    target_ids = tuple(
+        dict.fromkeys(
+            user_id
+            for user_id in normalized_message.at_user_ids
+            if user_id.isdigit()
+            if not self_id or user_id != self_id
+        )
+    )
+    if not target_ids:
+        return ""
+
+    nick_store = GroupNickStore(settings.data_root / "settings" / "group_nick.json")
+    lines = ["本次消息 @ 的目标用户身份证据："]
+    for target_id in target_ids:
+        call_name = nick_store.resolve_call_name(int(group_id), int(target_id))
+        if not call_name or call_name == target_id:
+            call_name = target_id
+        usage_summary = NicknameUsageService(ChatMemoryStore(settings.data_root)).summarize(
+            group_id=group_id,
+            user_id=target_id,
+            limit=100,
+        )
+        usage_text = format_at_target_nickname_usage_summary(usage_summary)
+        line = f"- 目标用户：{call_name}({target_id})"
+        if usage_text:
+            line += f"，{usage_text}"
+        lines.append(line)
+    lines.append("回答“@某人是谁”时，优先依据这里的目标用户 QQ 号、建议称呼和昵称统计回答。")
+    return "\n".join(lines)
+
+
+def format_at_target_nickname_usage_summary(summary: NicknameUsageSummary) -> str:
+    text = format_nickname_usage_summary(summary)
+    return text.removeprefix("当前发言者").strip("。")
 
 
 def build_ai_identity_context(

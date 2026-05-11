@@ -852,3 +852,56 @@ def test_ai_context_describes_current_message_structure(tmp_path: Path) -> None:
     assert "用户本次消息包含图片" in joined
     assert "用户本次消息包含语音" in joined
     assert "用户本次消息包含视频" in joined
+
+
+def test_ai_context_includes_at_target_nickname_usage_summary(tmp_path: Path) -> None:
+    nick_store = GroupNickStore(tmp_path / "settings" / "group_nick.json")
+    nick_store.record_group_sender(
+        group_id=1163635014,
+        qq=1728704949,
+        card="୧⍤⃝୨鱼子勺：[聊天记录]",
+        nickname="LiAuO₂ ⁧~喵喵喵 ⁦",
+        updated_at=1_800_000_000_000,
+    )
+    memory_store = ChatMemoryStore(tmp_path)
+    for index, sender_name in enumerate(
+        [
+            "୧⍤⃝୨鱼子勺：[聊天记录]",
+            "୧⍤⃝୨鱼子勺：[聊天记录]",
+            "୧⍤⃝୨勺子鱼",
+        ],
+        start=1,
+    ):
+        memory_store.append_message(
+            group_id=1163635014,
+            message_id=f"at-target-{index}",
+            direction="incoming",
+            user_id=1728704949,
+            sender_name=sender_name,
+            text=f"目标历史消息 {index}",
+            timestamp=index,
+        )
+    message = FakeMessage(
+        segments=[
+            FakeSegment("at", {"qq": "1443944862"}),
+            FakeSegment("text", {"text": " 你知道"}),
+            FakeSegment("at", {"qq": "1728704949"}),
+            FakeSegment("text", {"text": " 是谁吗"}),
+        ]
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            group_id=1163635014,
+            user_id="605738729",
+            text="你知道 是谁吗",
+            message=message,
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "本次消息 @ 的目标用户身份证据" in joined
+    assert "目标用户：鱼子勺(1728704949)" in joined
+    assert "最近 3 条本人消息的昵称使用统计：鱼子勺 2/3 条，占 67%；勺子鱼 1/3 条，占 33%" in joined
