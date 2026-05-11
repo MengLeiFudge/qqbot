@@ -408,6 +408,53 @@ def test_ai_context_includes_current_sender_nickname_usage_summary(tmp_path: Pat
     assert "勺子鱼 1/3 条，占 33%" in joined
 
 
+def test_ai_context_includes_text_identity_query_nickname_candidate(tmp_path: Path) -> None:
+    nick_store = GroupNickStore(tmp_path / "settings" / "group_nick.json")
+    nick_store.record_group_sender(
+        group_id=1163635014,
+        qq=273548027,
+        card="焰靛燦「YanDarkCollapser」",
+        nickname="YanDarkCollapser",
+        updated_at=1_800_000_000_000,
+    )
+    memory_store = ChatMemoryStore(tmp_path)
+    for index, sender_name in enumerate(
+        [
+            "YDC",
+            "YDC",
+            "焰靛燦「YanDarkCollapser」",
+        ],
+        start=1,
+    ):
+        memory_store.append_message(
+            group_id=1163635014,
+            message_id=f"ydc-{index}",
+            direction="incoming",
+            user_id=273548027,
+            sender_name=sender_name,
+            text=f"YDC 历史消息 {index}",
+            timestamp=index,
+        )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            group_id=1163635014,
+            user_id="605738729",
+            text="你知道YDC是谁吗",
+            sender=FakeSender(user_id=605738729, card="萌泪酱最可爱啦๑", nickname="萌泪"),
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "本次纯文本称呼身份查询证据" in joined
+    assert "查询称呼：YDC" in joined
+    assert "候选用户：焰靛燦「YanDarkCollapser」(273548027)" in joined
+    assert "匹配称呼：YDC" in joined
+    assert "最近 3 条本人消息的昵称使用统计：YDC 2/3 条，占 67%" in joined
+
+
 def test_ai_context_includes_long_term_memory_search_results(tmp_path: Path) -> None:
     memory_store = ChatMemoryStore(tmp_path)
     memory_store.append_message(

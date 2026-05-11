@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from qqbot.services.chat_memory_store import ChatMemoryStore
-from qqbot.services.group_nick_store import normalize_call_name
+from qqbot.services.group_nick_store import GroupNickStore, normalize_call_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +18,14 @@ class NicknameUsageEntry:
 class NicknameUsageSummary:
     sample_size: int
     entries: tuple[NicknameUsageEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class NicknameIdentityCandidate:
+    user_id: str
+    call_name: str
+    matched_names: tuple[str, ...]
+    summary: NicknameUsageSummary
 
 
 class NicknameUsageService:
@@ -58,3 +66,60 @@ class NicknameUsageService:
             )
         )
         return NicknameUsageSummary(sample_size=sample_size, entries=entries)
+
+    def find_identity_candidates(
+        self,
+        *,
+        group_id: int | str,
+        query_name: str,
+        nick_store: GroupNickStore,
+        limit: int = 100,
+        max_candidates: int = 3,
+    ) -> tuple[NicknameIdentityCandidate, ...]:
+        normalized_query = normalize_call_name(query_name)
+        if not normalized_query:
+            return ()
+
+        group_records = nick_store.records.get(str(group_id), {})
+        candidates: list[NicknameIdentityCandidate] = []
+        for user_id, record in group_records.items():
+            if not user_id.isdigit():
+                continue
+            summary = self.summarize(group_id=group_id, user_id=user_id, limit=limit)
+            call_name = nick_store.resolve_call_name(int(group_id), int(user_id))
+            names = [
+                call_name,
+                record.card,
+                record.nickname,
+                *[entry.name for entry in summary.entries],
+            ]
+            matched_names = tuple(
+                dict.fromkeys(
+                    name
+                    for name in (normalize_call_name(item) for item in names)
+                    if name and name == normalized_query
+                )
+            )
+            if not matched_names:
+                continue
+            candidates.append(
+                NicknameIdentityCandidate(
+                    user_id=user_id,
+                    call_name=call_name,
+                    matched_names=matched_names,
+                    summary=summary,
+                )
+            )
+
+        def sort_key(candidate: NicknameIdentityCandidate) -> tuple[int, int, int]:
+            matched_count = next(
+                (
+                    entry.count
+                    for entry in candidate.summary.entries
+                    if entry.name in candidate.matched_names
+                ),
+                0,
+            )
+            return (-matched_count, -candidate.summary.sample_size, int(candidate.user_id))
+
+        return tuple(sorted(candidates, key=sort_key)[:max_candidates])

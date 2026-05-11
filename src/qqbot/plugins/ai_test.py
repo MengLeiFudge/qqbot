@@ -34,7 +34,11 @@ from qqbot.services.memory_retrieval_service import (
     format_evidence_bundle,
     retrieve_memory_evidence,
 )
-from qqbot.services.nickname_usage_service import NicknameUsageService, NicknameUsageSummary
+from qqbot.services.nickname_usage_service import (
+    NicknameIdentityCandidate,
+    NicknameUsageService,
+    NicknameUsageSummary,
+)
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
@@ -506,6 +510,13 @@ def build_ai_context(
     )
     if at_target_context:
         context.append(at_target_context)
+    text_identity_context = build_text_identity_query_context(
+        settings,
+        event,
+        normalized_message,
+    )
+    if text_identity_context:
+        context.append(text_identity_context)
     reply_context = build_reply_context(normalized_message)
     if reply_context:
         context.append(reply_context)
@@ -1153,6 +1164,81 @@ def build_at_target_identity_context(
 def format_at_target_nickname_usage_summary(summary: NicknameUsageSummary) -> str:
     text = format_nickname_usage_summary(summary)
     return text.removeprefix("当前发言者").strip("。")
+
+
+def build_text_identity_query_context(
+    settings: RuntimeSettings,
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+) -> str:
+    group_id = getattr(event, "group_id", None)
+    if group_id is None or not str(group_id).isdigit():
+        return ""
+    if normalized_message.at_user_ids:
+        return ""
+    query_name = extract_text_identity_query_name(
+        normalized_message.text or normalized_message.outline
+    )
+    if not query_name:
+        return ""
+
+    nick_store = GroupNickStore(settings.data_root / "settings" / "group_nick.json")
+    candidates = NicknameUsageService(ChatMemoryStore(settings.data_root)).find_identity_candidates(
+        group_id=group_id,
+        query_name=query_name,
+        nick_store=nick_store,
+        limit=100,
+        max_candidates=3,
+    )
+    if not candidates:
+        return ""
+
+    lines = [
+        "本次纯文本称呼身份查询证据：",
+        f"查询称呼：{normalize_call_name(query_name) or query_name}",
+        "用户没有 @ 目标时，回答身份问题优先依据这里的候选 QQ、匹配称呼和昵称统计；"
+        "如果候选不唯一，需要说明不确定，不要用最近聊天记录里的其他人替代。",
+    ]
+    for candidate in candidates:
+        usage_text = format_text_identity_candidate_usage(candidate)
+        line = (
+            f"- 候选用户：{candidate.call_name}({candidate.user_id})，"
+            f"匹配称呼：{'、'.join(candidate.matched_names)}"
+        )
+        if usage_text:
+            line += f"，{usage_text}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def extract_text_identity_query_name(text: str) -> str:
+    compact = re.sub(r"\s+", "", text.strip())
+    if not compact:
+        return ""
+    for prefix in ("你知道", "你认识", "认识"):
+        if compact.startswith(prefix):
+            compact = compact[len(prefix):]
+            break
+    compact = compact.strip("，,。！？!?.")
+    patterns = (
+        r"^(?P<name>.+?)(?:是谁|是什么|叫什么|是哪位|哪个|哪一个)(?:吗)?$",
+        r"^(?P<name>.+?)(?:你认识吗|认识吗)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, compact)
+        if match is None:
+            continue
+        name = normalize_call_name(match.group("name").strip())
+        if name and name not in {"我", "你", "机器人", "bot", "Bot"}:
+            return name
+    return ""
+
+
+def format_text_identity_candidate_usage(candidate: NicknameIdentityCandidate) -> str:
+    text = format_at_target_nickname_usage_summary(candidate.summary)
+    if text:
+        return text
+    return ""
 
 
 def build_ai_identity_context(
