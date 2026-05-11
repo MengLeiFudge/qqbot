@@ -43,9 +43,11 @@ class FakeGroupEvent:
         sender=None,
         message=None,
         group_id: int = 516286670,
+        self_id: int = 1443944862,
     ) -> None:
         self.group_id = group_id
         self.user_id = user_id
+        self.self_id = self_id
         self.text = text
         self.reply = reply
         self.sender = sender or FakeSender(user_id=int(user_id), card="萌泪", nickname="MLJ")
@@ -905,3 +907,48 @@ def test_ai_context_includes_at_target_nickname_usage_summary(tmp_path: Path) ->
     assert "本次消息 @ 的目标用户身份证据" in joined
     assert "目标用户：鱼子勺(1728704949)" in joined
     assert "最近 3 条本人消息的昵称使用统计：鱼子勺 2/3 条，占 67%；勺子鱼 1/3 条，占 33%" in joined
+
+
+def test_ai_context_limits_identity_query_to_current_at_target(tmp_path: Path) -> None:
+    GroupNickStore(tmp_path / "settings" / "group_nick.json").record_group_sender(
+        group_id=1163635014,
+        qq=605738729,
+        card="萌泪酱最可爱啦๑",
+        nickname="萌泪酱最可爱啦๑",
+        updated_at=1_800_000_000_000,
+    )
+    group_context_store = AiGroupContextStore(tmp_path)
+    group_context_store.append_message(
+        group_id=1163635014,
+        user_id=1728704949,
+        sender_name="୧⍤⃝୨勺子鱼的德军旗队长",
+        text="我也在聊天记录里",
+        timestamp=1,
+    )
+    message = FakeMessage(
+        segments=[
+            FakeSegment("at", {"qq": "1443944862"}),
+            FakeSegment("text", {"text": " 你知道"}),
+            FakeSegment("at", {"qq": "605738729"}),
+            FakeSegment("text", {"text": " 是谁吗"}),
+        ]
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            group_id=1163635014,
+            user_id="2633301937",
+            text="你知道 是谁吗",
+            message=message,
+            self_id=1443944862,
+        ),
+        group_context_store,
+    )
+
+    joined = "\n".join(context)
+    assert "本轮是在询问被 @ 的目标用户身份；本轮身份查询目标只有：605738729。" in joined
+    assert "不要把最近聊天记录里的其他 QQ 号当作本轮问题答案" in joined
+    target_block = joined.split("本次消息 @ 的目标用户身份证据", 1)[1]
+    assert "目标用户：萌泪酱最可爱啦๑(605738729)" in target_block
+    assert "1728704949" not in target_block.split("回答“@某人是谁”时", 1)[0]

@@ -1126,7 +1126,12 @@ def build_at_target_identity_context(
         return ""
 
     nick_store = GroupNickStore(settings.data_root / "settings" / "group_nick.json")
-    lines = ["本次消息 @ 的目标用户身份证据："]
+    lines = [
+        "本次消息 @ 的目标用户身份证据：",
+        "本轮是在询问被 @ 的目标用户身份；"
+        f"本轮身份查询目标只有：{'、'.join(target_ids)}。"
+        "不要把最近聊天记录里的其他 QQ 号当作本轮问题答案。",
+    ]
     for target_id in target_ids:
         call_name = nick_store.resolve_call_name(int(group_id), int(target_id))
         if not call_name or call_name == target_id:
