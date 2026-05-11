@@ -365,6 +365,47 @@ def test_ai_context_includes_current_sender_call_name(tmp_path: Path) -> None:
     assert "不要把其他群友对第三人的称呼纠正当成当前发言者的名字" in joined
 
 
+def test_ai_context_includes_current_sender_nickname_usage_summary(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    for index, sender_name in enumerate(
+        [
+            "୧⍤⃝୨鱼子勺：[聊天记录]",
+            "୧⍤⃝୨鱼子勺：[聊天记录]",
+            "୧⍤⃝୨勺子鱼",
+        ],
+        start=1,
+    ):
+        memory_store.append_message(
+            group_id=1163635014,
+            message_id=f"nickname-{index}",
+            direction="incoming",
+            user_id=1728704949,
+            sender_name=sender_name,
+            text=f"历史消息 {index}",
+            timestamp=index,
+        )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            group_id=1163635014,
+            user_id="1728704949",
+            text="我是谁",
+            sender=FakeSender(
+                user_id=1728704949,
+                card="୧⍤⃝୨鱼子勺：[聊天记录]",
+                nickname="LiAuO₂ ⁧~喵喵喵 ⁦",
+            ),
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "当前发言者最近 3 条本人消息的昵称使用统计" in joined
+    assert "鱼子勺 2/3 条，占 67%" in joined
+    assert "勺子鱼 1/3 条，占 33%" in joined
+
+
 def test_ai_context_includes_long_term_memory_search_results(tmp_path: Path) -> None:
     memory_store = ChatMemoryStore(tmp_path)
     memory_store.append_message(

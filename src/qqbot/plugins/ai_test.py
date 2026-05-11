@@ -26,7 +26,7 @@ from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_pr
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
 from qqbot.services.admin_service import AdminService
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.services.group_nick_store import GroupNickStore
+from qqbot.services.group_nick_store import GroupNickStore, normalize_call_name
 from qqbot.services.message_delivery import COLLAPSIBLE_TEXT_THRESHOLD_CHARS, finish_split_text
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_event
 from qqbot.services.memory_retrieval_service import (
@@ -34,6 +34,7 @@ from qqbot.services.memory_retrieval_service import (
     format_evidence_bundle,
     retrieve_memory_evidence,
 )
+from qqbot.services.nickname_usage_service import NicknameUsageService, NicknameUsageSummary
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
@@ -1048,12 +1049,52 @@ def build_current_sender_call_name_context(
         settings.data_root / "settings" / "group_nick.json"
     ).resolve_call_name(int(group_id), int(user_id))
     if not call_name or call_name == str(user_id):
+        sender = getattr(event, "sender", None)
+        call_name = normalize_call_name(
+            str(getattr(sender, "card", "") or "").strip()
+            or str(getattr(sender, "nickname", "") or "").strip()
+        )
+    if not call_name or call_name == str(user_id):
         return ""
+    usage_context = build_current_sender_nickname_usage_context(
+        settings,
+        group_id=group_id,
+        user_id=user_id,
+    )
     return (
         f"建议称呼当前发言者：{call_name}。"
+        f"{usage_context}"
         "QQ号是区分群成员的稳定身份锚点；群名片相似时不要把不同QQ号的人混为一人。"
         "不要把其他群友对第三人的称呼纠正当成当前发言者的名字，"
         "除非当前发言者本人明确要求你这样称呼自己。"
+    )
+
+
+def build_current_sender_nickname_usage_context(
+    settings: RuntimeSettings,
+    *,
+    group_id: int | str,
+    user_id: int | str,
+) -> str:
+    summary = NicknameUsageService(ChatMemoryStore(settings.data_root)).summarize(
+        group_id=group_id,
+        user_id=user_id,
+        limit=100,
+    )
+    return format_nickname_usage_summary(summary)
+
+
+def format_nickname_usage_summary(summary: NicknameUsageSummary) -> str:
+    if summary.sample_size <= 0 or not summary.entries:
+        return ""
+    fragments = [
+        f"{entry.name} {entry.count}/{summary.sample_size} 条，占 {entry.ratio:.0%}"
+        for entry in summary.entries[:3]
+    ]
+    return (
+        f"当前发言者最近 {summary.sample_size} 条本人消息的昵称使用统计："
+        + "；".join(fragments)
+        + "。"
     )
 
 

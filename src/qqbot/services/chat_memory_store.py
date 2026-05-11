@@ -342,6 +342,40 @@ class ChatMemoryStore:
             ).fetchall()
         return tuple(self._record_from_row(row) for row in rows)
 
+    def load_recent_group_user_messages(
+        self,
+        *,
+        group_id: int | str,
+        user_id: int | str,
+        limit: int = 100,
+    ) -> tuple[ChatMemoryRecord, ...]:
+        normalized_group_id = str(group_id).strip()
+        normalized_user_id = str(user_id).strip()
+        if (
+            not normalized_group_id
+            or not normalized_user_id
+            or limit <= 0
+            or not self.db_path.exists()
+        ):
+            return ()
+        with self._connect() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM messages
+                WHERE group_id = ?
+                  AND user_id = ?
+                  AND direction = 'incoming'
+                  AND visibility = 'group_public'
+                  AND text != ''
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                (normalized_group_id, normalized_user_id, limit),
+            ).fetchall()
+        return tuple(self._record_from_row(row) for row in rows)
+
     def load_recent_actor_messages_across_spaces(
         self,
         *,
