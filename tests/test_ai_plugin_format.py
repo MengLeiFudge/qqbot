@@ -288,7 +288,7 @@ def test_ai_system_context_declares_bot_identity() -> None:
 
 
 def test_ai_style_context_uses_global_rotation_without_overriding_identity(tmp_path: Path) -> None:
-    orchestrator = AiOrchestrator(data_root=tmp_path)
+    orchestrator = AiOrchestrator(data_root=tmp_path, bot_name="萌萌棉花糖♪")
 
     result = asyncio.run(
         orchestrator.handle(
@@ -304,6 +304,8 @@ def test_ai_style_context_uses_global_rotation_without_overriding_identity(tmp_p
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in system_context
     assert "用户问“我是谁”" in system_context
     assert "人格设定：" in style_context
+    assert "你是 QQ 机器人“萌萌棉花糖♪”" in style_context
+    assert "当前采用的人格表现是" in style_context
     assert "回复风格轮换层" not in style_context
     assert "每 8 小时" not in style_context
     assert "4:00" not in style_context

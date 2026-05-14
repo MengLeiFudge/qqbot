@@ -146,6 +146,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
     orchestrator = AiOrchestrator(
         data_root=settings.data_root,
+        bot_name=settings.ai_bot_name,
         action_executor=AiActionExecutor(
             bot=bot,
             data_root=settings.data_root,

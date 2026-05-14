@@ -127,6 +127,7 @@ class AiOrchestrator:
         self,
         *,
         data_root: Path,
+        bot_name: str = "QQBot",
         action_executor: AiActionExecutor | None = None,
         codex_session_runner: Callable[[CodexSessionRequest], Awaitable[CodexTaskResult]] = run_codex_session_turn,
         self_restart_scheduler: Callable[[], object] | None = None,
@@ -139,7 +140,7 @@ class AiOrchestrator:
         self.self_restart_scheduler = self_restart_scheduler
         self.sleep = sleep
         self.task_factory = task_factory or asyncio.create_task
-        self.styles = AiUserStyleStore(self.data_root)
+        self.styles = AiUserStyleStore(self.data_root, bot_name=bot_name)
         self.requirements = AiRequirementStore(self.data_root)
         self.tools = build_default_ai_tool_registry()
 
