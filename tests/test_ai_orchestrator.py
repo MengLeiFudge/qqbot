@@ -13,6 +13,7 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
+from qqbot.services.ai_orchestrator import STYLE_CHANGE_UNAWARE_MESSAGE
 from qqbot.services.codex_task_service import (
     CodexProgressEvent,
     CodexProjectBinding,
@@ -101,7 +102,10 @@ def test_orchestrator_rejects_user_style_preference_update(tmp_path: Path) -> No
     )
 
     assert result.handled is True
-    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert "预设" not in result.text
+    assert "全局随机轮换" not in result.text
+    assert "4:00" not in result.text
     assert orchestrator.styles.get_user_preferences("10001") == ()
     assert "当前用户回复偏好" not in "\n".join(result.extra_context)
 
@@ -125,10 +129,12 @@ def test_orchestrator_rejects_group_style_preference_update(tmp_path: Path) -> N
     )
 
     assert update.handled is True
-    assert update.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert update.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert "预设" not in update.text
+    assert "全局随机轮换" not in update.text
     assert later.handled is False
     joined = "\n".join(later.extra_context)
-    assert "回复风格轮换层：" in joined
+    assert "人格设定：" in joined
     assert "本群回复偏好" not in joined
     assert "不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则" in joined
 
@@ -145,7 +151,8 @@ def test_orchestrator_rejects_user_style_preset_switch(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert "12:00" not in result.text
 
 
 def test_orchestrator_rejects_group_style_preset_switch(tmp_path: Path) -> None:
@@ -160,7 +167,8 @@ def test_orchestrator_rejects_group_style_preset_switch(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert "20:00" not in result.text
 
 
 def test_orchestrator_rejects_group_style_preset_switch_for_admin(tmp_path: Path) -> None:
@@ -175,7 +183,7 @@ def test_orchestrator_rejects_group_style_preset_switch_for_admin(tmp_path: Path
     )
 
     assert result.handled is True
-    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
 
 
 def test_orchestrator_rejects_style_preset_with_extra_preference(tmp_path: Path) -> None:
@@ -190,7 +198,7 @@ def test_orchestrator_rejects_style_preset_with_extra_preference(tmp_path: Path)
     )
 
     assert result.handled is True
-    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
 
 
 def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
@@ -205,14 +213,10 @@ def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert "猫娘风格" in result.text
-    assert "谜语人风格" in result.text
-    assert "傲娇大小姐风格" in result.text
-    assert "御姐风格" in result.text
-    assert "雌小鬼风格" in result.text
-    assert "假如你问我，今天适合做什么？那棉花糖就会告诉你——" in result.text
-    assert "切换时间点：4:00、12:00、20:00" in result.text
-    assert "谜语人风格：旅人，若晨雾尚未散去" in result.text
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert "猫娘风格" not in result.text
+    assert "侦探风格" not in result.text
+    assert "切换时间点" not in result.text
     assert "关键词：" not in result.text
     assert "用法：" not in result.text
     assert "常规风格" not in result.text
@@ -664,7 +668,9 @@ def test_orchestrator_lets_plain_chat_fall_back_after_codex_session_expires(tmp_
     )
 
     assert result.handled is True
-    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert "预设" not in result.text
+    assert "4:00" not in result.text
     assert requests == []
 
 

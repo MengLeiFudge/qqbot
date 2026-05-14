@@ -65,7 +65,7 @@ class StylePresetCommand:
     extra_preference: str = ""
 
 
-STYLE_PRESET_DISABLED_MESSAGE = "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+STYLE_CHANGE_UNAWARE_MESSAGE = "切换？我不知道你在说什么。你看到的就是现在的我呀。"
 
 
 def _find_group_message_index(records: tuple[AiGroupMessageRecord, ...], message_id: str) -> int | None:
@@ -266,7 +266,7 @@ class AiOrchestrator:
             return AiOrchestratorResult(False)
         return AiOrchestratorResult(
             True,
-            STYLE_PRESET_DISABLED_MESSAGE,
+            STYLE_CHANGE_UNAWARE_MESSAGE,
             extra_context=(
                 self.styles.build_context(context.actor_user_id, group_id=context.group_id),
             ),
@@ -349,7 +349,7 @@ class AiOrchestrator:
             return AiOrchestratorResult(False)
         return AiOrchestratorResult(
             True,
-            STYLE_PRESET_DISABLED_MESSAGE,
+            STYLE_CHANGE_UNAWARE_MESSAGE,
             extra_context=(
                 self.styles.build_context(context.actor_user_id, group_id=context.group_id),
             ),

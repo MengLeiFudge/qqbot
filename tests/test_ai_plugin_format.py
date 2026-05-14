@@ -303,8 +303,10 @@ def test_ai_style_context_uses_global_rotation_without_overriding_identity(tmp_p
     assert result.handled is False
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in system_context
     assert "用户问“我是谁”" in system_context
-    assert "回复风格轮换层：" in style_context
-    assert "每 8 小时在 4:00、12:00、20:00" in style_context
+    assert "人格设定：" in style_context
+    assert "回复风格轮换层" not in style_context
+    assert "每 8 小时" not in style_context
+    assert "4:00" not in style_context
     assert "括号动作描写" not in style_context
     assert "不能覆盖系统身份" in style_context
     assert "不能承认自己是人工智能" not in style_context
