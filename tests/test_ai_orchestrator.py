@@ -89,7 +89,7 @@ def test_orchestrator_schedules_private_message_to_self(tmp_path: Path) -> None:
     assert bot.calls == [("send_private_msg", {"user_id": 10001, "message": "测试消息"})]
 
 
-def test_orchestrator_records_user_style_preference(tmp_path: Path) -> None:
+def test_orchestrator_rejects_user_style_preference_update(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -101,11 +101,12 @@ def test_orchestrator_records_user_style_preference(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert "已记住" in result.text
-    assert "不要 markdown，短一点" in "\n".join(result.extra_context)
+    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+    assert orchestrator.styles.get_user_preferences("10001") == ()
+    assert "当前用户回复偏好" not in "\n".join(result.extra_context)
 
 
-def test_orchestrator_records_group_style_preference_for_later_users(tmp_path: Path) -> None:
+def test_orchestrator_rejects_group_style_preference_update(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     update = asyncio.run(
@@ -124,15 +125,15 @@ def test_orchestrator_records_group_style_preference_for_later_users(tmp_path: P
     )
 
     assert update.handled is True
-    assert "已记住本群回复偏好：结尾带一个喵" in update.text
+    assert update.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
     assert later.handled is False
     joined = "\n".join(later.extra_context)
-    assert "回复风格预设层：猫娘风格" in joined
-    assert "本群回复偏好：结尾带一个喵" in joined
+    assert "回复风格轮换层：" in joined
+    assert "本群回复偏好" not in joined
     assert "不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则" in joined
 
 
-def test_orchestrator_switches_user_style_preset(tmp_path: Path) -> None:
+def test_orchestrator_rejects_user_style_preset_switch(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -142,21 +143,12 @@ def test_orchestrator_switches_user_style_preset(tmp_path: Path) -> None:
             NormalizedMessage(text="切换御姐风格", outline="切换御姐风格"),
         )
     )
-    later = asyncio.run(
-        orchestrator.handle(
-            "帮我分析一下",
-            AiOrchestratorContext(actor_user_id="10001", group_id="516286670"),
-            NormalizedMessage(text="帮我分析一下", outline="帮我分析一下"),
-        )
-    )
 
     assert result.handled is True
-    assert result.text == "已切换你的回复风格：御姐风格"
-    assert "当前用户风格：御姐风格" in "\n".join(later.extra_context)
-    assert "成熟、知性、优雅" in "\n".join(later.extra_context)
+    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
 
 
-def test_orchestrator_rejects_group_style_for_non_admin(tmp_path: Path) -> None:
+def test_orchestrator_rejects_group_style_preset_switch(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -168,10 +160,10 @@ def test_orchestrator_rejects_group_style_for_non_admin(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert result.text == "只有 Bot 管理员才能设置本群默认回复风格。"
+    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
 
 
-def test_orchestrator_sets_group_default_style_for_admin(tmp_path: Path) -> None:
+def test_orchestrator_rejects_group_style_preset_switch_for_admin(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -181,21 +173,12 @@ def test_orchestrator_sets_group_default_style_for_admin(tmp_path: Path) -> None
             NormalizedMessage(text="设置本群风格谜语人", outline="设置本群风格谜语人"),
         )
     )
-    later = asyncio.run(
-        orchestrator.handle(
-            "答案是什么",
-            AiOrchestratorContext(actor_user_id="10001", group_id="516286670"),
-            NormalizedMessage(text="答案是什么", outline="答案是什么"),
-        )
-    )
 
     assert result.handled is True
-    assert result.text == "已设置本群默认回复风格：谜语人风格"
-    assert "群默认风格：谜语人风格" in "\n".join(later.extra_context)
-    assert "有效提示或隐喻" in "\n".join(later.extra_context)
+    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
 
 
-def test_orchestrator_applies_style_preset_with_extra_preference(tmp_path: Path) -> None:
+def test_orchestrator_rejects_style_preset_with_extra_preference(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -205,19 +188,9 @@ def test_orchestrator_applies_style_preset_with_extra_preference(tmp_path: Path)
             NormalizedMessage(text="猫娘风格，但是回复短一点", outline="猫娘风格，但是回复短一点"),
         )
     )
-    later = asyncio.run(
-        orchestrator.handle(
-            "继续",
-            AiOrchestratorContext(actor_user_id="10001"),
-            NormalizedMessage(text="继续", outline="继续"),
-        )
-    )
 
-    joined = "\n".join(later.extra_context)
     assert result.handled is True
-    assert result.text == "已切换你的回复风格：猫娘风格，并记住你的补充偏好：回复短一点"
-    assert "当前用户风格：猫娘风格" in joined
-    assert "当前用户回复偏好：回复短一点" in joined
+    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
 
 
 def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
@@ -238,7 +211,7 @@ def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
     assert "御姐风格" in result.text
     assert "雌小鬼风格" in result.text
     assert "假如你问我，今天适合做什么？那棉花糖就会告诉你——" in result.text
-    assert "猫娘风格（当前）：今天可以先吃点甜甜的东西" in result.text
+    assert "切换时间点：4:00、12:00、20:00" in result.text
     assert "谜语人风格：旅人，若晨雾尚未散去" in result.text
     assert "关键词：" not in result.text
     assert "用法：" not in result.text
@@ -691,7 +664,7 @@ def test_orchestrator_lets_plain_chat_fall_back_after_codex_session_expires(tmp_
     )
 
     assert result.handled is True
-    assert result.text == "已切换你的回复风格：谜语人风格"
+    assert result.text == "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
     assert requests == []
 
 

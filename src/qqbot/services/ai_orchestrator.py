@@ -65,6 +65,9 @@ class StylePresetCommand:
     extra_preference: str = ""
 
 
+STYLE_PRESET_DISABLED_MESSAGE = "机器人风格不再接受预设，会在 4:00、12:00、20:00 全局随机轮换。"
+
+
 def _find_group_message_index(records: tuple[AiGroupMessageRecord, ...], message_id: str) -> int | None:
     for index, record in enumerate(records):
         if record.message_id == message_id:
@@ -261,30 +264,9 @@ class AiOrchestrator:
         command = parse_style_preset_command(text)
         if command is None:
             return AiOrchestratorResult(False)
-        if command.scope == "group":
-            if context.group_id is None:
-                return AiOrchestratorResult(True, "设置本群默认回复风格需要在群聊里使用。")
-            if not context.is_admin:
-                return AiOrchestratorResult(True, "只有 Bot 管理员才能设置本群默认回复风格。")
-            preset = self.styles.set_group_preset(context.group_id, command.preset.preset_id)
-            return AiOrchestratorResult(
-                True,
-                f"已设置本群默认回复风格：{preset.display_name}",
-                extra_context=(
-                    self.styles.build_context(context.actor_user_id, group_id=context.group_id),
-                ),
-            )
-
-        preset = self.styles.set_user_preset(context.actor_user_id, command.preset.preset_id)
-        message = f"已切换你的回复风格：{preset.display_name}"
-        if command.extra_preference:
-            preference = command.extra_preference.strip(" ：:，,。")
-            if preference:
-                self.styles.add_user_preference(context.actor_user_id, preference)
-                message += f"，并记住你的补充偏好：{preference}"
         return AiOrchestratorResult(
             True,
-            message,
+            STYLE_PRESET_DISABLED_MESSAGE,
             extra_context=(
                 self.styles.build_context(context.actor_user_id, group_id=context.group_id),
             ),
@@ -365,20 +347,12 @@ class AiOrchestrator:
         preference = extract_style_preference(text)
         if not preference:
             return AiOrchestratorResult(False)
-        if context.group_id is not None:
-            self.styles.add_group_preference(context.group_id, preference)
-            return AiOrchestratorResult(
-                True,
-                f"已记住本群回复偏好：{preference}",
-                extra_context=(
-                    self.styles.build_context(context.actor_user_id, group_id=context.group_id),
-                ),
-            )
-        self.styles.add_user_preference(context.actor_user_id, preference)
         return AiOrchestratorResult(
             True,
-            f"已记住你的回复偏好：{preference}",
-            extra_context=(self.styles.build_context(context.actor_user_id),),
+            STYLE_PRESET_DISABLED_MESSAGE,
+            extra_context=(
+                self.styles.build_context(context.actor_user_id, group_id=context.group_id),
+            ),
         )
 
     def _try_create_requirement(

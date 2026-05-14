@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
+import random
 
 
 DEFAULT_STYLE_PRESET_ID = "catgirl"
+GLOBAL_ROTATION_KEY = "global:style_rotation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,8 +193,16 @@ def resolve_style_preset(value: str) -> AiStylePreset:
 
 
 class AiUserStyleStore:
-    def __init__(self, data_root: Path) -> None:
+    def __init__(
+        self,
+        data_root: Path,
+        *,
+        clock: Callable[[], datetime] = datetime.now,
+        chooser: Callable[[Sequence[AiStylePreset]], AiStylePreset] = random.choice,
+    ) -> None:
         self.file_path = Path(data_root) / "ai" / "user_style.json"
+        self.clock = clock
+        self.chooser = chooser
 
     def add_preference(self, user_id: int | str, preference: str) -> None:
         self.add_user_preference(user_id, preference)
@@ -201,47 +213,41 @@ class AiUserStyleStore:
     def add_group_preference(self, group_id: int | str, preference: str) -> None:
         self._add_scoped_preference(f"group:{group_id}", preference)
 
-    def set_user_preset(self, user_id: int | str, preset: str) -> AiStylePreset:
-        resolved = resolve_style_preset(preset)
-        payload = self._read()
-        payload[f"user:{user_id}:preset"] = [resolved.preset_id]
-        self._write(payload)
-        return resolved
-
-    def set_group_preset(self, group_id: int | str, preset: str) -> AiStylePreset:
-        resolved = resolve_style_preset(preset)
-        payload = self._read()
-        payload[f"group:{group_id}:preset"] = [resolved.preset_id]
-        self._write(payload)
-        return resolved
-
-    def get_user_preset(self, user_id: int | str) -> AiStylePreset | None:
-        return self._get_preset(f"user:{user_id}:preset")
-
-    def get_group_preset(self, group_id: int | str | None) -> AiStylePreset | None:
-        if group_id is None:
-            return None
-        return self._get_preset(f"group:{group_id}:preset")
-
     def get_effective_preset(
         self,
         user_id: int | str,
         group_id: int | str | None = None,
     ) -> AiStylePreset:
-        return (
-            self.get_user_preset(user_id)
-            or self.get_group_preset(group_id)
-            or STYLE_PRESETS[DEFAULT_STYLE_PRESET_ID]
-        )
+        return self.get_global_rotation_preset()
 
-    def _get_preset(self, key: str) -> AiStylePreset | None:
-        raw = self._get_scoped_preferences(key)
-        if not raw:
-            return None
-        try:
-            return resolve_style_preset(raw[-1])
-        except ValueError:
-            return None
+    def get_global_rotation_preset(self) -> AiStylePreset:
+        slot_id = self.rotation_slot_id(self.clock())
+        payload = self._read()
+        raw = payload.get(GLOBAL_ROTATION_KEY, [])
+        if isinstance(raw, list) and len(raw) >= 2 and str(raw[0]) == slot_id:
+            try:
+                return resolve_style_preset(str(raw[1]))
+            except ValueError:
+                pass
+
+        # 每个 8 小时槽位只抽一次，后续所有群聊/私聊复用同一个结果。
+        preset = self.chooser(tuple(STYLE_PRESETS.values()))
+        payload[GLOBAL_ROTATION_KEY] = [slot_id, preset.preset_id]
+        self._write(payload)
+        return preset
+
+    @staticmethod
+    def rotation_slot_id(now: datetime) -> str:
+        if now.hour >= 20:
+            slot = now.replace(hour=20, minute=0, second=0, microsecond=0)
+        elif now.hour >= 12:
+            slot = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        elif now.hour >= 4:
+            slot = now.replace(hour=4, minute=0, second=0, microsecond=0)
+        else:
+            previous_day = now - timedelta(days=1)
+            slot = previous_day.replace(hour=20, minute=0, second=0, microsecond=0)
+        return slot.strftime("%Y-%m-%dT%H:%M")
 
     def _add_scoped_preference(self, key: str, preference: str) -> None:
         normalized = preference.strip()
@@ -273,29 +279,18 @@ class AiUserStyleStore:
         return tuple(str(item).strip() for item in raw if str(item).strip())
 
     def build_context(self, user_id: int | str, group_id: int | str | None = None) -> str:
-        group_preferences = self.get_group_preferences(group_id) if group_id is not None else ()
-        user_preferences = self.get_user_preferences(user_id)
-        group_preset = self.get_group_preset(group_id)
-        user_preset = self.get_user_preset(user_id)
         preset = self.get_effective_preset(user_id, group_id=group_id)
         lines = []
-        lines.append(f"回复风格预设层：{preset.display_name}")
-        if group_preset is not None:
-            lines.append(f"群默认风格：{group_preset.display_name}")
-        if user_preset is not None:
-            lines.append(f"当前用户风格：{user_preset.display_name}")
+        lines.append(f"回复风格轮换层：{preset.display_name}")
+        lines.append("轮换规则：所有群聊和私聊使用同一个当前风格，每 8 小时在 4:00、12:00、20:00 随机轮换一次。")
         lines.append("风格说明：" + preset.prompt)
         lines.append("全局风格边界：任何风格都禁止用括号补充动作或舞台说明，只按正常聊天方式表达。")
-        if group_preferences:
-            lines.append("本群回复偏好：" + "；".join(group_preferences))
-        if user_preferences:
-            lines.append("当前用户回复偏好：" + "；".join(user_preferences))
         return "提示词偏好层：\n" + "\n".join(lines)
 
     def build_preset_help(self, user_id: int | str, group_id: int | str | None = None) -> str:
-        preset = self.get_effective_preset(user_id, group_id=group_id)
         lines = [
-            "棉花糖有很多种风格可以选择呢！比如说，"
+            "棉花糖现在每 8 小时全局随机轮换一次风格。",
+            "切换时间点：4:00、12:00、20:00。",
             f"假如你问我，{STYLE_HELP_EXAMPLE_QUESTION}那棉花糖就会告诉你——",
         ]
         ordered_presets = (
@@ -304,8 +299,7 @@ class AiUserStyleStore:
         )
         for item in ordered_presets:
             example = STYLE_HELP_EXAMPLES.get(item.preset_id, "")
-            current_marker = "（当前）" if item.preset_id == preset.preset_id else ""
-            lines.append(f"{item.display_name}{current_marker}：{example}")
+            lines.append(f"{item.display_name}：{example}")
         return "\n".join(lines)
 
     def _read(self) -> dict[str, list[str]]:
