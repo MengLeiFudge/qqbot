@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import threading
+import time
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +130,38 @@ def test_arc_background_service_checks_version_on_schedule_without_private_messa
 
     assert bot.calls == []
     assert service.state.version_last_seen == "6.14.0c"
+
+
+def test_arc_background_service_version_check_does_not_block_event_loop(tmp_path: Path) -> None:
+    import asyncio
+
+    async def run() -> None:
+        started = asyncio.Event()
+        release = threading.Event()
+
+        def blocking_version_fetcher() -> str:
+            loop.call_soon_threadsafe(started.set)
+            while not release.is_set():
+                time.sleep(0.01)
+            return "6.13.10c"
+
+        loop = asyncio.get_running_loop()
+        service = _service(
+            tmp_path,
+            version_fetcher=blocking_version_fetcher,
+            event_service=FakeEventService(),
+        )
+        bot = FakeBot()
+        now = datetime(2026, 4, 23, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+
+        task = asyncio.create_task(service.check_version_and_notify(bot, now=now))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(asyncio.sleep(0), timeout=1)
+
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+
+    asyncio.run(run())
 
 
 def test_arc_background_service_syncs_alias_cache_on_first_run_and_after_24h_gap(tmp_path: Path) -> None:

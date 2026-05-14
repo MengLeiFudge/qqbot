@@ -105,7 +105,7 @@ class ArcBackgroundService:
 
     async def check_version_and_notify(self, bot, now: datetime | None = None) -> None:
         current = self._coerce_now(now)
-        latest_version = self.version_fetcher()
+        latest_version = await asyncio.to_thread(self.version_fetcher)
         self.state.version_last_checked_at = current.isoformat()
         self.state.version_last_seen = latest_version
         self._save()
