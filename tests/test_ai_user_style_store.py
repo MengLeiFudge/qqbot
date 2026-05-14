@@ -138,17 +138,23 @@ def test_style_store_default_pool_is_distinct_female_roles() -> None:
         "butler",
         "detective",
     )
+    joined_prompts = "\n".join(preset.prompt for preset in STYLE_PRESETS.values())
+    assert "喵呜" not in joined_prompts
+    assert "橘雪莉" not in joined_prompts
 
 
-def test_style_store_resolves_preset_aliases() -> None:
+def test_style_store_resolves_only_internal_preset_names() -> None:
+    assert resolve_style_preset("catgirl").preset_id == "catgirl"
     assert resolve_style_preset("猫娘风格").preset_id == "catgirl"
-    assert resolve_style_preset("谜语人").preset_id == "oracle"
-    assert resolve_style_preset("大小姐").preset_id == "tsundere"
-    assert resolve_style_preset("御姐").preset_id == "onee"
-    assert resolve_style_preset("中二").preset_id == "chuunibyou"
-    assert resolve_style_preset("管家").preset_id == "butler"
-    assert resolve_style_preset("侦探").preset_id == "detective"
-    assert resolve_style_preset("橘雪莉风").preset_id == "detective"
+    assert resolve_style_preset("detective").preset_id == "detective"
+    assert resolve_style_preset("侦探风格").preset_id == "detective"
+
+    for visible_alias in ("侦探", "少女侦探", "橘雪莉风", "御姐", "管家", "谜语人"):
+        try:
+            resolve_style_preset(visible_alias)
+        except ValueError:
+            continue
+        raise AssertionError(f"不应支持用户可见人格别名：{visible_alias}")
 
 
 def test_style_context_sanitizes_unsafe_role_boundaries(tmp_path: Path) -> None:

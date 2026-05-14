@@ -155,6 +155,22 @@ def test_orchestrator_rejects_user_style_preset_switch(tmp_path: Path) -> None:
     assert "12:00" not in result.text
 
 
+def test_orchestrator_rejects_unknown_style_switch_without_alias_resolution(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "切换侦探风格",
+            AiOrchestratorContext(actor_user_id="10001", group_id="516286670"),
+            NormalizedMessage(text="切换侦探风格", outline="切换侦探风格"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert "侦探风格" not in result.text
+
+
 def test_orchestrator_rejects_group_style_preset_switch(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 

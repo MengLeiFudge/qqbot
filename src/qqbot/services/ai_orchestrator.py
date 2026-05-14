@@ -12,7 +12,7 @@ from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.ai_requirement_store import AiRequirementStore
 from qqbot.services.ai_tool_registry import AiToolContext, build_default_ai_tool_registry
-from qqbot.services.ai_user_style_store import AiStylePreset, AiUserStyleStore, resolve_style_preset
+from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
 from qqbot.services.codex_task_service import (
     CodexProgressEvent,
@@ -60,7 +60,6 @@ class AiOrchestratorResult:
 
 @dataclass(frozen=True, slots=True)
 class StylePresetCommand:
-    preset: AiStylePreset
     scope: str
     extra_preference: str = ""
 
@@ -111,12 +110,9 @@ def parse_style_preset_command(text: str) -> StylePresetCommand | None:
     parts = re.split(r"(?:，|,|。|\s)+(?:但是|但|不过|并且|而且)", cleaned, maxsplit=1)
     style_part = parts[0].strip(" ：:，,。")
     extra_preference = parts[1].strip(" ：:，,。") if len(parts) > 1 else ""
-    style_part = re.sub(r"(回复|说话|回答)?(风格|模式|口吻|人格)$", "", style_part).strip()
-    try:
-        preset = resolve_style_preset(style_part)
-    except ValueError:
+    if not style_part:
         return None
-    return StylePresetCommand(preset=preset, scope=scope, extra_preference=extra_preference)
+    return StylePresetCommand(scope=scope, extra_preference=extra_preference)
 
 
 def summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
