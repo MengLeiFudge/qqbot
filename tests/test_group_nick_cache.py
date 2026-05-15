@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import json
@@ -11,6 +12,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.plugins.group_nick_cache import (
+    handle_group_nick_cache_event,
     record_group_chat_memory,
     record_group_message_context,
     record_group_message_log,
@@ -186,3 +188,23 @@ def test_record_group_chat_memory_persists_normalized_incoming_message(tmp_path:
     assert records[0].text == "[@605738729] 讨论 shapez 数据库 [图片]"
     assert records[0].has_at is True
     assert records[0].has_image is True
+
+
+def test_handle_group_nick_cache_event_runs_blocking_writes_in_thread(monkeypatch) -> None:
+    event = FakeGroupMessageEvent(
+        group_id=516286670,
+        sender=FakeSender(card="萌泪", nickname="MLJ"),
+        time=1_800_000_000,
+        user_id=605738729,
+    )
+    calls: list[object] = []
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls.append((func, args, kwargs))
+        return "ok"
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+    asyncio.run(handle_group_nick_cache_event(event))
+
+    assert len(calls) == 1

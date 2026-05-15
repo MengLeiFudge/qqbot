@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import PrivateMessageEvent
 
@@ -37,11 +39,20 @@ def record_private_chat_memory(event: PrivateMessageEvent, store: ChatMemoryStor
     )
 
 
-@private_memory_cache_matcher.handle()
-async def handle_private_memory_cache(event: PrivateMessageEvent) -> None:
-    if not isinstance(event, PrivateMessageEvent):
-        return
+def record_private_memory_cache_event(event: PrivateMessageEvent) -> None:
     try:
         record_private_chat_memory(event, ChatMemoryStore(load_settings().data_root))
     except Exception:
         pass
+
+
+async def handle_private_memory_cache_event(event: PrivateMessageEvent) -> None:
+    # 私聊长期记忆写入 SQLite；放到线程池，避免影响命令和管理端响应。
+    await asyncio.to_thread(record_private_memory_cache_event, event)
+
+
+@private_memory_cache_matcher.handle()
+async def handle_private_memory_cache(event: PrivateMessageEvent) -> None:
+    if not isinstance(event, PrivateMessageEvent):
+        return
+    await handle_private_memory_cache_event(event)

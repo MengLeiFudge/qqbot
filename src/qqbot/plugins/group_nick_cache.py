@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import GroupMessageEvent
 
@@ -88,10 +90,7 @@ def record_group_chat_memory(event: GroupMessageEvent, store: ChatMemoryStore) -
     )
 
 
-@group_nick_cache_matcher.handle()
-async def handle_group_nick_cache(event: GroupMessageEvent) -> None:
-    if not isinstance(event, GroupMessageEvent):
-        return
+def record_group_cache_event(event: GroupMessageEvent) -> None:
     settings = load_settings()
     record_group_nick_event(event, get_group_nick_store())
     record_group_message_context(
@@ -109,3 +108,15 @@ async def handle_group_nick_cache(event: GroupMessageEvent) -> None:
         )
     except Exception:
         pass
+
+
+async def handle_group_nick_cache_event(event: GroupMessageEvent) -> None:
+    # 群聊记录会写 JSON 和 SQLite；放到线程池，避免积压消息堵住 NoneBot 事件循环。
+    await asyncio.to_thread(record_group_cache_event, event)
+
+
+@group_nick_cache_matcher.handle()
+async def handle_group_nick_cache(event: GroupMessageEvent) -> None:
+    if not isinstance(event, GroupMessageEvent):
+        return
+    await handle_group_nick_cache_event(event)

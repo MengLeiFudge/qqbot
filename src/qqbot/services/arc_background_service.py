@@ -58,7 +58,7 @@ class ArcBackgroundService:
         current = self._coerce_now(now)
         if self.should_run_alias_sync(current):
             try:
-                self.alias_service.sync_alias_cache(now=current)
+                await asyncio.to_thread(self.alias_service.sync_alias_cache, now=current)
                 self.state.alias_last_synced_at = current.isoformat()
                 self._save()
             except Exception:
@@ -66,8 +66,10 @@ class ArcBackgroundService:
         if self.should_run_constants_sync(current):
             try:
                 if self.constant_service is not None and self.constant_song_loader is not None:
-                    self.constant_service.sync_missing_constants(
-                        songs=self.constant_song_loader(),
+                    songs = await asyncio.to_thread(self.constant_song_loader)
+                    await asyncio.to_thread(
+                        self.constant_service.sync_missing_constants,
+                        songs=songs,
                         now=current,
                     )
                     self.state.constants_last_synced_at = current.isoformat()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -96,7 +97,8 @@ def install_onebot_group_message_throttle() -> None:
         if group_id is not None:
             # 管理端消息流是旁路记录，不能影响真实群消息发送结果。
             try:
-                record_bot_group_message(
+                await asyncio.to_thread(
+                    record_bot_group_message,
                     store=get_group_message_log_store(),
                     memory_store=get_chat_memory_store(),
                     group_id=group_id,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from html import escape
 from pathlib import Path
@@ -20,6 +21,7 @@ from qqbot.services.fe_artifact_publish_service import (
 )
 
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+ONEBOT_GROUP_LIST_TIMEOUT_SECONDS = 2.0
 
 
 class FeatureToggleRequest(BaseModel):
@@ -1339,7 +1341,9 @@ def _resolve_fe_artifact_to_publish(
     return artifacts[0]
 
 
-async def get_connected_group_names() -> dict[int, str]:
+async def get_connected_group_names(
+    timeout_seconds: float = ONEBOT_GROUP_LIST_TIMEOUT_SECONDS,
+) -> dict[int, str]:
     names: dict[int, str] = {}
     try:
         bots = nonebot.get_bots().values()
@@ -1348,7 +1352,10 @@ async def get_connected_group_names() -> dict[int, str]:
 
     for bot in bots:
         try:
-            groups = await bot.call_api("get_group_list")
+            groups = await asyncio.wait_for(
+                bot.call_api("get_group_list"),
+                timeout=max(0.01, timeout_seconds),
+            )
         except Exception:
             continue
         for group in groups:

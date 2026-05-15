@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import sys
@@ -9,7 +10,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qqbot.plugins.private_memory_cache import record_private_chat_memory
+from qqbot.plugins.private_memory_cache import handle_private_memory_cache_event, record_private_chat_memory
 from qqbot.services.chat_memory_store import ChatMemoryStore
 
 
@@ -98,3 +99,22 @@ def test_record_private_chat_memory_uses_unique_message_guard(tmp_path: Path) ->
         limit=5,
     )
     assert len(records) == 1
+
+
+def test_handle_private_memory_cache_event_runs_blocking_write_in_thread(monkeypatch) -> None:
+    event = FakePrivateMessageEvent(
+        user_id=605738729,
+        time=1_800_000_000,
+        text="私聊记录",
+    )
+    calls: list[object] = []
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls.append((func, args, kwargs))
+        return "ok"
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+    asyncio.run(handle_private_memory_cache_event(event))
+
+    assert len(calls) == 1

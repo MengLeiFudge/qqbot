@@ -10,7 +10,7 @@ if str(SRC) not in sys.path:
 
 from fastapi import FastAPI
 
-from qqbot.admin_api import register_admin_routes
+from qqbot.admin_api import get_connected_group_names, register_admin_routes
 from qqbot.config import RuntimeSettings
 import qqbot.services.admin_service as admin_service_module
 from qqbot.services.admin_service import AdminService
@@ -40,6 +40,12 @@ class FakeUploadBot:
         if api == "upload_group_file":
             return {"message_id": 24680}
         return {"status": "ok"}
+
+
+class FakeSlowGroupListBot:
+    async def call_api(self, api: str, **data: object) -> list[dict[str, object]]:
+        await asyncio.sleep(1)
+        return [{"group_id": 516286670, "group_name": "测试群"}]
 
 
 def build_app(tmp_path: Path) -> FastAPI:
@@ -204,6 +210,17 @@ def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
     payload = json.loads(body)[0]
     assert payload["group_id"] == 516286670
     assert payload["display_name"] == "测试群（516286670）"
+
+
+def test_get_connected_group_names_skips_slow_onebot_api(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "qqbot.admin_api.nonebot.get_bots",
+        lambda: {"114514": FakeSlowGroupListBot()},
+    )
+
+    names = asyncio.run(get_connected_group_names(timeout_seconds=0.01))
+
+    assert names == {}
 
 
 def test_group_messages_api_returns_grouped_realtime_messages(tmp_path: Path) -> None:
