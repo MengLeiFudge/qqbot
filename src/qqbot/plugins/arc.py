@@ -24,6 +24,7 @@ from qqbot.services.async_tools import run_blocking
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.message_delivery import finish_split_text, send_split_text
+from qqbot.services.offline_message_gate import is_before_onebot_connect
 from qqbot.services.settings_store import get_settings_store
 
 arc_recommend_matcher = on_regex(
@@ -222,6 +223,8 @@ def is_arc_guess_control_command(text: str) -> bool:
 async def has_active_arc_art_session(event: MessageEvent) -> bool:
     if not isinstance(event, GroupMessageEvent):
         return False
+    if is_before_onebot_connect(getattr(event, "time", None)):
+        return False
     text = event.get_plaintext().strip()
     if text.startswith("猜"):
         return False
@@ -239,6 +242,8 @@ async def has_active_arc_art_session(event: MessageEvent) -> bool:
 
 async def has_active_arc_guess_mode(event: MessageEvent, mode: str) -> bool:
     if not isinstance(event, GroupMessageEvent):
+        return False
+    if is_before_onebot_connect(getattr(event, "time", None)):
         return False
     if not await ensure_arc_enabled(event):
         return False

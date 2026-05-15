@@ -8,6 +8,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent
 
 from qqbot.services.command_guard import direct_command_rule, is_likely_command
 from qqbot.services.feature_catalog import get_feature_by_menu_key
+from qqbot.services.offline_message_gate import is_before_onebot_connect
 from qqbot.services.reread_service import (
     clamp_reread_percent,
     format_reread_chance,
@@ -48,6 +49,9 @@ async def handle_reread_setting(event: GroupMessageEvent) -> None:
 
 @reread_message_matcher.handle()
 async def handle_reread_message(event: GroupMessageEvent) -> None:
+    if is_before_onebot_connect(getattr(event, "time", None)):
+        return
+
     feature = get_reread_feature()
     if feature is None:
         return

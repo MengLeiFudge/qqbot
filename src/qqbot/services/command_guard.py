@@ -4,6 +4,8 @@ import re
 
 from nonebot.rule import Rule
 
+from qqbot.services.offline_message_gate import is_before_onebot_connect
+
 
 COMMAND_PATTERNS = [
     r"^(菜单|帮助|指令)$",
@@ -30,6 +32,9 @@ def is_likely_command(text: str) -> bool:
 
 
 def is_direct_command_event(event) -> bool:
+    if is_before_onebot_connect(getattr(event, "time", None)):
+        return False
+
     message_type = getattr(event, "message_type", "")
     if message_type != "group" and not hasattr(event, "group_id"):
         return True

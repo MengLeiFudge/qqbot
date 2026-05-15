@@ -6,6 +6,7 @@ from nonebot.params import CommandArg
 
 from qqbot.config import load_settings
 from qqbot.services.message_delivery import finish_split_text
+from qqbot.services.offline_message_gate import is_before_onebot_connect
 from qqbot.services.status import build_status_lines
 
 ping = on_command("ping", priority=10, block=True)
@@ -14,12 +15,16 @@ status = on_command("status", priority=10, block=True)
 
 
 @ping.handle()
-async def handle_ping() -> None:
+async def handle_ping(event: MessageEvent) -> None:
+    if is_before_onebot_connect(getattr(event, "time", None)):
+        return
     await ping.finish("pong")
 
 
 @echo.handle()
 async def handle_echo(event: MessageEvent, args: Message = CommandArg()) -> None:
+    if is_before_onebot_connect(getattr(event, "time", None)):
+        return
     text = args.extract_plain_text().strip()
     if not text:
         await echo.finish("用法：/echo 你想让我复述的内容")
@@ -28,6 +33,8 @@ async def handle_echo(event: MessageEvent, args: Message = CommandArg()) -> None
 
 @status.handle()
 async def handle_status(event: MessageEvent) -> None:
+    if is_before_onebot_connect(getattr(event, "time", None)):
+        return
     settings = load_settings()
     lines = build_status_lines(settings)
     lines.append(f"Last Trigger User: {event.get_user_id()}")

@@ -139,8 +139,9 @@ def test_arc_guess_answer_matchers_require_enabled_active_session(monkeypatch) -
     class FakeGroupEvent:
         group_id = 516286670
 
-        def __init__(self, text: str) -> None:
+        def __init__(self, text: str, event_time: int = 10) -> None:
             self.text = text
+            self.time = event_time
 
         def get_plaintext(self) -> str:
             return self.text
@@ -165,6 +166,12 @@ def test_arc_guess_answer_matchers_require_enabled_active_session(monkeypatch) -
     assert asyncio.run(arc.has_active_arc_letter_session(FakeGroupEvent("814是房租吗"))) is False
 
     monkeypatch.setattr(arc, "ensure_arc_enabled", enabled)
+    monkeypatch.setattr(arc, "is_before_onebot_connect", lambda event_time: event_time == 9)
+    assert asyncio.run(arc.has_active_arc_letter_session(FakeGroupEvent("814是房租吗", event_time=9))) is False
+    assert asyncio.run(arc.has_active_arc_letter_answer(FakeGroupEvent("10骨折光", event_time=9))) is False
+    assert asyncio.run(arc.has_active_arc_art_game(FakeGroupEvent("猜 arcahv", event_time=9))) is False
+
+    monkeypatch.setattr(arc, "is_before_onebot_connect", lambda event_time: False)
     assert asyncio.run(arc.has_active_arc_letter_session(FakeGroupEvent("814是房租吗"))) is True
     assert asyncio.run(arc.has_active_arc_letter_answer(FakeGroupEvent("10 We're all gonna die"))) is True
     assert asyncio.run(arc.has_active_arc_letter_answer(FakeGroupEvent(" 10 We're all gonna die "))) is True
@@ -199,6 +206,7 @@ class FakeBot:
 
 class FakeThunderEvent:
     group_id = 2333
+    time = 10
 
     def get_user_id(self) -> str:
         return "744306344"
@@ -269,6 +277,33 @@ def test_thunder_announcement_uses_at_message_segment(monkeypatch) -> None:
     assert isinstance(sent_messages[0], Message)
     assert [segment.type for segment in sent_messages[0]] == ["at", "text"]
     assert sent_messages[0][0].data["qq"] == "744306344"
+
+
+def test_thunder_skips_old_group_message(monkeypatch) -> None:
+    sent_messages: list[object] = []
+
+    class SuccessfulBanBot(FakeBot):
+        async def call_api(self, api: str, **data: object) -> dict[str, object]:
+            self.calls.append((api, data))
+            return {"status": "ok", "retcode": 0}
+
+    class OldThunderEvent(FakeThunderEvent):
+        time = 9
+
+    async def fake_send(message: object) -> None:
+        sent_messages.append(message)
+
+    monkeypatch.setattr(thunder, "is_before_onebot_connect", lambda event_time: event_time == 9)
+    monkeypatch.setattr(thunder, "get_settings_store", lambda: FakeThunderStore())
+    monkeypatch.setattr(thunder.random, "random", lambda: 0.0)
+    monkeypatch.setattr(thunder.random, "randint", lambda _a, _b: 10)
+    monkeypatch.setattr(thunder.thunder_message_matcher, "send", fake_send)
+    bot = SuccessfulBanBot("114514")
+
+    asyncio.run(thunder.handle_thunder_message(bot, OldThunderEvent()))
+
+    assert bot.calls == []
+    assert sent_messages == []
 
 
 def test_social_group_poke_uses_group_poke_api(monkeypatch) -> None:

@@ -22,9 +22,12 @@ class FakeEvent:
         *,
         group_id: str | None = None,
         to_me: bool = False,
+        event_time: int | None = None,
     ) -> None:
         self.message_type = message_type
         self.user_id = user_id
+        if event_time is not None:
+            self.time = event_time
         if group_id is not None:
             self.group_id = group_id
         self._to_me = to_me
@@ -99,6 +102,30 @@ def test_group_draw_model_help_enters_ai_chat_without_direct_at() -> None:
         )
         is True
     )
+
+
+def test_old_group_messages_do_not_enter_ai_chat(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "qqbot.services.ai_command.is_before_onebot_connect",
+        lambda event_time: event_time == 9,
+    )
+
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=True, event_time=9),
+            "你好",
+        )
+        is False
+    )
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=False, event_time=9),
+            "棉花糖生图 卡拉比丘联动原神的宣传图",
+        )
+        is False
+    )
+    assert should_handle_ai_chat(FakeEvent("private", "10001", event_time=9), "你好") is False
+    assert should_handle_ai_chat(FakeEvent("private", "10001", event_time=10), "你好") is True
 
 
 def test_parse_ai_model_command_lists_or_switches_profile() -> None:

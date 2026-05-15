@@ -5,6 +5,7 @@ import re
 
 from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.command_guard import is_direct_command_event, is_likely_command
+from qqbot.services.offline_message_gate import is_before_onebot_connect
 from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
@@ -20,6 +21,8 @@ class AiModelCommand:
 def should_handle_ai_chat(event, text: str) -> bool:
     prompt = text.strip()
     if not prompt:
+        return False
+    if is_before_onebot_connect(getattr(event, "time", None)):
         return False
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         if prompt.startswith("/"):

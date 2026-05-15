@@ -24,11 +24,14 @@ class FakeEvent:
         *,
         self_id: str = "114514",
         message=None,
+        event_time=None,
     ) -> None:
         self.message_type = message_type
         self.to_me = to_me
         self.self_id = self_id
         self.message = message
+        if event_time is not None:
+            self.time = event_time
 
     def is_tome(self) -> bool:
         return self.to_me
@@ -109,3 +112,15 @@ def test_group_direct_at_rejects_nonblank_text_before_at() -> None:
     )
 
     assert is_direct_command_event(event) is False
+
+
+def test_old_group_direct_command_is_rejected(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "qqbot.services.command_guard.is_before_onebot_connect",
+        lambda event_time: event_time == 9,
+    )
+
+    assert is_direct_command_event(FakeEvent("group", to_me=True, event_time=9)) is False
+    assert is_direct_command_event(FakeEvent("group", to_me=True, event_time=10)) is True
+    assert is_direct_command_event(FakeEvent("private", to_me=False, event_time=9)) is False
+    assert is_direct_command_event(FakeEvent("private", to_me=False, event_time=10)) is True

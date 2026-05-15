@@ -19,8 +19,10 @@ from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.memory_maintenance_service import MemoryMaintenanceService
 from qqbot.services.memory_vector_store import MemoryVectorStore
+from qqbot.services.offline_message_gate import mark_onebot_connected
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.settings_store import get_settings_store
+from qqbot.plugins.private_memory_cache import reset_offline_private_ai_replay_state
 
 driver = get_driver()
 _ARC_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
@@ -74,7 +76,9 @@ async def log_startup() -> None:
 
 @driver.on_bot_connect
 async def log_bot_connect(bot: Bot) -> None:
-    logger.success("OneBot bot connected: {}", bot.self_id)
+    connected_at = mark_onebot_connected()
+    reset_offline_private_ai_replay_state()
+    logger.success("OneBot bot connected: {}, connected_at={}", bot.self_id, connected_at)
     settings = load_settings()
     try:
         await publish_pending_codex_self_update_notices(bot, settings.data_root)

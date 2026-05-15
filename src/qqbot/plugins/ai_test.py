@@ -40,6 +40,7 @@ from qqbot.services.nickname_usage_service import (
     NicknameUsageSummary,
 )
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
+from qqbot.services.offline_message_gate import is_before_onebot_connect
 from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
@@ -101,6 +102,15 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     message_id = getattr(event, "message_id", None)
     group_id = getattr(event, "group_id", None)
     user_id = event.get_user_id()
+    if group_id is not None and is_before_onebot_connect(event_time):
+        logger.info(
+            "Skip old group AI message: user_id={}, group_id={}, message_id={}, event_time={}",
+            user_id,
+            group_id,
+            message_id,
+            event_time,
+        )
+        return
     if event_time is not None:
         logger.info(
             "AI message received: user_id={}, group_id={}, message_id={}, event_time={}, receive_lag={:.3f}s",

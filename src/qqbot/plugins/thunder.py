@@ -7,6 +7,7 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, Message
 
 from qqbot.services.command_guard import direct_command_rule, is_likely_command
 from qqbot.services.feature_catalog import get_feature_by_menu_key
+from qqbot.services.offline_message_gate import is_before_onebot_connect
 from qqbot.services.settings_store import get_settings_store
 from qqbot.services.thunder_service import parse_thunder_command
 
@@ -48,6 +49,9 @@ async def handle_thunder_setting(event: GroupMessageEvent) -> None:
 
 @thunder_message_matcher.handle()
 async def handle_thunder_message(bot: Bot, event: GroupMessageEvent) -> None:
+    if is_before_onebot_connect(getattr(event, "time", None)):
+        return
+
     feature = get_thunder_feature()
     if feature is None:
         return
