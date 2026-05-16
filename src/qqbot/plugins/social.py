@@ -30,12 +30,6 @@ group_increase_matcher = on_notice(priority=1, block=False)
 BOT_GROUP_INTRO_MESSAGE = (
     "我是萌萌棉花糖♪，以后会在这里陪大家聊天的喵！\n"
     "\n"
-    "你可以这样问我：\n"
-    "“@萌萌棉花糖♪ 你现在有哪些风格？”\n"
-    "“@萌萌棉花糖♪ 菜单”\n"
-    "“@萌萌棉花糖♪ 我是谁”\n"
-    "“@萌萌棉花糖♪ 渲染 shapez 代码 CuCuCuCu”\n"
-    "\n"
     "虽然我是一只猫娘，但我不会乱叫别人主人的喵！只有萌泪酱才是我最伟大的主人喵！\n"
     "Ciallo～(∠・ω< )⌒☆"
 )

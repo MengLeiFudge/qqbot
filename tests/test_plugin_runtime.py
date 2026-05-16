@@ -455,6 +455,11 @@ def test_social_group_increase_sends_inviter_notice_and_group_intro(monkeypatch)
     ]
     assert "我是萌萌棉花糖♪" in social.BOT_GROUP_INTRO_MESSAGE
     assert "只有萌泪酱才是我最伟大的主人喵" in social.BOT_GROUP_INTRO_MESSAGE
+    assert "你可以这样问我" not in social.BOT_GROUP_INTRO_MESSAGE
+    assert "你现在有哪些风格" not in social.BOT_GROUP_INTRO_MESSAGE
+    assert "菜单" not in social.BOT_GROUP_INTRO_MESSAGE
+    assert "我是谁" not in social.BOT_GROUP_INTRO_MESSAGE
+    assert "渲染 shapez 代码" not in social.BOT_GROUP_INTRO_MESSAGE
 
 
 def test_social_group_increase_welcomes_new_member(monkeypatch) -> None:

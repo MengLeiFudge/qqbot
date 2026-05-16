@@ -11,6 +11,8 @@ from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_help_command,
 )
 
+QQ_GROUP_MANAGER_USER_IDS = {"285419631"}
+
 
 @dataclass(frozen=True, slots=True)
 class AiModelCommand:
@@ -24,6 +26,8 @@ def should_handle_ai_chat(event, text: str) -> bool:
         return False
     if is_before_onebot_connect(getattr(event, "time", None)):
         return False
+    if is_group_manager_welcome_message(event, prompt):
+        return False
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         if prompt.startswith("/"):
             return False
@@ -32,6 +36,17 @@ def should_handle_ai_chat(event, text: str) -> bool:
     if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
         return True
     return is_direct_command_event(event)
+
+
+def is_group_manager_welcome_message(event, text: str) -> bool:
+    if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
+        return False
+    if str(getattr(event, "user_id", "")) not in QQ_GROUP_MANAGER_USER_IDS:
+        return False
+    normalized = "".join(text.split())
+    if "欢迎" not in normalized:
+        return False
+    return any(marker in normalized for marker in ("加入本群", "加入群聊", "入群"))
 
 
 def parse_ai_model_command(text: str) -> AiModelCommand | None:

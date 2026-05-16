@@ -70,6 +70,24 @@ def test_group_message_requires_direct_at_for_ai_chat() -> None:
     )
 
 
+def test_group_manager_welcome_message_does_not_enter_ai_chat() -> None:
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "285419631", group_id="927625724", to_me=True),
+            "欢迎 @棉花糖 加入本群，请先阅读群公告。",
+        )
+        is False
+    )
+
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "285419631", group_id="927625724", to_me=True),
+            "欢迎 @萌萌棉花糖♪ 入群。",
+        )
+        is False
+    )
+
+
 def test_group_draw_command_enters_ai_chat_without_direct_at() -> None:
     assert (
         should_handle_ai_chat(
