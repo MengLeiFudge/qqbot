@@ -12,6 +12,7 @@ from nonebot.rule import Rule
 from qqbot.config import RuntimeSettings, load_settings
 from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_command import (
+    parse_ai_output_mode_command,
     build_ai_conversation_key,
     parse_ai_model_command,
     should_handle_ai_chat,
@@ -23,14 +24,24 @@ from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMe
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
-from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
+from qqbot.services.ai_profile_registry import (
+    list_enabled_profiles,
+    load_ai_profiles,
+    resolve_ai_profile,
+)
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
 from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.admin_service import AdminService
+from qqbot.services.bot_loop_guard import BotLoopGuard
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.group_nick_store import GroupNickStore, normalize_call_name
-from qqbot.services.message_delivery import COLLAPSIBLE_TEXT_THRESHOLD_CHARS, finish_split_text
+from qqbot.services.message_delivery import (
+    COLLAPSIBLE_TEXT_THRESHOLD_CHARS,
+    call_record_api,
+    finish_split_text,
+)
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_event
+from qqbot.services.mimo_tts_client import MimoTtsClient
 from qqbot.services.memory_retrieval_service import (
     RetrievalPlan,
     format_evidence_bundle,
@@ -42,7 +53,10 @@ from qqbot.services.nickname_usage_service import (
     NicknameUsageSummary,
 )
 from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
-from qqbot.services.offline_message_gate import is_before_onebot_connect
+from qqbot.services.offline_message_gate import (
+    is_before_onebot_connect,
+    is_within_onebot_connect_grace,
+)
 from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
@@ -51,8 +65,18 @@ from qqbot.services.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
+AI_TTS_MAX_CHARS = 500
+_BOT_LOOP_GUARD = BotLoopGuard()
+
+
 ai_model_matcher = on_regex(
     r"(?i)^(AI模型|当前AI|切换AI\s+\S+)$",
+    priority=10,
+    block=True,
+    rule=direct_command_rule(),
+)
+ai_output_mode_matcher = on_regex(
+    r"^(本群|我的)?AI(回复|输出)?(语音|文字|文本|回复)模式$",
     priority=10,
     block=True,
     rule=direct_command_rule(),
@@ -92,6 +116,40 @@ async def handle_ai_model(event: MessageEvent) -> None:
     )
 
 
+@ai_output_mode_matcher.handle()
+async def handle_ai_output_mode(event: MessageEvent) -> None:
+    store = get_settings_store()
+    command = parse_ai_output_mode_command(event.get_plaintext())
+    if command is None:
+        return
+
+    group_id = getattr(event, "group_id", None)
+    user_id = event.get_user_id()
+    if command.action == "status":
+        mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
+        await ai_output_mode_matcher.finish(f"当前 AI 回复模式：{format_ai_output_mode(mode)}")
+
+    scope = command.scope
+    if scope == "auto":
+        scope = "group" if group_id is not None else "user"
+    if command.mode is None:
+        return
+    if scope == "group":
+        if group_id is None:
+            await ai_output_mode_matcher.finish("群 AI 回复模式只能在群聊中设置。")
+        if not store.is_bot_admin(int(user_id)):
+            await ai_output_mode_matcher.finish("只有 Bot 管理员才能设置本群 AI 回复模式。")
+        store.set_group_ai_output_mode(group_id, command.mode)
+        await ai_output_mode_matcher.finish(
+            f"本群 AI 回复模式已切换为：{format_ai_output_mode(command.mode)}"
+        )
+
+    store.set_user_ai_output_mode(user_id, command.mode)
+    await ai_output_mode_matcher.finish(
+        f"你的 AI 回复模式已切换为：{format_ai_output_mode(command.mode)}"
+    )
+
+
 @ai_chat_matcher.handle()
 async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     request_started = time.perf_counter()
@@ -99,7 +157,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     settings = load_settings()
     store = get_settings_store()
     normalized_message = normalize_onebot_event(event)
-    prompt = normalized_message.text or normalized_message.outline
+    prompt = build_ai_prompt(normalized_message)
     event_time = getattr(event, "time", None)
     message_id = getattr(event, "message_id", None)
     group_id = getattr(event, "group_id", None)
@@ -113,6 +171,35 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             event_time,
         )
         return
+    if group_id is not None and is_within_onebot_connect_grace(event_time):
+        logger.info(
+            "Skip group AI message in connect grace: user_id={}, group_id={}, message_id={}, event_time={}",
+            user_id,
+            group_id,
+            message_id,
+            event_time,
+        )
+        return
+    if group_id is not None:
+        loop_decision = _BOT_LOOP_GUARD.record_trigger(group_id, user_id, prompt)
+        if loop_decision == "blocked":
+            logger.info(
+                "Skip blacklisted suspected bot: user_id={}, group_id={}, message_id={}",
+                user_id,
+                group_id,
+                message_id,
+            )
+            return
+        if loop_decision == "warn":
+            await ai_chat_matcher.finish(
+                build_ai_reply_message(
+                    "你是不是机器人呀，我要不想理你了！",
+                    group_id=group_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                )
+            )
+            return
     if event_time is not None:
         logger.info(
             "AI message received: user_id={}, group_id={}, message_id={}, event_time={}, receive_lag={:.3f}s",
@@ -297,6 +384,22 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         response,
         show_metrics=settings.ai_show_metrics,
     )
+    output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
+    if output_mode == "voice" and not settings.ai_show_metrics:
+        voice_sent = await try_send_ai_voice_response(
+            bot,
+            settings,
+            profiles,
+            profile,
+            response_text,
+            group_id=group_id,
+            user_id=user_id,
+        )
+        if voice_sent:
+            await ai_chat_matcher.finish()
+            return
+        response_text = "语音生成失败啦，先用文字回复你：\n" + response_text
+
     if group_id is not None and len(response_text) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
         await ai_chat_matcher.send(
             build_ai_reply_notice_message(
@@ -321,6 +424,67 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         bot=bot,
         title="棉花糖的 AI 回复",
     )
+
+
+async def try_send_ai_voice_response(
+    bot: Bot,
+    settings: RuntimeSettings,
+    profiles: dict[str, object],
+    profile: str,
+    text: str,
+    *,
+    group_id: int | str | None,
+    user_id: int | str,
+) -> bool:
+    if not text.strip() or len(text) > AI_TTS_MAX_CHARS:
+        return False
+    try:
+        resolved = resolve_ai_profile(profiles, profile)
+        if resolved.provider not in {"xiaomi_mimo", "mimo_compatible"}:
+            return False
+        client = MimoTtsClient(
+            base_url=resolved.base_url,
+            api_key=resolved.api_key,
+            timeout_seconds=resolved.timeout_seconds,
+        )
+        audio_bytes = await client.synthesize(text)
+        await call_record_api(
+            bot,
+            settings.data_root,
+            audio_bytes=audio_bytes,
+            group_id=group_id,
+            user_id=None if group_id is not None else user_id,
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "AI voice response failed: profile={}, group_id={}, user_id={}, error={}",
+            profile,
+            group_id,
+            user_id,
+            exc,
+        )
+        return False
+
+
+def build_ai_prompt(normalized_message: NormalizedMessage) -> str:
+    prompt = normalized_message.text or normalized_message.outline
+    if not normalized_message.text and is_pure_direct_at(normalized_message):
+        return "找我什么事情？"
+    return prompt
+
+
+def is_pure_direct_at(normalized_message: NormalizedMessage) -> bool:
+    if not normalized_message.at_user_ids:
+        return False
+    outline = normalized_message.outline.strip()
+    if not outline:
+        return False
+    return all(part.startswith("[@") and part.endswith("]") for part in outline.split())
+
+
+def format_ai_output_mode(mode: str) -> str:
+    return "语音" if mode == "voice" else "文字"
 
 
 def record_ai_diagnostics(

@@ -20,10 +20,19 @@ class AiModelCommand:
     profile: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AiOutputModeCommand:
+    action: str
+    scope: str = "auto"
+    mode: str | None = None
+
+
 def should_handle_ai_chat(event, text: str) -> bool:
     prompt = text.strip()
     if not prompt:
-        return False
+        if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
+            return False
+        return is_direct_command_event(event)
     if is_before_onebot_connect(getattr(event, "time", None)):
         return False
     if is_group_manager_welcome_message(event, prompt):
@@ -31,7 +40,16 @@ def should_handle_ai_chat(event, text: str) -> bool:
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         if prompt.startswith("/"):
             return False
-    if is_likely_command(prompt) or parse_ai_model_command(prompt) is not None:
+        if is_likely_command(prompt) or parse_ai_model_command(prompt) is not None:
+            return False
+        if parse_ai_output_mode_command(prompt) is not None:
+            return False
+        return True
+    if (
+        is_likely_command(prompt)
+        or parse_ai_model_command(prompt) is not None
+        or parse_ai_output_mode_command(prompt) is not None
+    ):
         return False
     if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
         return True
@@ -61,6 +79,30 @@ def parse_ai_model_command(text: str) -> AiModelCommand | None:
     if match is None:
         return None
     return AiModelCommand(action="switch", profile=match.group(1).strip())
+
+
+def parse_ai_output_mode_command(text: str) -> AiOutputModeCommand | None:
+    normalized = re.sub(r"\s+", "", text.strip())
+    if not normalized:
+        return None
+
+    if normalized in {"AI回复模式", "AI输出模式"}:
+        return AiOutputModeCommand(action="status")
+
+    scope = "auto"
+    rest = normalized
+    if rest.startswith("本群"):
+        scope = "group"
+        rest = rest.removeprefix("本群")
+    elif rest.startswith("我的"):
+        scope = "user"
+        rest = rest.removeprefix("我的")
+
+    if rest in {"AI语音模式", "AI回复语音模式"}:
+        return AiOutputModeCommand(action="set", scope=scope, mode="voice")
+    if rest in {"AI文字模式", "AI文本模式", "AI回复文字模式", "AI回复文本模式"}:
+        return AiOutputModeCommand(action="set", scope=scope, mode="text")
+    return None
 
 
 def build_ai_conversation_key(

@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
 from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
     build_ai_context,
+    build_ai_prompt,
     build_memory_retrieval_plan_context,
     build_ai_system_context,
     build_ai_reply_message,
@@ -21,11 +22,13 @@ from qqbot.plugins.ai_test import (
     format_local_ai_result,
     format_memory_context,
     should_omit_ai_history_for_scope_query,
+    try_send_ai_voice_response,
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_orchestrator import AiOrchestratorResult
+from qqbot.services.ai_profile_registry import AiProfile
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_message
@@ -141,6 +144,16 @@ class FakeMessage:
         return iter(())
 
 
+class FakeVoiceBot:
+    self_id = "1443944862"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def call_api(self, api: str, **data: object) -> None:
+        self.calls.append((api, data))
+
+
 def test_format_ai_response_hides_metrics_by_default() -> None:
     response = AiResponse(
         text="我是萌萌棉花糖♪。",
@@ -212,6 +225,71 @@ def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None
 def test_format_draw_quota_messages_show_current_count() -> None:
     assert format_draw_start_message(3, 5) == "收到，棉花糖开始生图任务啦！这是今天第 3/5 次生图。"
     assert format_draw_quota_exceeded_message(5, 5) == "今天的生图次数已经用完啦（5/5）。明天再来找棉花糖画图吧！"
+
+
+def test_build_ai_prompt_treats_pure_at_as_greeting_prompt() -> None:
+    normalized = NormalizedMessage(text="", outline="[@1443944862]", at_user_ids=("1443944862",))
+
+    assert build_ai_prompt(normalized) == "找我什么事情？"
+
+
+def test_build_ai_prompt_keeps_media_outline_when_message_is_not_pure_at() -> None:
+    normalized = NormalizedMessage(
+        text="",
+        outline="[@1443944862] [图片]",
+        at_user_ids=("1443944862",),
+        image_urls=("https://example.invalid/a.png",),
+    )
+
+    assert build_ai_prompt(normalized) == "[@1443944862] [图片]"
+
+
+def test_try_send_ai_voice_response_sends_record_for_mimo_profile(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FakeTtsClient:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def synthesize(self, text: str) -> bytes:
+            assert text == "你好呀"
+            return b"wav-bytes"
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", FakeTtsClient)
+    monkeypatch.setattr(
+        "qqbot.services.message_delivery.MessageSegment.record",
+        lambda file_path: f"[record:{file_path}]",
+    )
+    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
+    bot = FakeVoiceBot()
+    profiles = {
+        "xiaomi": AiProfile(
+            name="xiaomi",
+            provider="xiaomi_mimo",
+            base_url="https://api.xiaomimimo.com/v1",
+            model="mimo-v2.5",
+            vision_model="mimo-v2.5",
+            api_key_env="MIMO_API_KEY",
+        )
+    }
+
+    sent = asyncio.run(
+        try_send_ai_voice_response(
+            bot,
+            RuntimeSettings(data_root=tmp_path),
+            profiles,
+            "xiaomi",
+            "你好呀",
+            group_id=516286670,
+            user_id="605738729",
+        )
+    )
+
+    assert sent is True
+    assert bot.calls[0][0] == "send_group_msg"
+    assert bot.calls[0][1]["group_id"] == 516286670
+    assert str(bot.calls[0][1]["message"]).startswith("[record:")
 
 
 def test_ai_context_includes_private_memory_only_in_private_chat(tmp_path: Path) -> None:

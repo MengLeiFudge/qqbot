@@ -1,8 +1,10 @@
 import asyncio
+from pathlib import Path
 
 from qqbot.services.message_delivery import (
     FORWARD_NODE_TEXT_CHARS,
     MAX_TEXT_MESSAGE_CHARS,
+    call_record_api,
     call_collapsible_text_api,
     call_split_text_api,
     finish_split_text,
@@ -234,6 +236,62 @@ def test_call_collapsible_text_api_falls_back_to_split_when_forward_fails() -> N
     assert len(bot.calls) >= 2
     assert {api for api, _data in bot.calls} == {"send_group_msg"}
     assert bot.calls[0][1]["message"].startswith("（1/")
+
+
+def test_call_record_api_sends_group_record(tmp_path: Path, monkeypatch) -> None:
+    reset_group_message_interval_state()
+    bot = FakeBot()
+    record_values: list[str] = []
+
+    def fake_record(file_path: str) -> str:
+        record_values.append(file_path)
+        return f"[record:{file_path}]"
+
+    monkeypatch.setattr("qqbot.services.message_delivery.MessageSegment.record", fake_record)
+
+    asyncio.run(
+        call_record_api(
+            bot,
+            tmp_path,
+            audio_bytes=b"wav-bytes",
+            group_id=10001,
+        )
+    )
+
+    assert len(record_values) == 1
+    audio_path = Path(record_values[0])
+    assert audio_path.exists()
+    assert audio_path.read_bytes() == b"wav-bytes"
+    assert bot.calls == [
+        (
+            "send_group_msg",
+            {
+                "group_id": 10001,
+                "message": f"[record:{audio_path}]",
+            },
+        )
+    ]
+
+
+def test_call_record_api_sends_private_record(tmp_path: Path, monkeypatch) -> None:
+    bot = FakeBot()
+    monkeypatch.setattr(
+        "qqbot.services.message_delivery.MessageSegment.record",
+        lambda file_path: f"[record:{file_path}]",
+    )
+
+    asyncio.run(
+        call_record_api(
+            bot,
+            tmp_path,
+            audio_bytes=b"wav-bytes",
+            user_id="605738729",
+        )
+    )
+
+    assert bot.calls[0][0] == "send_private_msg"
+    assert bot.calls[0][1]["user_id"] == "605738729"
+    assert str(bot.calls[0][1]["message"]).startswith("[record:")
 
 
 def test_group_message_interval_waits_for_same_group_only() -> None:

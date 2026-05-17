@@ -31,3 +31,17 @@ def is_before_onebot_connect(event_time: object) -> bool:
     except (TypeError, ValueError):
         return False
     return timestamp < _ONEBOT_CONNECTED_AT
+
+
+def is_within_onebot_connect_grace(
+    event_time: object,
+    *,
+    grace_seconds: float = 5.0,
+) -> bool:
+    if _ONEBOT_CONNECTED_AT is None:
+        return False
+    try:
+        timestamp = float(event_time)
+    except (TypeError, ValueError):
+        return False
+    return _ONEBOT_CONNECTED_AT <= timestamp < _ONEBOT_CONNECTED_AT + grace_seconds

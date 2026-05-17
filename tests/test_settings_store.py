@@ -95,6 +95,23 @@ def test_ai_provider_defaults_and_can_be_saved(tmp_path: Path) -> None:
     assert store.get_ai_provider("xiaomi") == "hicode"
 
 
+def test_ai_output_mode_defaults_to_text_and_saves_group_private_preferences(tmp_path: Path) -> None:
+    store = SettingsStore(tmp_path, author_qq=605738729)
+
+    assert store.get_ai_output_mode(group_id=516286670, user_id="605738729") == "text"
+    assert store.get_ai_output_mode(group_id=None, user_id="605738729") == "text"
+
+    store.set_group_ai_output_mode(516286670, "voice")
+    store.set_user_ai_output_mode("605738729", "voice")
+
+    assert store.get_ai_output_mode(group_id=516286670, user_id="10001") == "voice"
+    assert store.get_ai_output_mode(group_id=None, user_id="605738729") == "voice"
+    assert store.get_ai_output_mode(group_id=None, user_id="10001") == "text"
+
+    store.set_group_ai_output_mode(516286670, "bad")
+    assert store.get_ai_output_mode(group_id=516286670, user_id="10001") == "text"
+
+
 def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path, author_qq=605738729)
     func_state = tmp_path / "settings" / "func_state" / "10001.json"

@@ -9,6 +9,9 @@ from qqbot.services.feature_catalog import FeatureDefinition
 from qqbot.services.plugin_registry import list_visible_plugin_specs
 
 GLOBAL_CONFIG_KEY = "__global__"
+AI_OUTPUT_TEXT_MODE = "text"
+AI_OUTPUT_VOICE_MODE = "voice"
+AI_OUTPUT_MODES = {AI_OUTPUT_TEXT_MODE, AI_OUTPUT_VOICE_MODE}
 
 
 class SettingsStore:
@@ -76,6 +79,41 @@ class SettingsStore:
         settings = self._read_json(self.settings_root / "ai.json", {})
         settings["provider"] = profile.strip()
         self._write_json(self.settings_root / "ai.json", settings)
+
+    def get_ai_output_mode(
+        self,
+        *,
+        group_id: int | str | None,
+        user_id: int | str,
+    ) -> str:
+        settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
+        if group_id is not None:
+            groups = settings.get("groups", {})
+            if isinstance(groups, dict):
+                return _normalize_ai_output_mode(groups.get(str(group_id)))
+
+        users = settings.get("users", {})
+        if isinstance(users, dict):
+            return _normalize_ai_output_mode(users.get(str(user_id)))
+        return AI_OUTPUT_TEXT_MODE
+
+    def set_group_ai_output_mode(self, group_id: int | str, mode: str) -> None:
+        settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
+        groups = settings.get("groups", {})
+        if not isinstance(groups, dict):
+            groups = {}
+        groups[str(group_id)] = _normalize_ai_output_mode(mode)
+        settings["groups"] = groups
+        self._write_json(self.settings_root / "ai_output_mode.json", settings)
+
+    def set_user_ai_output_mode(self, user_id: int | str, mode: str) -> None:
+        settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
+        users = settings.get("users", {})
+        if not isinstance(users, dict):
+            users = {}
+        users[str(user_id)] = _normalize_ai_output_mode(mode)
+        settings["users"] = users
+        self._write_json(self.settings_root / "ai_output_mode.json", settings)
 
     def list_codex_group_bindings(self) -> dict[str, str]:
         bindings = self._read_json(self.settings_root / "codex_group_bindings.json", {})
@@ -190,3 +228,12 @@ class SettingsStore:
 def get_settings_store() -> SettingsStore:
     settings = load_settings()
     return SettingsStore(settings.data_root, settings.author_qq)
+
+
+def _normalize_ai_output_mode(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"语音", "voice", AI_OUTPUT_VOICE_MODE}:
+        return AI_OUTPUT_VOICE_MODE
+    if normalized in {"文字", "文本", "text", AI_OUTPUT_TEXT_MODE}:
+        return AI_OUTPUT_TEXT_MODE
+    return AI_OUTPUT_TEXT_MODE

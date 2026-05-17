@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from contextvars import ContextVar
+from pathlib import Path
 import time
 from typing import Any, Callable
+from uuid import uuid4
+
+from nonebot.adapters.onebot.v11 import MessageSegment
 
 
 MAX_TEXT_MESSAGE_CHARS = 1000
@@ -161,6 +165,29 @@ async def call_collapsible_text_api(
             group_interval_sleep=group_interval_sleep,
             **data,
         )
+
+
+async def call_record_api(
+    bot: Any,
+    output_root: Path,
+    *,
+    audio_bytes: bytes,
+    group_id: int | str | None = None,
+    user_id: int | str | None = None,
+) -> Path:
+    audio_root = Path(output_root) / "ai" / "tts"
+    audio_root.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_root / f"{int(time.time() * 1000)}-{uuid4().hex}.wav"
+    audio_path.write_bytes(audio_bytes)
+    message = MessageSegment.record(str(audio_path))
+    if group_id is not None:
+        await wait_for_group_message_interval(group_id)
+        await bot.call_api("send_group_msg", group_id=group_id, message=message)
+        return audio_path
+    if user_id is not None:
+        await bot.call_api("send_private_msg", user_id=user_id, message=message)
+        return audio_path
+    raise ValueError("call_record_api requires group_id or user_id")
 
 
 async def wait_for_group_message_interval(

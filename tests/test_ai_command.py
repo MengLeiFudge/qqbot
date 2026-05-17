@@ -8,6 +8,7 @@ if str(SRC) not in sys.path:
 
 from qqbot.services.ai_command import (
     build_ai_conversation_key,
+    parse_ai_output_mode_command,
     parse_ai_model_command,
     should_handle_ai_chat,
 )
@@ -65,6 +66,23 @@ def test_group_message_requires_direct_at_for_ai_chat() -> None:
         should_handle_ai_chat(
             FakeEvent("group", "10001", group_id="20001", to_me=True),
             "菜单",
+        )
+        is False
+    )
+
+
+def test_group_direct_at_without_text_enters_ai_chat() -> None:
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=True),
+            "",
+        )
+        is True
+    )
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=False),
+            "",
         )
         is False
     )
@@ -165,6 +183,37 @@ def test_parse_ai_model_command_lists_or_switches_profile() -> None:
     assert switch_command.action == "switch"
     assert switch_command.profile == "xiaomi"
     assert parse_ai_model_command("ai xiaomi 你好") is None
+
+
+def test_parse_ai_output_mode_command_accepts_group_and_private_commands() -> None:
+    assert parse_ai_output_mode_command("AI回复模式").action == "status"
+    assert parse_ai_output_mode_command("AI语音模式").mode == "voice"
+    assert parse_ai_output_mode_command("AI文字模式").mode == "text"
+
+    group_voice = parse_ai_output_mode_command("本群AI语音模式")
+    assert group_voice is not None
+    assert group_voice.action == "set"
+    assert group_voice.scope == "group"
+    assert group_voice.mode == "voice"
+
+    user_text = parse_ai_output_mode_command("我的AI文字模式")
+    assert user_text is not None
+    assert user_text.action == "set"
+    assert user_text.scope == "user"
+    assert user_text.mode == "text"
+
+    assert parse_ai_output_mode_command("AI模型") is None
+
+
+def test_ai_output_mode_command_does_not_enter_ai_chat() -> None:
+    assert (
+        should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=True),
+            "本群AI语音模式",
+        )
+        is False
+    )
+    assert should_handle_ai_chat(FakeEvent("private", "10001"), "我的AI文字模式") is False
 
 
 def test_build_ai_conversation_key_uses_private_or_group_user_scope(tmp_path: Path) -> None:
