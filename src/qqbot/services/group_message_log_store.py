@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
+import threading
 
 from qqbot.services.ai_output_style import sanitize_ai_output_text
+from qqbot.services.json_file_store import atomic_write_json, load_json_array
 
 
 VALID_DIRECTIONS = {"incoming", "bot"}
@@ -31,6 +32,8 @@ class GroupMessageLogRecord:
 
 
 class GroupMessageLogStore:
+    _lock = threading.Lock()
+
     def __init__(self, data_root: Path, max_messages: int = 200) -> None:
         self.root = Path(data_root) / "admin" / "group_messages"
         self.max_messages = max(1, max_messages)
@@ -52,18 +55,19 @@ class GroupMessageLogStore:
         if direction not in VALID_DIRECTIONS:
             raise ValueError(f"Unsupported group message direction: {direction}")
 
-        records = list(self.load_messages(group_id))
-        records.append(
-            GroupMessageLogRecord(
-                direction=direction,
-                user_id=str(user_id),
-                sender_name=sender_name.strip() or str(user_id),
-                text=normalized_text,
-                timestamp=int(timestamp),
-                message_id=str(message_id or ""),
+        with self._lock:
+            records = list(self.load_messages(group_id))
+            records.append(
+                GroupMessageLogRecord(
+                    direction=direction,
+                    user_id=str(user_id),
+                    sender_name=sender_name.strip() or str(user_id),
+                    text=normalized_text,
+                    timestamp=int(timestamp),
+                    message_id=str(message_id or ""),
+                )
             )
-        )
-        self._write_messages(group_id, records[-self.max_messages :])
+            self._write_messages(group_id, records[-self.max_messages :])
 
     def load_messages(
         self,
@@ -75,7 +79,7 @@ class GroupMessageLogStore:
         if not path.exists():
             return ()
 
-        raw_records = json.loads(path.read_text(encoding="utf-8"))
+        raw_records = load_json_array(path)
         records: list[GroupMessageLogRecord] = []
         for raw in raw_records:
             if not isinstance(raw, dict):
@@ -149,15 +153,7 @@ class GroupMessageLogStore:
         records: list[GroupMessageLogRecord],
     ) -> None:
         path = self._path_for_group(group_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                [record.to_dict() for record in records],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        atomic_write_json(path, [record.to_dict() for record in records])
 
     def _path_for_group(self, group_id: int | str) -> Path:
         return self.root / f"{group_id}.json"

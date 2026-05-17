@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 
@@ -128,6 +129,51 @@ def test_group_message_log_store_sanitizes_bot_action_descriptions(tmp_path: Pat
     records = store.load_messages(10001)
 
     assert records[0].text == "棉花糖会继续认真回答喵~"
+
+
+def test_group_message_log_store_recovers_trailing_corrupt_data(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "admin" / "group_messages" / "10001.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        (
+            '[{"direction":"incoming","user_id":"20001","sender_name":"甲",'
+            '"text":"旧消息","timestamp":1,"message_id":"11"}]'
+            '    "message_id": "broken"}]'
+        ),
+        encoding="utf-8",
+    )
+    store = GroupMessageLogStore(tmp_path / "run")
+
+    records = store.load_messages(10001)
+    store.append_message(
+        group_id=10001,
+        direction="incoming",
+        user_id=20002,
+        sender_name="乙",
+        text="新消息",
+        timestamp=2,
+        message_id=12,
+    )
+
+    assert [(record.sender_name, record.text) for record in records] == [("甲", "旧消息")]
+    assert json.loads(path.read_text(encoding="utf-8")) == [
+        {
+            "direction": "incoming",
+            "user_id": "20001",
+            "sender_name": "甲",
+            "text": "旧消息",
+            "timestamp": 1,
+            "message_id": "11",
+        },
+        {
+            "direction": "incoming",
+            "user_id": "20002",
+            "sender_name": "乙",
+            "text": "新消息",
+            "timestamp": 2,
+            "message_id": "12",
+        },
+    ]
 
 
 def test_group_message_log_store_removes_group_file(tmp_path: Path) -> None:

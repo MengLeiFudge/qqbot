@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import threading
-from typing import Any
 
 from qqbot.services.ai_gateway import is_safety_rejection_text
+from qqbot.services.json_file_store import atomic_write_json, load_json_array
 from qqbot.services.ai_output_style import sanitize_ai_output_text
 
 
@@ -63,7 +62,7 @@ class AiGroupContextStore:
         if not path.exists():
             return ()
 
-        raw_records = _load_json_records(path)
+        raw_records = load_json_array(path)
         records: list[AiGroupMessageRecord] = []
         for raw in raw_records:
             if not isinstance(raw, dict):
@@ -97,8 +96,8 @@ class AiGroupContextStore:
         records: list[AiGroupMessageRecord],
     ) -> None:
         path = self._path_for_group(group_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(
+        atomic_write_json(
+            path,
             [
                 {
                     "user_id": record.user_id,
@@ -109,27 +108,7 @@ class AiGroupContextStore:
                 }
                 for record in records
             ],
-            ensure_ascii=False,
-            indent=2,
         )
-        temp_path = path.with_name(f".{path.name}.tmp")
-        temp_path.write_text(payload, encoding="utf-8")
-        temp_path.replace(path)
 
     def _path_for_group(self, group_id: int | str) -> Path:
         return self.root / f"{group_id}.json"
-
-
-def _load_json_records(path: Path) -> list[Any]:
-    text = path.read_text(encoding="utf-8")
-    try:
-        raw_records = json.loads(text)
-    except json.JSONDecodeError:
-        raw_records = _load_recoverable_json_array(text)
-    return raw_records if isinstance(raw_records, list) else []
-
-
-def _load_recoverable_json_array(text: str) -> list[Any]:
-    decoder = json.JSONDecoder()
-    raw_records, _end = decoder.raw_decode(text)
-    return raw_records if isinstance(raw_records, list) else []
