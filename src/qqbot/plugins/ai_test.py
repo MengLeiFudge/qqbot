@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import time
@@ -66,7 +67,9 @@ from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
 AI_TTS_MAX_CHARS = 500
+AI_TTS_TOTAL_TIMEOUT_SECONDS = 45.0
 _BOT_LOOP_GUARD = BotLoopGuard()
+_AI_REPLY_SCOPES: set[str] = set()
 
 
 ai_model_matcher = on_regex(
@@ -162,6 +165,53 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     message_id = getattr(event, "message_id", None)
     group_id = getattr(event, "group_id", None)
     user_id = event.get_user_id()
+    reply_scope = build_ai_reply_scope(event)
+    if reply_scope in _AI_REPLY_SCOPES:
+        if group_id is not None:
+            await ai_chat_matcher.finish(
+                build_ai_reply_message(
+                    "上一条还在处理，先别连续叫我啦。",
+                    group_id=group_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                )
+            )
+        await ai_chat_matcher.finish("上一条还在处理，先别连续叫我啦。")
+    _AI_REPLY_SCOPES.add(reply_scope)
+    try:
+        await _handle_ai_locked(
+            bot,
+            event,
+            settings=settings,
+            store=store,
+            normalized_message=normalized_message,
+            prompt=prompt,
+            request_started=request_started,
+            request_wall_started=request_wall_started,
+            event_time=event_time,
+            message_id=message_id,
+            group_id=group_id,
+            user_id=user_id,
+        )
+    finally:
+        _AI_REPLY_SCOPES.discard(reply_scope)
+
+
+async def _handle_ai_locked(
+    bot: Bot,
+    event: MessageEvent,
+    *,
+    settings: RuntimeSettings,
+    store: SettingsStore,
+    normalized_message: NormalizedMessage,
+    prompt: str,
+    request_started: float,
+    request_wall_started: float,
+    event_time: object,
+    message_id: object,
+    group_id: object | None,
+    user_id: str,
+) -> None:
     if group_id is not None and is_before_onebot_connect(event_time):
         logger.info(
             "Skip old group AI message: user_id={}, group_id={}, message_id={}, event_time={}",
@@ -453,13 +503,19 @@ async def try_send_ai_voice_response(
             api_key=resolved.api_key,
             timeout_seconds=resolved.timeout_seconds,
         )
-        audio_bytes = await client.synthesize(text, singing=singing)
-        await call_record_api(
-            bot,
-            settings.data_root,
-            audio_bytes=audio_bytes,
-            group_id=group_id,
-            user_id=None if group_id is not None else user_id,
+        audio_bytes = await asyncio.wait_for(
+            client.synthesize(text, singing=singing),
+            timeout=AI_TTS_TOTAL_TIMEOUT_SECONDS,
+        )
+        await asyncio.wait_for(
+            call_record_api(
+                bot,
+                settings.data_root,
+                audio_bytes=audio_bytes,
+                group_id=group_id,
+                user_id=None if group_id is not None else user_id,
+            ),
+            timeout=10.0,
         )
         return True
     except Exception as exc:
@@ -471,6 +527,13 @@ async def try_send_ai_voice_response(
             exc,
         )
         return False
+
+
+def build_ai_reply_scope(event: MessageEvent) -> str:
+    group_id = getattr(event, "group_id", None)
+    if group_id is not None:
+        return f"group:{group_id}"
+    return f"private:{event.get_user_id()}"
 
 
 def build_ai_prompt(normalized_message: NormalizedMessage) -> str:

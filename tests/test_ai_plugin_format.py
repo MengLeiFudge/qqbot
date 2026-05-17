@@ -344,6 +344,49 @@ def test_try_send_ai_voice_response_passes_singing_mode(
     assert synthesize_calls == [("啦啦啦", True)]
 
 
+def test_try_send_ai_voice_response_returns_false_when_tts_times_out(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class SlowTtsClient:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
+            await asyncio.sleep(0.05)
+            return b"wav-bytes"
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", SlowTtsClient)
+    monkeypatch.setattr("qqbot.plugins.ai_test.AI_TTS_TOTAL_TIMEOUT_SECONDS", 0.001)
+    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
+    bot = FakeVoiceBot()
+    profiles = {
+        "xiaomi": AiProfile(
+            name="xiaomi",
+            provider="xiaomi_mimo",
+            base_url="https://api.xiaomimimo.com/v1",
+            model="mimo-v2.5",
+            vision_model="mimo-v2.5",
+            api_key_env="MIMO_API_KEY",
+        )
+    }
+
+    sent = asyncio.run(
+        try_send_ai_voice_response(
+            bot,
+            RuntimeSettings(data_root=tmp_path),
+            profiles,
+            "xiaomi",
+            "啦啦啦",
+            group_id=516286670,
+            user_id="605738729",
+        )
+    )
+
+    assert sent is False
+    assert bot.calls == []
+
+
 def test_ai_output_mode_context_declares_voice_mode() -> None:
     context = build_ai_output_mode_context("voice")
 

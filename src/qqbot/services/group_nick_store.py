@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+from json import JSONDecodeError
 from pathlib import Path
 import re
 
 from qqbot.config import load_settings
+from qqbot.services.json_file_store import atomic_write_json
 
 
 @dataclass(slots=True)
@@ -120,7 +122,12 @@ class GroupNickStore:
     def _load(self) -> dict[str, dict[str, GroupNickRecord]]:
         if not self.file_path.exists():
             return {}
-        raw = json.loads(self.file_path.read_text(encoding="utf-8"))
+        try:
+            raw = json.loads(self.file_path.read_text(encoding="utf-8"))
+        except JSONDecodeError:
+            return {}
+        if not isinstance(raw, dict):
+            return {}
         return {
             str(group_id): {
                 str(qq): GroupNickRecord(
@@ -142,7 +149,7 @@ class GroupNickStore:
             }
             for group_id, group_payload in self.records.items()
         }
-        self.file_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(self.file_path, payload)
 
 
 def get_group_nick_store() -> GroupNickStore:

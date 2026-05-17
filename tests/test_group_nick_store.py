@@ -82,6 +82,32 @@ def test_group_nick_store_builds_alias_terms_for_group_member(tmp_path: Path) ->
     assert store.build_alias_terms(10001, "605738729") == ("605738729", "萌泪酱", "MLJ")
 
 
+def test_group_nick_store_treats_empty_json_as_empty_records(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "settings" / "group_nick.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("", encoding="utf-8")
+
+    store = GroupNickStore(path)
+
+    assert store.records == {}
+
+
+def test_group_nick_store_writes_atomically_without_tmp_file_left(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "settings" / "group_nick.json"
+    store = GroupNickStore(path)
+
+    store.record_group_sender(
+        group_id=10001,
+        qq=605738729,
+        card="萌泪酱",
+        nickname="MLJ",
+        updated_at=1,
+    )
+
+    assert GroupNickStore(path).resolve_display_name(10001, 605738729) == "萌泪酱"
+    assert not (path.parent / ".group_nick.json.tmp").exists()
+
+
 def test_resolve_call_name_strips_shapez_decorations(tmp_path: Path) -> None:
     store = GroupNickStore(tmp_path / "run" / "settings" / "group_nick.json")
     store.record_group_sender(
