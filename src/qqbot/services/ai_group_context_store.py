@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import threading
+from typing import Any
 
 from qqbot.services.ai_gateway import is_safety_rejection_text
 from qqbot.services.ai_output_style import sanitize_ai_output_text
@@ -18,6 +20,8 @@ class AiGroupMessageRecord:
 
 
 class AiGroupContextStore:
+    _lock = threading.Lock()
+
     def __init__(self, data_root: Path, max_messages: int = 100) -> None:
         self.root = Path(data_root) / "ai" / "group_context"
         self.max_messages = max(1, max_messages)
@@ -36,17 +40,18 @@ class AiGroupContextStore:
         if not normalized_text or is_safety_rejection_text(normalized_text):
             return
 
-        records = list(self.load_messages(group_id))
-        records.append(
-            AiGroupMessageRecord(
-                user_id=str(user_id),
-                sender_name=sender_name.strip() or str(user_id),
-                text=normalized_text,
-                timestamp=int(timestamp),
-                message_id=str(message_id or ""),
+        with self._lock:
+            records = list(self.load_messages(group_id))
+            records.append(
+                AiGroupMessageRecord(
+                    user_id=str(user_id),
+                    sender_name=sender_name.strip() or str(user_id),
+                    text=normalized_text,
+                    timestamp=int(timestamp),
+                    message_id=str(message_id or ""),
+                )
             )
-        )
-        self._write_messages(group_id, records[-self.max_messages :])
+            self._write_messages(group_id, records[-self.max_messages :])
 
     def load_messages(
         self,
@@ -58,7 +63,7 @@ class AiGroupContextStore:
         if not path.exists():
             return ()
 
-        raw_records = json.loads(path.read_text(encoding="utf-8"))
+        raw_records = _load_json_records(path)
         records: list[AiGroupMessageRecord] = []
         for raw in raw_records:
             if not isinstance(raw, dict):
@@ -93,23 +98,38 @@ class AiGroupContextStore:
     ) -> None:
         path = self._path_for_group(group_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                [
-                    {
-                        "user_id": record.user_id,
-                        "sender_name": record.sender_name,
-                        "text": record.text,
-                        "timestamp": record.timestamp,
-                        "message_id": record.message_id,
-                    }
-                    for record in records
-                ],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        payload = json.dumps(
+            [
+                {
+                    "user_id": record.user_id,
+                    "sender_name": record.sender_name,
+                    "text": record.text,
+                    "timestamp": record.timestamp,
+                    "message_id": record.message_id,
+                }
+                for record in records
+            ],
+            ensure_ascii=False,
+            indent=2,
         )
+        temp_path = path.with_name(f".{path.name}.tmp")
+        temp_path.write_text(payload, encoding="utf-8")
+        temp_path.replace(path)
 
     def _path_for_group(self, group_id: int | str) -> Path:
         return self.root / f"{group_id}.json"
+
+
+def _load_json_records(path: Path) -> list[Any]:
+    text = path.read_text(encoding="utf-8")
+    try:
+        raw_records = json.loads(text)
+    except json.JSONDecodeError:
+        raw_records = _load_recoverable_json_array(text)
+    return raw_records if isinstance(raw_records, list) else []
+
+
+def _load_recoverable_json_array(text: str) -> list[Any]:
+    decoder = json.JSONDecoder()
+    raw_records, _end = decoder.raw_decode(text)
+    return raw_records if isinstance(raw_records, list) else []

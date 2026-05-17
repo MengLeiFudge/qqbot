@@ -110,6 +110,50 @@ def test_ai_group_context_store_loads_legacy_records_without_message_id(tmp_path
     assert records[0].message_id == ""
 
 
+def test_ai_group_context_store_recovers_trailing_corrupt_data(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ai" / "group_context" / "516286670.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        (
+            '[{"user_id":"10001","sender_name":"萌泪","text":"旧消息",'
+            '"timestamp":1,"message_id":"11"}]'
+            '    "message_id": "broken"}]'
+        ),
+        encoding="utf-8",
+    )
+    store = AiGroupContextStore(tmp_path)
+
+    records = store.load_messages(516286670)
+    store.append_message(
+        group_id=516286670,
+        user_id=10002,
+        sender_name="可可",
+        text="新消息",
+        timestamp=2,
+        message_id=12,
+    )
+
+    assert [(record.sender_name, record.text) for record in records] == [("萌泪", "旧消息")]
+    assert json.loads(path.read_text(encoding="utf-8")) == [
+        {
+            "user_id": "10001",
+            "sender_name": "萌泪",
+            "text": "旧消息",
+            "timestamp": 1,
+            "message_id": "11",
+        },
+        {
+            "user_id": "10002",
+            "sender_name": "可可",
+            "text": "新消息",
+            "timestamp": 2,
+            "message_id": "12",
+        },
+    ]
+
+
 def test_ai_group_context_store_removes_group_file(tmp_path: Path) -> None:
     store = AiGroupContextStore(tmp_path)
     store.append_message(
