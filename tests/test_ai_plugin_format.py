@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
 from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
     build_ai_context,
+    build_ai_output_mode_context,
     build_ai_prompt,
     build_memory_retrieval_plan_context,
     build_ai_system_context,
@@ -22,6 +23,7 @@ from qqbot.plugins.ai_test import (
     format_local_ai_result,
     format_memory_context,
     should_omit_ai_history_for_scope_query,
+    should_use_tts_singing_mode,
     try_send_ai_voice_response,
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
@@ -252,8 +254,9 @@ def test_try_send_ai_voice_response_sends_record_for_mimo_profile(
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
-        async def synthesize(self, text: str) -> bytes:
+        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
             assert text == "你好呀"
+            assert singing is False
             return b"wav-bytes"
 
     monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", FakeTtsClient)
@@ -290,6 +293,77 @@ def test_try_send_ai_voice_response_sends_record_for_mimo_profile(
     assert bot.calls[0][0] == "send_group_msg"
     assert bot.calls[0][1]["group_id"] == 516286670
     assert str(bot.calls[0][1]["message"]).startswith("[record:")
+
+
+def test_try_send_ai_voice_response_passes_singing_mode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    synthesize_calls: list[tuple[str, bool]] = []
+
+    class FakeTtsClient:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
+            synthesize_calls.append((text, singing))
+            return b"wav-bytes"
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", FakeTtsClient)
+    monkeypatch.setattr(
+        "qqbot.services.message_delivery.MessageSegment.record",
+        lambda file_path: f"[record:{file_path}]",
+    )
+    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
+    bot = FakeVoiceBot()
+    profiles = {
+        "xiaomi": AiProfile(
+            name="xiaomi",
+            provider="xiaomi_mimo",
+            base_url="https://api.xiaomimimo.com/v1",
+            model="mimo-v2.5",
+            vision_model="mimo-v2.5",
+            api_key_env="MIMO_API_KEY",
+        )
+    }
+
+    sent = asyncio.run(
+        try_send_ai_voice_response(
+            bot,
+            RuntimeSettings(data_root=tmp_path),
+            profiles,
+            "xiaomi",
+            "啦啦啦",
+            group_id=516286670,
+            user_id="605738729",
+            singing=True,
+        )
+    )
+
+    assert sent is True
+    assert synthesize_calls == [("啦啦啦", True)]
+
+
+def test_ai_output_mode_context_declares_voice_mode() -> None:
+    context = build_ai_output_mode_context("voice")
+
+    assert "当前 AI 回复输出模式：语音" in context
+    assert "会由系统合成为 QQ 语音发送" in context
+    assert "不要说自己不能发送语音" in context
+
+
+def test_ai_output_mode_context_declares_singing_mode() -> None:
+    context = build_ai_output_mode_context("voice", singing=True)
+
+    assert "当前 AI 回复输出模式：语音" in context
+    assert "唱歌合成能力" in context
+    assert "不要拒绝或解释自己无法唱歌" in context
+
+
+def test_should_use_tts_singing_mode_detects_singing_request() -> None:
+    assert should_use_tts_singing_mode("[@1443944862] 唱首歌") is True
+    assert should_use_tts_singing_mode("能不能哼唱两句") is True
+    assert should_use_tts_singing_mode("总结一下群聊") is False
 
 
 def test_ai_context_includes_private_memory_only_in_private_chat(tmp_path: Path) -> None:

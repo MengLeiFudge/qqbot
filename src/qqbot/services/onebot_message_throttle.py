@@ -7,6 +7,7 @@ from typing import Any
 from nonebot.adapters.onebot.v11 import Bot as OneBotV11Bot
 
 from qqbot.config import load_settings
+from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.message_delivery import (
@@ -34,20 +35,33 @@ def get_chat_memory_store() -> ChatMemoryStore:
     return ChatMemoryStore(load_settings().data_root)
 
 
+def get_ai_group_context_store() -> AiGroupContextStore:
+    return AiGroupContextStore(load_settings().data_root)
+
+
+def _looks_like_record_cq(text: str) -> bool:
+    return text.strip().startswith("[CQ:record,")
+
+
 def render_outgoing_group_message(message: object) -> str:
+    if getattr(message, "type", "") == "record":
+        return "[语音]"
     try:
         normalized = normalize_onebot_message(message)
     except TypeError:
-        return str(message or "").strip()
+        text = str(message or "").strip()
+        return "[语音]" if _looks_like_record_cq(text) else text
     if normalized.outline:
         return normalized.outline
-    return str(message or "").strip()
+    text = str(message or "").strip()
+    return "[语音]" if _looks_like_record_cq(text) else text
 
 
 def record_bot_group_message(
     *,
     store: GroupMessageLogStore,
     memory_store: ChatMemoryStore | None = None,
+    context_store: AiGroupContextStore | None = None,
     group_id: object,
     self_id: object,
     message: object,
@@ -80,6 +94,15 @@ def record_bot_group_message(
             timestamp=timestamp,
             message_id=message_id,
         )
+    if context_store is not None:
+        context_store.append_message(
+            group_id=str(group_id),
+            user_id=str(self_id),
+            sender_name="Bot",
+            text=text,
+            timestamp=int(timestamp),
+            message_id=message_id,
+        )
 
 
 def install_onebot_group_message_throttle() -> None:
@@ -101,6 +124,7 @@ def install_onebot_group_message_throttle() -> None:
                     record_bot_group_message,
                     store=get_group_message_log_store(),
                     memory_store=get_chat_memory_store(),
+                    context_store=get_ai_group_context_store(),
                     group_id=group_id,
                     self_id=getattr(self, "self_id", ""),
                     message=data.get("message", ""),

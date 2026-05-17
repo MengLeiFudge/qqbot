@@ -243,6 +243,11 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             settings_store=store,
         )
     )
+    output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
+    voice_singing = should_use_tts_singing_mode(prompt)
+    voice_context = build_ai_output_mode_context(output_mode, singing=voice_singing)
+    if voice_context:
+        context_parts.append(voice_context)
     restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
     orchestrator = AiOrchestrator(
         data_root=settings.data_root,
@@ -384,7 +389,6 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         response,
         show_metrics=settings.ai_show_metrics,
     )
-    output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
     if output_mode == "voice" and not settings.ai_show_metrics:
         voice_sent = await try_send_ai_voice_response(
             bot,
@@ -394,6 +398,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             response_text,
             group_id=group_id,
             user_id=user_id,
+            singing=voice_singing,
         )
         if voice_sent:
             await ai_chat_matcher.finish()
@@ -435,6 +440,7 @@ async def try_send_ai_voice_response(
     *,
     group_id: int | str | None,
     user_id: int | str,
+    singing: bool = False,
 ) -> bool:
     if not text.strip() or len(text) > AI_TTS_MAX_CHARS:
         return False
@@ -447,7 +453,7 @@ async def try_send_ai_voice_response(
             api_key=resolved.api_key,
             timeout_seconds=resolved.timeout_seconds,
         )
-        audio_bytes = await client.synthesize(text)
+        audio_bytes = await client.synthesize(text, singing=singing)
         await call_record_api(
             bot,
             settings.data_root,
@@ -485,6 +491,38 @@ def is_pure_direct_at(normalized_message: NormalizedMessage) -> bool:
 
 def format_ai_output_mode(mode: str) -> str:
     return "语音" if mode == "voice" else "文字"
+
+
+def build_ai_output_mode_context(mode: str, *, singing: bool = False) -> str:
+    if mode != "voice":
+        return ""
+    context = (
+        "当前 AI 回复输出模式：语音。你的本轮文本回复会由系统合成为 QQ 语音发送；"
+        "不要说自己不能发送语音，也不要要求用户改用语音指令。"
+    )
+    if singing:
+        context += (
+            "用户这轮在请求唱歌或哼唱，系统会尝试使用 MiMo TTS 的唱歌合成能力；"
+            "请直接给出适合短语音演唱的内容，不要拒绝或解释自己无法唱歌。"
+        )
+    return context
+
+
+def should_use_tts_singing_mode(prompt: str) -> bool:
+    normalized = prompt.strip().lower()
+    if not normalized:
+        return False
+    singing_keywords = (
+        "唱首歌",
+        "唱一首",
+        "唱歌",
+        "唱一下",
+        "唱两句",
+        "哼唱",
+        "哼一段",
+        "sing",
+    )
+    return any(keyword in normalized for keyword in singing_keywords)
 
 
 def record_ai_diagnostics(

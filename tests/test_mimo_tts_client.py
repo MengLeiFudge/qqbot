@@ -72,6 +72,38 @@ def test_mimo_tts_client_builds_payload_and_decodes_audio() -> None:
     assert call["json"]["audio"] == {"format": "wav", "voice": "mimo_default"}
 
 
+def test_mimo_tts_client_marks_singing_content() -> None:
+    http_client = FakeHttpClient()
+    client = MimoTtsClient(
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key="secret-key",
+        http_client=http_client,
+    )
+
+    audio = asyncio.run(client.synthesize("啦啦啦", singing=True))
+
+    assert audio == b"wav-bytes"
+    call = http_client.calls[0]
+    assert call["json"]["messages"][1] == {
+        "role": "assistant",
+        "content": "(唱歌)啦啦啦",
+    }
+
+
+def test_mimo_tts_client_keeps_existing_singing_tag() -> None:
+    http_client = FakeHttpClient()
+    client = MimoTtsClient(
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key="secret-key",
+        http_client=http_client,
+    )
+
+    asyncio.run(client.synthesize("(唱歌)啦啦啦", singing=True))
+
+    call = http_client.calls[0]
+    assert call["json"]["messages"][1]["content"] == "(唱歌)啦啦啦"
+
+
 def test_mimo_tts_client_rejects_missing_audio_data() -> None:
     class MissingAudioHttpClient:
         async def post_json(self, url, *, headers, json, timeout):

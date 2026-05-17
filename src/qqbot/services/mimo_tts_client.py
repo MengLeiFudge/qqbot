@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 DEFAULT_TTS_MODEL = "mimo-v2.5-tts"
 DEFAULT_TTS_VOICE = "mimo_default"
 DEFAULT_TTS_STYLE = "自然、清晰、适合 QQ 聊天的中文语气。"
+SINGING_TAG = "(唱歌)"
 
 
 class AsyncJsonPostClient(Protocol):
@@ -44,12 +45,13 @@ class MimoTtsClient:
         self.timeout_seconds = timeout_seconds
         self.http_client = http_client
 
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
+        assistant_content = _prepare_assistant_content(text, singing=singing)
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "user", "content": self.style_prompt},
-                {"role": "assistant", "content": text},
+                {"role": "assistant", "content": assistant_content},
             ],
             "audio": {
                 "format": "wav",
@@ -87,6 +89,15 @@ class MimoTtsClient:
                 timeout=timeout,
             )
         return await asyncio.to_thread(_post_json, url, headers, json, timeout)
+
+
+def _prepare_assistant_content(text: str, *, singing: bool = False) -> str:
+    content = text.strip()
+    if not singing:
+        return content
+    if content.startswith((SINGING_TAG, "（唱歌）", "[唱歌]", "【唱歌】")):
+        return content
+    return f"{SINGING_TAG}{content}"
 
 
 def _post_json(

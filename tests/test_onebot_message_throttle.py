@@ -9,11 +9,14 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import qqbot.services.onebot_message_throttle as throttle_module
+from nonebot.adapters.onebot.v11 import MessageSegment
+from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.onebot_message_throttle import (
     extract_group_message_group_id,
     record_bot_group_message,
+    render_outgoing_group_message,
 )
 
 
@@ -51,6 +54,33 @@ def test_record_bot_group_message_persists_successful_group_send(tmp_path: Path)
     assert records[0].text == "Bot 回复"
     assert records[0].timestamp == int(fixed_time)
     assert records[0].message_id == "7788"
+
+
+def test_render_outgoing_group_message_normalizes_record_segment() -> None:
+    assert render_outgoing_group_message(MessageSegment.record("file:///D:/x.wav")) == "[语音]"
+    assert render_outgoing_group_message("[CQ:record,file=file:///D:/x.wav]") == "[语音]"
+
+
+def test_record_bot_group_message_persists_ai_context(tmp_path: Path) -> None:
+    log_store = GroupMessageLogStore(tmp_path / "run")
+    context_store = AiGroupContextStore(tmp_path / "run")
+
+    record_bot_group_message(
+        store=log_store,
+        context_store=context_store,
+        group_id=10001,
+        self_id=30001,
+        message=MessageSegment.record("file:///D:/x.wav"),
+        timestamp=1_800_000_000.1,
+        result={"message_id": 7788},
+    )
+
+    records = context_store.load_messages(10001)
+    assert len(records) == 1
+    assert records[0].user_id == "30001"
+    assert records[0].sender_name == "Bot"
+    assert records[0].message_id == "7788"
+    assert records[0].text == "[语音]"
 
 
 def test_record_bot_group_message_persists_chat_memory(tmp_path: Path) -> None:
