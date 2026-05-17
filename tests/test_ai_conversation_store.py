@@ -35,6 +35,14 @@ def test_ai_conversation_store_builds_group_user_key(tmp_path: Path) -> None:
         store.group_user_key("10000", "605738729", "xiaomi")
         == "group_user:10000:605738729:xiaomi"
     )
+    assert (
+        store.group_user_key("10000", "605738729", "xiaomi", scope="2026-05-17T04:00")
+        == "group_user:10000:605738729:xiaomi:2026-05-17T04:00"
+    )
+    assert (
+        store.private_key("605738729", "xiaomi", scope="2026-05-17T04:00")
+        == "private:605738729:xiaomi:2026-05-17T04:00"
+    )
 
 
 def test_ai_conversation_store_filters_high_risk_rejection_text(tmp_path: Path) -> None:

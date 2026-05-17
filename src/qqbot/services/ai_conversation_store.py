@@ -12,11 +12,23 @@ class AiConversationStore:
         self.root = Path(data_root) / "ai" / "conversations"
         self.max_messages = max(2, max_messages)
 
-    def private_key(self, user_id: str, profile: str) -> str:
-        return f"private:{user_id}:{profile}"
+    def private_key(self, user_id: str, profile: str, scope: str | None = None) -> str:
+        parts = ["private", user_id, profile]
+        if scope:
+            parts.append(scope)
+        return ":".join(parts)
 
-    def group_user_key(self, group_id: str, user_id: str, profile: str) -> str:
-        return f"group_user:{group_id}:{user_id}:{profile}"
+    def group_user_key(
+        self,
+        group_id: str,
+        user_id: str,
+        profile: str,
+        scope: str | None = None,
+    ) -> str:
+        parts = ["group_user", group_id, user_id, profile]
+        if scope:
+            parts.append(scope)
+        return ":".join(parts)
 
     def load_messages(self, key: str) -> tuple[AiMessage, ...]:
         path = self._path_for_key(key)

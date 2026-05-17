@@ -178,3 +178,9 @@ def test_build_ai_conversation_key_uses_private_or_group_user_scope(tmp_path: Pa
         FakeEvent("group", "605738729", group_id="516286670", to_me=True),
         "xiaomi",
     ) == "group_user:516286670:605738729:xiaomi"
+    assert build_ai_conversation_key(
+        store,
+        FakeEvent("group", "605738729", group_id="516286670", to_me=True),
+        "xiaomi",
+        scope="2026-05-17T04:00",
+    ) == "group_user:516286670:605738729:xiaomi:2026-05-17T04:00"

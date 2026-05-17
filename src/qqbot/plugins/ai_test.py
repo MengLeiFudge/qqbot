@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from datetime import datetime
 
 from nonebot import logger, on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
@@ -24,6 +25,7 @@ from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
+from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.admin_service import AdminService
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.group_nick_store import GroupNickStore, normalize_call_name
@@ -140,7 +142,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         settings.data_root,
         max_messages=settings.ai_max_context_messages,
     )
-    key = build_ai_conversation_key(conversation_store, event, profile)
+    conversation_scope = AiUserStyleStore.rotation_slot_id(datetime.now())
+    key = build_ai_conversation_key(conversation_store, event, profile, scope=conversation_scope)
     history = conversation_store.load_messages(key)
     if should_omit_ai_history_for_scope_query(event, normalized_message):
         history = ()
