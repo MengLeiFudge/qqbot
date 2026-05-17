@@ -67,9 +67,9 @@ def build_ai_conversation_key(
     store: AiConversationStore,
     event,
     profile: str,
-    scope: str | None = None,
+    scope: str,
 ) -> str:
     user_id = event.get_user_id()
     if getattr(event, "message_type", "") == "group" or hasattr(event, "group_id"):
-        return store.group_user_key(str(getattr(event, "group_id")), user_id, profile, scope=scope)
-    return store.private_key(user_id, profile, scope=scope)
+        return store.group_user_key(str(getattr(event, "group_id")), user_id, profile, scope)
+    return store.private_key(user_id, profile, scope)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from nonebot import logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, PrivateMessageEvent
@@ -11,6 +12,7 @@ from qqbot.services.ai_gateway import AiRequest
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.ai_profile_registry import load_ai_profiles
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
+from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.chat_memory_store import ChatMemoryStore, build_user_actor_id
 from qqbot.services.message_delivery import call_split_text_api
 from qqbot.services.message_normalizer import normalize_onebot_event
@@ -163,7 +165,8 @@ async def replay_offline_private_ai_once(bot: Bot, user_id: str) -> None:
         settings.data_root,
         max_messages=settings.ai_max_context_messages,
     )
-    key = conversation_store.private_key(user_id, profile)
+    conversation_scope = AiUserStyleStore.rotation_slot_id(datetime.now())
+    key = conversation_store.private_key(user_id, profile, conversation_scope)
     gateway = build_ai_gateway(settings, profile)
     response = await gateway.complete(
         AiRequest(
