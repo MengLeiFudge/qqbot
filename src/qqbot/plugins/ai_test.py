@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 from nonebot import logger, on_message, on_regex
@@ -66,10 +67,58 @@ from qqbot.services.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
-AI_TTS_MAX_CHARS = 500
+AI_TTS_MAX_CHARS = 100
+AI_TTS_FORCE_MAX_CHARS = 500
 AI_TTS_TOTAL_TIMEOUT_SECONDS = 45.0
+AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST = 20.0
+AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS = 45.0
 _BOT_LOOP_GUARD = BotLoopGuard()
-_AI_REPLY_SCOPES: set[str] = set()
+
+
+@dataclass(frozen=True)
+class AiReplyQueueTicket:
+    scope: str
+    lock: asyncio.Lock
+    queue_position: int
+    estimated_wait_seconds: float
+    force_text_response: bool
+
+
+class AiReplyQueueManager:
+    def __init__(
+        self,
+        *,
+        estimated_seconds_per_request: float = AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST,
+        text_fallback_after_seconds: float = AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS,
+    ) -> None:
+        self.estimated_seconds_per_request = estimated_seconds_per_request
+        self.text_fallback_after_seconds = text_fallback_after_seconds
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._queued_counts: dict[str, int] = {}
+
+    def join(self, scope: str) -> AiReplyQueueTicket:
+        queued_ahead = self._queued_counts.get(scope, 0)
+        self._queued_counts[scope] = queued_ahead + 1
+        estimated_wait = queued_ahead * self.estimated_seconds_per_request
+        return AiReplyQueueTicket(
+            scope=scope,
+            lock=self._locks.setdefault(scope, asyncio.Lock()),
+            queue_position=queued_ahead,
+            estimated_wait_seconds=estimated_wait,
+            force_text_response=estimated_wait > self.text_fallback_after_seconds,
+        )
+
+    def leave(self, ticket: AiReplyQueueTicket) -> None:
+        remaining = self._queued_counts.get(ticket.scope, 0) - 1
+        if remaining > 0:
+            self._queued_counts[ticket.scope] = remaining
+            return
+        self._queued_counts.pop(ticket.scope, None)
+        if not ticket.lock.locked():
+            self._locks.pop(ticket.scope, None)
+
+
+_AI_REPLY_QUEUE = AiReplyQueueManager()
 
 
 ai_model_matcher = on_regex(
@@ -166,35 +215,46 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     group_id = getattr(event, "group_id", None)
     user_id = event.get_user_id()
     reply_scope = build_ai_reply_scope(event)
-    if reply_scope in _AI_REPLY_SCOPES:
+    voice_singing = should_use_tts_singing_mode(prompt)
+    queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
+    force_text_response = queue_ticket.force_text_response and not voice_singing
+    if queue_ticket.queue_position > 0:
+        notice = build_ai_queue_notice_message(
+            queue_position=queue_ticket.queue_position,
+            estimated_wait_seconds=queue_ticket.estimated_wait_seconds,
+            force_text_response=force_text_response,
+        )
         if group_id is not None:
-            await ai_chat_matcher.finish(
+            await ai_chat_matcher.send(
                 build_ai_reply_message(
-                    "上一条还在处理，先别连续叫我啦。",
+                    notice,
                     group_id=group_id,
                     message_id=message_id,
                     user_id=user_id,
                 )
             )
-        await ai_chat_matcher.finish("上一条还在处理，先别连续叫我啦。")
-    _AI_REPLY_SCOPES.add(reply_scope)
+        else:
+            await ai_chat_matcher.send(notice)
     try:
-        await _handle_ai_locked(
-            bot,
-            event,
-            settings=settings,
-            store=store,
-            normalized_message=normalized_message,
-            prompt=prompt,
-            request_started=request_started,
-            request_wall_started=request_wall_started,
-            event_time=event_time,
-            message_id=message_id,
-            group_id=group_id,
-            user_id=user_id,
-        )
+        async with queue_ticket.lock:
+            await _handle_ai_locked(
+                bot,
+                event,
+                settings=settings,
+                store=store,
+                normalized_message=normalized_message,
+                prompt=prompt,
+                request_started=request_started,
+                request_wall_started=request_wall_started,
+                event_time=event_time,
+                message_id=message_id,
+                group_id=group_id,
+                user_id=user_id,
+                force_text_response=force_text_response,
+                force_voice_response=voice_singing,
+            )
     finally:
-        _AI_REPLY_SCOPES.discard(reply_scope)
+        _AI_REPLY_QUEUE.leave(queue_ticket)
 
 
 async def _handle_ai_locked(
@@ -211,6 +271,8 @@ async def _handle_ai_locked(
     message_id: object,
     group_id: object | None,
     user_id: str,
+    force_text_response: bool = False,
+    force_voice_response: bool = False,
 ) -> None:
     if group_id is not None and is_before_onebot_connect(event_time):
         logger.info(
@@ -295,7 +357,9 @@ async def _handle_ai_locked(
     )
     output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
     voice_singing = should_use_tts_singing_mode(prompt)
-    voice_context = build_ai_output_mode_context(output_mode, singing=voice_singing)
+    voice_output_requested = output_mode == "voice" or force_voice_response
+    context_output_mode = "voice" if voice_output_requested else output_mode
+    voice_context = build_ai_output_mode_context(context_output_mode, singing=voice_singing)
     if voice_context:
         context_parts.append(voice_context)
     restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
@@ -439,7 +503,12 @@ async def _handle_ai_locked(
         response,
         show_metrics=settings.ai_show_metrics,
     )
-    if output_mode == "voice" and not settings.ai_show_metrics:
+    force_voice = voice_singing and voice_output_requested
+    if voice_output_requested and not settings.ai_show_metrics and not force_text_response:
+        should_attempt_voice = should_attempt_ai_voice_response(
+            response_text,
+            force_voice=force_voice,
+        )
         voice_sent = await try_send_ai_voice_response(
             bot,
             settings,
@@ -449,11 +518,13 @@ async def _handle_ai_locked(
             group_id=group_id,
             user_id=user_id,
             singing=voice_singing,
+            force_voice=force_voice,
         )
         if voice_sent:
             await ai_chat_matcher.finish()
             return
-        response_text = "语音生成失败啦，先用文字回复你：\n" + response_text
+        if should_attempt_voice:
+            response_text = "语音生成失败啦，先用文字回复你：\n" + response_text
 
     if group_id is not None and len(response_text) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
         await ai_chat_matcher.send(
@@ -491,8 +562,9 @@ async def try_send_ai_voice_response(
     group_id: int | str | None,
     user_id: int | str,
     singing: bool = False,
+    force_voice: bool = False,
 ) -> bool:
-    if not text.strip() or len(text) > AI_TTS_MAX_CHARS:
+    if not should_attempt_ai_voice_response(text, force_voice=force_voice):
         return False
     try:
         resolved = resolve_ai_profile(profiles, profile)
@@ -534,6 +606,21 @@ def build_ai_reply_scope(event: MessageEvent) -> str:
     if group_id is not None:
         return f"group:{group_id}"
     return f"private:{event.get_user_id()}"
+
+
+def build_ai_queue_notice_message(
+    *,
+    queue_position: int,
+    estimated_wait_seconds: float,
+    force_text_response: bool,
+) -> str:
+    seconds = max(1, int(round(estimated_wait_seconds)))
+    if force_text_response:
+        return (
+            f"前面还有 {queue_position} 条，预计等 {seconds} 秒；"
+            "这条会直接用文字回复，避免语音把队列拖住。"
+        )
+    return f"前面还有 {queue_position} 条，预计等 {seconds} 秒，我排到了再回复。"
 
 
 def build_ai_prompt(normalized_message: NormalizedMessage) -> str:
@@ -586,6 +673,13 @@ def should_use_tts_singing_mode(prompt: str) -> bool:
         "sing",
     )
     return any(keyword in normalized for keyword in singing_keywords)
+
+
+def should_attempt_ai_voice_response(text: str, *, force_voice: bool = False) -> bool:
+    if not text.strip():
+        return False
+    limit = AI_TTS_FORCE_MAX_CHARS if force_voice else AI_TTS_MAX_CHARS
+    return len(text) <= limit
 
 
 def record_ai_diagnostics(

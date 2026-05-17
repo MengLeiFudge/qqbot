@@ -10,7 +10,9 @@ if str(SRC) not in sys.path:
 
 from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
+    AiReplyQueueManager,
     build_ai_context,
+    build_ai_queue_notice_message,
     build_ai_output_mode_context,
     build_ai_prompt,
     build_memory_retrieval_plan_context,
@@ -23,8 +25,10 @@ from qqbot.plugins.ai_test import (
     format_local_ai_result,
     format_memory_context,
     should_omit_ai_history_for_scope_query,
+    should_attempt_ai_voice_response,
     should_use_tts_singing_mode,
     try_send_ai_voice_response,
+    _handle_ai_locked,
 )
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
@@ -154,6 +158,22 @@ class FakeVoiceBot:
 
     async def call_api(self, api: str, **data: object) -> None:
         self.calls.append((api, data))
+
+
+class FinishException(Exception):
+    def __init__(self, message=None) -> None:
+        self.message = message
+
+
+class DummyMatcher:
+    def __init__(self) -> None:
+        self.sent: list[object] = []
+
+    async def send(self, message=None, **kwargs) -> None:
+        self.sent.append(message)
+
+    async def finish(self, message=None, **kwargs) -> None:
+        raise FinishException(message)
 
 
 def test_format_ai_response_hides_metrics_by_default() -> None:
@@ -342,6 +362,223 @@ def test_try_send_ai_voice_response_passes_singing_mode(
 
     assert sent is True
     assert synthesize_calls == [("啦啦啦", True)]
+
+
+def test_try_send_ai_voice_response_skips_long_normal_text(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class UnexpectedTtsClient:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
+            raise AssertionError("normal long text must not call TTS")
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", UnexpectedTtsClient)
+    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
+    bot = FakeVoiceBot()
+    profiles = {
+        "xiaomi": AiProfile(
+            name="xiaomi",
+            provider="xiaomi_mimo",
+            base_url="https://api.xiaomimimo.com/v1",
+            model="mimo-v2.5",
+            vision_model="mimo-v2.5",
+            api_key_env="MIMO_API_KEY",
+        )
+    }
+
+    sent = asyncio.run(
+        try_send_ai_voice_response(
+            bot,
+            RuntimeSettings(data_root=tmp_path),
+            profiles,
+            "xiaomi",
+            "很长" * 51,
+            group_id=516286670,
+            user_id="605738729",
+        )
+    )
+
+    assert sent is False
+    assert bot.calls == []
+
+
+def test_try_send_ai_voice_response_force_voice_allows_long_singing_text(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    synthesize_calls: list[tuple[str, bool]] = []
+
+    class FakeTtsClient:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
+            synthesize_calls.append((text, singing))
+            return b"wav-bytes"
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", FakeTtsClient)
+    monkeypatch.setattr(
+        "qqbot.services.message_delivery.MessageSegment.record",
+        lambda file_path: f"[record:{file_path}]",
+    )
+    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
+    bot = FakeVoiceBot()
+    profiles = {
+        "xiaomi": AiProfile(
+            name="xiaomi",
+            provider="xiaomi_mimo",
+            base_url="https://api.xiaomimimo.com/v1",
+            model="mimo-v2.5",
+            vision_model="mimo-v2.5",
+            api_key_env="MIMO_API_KEY",
+        )
+    }
+    long_song = "啦" * 120
+
+    sent = asyncio.run(
+        try_send_ai_voice_response(
+            bot,
+            RuntimeSettings(data_root=tmp_path),
+            profiles,
+            "xiaomi",
+            long_song,
+            group_id=516286670,
+            user_id="605738729",
+            singing=True,
+            force_voice=True,
+        )
+    )
+
+    assert sent is True
+    assert synthesize_calls == [(long_song, True)]
+
+
+def test_should_attempt_ai_voice_response_uses_normal_and_force_limits() -> None:
+    assert should_attempt_ai_voice_response("好" * 100) is True
+    assert should_attempt_ai_voice_response("好" * 101) is False
+    assert should_attempt_ai_voice_response("好" * 101, force_voice=True) is True
+    assert should_attempt_ai_voice_response("好" * 501, force_voice=True) is False
+
+
+def test_ai_reply_queue_estimates_wait_and_marks_long_wait_text_fallback() -> None:
+    manager = AiReplyQueueManager(
+        estimated_seconds_per_request=20.0,
+        text_fallback_after_seconds=45.0,
+    )
+
+    first = manager.join("group:1")
+    second = manager.join("group:1")
+    third = manager.join("group:1")
+    fourth = manager.join("group:1")
+
+    assert first.queue_position == 0
+    assert first.estimated_wait_seconds == 0.0
+    assert first.force_text_response is False
+    assert second.queue_position == 1
+    assert second.estimated_wait_seconds == 20.0
+    assert second.force_text_response is False
+    assert third.queue_position == 2
+    assert third.estimated_wait_seconds == 40.0
+    assert third.force_text_response is False
+    assert fourth.queue_position == 3
+    assert fourth.estimated_wait_seconds == 60.0
+    assert fourth.force_text_response is True
+
+    manager.leave(first)
+    manager.leave(second)
+    manager.leave(third)
+    manager.leave(fourth)
+
+
+def test_build_ai_queue_notice_message_reports_estimate_and_text_fallback() -> None:
+    assert build_ai_queue_notice_message(
+        queue_position=2,
+        estimated_wait_seconds=40.0,
+        force_text_response=False,
+    ) == "前面还有 2 条，预计等 40 秒，我排到了再回复。"
+    assert build_ai_queue_notice_message(
+        queue_position=3,
+        estimated_wait_seconds=60.0,
+        force_text_response=True,
+    ) == "前面还有 3 条，预计等 60 秒；这条会直接用文字回复，避免语音把队列拖住。"
+
+
+def test_handle_ai_locked_forces_voice_for_singing_even_in_text_mode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    contexts: list[tuple[str, ...]] = []
+    voice_calls: list[tuple[str, bool, bool]] = []
+    dummy_matcher = DummyMatcher()
+
+    class FakeGateway:
+        async def complete(self, request) -> AiResponse:
+            contexts.append(tuple(request.context))
+            return AiResponse(text="啦" * 120)
+
+    async def fake_voice_response(
+        bot,
+        settings,
+        profiles,
+        profile,
+        text,
+        *,
+        group_id,
+        user_id,
+        singing=False,
+        force_voice=False,
+    ) -> bool:
+        voice_calls.append((text, singing, force_voice))
+        return True
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+    monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
+        "xiaomi": AiProfile(
+            name="xiaomi",
+            provider="xiaomi_mimo",
+            base_url="https://api.xiaomimimo.com/v1",
+            model="mimo-v2.5",
+            vision_model="mimo-v2.5",
+            api_key_env="MIMO_API_KEY",
+        )
+    })
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "xiaomi")
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
+    monkeypatch.setattr("qqbot.plugins.ai_test.try_send_ai_voice_response", fake_voice_response)
+
+    event = FakeGroupEvent(text="唱一下小星星")
+    store = SettingsStore(tmp_path, author_qq=605738729)
+    settings = RuntimeSettings(data_root=tmp_path, ai_enabled=True, ai_show_metrics=False)
+
+    try:
+        asyncio.run(
+            _handle_ai_locked(
+                FakeVoiceBot(),
+                event,
+                settings=settings,
+                store=store,
+                normalized_message=normalize_onebot_message(event.original_message),
+                prompt="唱一下小星星",
+                request_started=time.perf_counter(),
+                request_wall_started=time.time(),
+                event_time=None,
+                message_id=12345,
+                group_id=event.group_id,
+                user_id=event.get_user_id(),
+                force_text_response=False,
+                force_voice_response=True,
+            )
+        )
+    except FinishException:
+        pass
+
+    assert voice_calls == [("啦" * 120, True, True)]
+    assert any("当前 AI 回复输出模式：语音" in part for part in contexts[0])
+    assert any("唱歌合成能力" in part for part in contexts[0])
 
 
 def test_try_send_ai_voice_response_returns_false_when_tts_times_out(
