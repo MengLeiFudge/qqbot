@@ -11,7 +11,7 @@ from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_help_command,
 )
 
-QQ_GROUP_MANAGER_USER_IDS = {"285419631"}
+QQ_GROUP_MANAGER_USER_IDS = {"2854196310"}
 
 
 @dataclass(frozen=True, slots=True)
