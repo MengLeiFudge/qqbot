@@ -259,7 +259,8 @@ def test_call_record_api_sends_group_record(tmp_path: Path, monkeypatch) -> None
     )
 
     assert len(record_values) == 1
-    audio_path = Path(record_values[0])
+    assert record_values[0].startswith("file:///")
+    audio_path = Path(record_values[0].removeprefix("file:///"))
     assert audio_path.exists()
     assert audio_path.read_bytes() == b"wav-bytes"
     assert bot.calls == [
@@ -267,7 +268,7 @@ def test_call_record_api_sends_group_record(tmp_path: Path, monkeypatch) -> None
             "send_group_msg",
             {
                 "group_id": 10001,
-                "message": f"[record:{audio_path}]",
+                "message": f"[record:{record_values[0]}]",
             },
         )
     ]
@@ -275,9 +276,15 @@ def test_call_record_api_sends_group_record(tmp_path: Path, monkeypatch) -> None
 
 def test_call_record_api_sends_private_record(tmp_path: Path, monkeypatch) -> None:
     bot = FakeBot()
+    record_values: list[str] = []
+
+    def fake_record(file_path: str) -> str:
+        record_values.append(file_path)
+        return f"[record:{file_path}]"
+
     monkeypatch.setattr(
         "qqbot.services.message_delivery.MessageSegment.record",
-        lambda file_path: f"[record:{file_path}]",
+        fake_record,
     )
 
     asyncio.run(
@@ -292,6 +299,7 @@ def test_call_record_api_sends_private_record(tmp_path: Path, monkeypatch) -> No
     assert bot.calls[0][0] == "send_private_msg"
     assert bot.calls[0][1]["user_id"] == "605738729"
     assert str(bot.calls[0][1]["message"]).startswith("[record:")
+    assert record_values[0].startswith("file:///")
 
 
 def test_group_message_interval_waits_for_same_group_only() -> None:

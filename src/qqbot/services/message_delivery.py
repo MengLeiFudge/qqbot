@@ -179,7 +179,7 @@ async def call_record_api(
     audio_root.mkdir(parents=True, exist_ok=True)
     audio_path = audio_root / f"{int(time.time() * 1000)}-{uuid4().hex}.wav"
     audio_path.write_bytes(audio_bytes)
-    message = MessageSegment.record(str(audio_path))
+    message = MessageSegment.record(audio_path.resolve().as_uri())
     if group_id is not None:
         await wait_for_group_message_interval(group_id)
         await bot.call_api("send_group_msg", group_id=group_id, message=message)
