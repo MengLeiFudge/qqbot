@@ -111,6 +111,8 @@ def test_ai_output_mode_defaults_to_text_and_saves_group_private_preferences(tmp
     store.set_group_ai_output_mode(516286670, "bad")
     assert store.get_ai_output_mode(group_id=516286670, user_id="10001") == "text"
 
+    assert store.list_group_ai_output_modes() == {"516286670": "text"}
+
 
 def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path, author_qq=605738729)

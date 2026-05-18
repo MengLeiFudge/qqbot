@@ -106,6 +106,17 @@ class SettingsStore:
         settings["groups"] = groups
         self._write_json(self.settings_root / "ai_output_mode.json", settings)
 
+    def list_group_ai_output_modes(self) -> dict[str, str]:
+        settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
+        groups = settings.get("groups", {})
+        if not isinstance(groups, dict):
+            return {}
+        return {
+            str(group_id): _normalize_ai_output_mode(mode)
+            for group_id, mode in groups.items()
+            if str(group_id).strip().isdigit()
+        }
+
     def set_user_ai_output_mode(self, user_id: int | str, mode: str) -> None:
         settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
         users = settings.get("users", {})

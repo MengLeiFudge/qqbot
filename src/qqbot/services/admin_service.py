@@ -16,7 +16,7 @@ from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
 from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_plugin_specs
 from qqbot.services.reread_service import clamp_reread_percent
-from qqbot.services.settings_store import SettingsStore
+from qqbot.services.settings_store import AI_OUTPUT_MODES, AI_OUTPUT_TEXT_MODE, SettingsStore
 from qqbot.services.thunder_service import clamp_thunder_percent, normalize_thunder_range
 
 STARTUP_LOG_FILES = {"launcher.log", "qqbot_stdout.log", "qqbot_stderr.log"}
@@ -262,6 +262,57 @@ class AdminService:
         self.store.set_ai_provider(profile)
         return self.list_ai()
 
+    def list_ai_output_modes(
+        self,
+        group_names: dict[int, str] | None = None,
+    ) -> dict[str, object]:
+        group_names = group_names or {}
+        group_modes = self.store.list_group_ai_output_modes()
+        group_ids = sorted(
+            set(self._list_known_group_ids())
+            | set(group_names)
+            | {int(group_id) for group_id in group_modes if str(group_id).isdigit()}
+        )
+        return {
+            "default_mode": AI_OUTPUT_TEXT_MODE,
+            "modes": ["text", "voice"],
+            "groups": [
+                {
+                    "group_id": group_id,
+                    "group_name": group_names.get(group_id, ""),
+                    "display_name": self._format_group_display_name(
+                        group_id,
+                        group_names.get(group_id, ""),
+                    ),
+                    "mode": group_modes.get(str(group_id), AI_OUTPUT_TEXT_MODE),
+                    "source": "group" if str(group_id) in group_modes else "default",
+                }
+                for group_id in group_ids
+            ],
+        }
+
+    def set_group_ai_output_mode(
+        self,
+        group_id: int,
+        mode: str,
+        group_names: dict[int, str] | None = None,
+    ) -> dict[str, object]:
+        if group_id <= 0:
+            raise ValueError("Invalid group id.")
+        normalized_mode = self._normalize_ai_output_mode_for_admin(mode)
+        self.store.set_group_ai_output_mode(group_id, normalized_mode)
+        return self.list_ai_output_modes(group_names)
+
+    def set_all_group_ai_output_modes(
+        self,
+        mode: str,
+        group_names: dict[int, str] | None = None,
+    ) -> dict[str, object]:
+        normalized_mode = self._normalize_ai_output_mode_for_admin(mode)
+        for group in self.list_ai_output_modes(group_names)["groups"]:
+            self.store.set_group_ai_output_mode(group["group_id"], normalized_mode)
+        return self.list_ai_output_modes(group_names)
+
     def list_ai_diagnostics(self, limit: int = 100) -> dict[str, object]:
         safe_limit = max(1, min(int(limit), 500))
         return AiDiagnosticsStore(self.settings.data_root).summary(limit=safe_limit)
@@ -422,6 +473,13 @@ class AdminService:
     def _format_user_display_name(qq: int, name: str) -> str:
         name = name.strip()
         return f"{name}（{qq}）" if name and name != str(qq) else str(qq)
+
+    @staticmethod
+    def _normalize_ai_output_mode_for_admin(mode: str) -> str:
+        normalized = str(mode).strip().lower()
+        if normalized not in AI_OUTPUT_MODES:
+            raise ValueError("AI output mode must be text or voice.")
+        return normalized
 
     @staticmethod
     def _build_group_control_config(

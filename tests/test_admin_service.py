@@ -130,6 +130,57 @@ def test_set_plugin_enabled_rejects_unknown_plugin(tmp_path: Path) -> None:
         service.set_plugin_enabled("missing", False)
 
 
+def test_ai_output_mode_management_lists_and_updates_groups(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    GroupMessageLogStore(tmp_path / "run").append_message(
+        group_id=10001,
+        direction="incoming",
+        user_id=605738729,
+        sender_name="群友",
+        text="你好",
+        timestamp=1,
+    )
+    service.store.set_group_ai_output_mode(10002, "voice")
+
+    initial = service.list_ai_output_modes({10001: "甲群", 10002: "乙群"})
+    updated = service.set_group_ai_output_mode(10001, "voice", {10001: "甲群", 10002: "乙群"})
+    bulk = service.set_all_group_ai_output_modes("text", {10001: "甲群", 10002: "乙群"})
+
+    assert initial["default_mode"] == "text"
+    assert initial["modes"] == ["text", "voice"]
+    assert initial["groups"] == [
+        {
+            "group_id": 10001,
+            "group_name": "甲群",
+            "display_name": "甲群（10001）",
+            "mode": "text",
+            "source": "default",
+        },
+        {
+            "group_id": 10002,
+            "group_name": "乙群",
+            "display_name": "乙群（10002）",
+            "mode": "voice",
+            "source": "group",
+        },
+    ]
+    assert all(group["mode"] == "voice" for group in updated["groups"])
+    assert all(group["mode"] == "text" for group in bulk["groups"])
+    assert service.store.get_ai_output_mode(group_id=10001, user_id="605738729") == "text"
+    assert service.store.get_ai_output_mode(group_id=10002, user_id="605738729") == "text"
+
+
+def test_ai_output_mode_management_rejects_invalid_mode_and_group(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+
+    with pytest.raises(ValueError):
+        service.set_group_ai_output_mode(10001, "bad")
+    with pytest.raises(ValueError):
+        service.set_group_ai_output_mode(0, "voice")
+    with pytest.raises(ValueError):
+        service.set_all_group_ai_output_modes("bad")
+
+
 def test_group_control_config_lists_and_updates_global_settings(tmp_path: Path) -> None:
     service = build_service(tmp_path)
 

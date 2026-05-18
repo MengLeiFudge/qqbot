@@ -154,6 +154,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "/admin/api/plugins" in body
     assert "/admin/api/ai" in body
     assert "/admin/api/ai/diagnostics" in body
+    assert "/admin/api/ai/output-modes" in body
     assert "群功能" not in body
     assert "/features" not in body
     assert "adminShell" in body
@@ -164,6 +165,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
+    assert "AI 回复模式" in body
     assert "AI 诊断" in body
     assert "Codex 群绑定项目" in body
     assert "/admin/api/codex/group-bindings" in body
@@ -189,6 +191,8 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "scrollState.scrollTop" in body
     assert "scrollSelectedMessageListToBottom" in body
     assert "loadAiDiagnostics" in body
+    assert "loadAiOutputModes" in body
+    assert "saveAllAiOutputModes" in body
     assert "message-row" in body
     assert ".message-row.incoming" in body
     assert ".message-row.bot" in body
@@ -763,6 +767,56 @@ def test_ai_api_rejects_unknown_provider(tmp_path: Path) -> None:
 
     assert status_code == 404
     assert "Unknown AI profile" in body
+
+
+def test_ai_output_mode_api_lists_and_updates_group_modes(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    list_status, list_body = asgi_request(app, "GET", "/admin/api/ai/output-modes")
+    update_status, update_body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/ai/output-modes/516286670",
+        json_body={"mode": "voice"},
+    )
+    bulk_status, bulk_body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/ai/output-modes/all",
+        json_body={"mode": "text"},
+    )
+
+    assert list_status == 200
+    list_payload = json.loads(list_body)
+    assert list_payload["groups"] == [
+        {
+            "group_id": 516286670,
+            "group_name": "测试群",
+            "display_name": "测试群（516286670）",
+            "mode": "text",
+            "source": "default",
+        }
+    ]
+    assert update_status == 200
+    updated_group = json.loads(update_body)["groups"][0]
+    assert updated_group["mode"] == "voice"
+    assert updated_group["source"] == "group"
+    assert bulk_status == 200
+    assert json.loads(bulk_body)["groups"][0]["mode"] == "text"
+
+
+def test_ai_output_mode_api_rejects_invalid_mode(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/ai/output-modes/516286670",
+        json_body={"mode": "bad"},
+    )
+
+    assert status_code == 400
+    assert "AI output mode must be text or voice" in body
 
 
 def test_ai_diagnostics_api_returns_summary(tmp_path: Path) -> None:

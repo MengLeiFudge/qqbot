@@ -36,6 +36,10 @@ class AiProviderUpdateRequest(BaseModel):
     profile: str
 
 
+class AiOutputModeUpdateRequest(BaseModel):
+    mode: str
+
+
 class CodexGroupBindingUpdateRequest(BaseModel):
     project_id: str = ""
 
@@ -264,6 +268,43 @@ def register_admin_routes(
             return admin_service.set_ai_provider(payload.profile)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/admin/api/ai/output-modes")
+    async def admin_ai_output_modes(
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.list_ai_output_modes(await resolve_group_names())
+
+    @app.put("/admin/api/ai/output-modes/all")
+    async def admin_update_all_ai_output_modes(
+        payload: AiOutputModeUpdateRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.set_all_group_ai_output_modes(
+                payload.mode,
+                await resolve_group_names(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/admin/api/ai/output-modes/{group_id}")
+    async def admin_update_group_ai_output_mode(
+        group_id: int,
+        payload: AiOutputModeUpdateRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.set_group_ai_output_mode(
+                group_id,
+                payload.mode,
+                await resolve_group_names(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/admin/api/ai/diagnostics")
     async def admin_ai_diagnostics(
@@ -666,6 +707,19 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           </div>
         </div>
         <div class="panel-block">
+          <h3>AI 回复模式</h3>
+          <div class="row">
+            <select id="aiOutputBulkModeSelect">
+              <option value="text">文字</option>
+              <option value="voice">语音</option>
+            </select>
+            <button onclick="saveAllAiOutputModes()">批量切换已知群</button>
+            <button onclick="loadAiOutputModes()">刷新</button>
+            <span id="aiOutputModeStatus" class="muted"></span>
+          </div>
+          <div id="aiOutputModeList" class="binding-list"></div>
+        </div>
+        <div class="panel-block">
           <h3>AI 诊断</h3>
           <div class="row">
             <button onclick="loadAiDiagnostics()">刷新</button>
@@ -970,6 +1024,83 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         body: JSON.stringify({{ profile }}),
       }});
       status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}`;
+    }}
+
+    let aiOutputModePayload = {{ groups: [], modes: [] }};
+
+    async function loadAiOutputModes() {{
+      const status = document.getElementById("aiOutputModeStatus");
+      status.textContent = "正在读取...";
+      aiOutputModePayload = await api("/admin/api/ai/output-modes");
+      renderAiOutputModes();
+      status.textContent = `已读取：${{aiOutputModePayload.groups.length}} 个群`;
+    }}
+
+    function renderAiOutputModes() {{
+      const list = document.getElementById("aiOutputModeList");
+      if (!aiOutputModePayload.groups.length) {{
+        list.innerHTML = `<div class="muted">暂无已知群。</div>`;
+        return;
+      }}
+      list.innerHTML = aiOutputModePayload.groups.map(group => renderAiOutputModeRow(group)).join("");
+    }}
+
+    function renderAiOutputModeRow(group) {{
+      const source = group.source === "group" ? "面板设置" : "默认文字";
+      return `
+        <div class="binding-row">
+          <div>
+            <div class="binding-title">${{escapeHtml(group.display_name)}}</div>
+            <div class="binding-meta">当前：${{formatAiOutputMode(group.mode)}} / 来源：${{escapeHtml(source)}}</div>
+          </div>
+          <select id="ai_output_mode_${{group.group_id}}">
+            ${{renderAiOutputModeOption("text", group.mode)}}
+            ${{renderAiOutputModeOption("voice", group.mode)}}
+          </select>
+          <button onclick="saveGroupAiOutputMode(${{group.group_id}})">保存</button>
+        </div>
+      `;
+    }}
+
+    function renderAiOutputModeOption(value, current) {{
+      const selected = value === current ? " selected" : "";
+      return `<option value="${{value}}"${{selected}}>${{formatAiOutputMode(value)}}</option>`;
+    }}
+
+    function formatAiOutputMode(mode) {{
+      return mode === "voice" ? "语音" : "文字";
+    }}
+
+    async function saveGroupAiOutputMode(groupId) {{
+      const status = document.getElementById("aiOutputModeStatus");
+      const select = document.getElementById(`ai_output_mode_${{groupId}}`);
+      status.textContent = "正在保存...";
+      try {{
+        aiOutputModePayload = await api(`/admin/api/ai/output-modes/${{groupId}}`, {{
+          method: "PUT",
+          body: JSON.stringify({{ mode: select.value }}),
+        }});
+        renderAiOutputModes();
+        status.textContent = "已保存。";
+      }} catch (error) {{
+        status.textContent = `保存失败：${{error.message}}`;
+      }}
+    }}
+
+    async function saveAllAiOutputModes() {{
+      const status = document.getElementById("aiOutputModeStatus");
+      const select = document.getElementById("aiOutputBulkModeSelect");
+      status.textContent = "正在批量保存...";
+      try {{
+        aiOutputModePayload = await api("/admin/api/ai/output-modes/all", {{
+          method: "PUT",
+          body: JSON.stringify({{ mode: select.value }}),
+        }});
+        renderAiOutputModes();
+        status.textContent = `已批量切换为：${{formatAiOutputMode(select.value)}}`;
+      }} catch (error) {{
+        status.textContent = `批量保存失败：${{error.message}}`;
+      }}
     }}
 
     async function loadAiDiagnostics() {{
@@ -1300,7 +1431,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         .replaceAll("'", "&#39;");
     }}
     setInterval(loadGroupMessages, 3000);
-    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadAiDiagnostics(), loadCodexGroupBindings(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
+    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadAiOutputModes(), loadAiDiagnostics(), loadCodexGroupBindings(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
       document.body.insertAdjacentHTML("beforeend", `<pre>${{error.message}}</pre>`);
     }});
   </script>
