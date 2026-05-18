@@ -218,23 +218,6 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     voice_singing = should_use_tts_singing_mode(prompt)
     queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
     force_text_response = queue_ticket.force_text_response and not voice_singing
-    if queue_ticket.queue_position > 0:
-        notice = build_ai_queue_notice_message(
-            queue_position=queue_ticket.queue_position,
-            estimated_wait_seconds=queue_ticket.estimated_wait_seconds,
-            force_text_response=force_text_response,
-        )
-        if group_id is not None:
-            await ai_chat_matcher.send(
-                build_ai_reply_message(
-                    notice,
-                    group_id=group_id,
-                    message_id=message_id,
-                    user_id=user_id,
-                )
-            )
-        else:
-            await ai_chat_matcher.send(notice)
     try:
         async with queue_ticket.lock:
             await _handle_ai_locked(
@@ -606,21 +589,6 @@ def build_ai_reply_scope(event: MessageEvent) -> str:
     if group_id is not None:
         return f"group:{group_id}"
     return f"private:{event.get_user_id()}"
-
-
-def build_ai_queue_notice_message(
-    *,
-    queue_position: int,
-    estimated_wait_seconds: float,
-    force_text_response: bool,
-) -> str:
-    seconds = max(1, int(round(estimated_wait_seconds)))
-    if force_text_response:
-        return (
-            f"前面还有 {queue_position} 条，预计等 {seconds} 秒；"
-            "这条会直接用文字回复，避免语音把队列拖住。"
-        )
-    return f"前面还有 {queue_position} 条，预计等 {seconds} 秒，我排到了再回复。"
 
 
 def build_ai_prompt(normalized_message: NormalizedMessage) -> str:

@@ -12,7 +12,6 @@ from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
     AiReplyQueueManager,
     build_ai_context,
-    build_ai_queue_notice_message,
     build_ai_output_mode_context,
     build_ai_prompt,
     build_memory_retrieval_plan_context,
@@ -491,19 +490,6 @@ def test_ai_reply_queue_estimates_wait_and_marks_long_wait_text_fallback() -> No
     manager.leave(second)
     manager.leave(third)
     manager.leave(fourth)
-
-
-def test_build_ai_queue_notice_message_reports_estimate_and_text_fallback() -> None:
-    assert build_ai_queue_notice_message(
-        queue_position=2,
-        estimated_wait_seconds=40.0,
-        force_text_response=False,
-    ) == "前面还有 2 条，预计等 40 秒，我排到了再回复。"
-    assert build_ai_queue_notice_message(
-        queue_position=3,
-        estimated_wait_seconds=60.0,
-        force_text_response=True,
-    ) == "前面还有 3 条，预计等 60 秒；这条会直接用文字回复，避免语音把队列拖住。"
 
 
 def test_handle_ai_locked_forces_voice_for_singing_even_in_text_mode(
