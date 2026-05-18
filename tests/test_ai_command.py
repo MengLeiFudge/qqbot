@@ -187,8 +187,16 @@ def test_parse_ai_model_command_lists_or_switches_profile() -> None:
 
 def test_parse_ai_output_mode_command_accepts_group_and_private_commands() -> None:
     assert parse_ai_output_mode_command("AI回复模式").action == "status"
+    assert parse_ai_output_mode_command("回复模式").action == "status"
     assert parse_ai_output_mode_command("AI语音模式").mode == "voice"
     assert parse_ai_output_mode_command("AI文字模式").mode == "text"
+    assert parse_ai_output_mode_command("切换语音").mode == "voice"
+    assert parse_ai_output_mode_command("切到语音").mode == "voice"
+    assert parse_ai_output_mode_command("语音回复").mode == "voice"
+    assert parse_ai_output_mode_command("切换文字").mode == "text"
+    assert parse_ai_output_mode_command("切换文本").mode == "text"
+    assert parse_ai_output_mode_command("切回文字").mode == "text"
+    assert parse_ai_output_mode_command("文字回复").mode == "text"
 
     group_voice = parse_ai_output_mode_command("本群AI语音模式")
     assert group_voice is not None
@@ -202,6 +210,18 @@ def test_parse_ai_output_mode_command_accepts_group_and_private_commands() -> No
     assert user_text.scope == "user"
     assert user_text.mode == "text"
 
+    group_short_voice = parse_ai_output_mode_command("本群切换语音")
+    assert group_short_voice is not None
+    assert group_short_voice.action == "set"
+    assert group_short_voice.scope == "group"
+    assert group_short_voice.mode == "voice"
+
+    user_short_text = parse_ai_output_mode_command("我的切换文本")
+    assert user_short_text is not None
+    assert user_short_text.action == "set"
+    assert user_short_text.scope == "user"
+    assert user_short_text.mode == "text"
+
     assert parse_ai_output_mode_command("AI模型") is None
 
 
@@ -214,6 +234,7 @@ def test_ai_output_mode_command_does_not_enter_ai_chat() -> None:
         is False
     )
     assert should_handle_ai_chat(FakeEvent("private", "10001"), "我的AI文字模式") is False
+    assert should_handle_ai_chat(FakeEvent("private", "10001"), "切换语音") is False
 
 
 def test_build_ai_conversation_key_uses_private_or_group_user_scope(tmp_path: Path) -> None:

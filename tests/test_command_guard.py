@@ -75,6 +75,21 @@ def test_ai_model_management_commands_are_guarded() -> None:
     assert is_likely_command("ai xiaomi 你好") is False
 
 
+def test_ai_output_mode_short_commands_are_guarded() -> None:
+    for text in (
+        "AI回复模式",
+        "回复模式",
+        "切换语音",
+        "切到语音",
+        "本群切换语音",
+        "我的切换文本",
+        "切回文字",
+        "语音回复",
+        "文字回复",
+    ):
+        assert is_likely_command(text) is True
+
+
 def test_unknown_slash_text_can_fall_through_to_ai_when_directly_addressed() -> None:
     assert is_likely_command("/chart CrRgSbWy") is False
 

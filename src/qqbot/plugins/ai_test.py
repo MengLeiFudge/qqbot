@@ -128,7 +128,7 @@ ai_model_matcher = on_regex(
     rule=direct_command_rule(),
 )
 ai_output_mode_matcher = on_regex(
-    r"^(本群|我的)?AI(回复|输出)?(语音|文字|文本|回复)模式$",
+    r"^(本群|我的)?(?:AI(回复|输出)?(语音|文字|文本|回复)模式|(回复|输出)模式|切换语音|切到语音|切换到语音|语音模式|语音回复|切换文字|切换文本|切到文字|切到文本|切回文字|切回文本|切换到文字|切换到文本|文字模式|文本模式|文字回复|文本回复)$",
     priority=10,
     block=True,
     rule=direct_command_rule(),

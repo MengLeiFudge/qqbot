@@ -86,7 +86,7 @@ def parse_ai_output_mode_command(text: str) -> AiOutputModeCommand | None:
     if not normalized:
         return None
 
-    if normalized in {"AI回复模式", "AI输出模式"}:
+    if normalized in {"AI回复模式", "AI输出模式", "回复模式", "输出模式"}:
         return AiOutputModeCommand(action="status")
 
     scope = "auto"
@@ -98,9 +98,34 @@ def parse_ai_output_mode_command(text: str) -> AiOutputModeCommand | None:
         scope = "user"
         rest = rest.removeprefix("我的")
 
-    if rest in {"AI语音模式", "AI回复语音模式"}:
+    if rest in {
+        "AI语音模式",
+        "AI回复语音模式",
+        "切换语音",
+        "切到语音",
+        "切换到语音",
+        "语音模式",
+        "语音回复",
+    }:
         return AiOutputModeCommand(action="set", scope=scope, mode="voice")
-    if rest in {"AI文字模式", "AI文本模式", "AI回复文字模式", "AI回复文本模式"}:
+    if rest in {
+        "AI文字模式",
+        "AI文本模式",
+        "AI回复文字模式",
+        "AI回复文本模式",
+        "切换文字",
+        "切换文本",
+        "切到文字",
+        "切到文本",
+        "切回文字",
+        "切回文本",
+        "切换到文字",
+        "切换到文本",
+        "文字模式",
+        "文本模式",
+        "文字回复",
+        "文本回复",
+    }:
         return AiOutputModeCommand(action="set", scope=scope, mode="text")
     return None
 
