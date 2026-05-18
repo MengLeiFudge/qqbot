@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 
@@ -105,7 +106,27 @@ def test_group_nick_store_writes_atomically_without_tmp_file_left(tmp_path: Path
     )
 
     assert GroupNickStore(path).resolve_display_name(10001, 605738729) == "萌泪酱"
-    assert not (path.parent / ".group_nick.json.tmp").exists()
+    assert not list(path.parent.glob(".group_nick.json.*.tmp"))
+
+
+def test_group_nick_store_parallel_writes_do_not_share_tmp_file(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "settings" / "group_nick.json"
+
+    def write_record(index: int) -> None:
+        store = GroupNickStore(path)
+        store.record_group_sender(
+            group_id=10001 + index,
+            qq=605738729 + index,
+            card=f"群名片{index}",
+            nickname=f"昵称{index}",
+            updated_at=index,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(write_record, range(40)))
+
+    assert path.exists()
+    assert not list(path.parent.glob(".group_nick.json.*.tmp"))
 
 
 def test_resolve_call_name_strips_shapez_decorations(tmp_path: Path) -> None:

@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 
 from qqbot.config import load_settings
-from qqbot.services.json_file_store import atomic_write_json
+from qqbot.services.json_file_store import atomic_write_json, get_file_lock
 
 
 @dataclass(slots=True)
@@ -120,12 +120,13 @@ class GroupNickStore:
         return record.card or record.nickname
 
     def _load(self) -> dict[str, dict[str, GroupNickRecord]]:
-        if not self.file_path.exists():
-            return {}
-        try:
-            raw = json.loads(self.file_path.read_text(encoding="utf-8"))
-        except JSONDecodeError:
-            return {}
+        with get_file_lock(self.file_path):
+            if not self.file_path.exists():
+                return {}
+            try:
+                raw = json.loads(self.file_path.read_text(encoding="utf-8"))
+            except JSONDecodeError:
+                return {}
         if not isinstance(raw, dict):
             return {}
         return {
