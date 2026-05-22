@@ -24,51 +24,34 @@ class FeArtifactPublishResult:
 
 
 @dataclass(frozen=True, slots=True)
+class LocalArtifactPublishFile:
+    path: Path
+    name: str
+    targets: tuple[int, ...]
+    sha256: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class LocalArtifactPublishContext:
+    project_id: str
+    branch: str
+    commit_hash: str
+    commit_subject: str = ""
+    commit_detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class LocalArtifactPublishResult:
+    uploaded: list[dict[str, object]]
+    deleted: list[dict[str, object]]
+
+
+@dataclass(frozen=True, slots=True)
 class CommitSummary:
     short_hash: str
     title: str
     body: str
-
-
-def select_fe_package_from_afterbuild_result(
-    result_path: str | Path,
-    repo_path: str | Path,
-) -> Path | None:
-    path = normalize_local_path(result_path)
-    if not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    raw_packages = payload.get("generated_packages")
-    if not isinstance(raw_packages, list):
-        return None
-
-    repo = normalize_local_path(repo_path)
-    candidates = [
-        package
-        for raw_package in raw_packages
-        if isinstance(raw_package, str)
-        for package in [_normalize_fe_package(raw_package, repo)]
-        if package is not None
-    ]
-    if not candidates:
-        return None
-    candidates.sort(key=lambda package: (package.stat().st_mtime, package.name), reverse=True)
-    return candidates[0]
-
-
-def read_publish_summary_from_afterbuild_result(result_path: str | Path) -> str:
-    path = normalize_local_path(result_path)
-    if not path.is_file():
-        return ""
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return ""
-    summary = payload.get("publish_summary")
-    return summary.strip() if isinstance(summary, str) else ""
 
 
 async def publish_fe_artifact(
@@ -112,6 +95,53 @@ async def publish_fe_artifact(
     )
 
 
+async def publish_local_artifacts(
+    bot: Any,
+    files: list[LocalArtifactPublishFile],
+    context: LocalArtifactPublishContext,
+) -> LocalArtifactPublishResult:
+    uploaded: list[dict[str, object]] = []
+    deleted: list[dict[str, object]] = []
+
+    for artifact in files:
+        package_path = normalize_local_path(artifact.path)
+        upload_name = artifact.name.strip() or package_path.name
+        expected_sha256 = artifact.sha256.strip().lower()
+        actual_sha256 = calculate_sha256(package_path)
+        if expected_sha256 and expected_sha256 != actual_sha256:
+            raise ValueError(f"Artifact sha256 mismatch: {package_path}")
+
+        for group_id in artifact.targets:
+            deleted_names = await delete_same_named_group_files_uploaded_by_bot(bot, group_id, upload_name)
+            deleted.extend({"group_id": group_id, "name": name} for name in deleted_names)
+
+            upload_result = await bot.call_api(
+                "upload_group_file",
+                group_id=group_id,
+                file=str(package_path),
+                name=upload_name,
+            )
+            reply_message_id = _extract_message_id(upload_result)
+            if not reply_message_id:
+                reply_message_id = await find_uploaded_file_message_id(bot, group_id, upload_name)
+            message = build_local_artifact_publish_message(
+                context,
+                artifact.message,
+                reply_message_id=reply_message_id,
+            )
+            if message:
+                await bot.call_api("send_group_msg", group_id=group_id, message=message)
+            uploaded.append(
+                {
+                    "group_id": group_id,
+                    "file": str(package_path),
+                    "name": upload_name,
+                    "sha256": actual_sha256,
+                }
+            )
+    return LocalArtifactPublishResult(uploaded=uploaded, deleted=deleted)
+
+
 async def delete_old_fe_group_files(bot: Any, group_id: int) -> list[str]:
     payload = await bot.call_api("get_group_root_files", group_id=group_id)
     files = _extract_group_files(payload)
@@ -120,6 +150,37 @@ async def delete_old_fe_group_files(bot: Any, group_id: int) -> list[str]:
     for file_info in files:
         name = _first_text(file_info, "file_name", "name")
         if not FE_ARTIFACT_NAME_RE.fullmatch(name):
+            continue
+        uploader = _first_text(file_info, "uploader", "uploader_id", "user_id", "sender_id")
+        if self_id and uploader and uploader != self_id:
+            continue
+        file_id = _first_text(file_info, "file_id", "id")
+        if not file_id:
+            continue
+        delete_args: dict[str, object] = {
+            "group_id": group_id,
+            "file_id": file_id,
+        }
+        busid = _first_value(file_info, "busid", "bus_id")
+        if busid is not None:
+            delete_args["busid"] = busid
+        await bot.call_api("delete_group_file", **delete_args)
+        deleted.append(name)
+    return deleted
+
+
+async def delete_same_named_group_files_uploaded_by_bot(
+    bot: Any,
+    group_id: int,
+    file_name: str,
+) -> list[str]:
+    payload = await bot.call_api("get_group_root_files", group_id=group_id)
+    files = _extract_group_files(payload)
+    deleted: list[str] = []
+    self_id = str(getattr(bot, "self_id", ""))
+    for file_info in files:
+        name = _first_text(file_info, "file_name", "name")
+        if name != file_name:
             continue
         uploader = _first_text(file_info, "uploader", "uploader_id", "user_id", "sender_id")
         if self_id and uploader and uploader != self_id:
@@ -219,6 +280,35 @@ def build_publish_message(
         fields = {"变更内容": [normalized_message]}
 
     lines.extend(_build_type_sections(_commit_type(commit.title if commit else ""), fields))
+    return "\n".join(line for line in lines if line is not None).strip()
+
+
+def build_local_artifact_publish_message(
+    context: LocalArtifactPublishContext,
+    message: str = "",
+    reply_message_id: str = "",
+) -> str:
+    reply_prefix = _build_reply_prefix(reply_message_id)
+    subject = context.commit_subject.strip()
+    commit = context.commit_hash.strip()
+    if commit and subject:
+        headline = f"{commit[:7]} {subject}"
+    elif commit:
+        headline = commit[:7]
+    else:
+        headline = "本次构建"
+
+    lines = [f"{reply_prefix}{headline}".strip()]
+    if context.branch.strip():
+        lines.extend(["", f"分支：{context.branch.strip()}"])
+
+    detail = (message or context.commit_detail).strip()
+    if detail:
+        fields = _parse_publish_summary(detail)
+        if fields:
+            lines.extend(_build_type_sections(_commit_type(subject), fields))
+        else:
+            lines.extend(["", detail])
     return "\n".join(line for line in lines if line is not None).strip()
 
 
@@ -475,17 +565,6 @@ def _last_published_sha_path(
 ) -> Path:
     root = normalize_local_path(data_root) if data_root is not None else load_settings().data_root
     return root / "fe_artifacts" / f"{group_id}.json"
-
-
-def _normalize_fe_package(raw_path: str, repo_path: Path) -> Path | None:
-    package = normalize_local_path(raw_path)
-    if not package.is_file() or not is_fe_artifact_path(package):
-        return None
-    try:
-        package.resolve().relative_to(repo_path.resolve())
-    except ValueError:
-        return None
-    return package
 
 
 def _run_git(repo_path: Path, *args: str) -> str:

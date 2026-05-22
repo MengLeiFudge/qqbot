@@ -2,6 +2,7 @@ from pathlib import Path
 import asyncio
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -431,16 +432,6 @@ def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
     modzips.mkdir(parents=True)
     fe_package.write_bytes(b"fe")
     get_data_package.write_bytes(b"get-data")
-    result_path = modzips / "afterbuild-result.json"
-    result_path.write_text(
-        json.dumps(
-            {
-                "automation_mode": True,
-                "generated_packages": [str(get_data_package), str(fe_package)],
-            }
-        ),
-        encoding="utf-8",
-    )
     bot = FakeUploadBot()
     bot.group_files = [
         {
@@ -503,7 +494,7 @@ def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
         json_body={
             "project_id": "mlj_dspmods",
             "group_id": 319567534,
-            "afterbuild_result_path": str(result_path),
+            "files": [str(fe_package)],
             "message": "原因：用户反馈启动崩溃\n修复：避免 ProcessManager 静态初始化读取未就绪字段",
         },
     )
@@ -580,16 +571,6 @@ def test_publish_fe_artifact_skips_unchanged_fe_zip(
     fe_package = modzips / "FractionateEverything_2.3.0.zip"
     modzips.mkdir(parents=True)
     fe_package.write_bytes(b"same-fe-content")
-    result_path = modzips / "afterbuild-result.json"
-    result_path.write_text(
-        json.dumps(
-            {
-                "automation_mode": True,
-                "generated_packages": [str(fe_package)],
-            }
-        ),
-        encoding="utf-8",
-    )
     sha256 = __import__("hashlib").sha256(fe_package.read_bytes()).hexdigest()
     state_path = tmp_path / "run" / "fe_artifacts" / "319567534.json"
     state_path.parent.mkdir(parents=True)
@@ -618,7 +599,7 @@ def test_publish_fe_artifact_skips_unchanged_fe_zip(
         json_body={
             "project_id": "mlj_dspmods",
             "group_id": 319567534,
-            "afterbuild_result_path": str(result_path),
+            "files": [str(fe_package)],
             "message": "原因：这次 FE 包没变",
         },
     )
@@ -631,6 +612,279 @@ def test_publish_fe_artifact_skips_unchanged_fe_zip(
         "skipped": True,
         "reason": "FE package sha256 unchanged.",
     }
+    assert bot.calls == []
+
+
+def test_publish_local_artifacts_uploads_declared_files_to_multiple_groups(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    modzips = repo / "AfterBuildEvent" / "bin" / "Debug" / "ModZips"
+    package = modzips / "MyNewMod_1.0.0.zip"
+    modzips.mkdir(parents=True)
+    package.write_bytes(b"new-mod")
+    package_sha = __import__("hashlib").sha256(package.read_bytes()).hexdigest()
+    bot = FakeUploadBot()
+    bot.group_files = [
+        {
+            "file_id": "old-same-name",
+            "busid": 1,
+            "file_name": "MyNewMod_1.0.0.zip",
+            "uploader": 114514,
+        },
+        {
+            "file_id": "keep-other-name",
+            "busid": 2,
+            "file_name": "OtherMod_1.0.0.zip",
+            "uploader": 114514,
+        },
+        {
+            "file_id": "keep-user-upload",
+            "busid": 3,
+            "file_name": "MyNewMod_1.0.0.zip",
+            "uploader": 10001,
+        },
+    ]
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    monkeypatch.setattr(
+        "qqbot.admin_api.get_codex_project_by_id",
+        lambda project_id: type(
+            "Project",
+            (),
+            {
+                "project_id": project_id,
+                "display_name": "MLJ_DSPmods",
+                "repo_path": str(repo),
+            },
+        )(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "qqbot.admin_api._read_git_output",
+        lambda repo_path, *args: "master-224"
+        if args == ("branch", "--show-current")
+        else "abcdef1234567890",
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/artifacts/publish-local",
+        json_body={
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "project_id": "mlj_dspmods",
+            "branch": "master-224",
+            "commit_hash": "abcdef1234567890",
+            "commit_subject": "功能：发布新模组",
+            "commit_detail": "原因：新增测试包\n新增：MyNewMod 发布\n验证：AfterBuildEvent 1 成功",
+            "files": [
+                {
+                    "path": str(package),
+                    "sha256": package_sha,
+                    "targets": [319567534, 516286670],
+                }
+            ],
+        },
+    )
+
+    assert status_code == 200, body
+    assert json.loads(body) == {
+        "ok": True,
+        "uploaded": [
+            {
+                "group_id": 319567534,
+                "file": str(package),
+                "name": "MyNewMod_1.0.0.zip",
+                "sha256": package_sha,
+            },
+            {
+                "group_id": 516286670,
+                "file": str(package),
+                "name": "MyNewMod_1.0.0.zip",
+                "sha256": package_sha,
+            },
+        ],
+        "deleted": [
+            {"group_id": 319567534, "name": "MyNewMod_1.0.0.zip"},
+            {"group_id": 516286670, "name": "MyNewMod_1.0.0.zip"},
+        ],
+    }
+    assert bot.calls == [
+        (
+            "get_group_root_files",
+            {
+                "group_id": 319567534,
+            },
+        ),
+        (
+            "delete_group_file",
+            {
+                "group_id": 319567534,
+                "file_id": "old-same-name",
+                "busid": 1,
+            },
+        ),
+        (
+            "upload_group_file",
+            {
+                "group_id": 319567534,
+                "file": str(package),
+                "name": "MyNewMod_1.0.0.zip",
+            },
+        ),
+        (
+            "send_group_msg",
+            {
+                "group_id": 319567534,
+                "message": (
+                    "[CQ:reply,id=24680]abcdef1 功能：发布新模组\n\n"
+                    "分支：master-224\n\n"
+                    "背景原因：\n"
+                    "新增测试包\n\n"
+                    "新增能力：\n"
+                    "MyNewMod 发布\n\n"
+                    "验证：\n"
+                    "AfterBuildEvent 1 成功"
+                ),
+            },
+        ),
+        (
+            "get_group_root_files",
+            {
+                "group_id": 516286670,
+            },
+        ),
+        (
+            "delete_group_file",
+            {
+                "group_id": 516286670,
+                "file_id": "old-same-name",
+                "busid": 1,
+            },
+        ),
+        (
+            "upload_group_file",
+            {
+                "group_id": 516286670,
+                "file": str(package),
+                "name": "MyNewMod_1.0.0.zip",
+            },
+        ),
+        (
+            "send_group_msg",
+            {
+                "group_id": 516286670,
+                "message": (
+                    "[CQ:reply,id=24680]abcdef1 功能：发布新模组\n\n"
+                    "分支：master-224\n\n"
+                    "背景原因：\n"
+                    "新增测试包\n\n"
+                    "新增能力：\n"
+                    "MyNewMod 发布\n\n"
+                    "验证：\n"
+                    "AfterBuildEvent 1 成功"
+                ),
+            },
+        ),
+    ]
+
+
+def test_publish_local_artifacts_rejects_stale_request(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    package = repo / "ModZips" / "MyNewMod_1.0.0.zip"
+    package.parent.mkdir(parents=True)
+    package.write_bytes(b"new-mod")
+    bot = FakeUploadBot()
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    monkeypatch.setattr(
+        "qqbot.admin_api.get_codex_project_by_id",
+        lambda project_id: type(
+            "Project",
+            (),
+            {
+                "project_id": project_id,
+                "display_name": "MLJ_DSPmods",
+                "repo_path": str(repo),
+            },
+        )(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "qqbot.admin_api._read_git_output",
+        lambda repo_path, *args: "master"
+        if args == ("branch", "--show-current")
+        else "abcdef1234567890",
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/artifacts/publish-local",
+        json_body={
+            "timestamp": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
+            "project_id": "mlj_dspmods",
+            "files": [{"path": str(package), "targets": [319567534]}],
+        },
+    )
+
+    assert status_code == 400
+    assert "Publish request timestamp is stale" in body
+    assert bot.calls == []
+
+
+def test_publish_local_artifacts_rejects_wrong_branch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    package = repo / "ModZips" / "MyNewMod_1.0.0.zip"
+    package.parent.mkdir(parents=True)
+    package.write_bytes(b"new-mod")
+    bot = FakeUploadBot()
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    monkeypatch.setattr(
+        "qqbot.admin_api.get_codex_project_by_id",
+        lambda project_id: type(
+            "Project",
+            (),
+            {
+                "project_id": project_id,
+                "display_name": "MLJ_DSPmods",
+                "repo_path": str(repo),
+            },
+        )(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "qqbot.admin_api._read_git_output",
+        lambda repo_path, *args: "master"
+        if args == ("branch", "--show-current")
+        else "abcdef1234567890",
+    )
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/artifacts/publish-local",
+        json_body={
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "project_id": "mlj_dspmods",
+            "branch": "master-224",
+            "commit_hash": "abcdef1234567890",
+            "commit_detail": "验证：不会发送",
+            "files": [{"path": str(package), "targets": [319567534]}],
+        },
+    )
+
+    assert status_code == 400
+    assert "Publish branch does not match project checkout" in body
     assert bot.calls == []
 
 

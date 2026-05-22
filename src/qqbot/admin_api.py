@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
+import subprocess
 
 import nonebot
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -14,14 +16,16 @@ from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
 from qqbot.services.codex_task_service import get_codex_project_by_id, normalize_local_path
 from qqbot.services.fe_artifact_publish_service import (
+    LocalArtifactPublishContext,
+    LocalArtifactPublishFile,
     is_fe_artifact_path,
     publish_fe_artifact,
-    read_publish_summary_from_afterbuild_result,
-    select_fe_package_from_afterbuild_result,
+    publish_local_artifacts,
 )
 
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 ONEBOT_GROUP_LIST_TIMEOUT_SECONDS = 2.0
+LOCAL_ARTIFACT_PUBLISH_MAX_AGE_SECONDS = 5 * 60
 
 
 class FeatureToggleRequest(BaseModel):
@@ -48,8 +52,25 @@ class LocalArtifactUploadRequest(BaseModel):
     project_id: str
     group_id: int
     files: list[str] = []
-    afterbuild_result_path: str = ""
     message: str = ""
+
+
+class LocalArtifactPublishFileRequest(BaseModel):
+    path: str
+    name: str = ""
+    sha256: str = ""
+    targets: list[int]
+    message: str = ""
+
+
+class LocalArtifactPublishRequest(BaseModel):
+    timestamp: str
+    project_id: str
+    branch: str = ""
+    commit_hash: str = ""
+    commit_subject: str = ""
+    commit_detail: str = ""
+    files: list[LocalArtifactPublishFileRequest]
 
 
 class GroupControlUpdateRequest(BaseModel):
@@ -348,8 +369,8 @@ def register_admin_routes(
             raise HTTPException(status_code=404, detail="Unknown Codex project.")
         if payload.group_id <= 0:
             raise HTTPException(status_code=400, detail="Invalid group id.")
-        if not payload.files and not payload.afterbuild_result_path.strip():
-            raise HTTPException(status_code=400, detail="No artifact source to upload.")
+        if not payload.files:
+            raise HTTPException(status_code=400, detail="No artifact files to upload.")
 
         bots = nonebot.get_bots()
         if not bots:
@@ -364,8 +385,6 @@ def register_admin_routes(
             raise HTTPException(status_code=404, detail="No FractionateEverything zip artifact found.")
         bot = next(iter(bots.values()))
         publish_message = payload.message.strip()
-        if not publish_message and payload.afterbuild_result_path.strip():
-            publish_message = read_publish_summary_from_afterbuild_result(payload.afterbuild_result_path)
         result = await publish_fe_artifact(
             bot,
             payload.group_id,
@@ -380,6 +399,50 @@ def register_admin_routes(
             "deleted": result.deleted,
             "skipped": result.skipped,
             "reason": result.reason,
+        }
+
+    @app.post("/admin/api/artifacts/publish-local")
+    async def admin_publish_local_artifacts(
+        payload: LocalArtifactPublishRequest,
+        _: None = Depends(require_local_request),
+    ) -> dict[str, object]:
+        project = get_codex_project_by_id(payload.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Unknown Codex project.")
+        if not payload.files:
+            raise HTTPException(status_code=400, detail="No artifact files to publish.")
+        _validate_publish_timestamp(payload.timestamp)
+        _validate_publish_metadata(payload)
+
+        bots = nonebot.get_bots()
+        if not bots:
+            raise HTTPException(status_code=503, detail="No connected OneBot bot.")
+
+        repo_path = normalize_local_path(project.repo_path)
+        if not repo_path.is_dir():
+            raise HTTPException(status_code=404, detail="Project repository does not exist.")
+        _validate_publish_git_context(payload, repo_path)
+
+        files = [
+            _build_local_artifact_publish_file(file_payload, repo_path)
+            for file_payload in payload.files
+        ]
+        context = LocalArtifactPublishContext(
+            project_id=payload.project_id,
+            branch=payload.branch.strip(),
+            commit_hash=payload.commit_hash.strip(),
+            commit_subject=payload.commit_subject.strip(),
+            commit_detail=payload.commit_detail.strip(),
+        )
+        bot = next(iter(bots.values()))
+        try:
+            result = await publish_local_artifacts(bot, files, context)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "uploaded": result.uploaded,
+            "deleted": result.deleted,
         }
 
     @app.get("/admin/api/admins")
@@ -1458,10 +1521,6 @@ def _resolve_fe_artifact_to_publish(
     payload: LocalArtifactUploadRequest,
     repo_path: Path,
 ) -> Path | None:
-    if payload.afterbuild_result_path.strip():
-        result = select_fe_package_from_afterbuild_result(payload.afterbuild_result_path, repo_path)
-        if result is not None:
-            return result
     artifacts = [
         _validate_local_artifact_path(file_path, repo_path)
         for file_path in payload.files
@@ -1470,6 +1529,95 @@ def _resolve_fe_artifact_to_publish(
         return None
     artifacts.sort(key=lambda artifact: (artifact.stat().st_mtime, artifact.name), reverse=True)
     return artifacts[0]
+
+
+def _build_local_artifact_publish_file(
+    payload: LocalArtifactPublishFileRequest,
+    repo_path: Path,
+) -> LocalArtifactPublishFile:
+    targets = tuple(group_id for group_id in payload.targets if group_id > 0)
+    if not targets:
+        raise HTTPException(status_code=400, detail="Artifact targets must include at least one valid group id.")
+    artifact = _validate_generic_local_artifact_path(payload.path, repo_path)
+    return LocalArtifactPublishFile(
+        path=artifact,
+        name=payload.name.strip() or artifact.name,
+        targets=targets,
+        sha256=payload.sha256.strip(),
+        message=payload.message.strip(),
+    )
+
+
+def _validate_generic_local_artifact_path(raw_path: str, repo_path: Path) -> Path:
+    artifact = normalize_local_path(raw_path)
+    if artifact.suffix.lower() != ".zip":
+        raise HTTPException(status_code=400, detail="Only zip artifacts can be uploaded.")
+    if not artifact.is_file():
+        raise HTTPException(status_code=404, detail="Artifact file does not exist.")
+    try:
+        artifact.resolve().relative_to(repo_path.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Artifact must be inside project repository.") from exc
+    return artifact
+
+
+def _validate_publish_timestamp(timestamp: str) -> None:
+    text = timestamp.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Publish timestamp is required.")
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        published_at = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid publish timestamp.") from exc
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    age_seconds = abs((datetime.now(timezone.utc) - published_at.astimezone(timezone.utc)).total_seconds())
+    if age_seconds > LOCAL_ARTIFACT_PUBLISH_MAX_AGE_SECONDS:
+        raise HTTPException(status_code=400, detail="Publish request timestamp is stale.")
+
+
+def _validate_publish_metadata(payload: LocalArtifactPublishRequest) -> None:
+    if not payload.branch.strip():
+        raise HTTPException(status_code=400, detail="Publish branch is required.")
+    if not payload.commit_hash.strip():
+        raise HTTPException(status_code=400, detail="Publish commit hash is required.")
+    if not payload.commit_detail.strip() and not any(file.message.strip() for file in payload.files):
+        raise HTTPException(status_code=400, detail="Publish commit detail or file message is required.")
+
+
+def _validate_publish_git_context(payload: LocalArtifactPublishRequest, repo_path: Path) -> None:
+    current_branch = _read_git_output(repo_path, "branch", "--show-current")
+    if not current_branch:
+        raise HTTPException(status_code=400, detail="Cannot read project git branch.")
+    if current_branch and current_branch != payload.branch.strip():
+        raise HTTPException(status_code=400, detail="Publish branch does not match project checkout.")
+
+    current_commit = _read_git_output(repo_path, "rev-parse", "HEAD")
+    if not current_commit:
+        raise HTTPException(status_code=400, detail="Cannot read project git commit.")
+    requested_commit = payload.commit_hash.strip().lower()
+    if current_commit and not current_commit.lower().startswith(requested_commit):
+        raise HTTPException(status_code=400, detail="Publish commit does not match project checkout.")
+
+
+def _read_git_output(repo_path: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_path,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
 
 
 async def get_connected_group_names(

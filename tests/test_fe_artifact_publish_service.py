@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 import asyncio
 
@@ -155,23 +154,6 @@ def test_build_publish_message_formats_misc_summary(
         "验证：\n"
         "文档检查通过"
     )
-
-
-def test_read_publish_summary_from_afterbuild_result(tmp_path: Path) -> None:
-    result_path = tmp_path / "afterbuild-result.json"
-    result_path.write_text(
-        json.dumps(
-            {
-                "automation_mode": True,
-                "publish_summary": "原因：用户反馈启动崩溃\n修复：移除静态初始化顺序依赖",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    summary = service.read_publish_summary_from_afterbuild_result(result_path)
-
-    assert summary == "原因：用户反馈启动崩溃\n修复：移除静态初始化顺序依赖"
 
 
 def test_find_uploaded_file_message_id_reads_group_history() -> None:

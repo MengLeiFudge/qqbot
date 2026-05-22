@@ -133,7 +133,7 @@
 
 - 普通 AI 回复只负责文本生成和已白名单的本地能力编排。
 - AI 不直接获得 shell、文件系统、群管、重启、上传文件等自由权限。
-- 上传已有项目 zip 产物属于固定白名单能力，只能由 Bot 管理员在群聊触发；机器人只查找项目仓库内真实存在的 `.zip` 并上传，不构建、不改代码、不 push。MLJ_DSPmods 的 FE 发布流程只上传 `FractionateEverything_*.zip`，上传前删除同一群内由 Bot 上传的旧 `FractionateEverything_*.zip`。
+- 上传已有项目 zip 产物属于固定白名单能力，只能由 Bot 管理员在群聊触发，或由 `AfterBuildEvent.exe 1` 这类 localhost-only 白名单构建流程调用管理 API。机器人只接收发布方明确列出的项目仓库内真实存在的 `.zip`，不构建、不改代码、不 push。
 - 涉及代码修改时，qqbot 只做中转、权限、项目路由、会话记录、结果回传和产物上传。
 - qqbot 给 Codex 的 prompt 不替目标仓库规定 git、分支、提交、测试、构建、输出格式或 Markdown 规则。
 - 目标仓库的 `AGENTS.md` / README / 项目规范决定 Codex 的具体执行规则。
@@ -145,7 +145,8 @@
 - Codex 会话讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
 - Codex 输出的 `.zip` 产物路径可由 qqbot 解析并上传回来源群，但只能上传目标仓库内真实存在的 zip 文件。
 - 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报。
-- 直接在本地 Codex 终端执行的任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only 管理接口推送 `afterbuild-result.json`，由 qqbot 完成 FE 产物筛选、旧包清理和上传。若请求体或 `afterbuild-result.json` 带有发布说明，qqbot 应优先发送该说明，说明内容应聚焦本次原因、修复/改动内容和实现方式，不发送文件级 diff 统计。说明消息应尽量引用刚上传的 FE zip，并根据提交前缀套用 `修复/功能/重构/杂项` 的结构化段落。若本次 FE zip 的 SHA256 与该群上次成功推送记录一致，则跳过清理、上传和说明发送。
+- 直接在本地 Codex 终端执行的任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only `/admin/api/artifacts/publish-local`，用 JSON 直接提交发布事件。请求体必须包含 `timestamp`、`project_id`、当前 `branch`、当前 `commit_hash`、`commit_subject`、`commit_detail` 和 `files` 数组；每个文件项包含 `path`、可选 `name`、可选 `sha256`、`targets` 群号数组和可选 `message`。qqbot 只校验并上传请求中明确列出的文件，不扫描构建目录，不读取发布方仓库里的结果 JSON，不硬编码 MLJ_DSPmods 的模组取舍。
+- `/admin/api/artifacts/publish-local` 的删除策略是按目标群和上传文件名精确匹配：只删除同一目标群内由当前 bot 上传的完全同名文件，再上传新文件。上传后尽量引用文件消息，并发送分支、提交和 `commit_detail`/文件级 `message` 格式化后的说明。说明内容应聚焦本次原因、修复/改动内容和实现方式，不发送文件级 diff 统计。
 - Codex 修改 qqbot 自身项目并成功完成后，必须安排 Bot 重启，使新代码实际生效。
 - 通过 qqbot 触发的自我更新，旧进程应先向来源群或私聊提示“已安排重启”，重启后在 OneBot 重新连接时再向相同目标回报连接状态。
 - 直接在本地 Codex 终端修改 qqbot 时，完成提交和验证后必须调用管理端重启入口，并检查 `onebot_connected=true`、`connected_bot_count>=1`。
