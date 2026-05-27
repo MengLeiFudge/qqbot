@@ -40,5 +40,6 @@ def test_ai_capabilities_are_explicitly_declared() -> None:
     assert shapez is not None
     assert arc.ai_capabilities == ("explain",)
     assert shapez.ai_capabilities == ("render",)
+    assert {"i", "view", "chart", "chart1", "chart2", "p"} <= set(shapez.commands)
     assert group_assistant.ai_capabilities == ()
     assert group_assistant.admin_only is True

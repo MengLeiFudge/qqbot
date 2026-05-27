@@ -125,7 +125,7 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
         id="shapez",
         name="异形工厂",
         aliases=("shapez",),
-        commands=("i", "p"),
+        commands=("i", "view", "chart", "chart1", "chart2", "p"),
         scopes=("group", "private"),
         ai_capabilities=("render",),
     ),
