@@ -80,6 +80,7 @@
 当前对话链路采用 `OneBot V11 事件 -> NoneBot matcher -> 消息规范化 -> 场景分流 -> 服务层编排` 的结构，保持事件入口轻量、业务逻辑可测试：
 
 - `message_normalizer.py` 是 OneBot 消息段到内部消息模型的唯一规范化入口；文本、@、图片、语音、视频、文件和引用消息先统一成 `NormalizedMessage` / `NormalizedReply`，后续 AI、记忆、日志和上下文逻辑不直接解析 CQ 码或 raw segment。
+- AI 触发链路需要读取引用消息或聚合聊天记录时，也必须通过 `message_normalizer.py` 的异步规范化能力调用 OneBot API 递归展开；插件层不要自行解析 `forward` / `node` 消息段。
 - 群聊普通消息只做旁路记录：`group_nick_cache.py` 负责记录群名片、最近群上下文、管理端消息日志和长期群聊记忆；不主动触发 AI 回复。
 - 群聊显式命令和 AI 对话必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。
 - 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。

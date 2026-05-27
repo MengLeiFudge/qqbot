@@ -42,7 +42,11 @@ from qqbot.services.message_delivery import (
     call_record_api,
     finish_split_text,
 )
-from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_event
+from qqbot.services.message_normalizer import (
+    NormalizedMessage,
+    normalize_onebot_event,
+    normalize_onebot_event_with_fetcher,
+)
 from qqbot.services.mimo_tts_client import MimoTtsClient
 from qqbot.services.memory_retrieval_service import (
     RetrievalPlan,
@@ -208,7 +212,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     request_wall_started = time.time()
     settings = load_settings()
     store = get_settings_store()
-    normalized_message = normalize_onebot_event(event)
+    normalized_message = await normalize_onebot_event_with_fetcher(event, bot.call_api)
     prompt = build_ai_prompt(normalized_message)
     event_time = getattr(event, "time", None)
     message_id = getattr(event, "message_id", None)
