@@ -1287,6 +1287,33 @@ def test_orchestrator_generates_image_with_rightcodes(
     assert request.image_urls == ("https://example.com/ref.png",)
 
 
+def test_orchestrator_prioritizes_rightcodes_draw_over_style_commands(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    FakeDrawClient.requests = []
+    monkeypatch.setenv("QQBOT_AI_KEY_RIGHTCODES", "rc-secret")
+    monkeypatch.setattr(ai_orchestrator_module, "RightCodesDrawClient", FakeDrawClient)
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "棉花生图 把这张图按照nature封面的风格重画",
+            AiOrchestratorContext(actor_user_id="10001"),
+            NormalizedMessage(
+                text="棉花生图 把这张图按照nature封面的风格重画",
+                outline="棉花生图 把这张图按照nature封面的风格重画",
+                image_urls=("https://example.com/ref.png",),
+            ),
+        )
+    )
+
+    assert result.handled is True
+    assert result.image_path == "https://example.com/generated.png"
+    assert result.text != STYLE_CHANGE_UNAWARE_MESSAGE
+    assert FakeDrawClient.requests[0][1].prompt == "把这张图按照nature封面的风格重画"
+
+
 def test_orchestrator_returns_rightcodes_model_help(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 

@@ -7,7 +7,13 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qqbot.services.ai_user_style_store import AiUserStyleStore, STYLE_PRESETS, resolve_style_preset
+from qqbot.services.ai_user_style_store import (
+    CATGIRL_ROTATION_WEIGHT,
+    AiUserStyleStore,
+    STYLE_PRESETS,
+    resolve_style_preset,
+    rotation_preset_candidates,
+)
 
 
 def test_user_style_store_saves_and_formats_preferences(tmp_path: Path) -> None:
@@ -74,7 +80,7 @@ def test_style_store_separates_group_and_user_preferences(tmp_path: Path) -> Non
 
 def test_style_store_rotates_one_global_preset_per_eight_hour_slot(tmp_path: Path) -> None:
     current_time = datetime(2026, 5, 14, 4, 0, 0)
-    choices = ["oracle", "onee"]
+    choices = ["catgirl", "onee"]
 
     def clock() -> datetime:
         return current_time
@@ -88,8 +94,8 @@ def test_style_store_rotates_one_global_preset_per_eight_hour_slot(tmp_path: Pat
     preset = store.get_effective_preset("10001")
     same_slot_group_context = store.build_context("10002", group_id="516286670")
 
-    assert preset.preset_id == "oracle"
-    assert "人格设定：谜语人风格" in same_slot_group_context
+    assert preset.preset_id == "catgirl"
+    assert "人格设定：猫娘风格" in same_slot_group_context
 
     current_time = datetime(2026, 5, 14, 12, 0, 0)
     next_slot_private_context = store.build_context("10001")
@@ -151,7 +157,6 @@ def test_style_store_lists_available_presets(tmp_path: Path) -> None:
 def test_style_store_default_pool_is_distinct_female_roles() -> None:
     assert tuple(STYLE_PRESETS) == (
         "catgirl",
-        "oracle",
         "tsundere",
         "onee",
         "chuunibyou",
@@ -161,6 +166,16 @@ def test_style_store_default_pool_is_distinct_female_roles() -> None:
     joined_prompts = "\n".join(preset.prompt for preset in STYLE_PRESETS.values())
     assert "喵呜" not in joined_prompts
     assert "橘雪莉" not in joined_prompts
+    assert "谜语人风格" not in joined_prompts
+
+
+def test_style_rotation_candidates_weight_catgirl_and_exclude_oracle() -> None:
+    candidates = rotation_preset_candidates()
+    candidate_ids = [preset.preset_id for preset in candidates]
+
+    assert CATGIRL_ROTATION_WEIGHT == 3
+    assert candidate_ids.count("catgirl") == 3
+    assert "oracle" not in candidate_ids
 
 
 def test_style_store_resolves_only_internal_preset_names() -> None:
@@ -169,7 +184,7 @@ def test_style_store_resolves_only_internal_preset_names() -> None:
     assert resolve_style_preset("detective").preset_id == "detective"
     assert resolve_style_preset("侦探风格").preset_id == "detective"
 
-    for visible_alias in ("侦探", "少女侦探", "橘雪莉风", "御姐", "管家", "谜语人"):
+    for visible_alias in ("侦探", "少女侦探", "橘雪莉风", "御姐", "管家", "谜语人", "谜语人风格"):
         try:
             resolve_style_preset(visible_alias)
         except ValueError:

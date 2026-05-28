@@ -7,7 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-RIGHTCODES_DRAW_DAILY_LIMIT = 5
+RIGHTCODES_DRAW_DAILY_LIMIT = 10
 
 
 @dataclass(frozen=True, slots=True)

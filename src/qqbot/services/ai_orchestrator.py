@@ -169,6 +169,14 @@ class AiOrchestrator:
         if group_plugins_result.handled:
             return group_plugins_result
 
+        draw_help_result = self._try_rightcodes_draw_help(text)
+        if draw_help_result.handled:
+            return draw_help_result
+
+        draw_result = await self._try_rightcodes_draw(text, normalized_message)
+        if draw_result.handled:
+            return draw_result
+
         style_list_result = self._try_list_style_presets(text, context)
         if style_list_result.handled:
             return style_list_result
@@ -188,14 +196,6 @@ class AiOrchestrator:
         requirement_list_result = self._try_list_requirements(text, context)
         if requirement_list_result.handled:
             return requirement_list_result
-
-        draw_help_result = self._try_rightcodes_draw_help(text)
-        if draw_help_result.handled:
-            return draw_help_result
-
-        draw_result = await self._try_rightcodes_draw(text, normalized_message)
-        if draw_result.handled:
-            return draw_result
 
         shapez_result = self._try_render_shapez(text, context)
         if shapez_result.handled:

@@ -8,6 +8,7 @@ if str(SRC) not in sys.path:
 
 from qqbot.services import rightcodes_draw_quota_store as quota_module
 from qqbot.services.rightcodes_draw_quota_store import (
+    RIGHTCODES_DRAW_DAILY_LIMIT,
     RightCodesDrawQuotaStore,
     current_draw_quota_date_key,
 )
@@ -29,6 +30,20 @@ def test_rightcodes_draw_quota_counts_per_user_per_day(tmp_path: Path) -> None:
     assert third.used == 2
     assert third.limit == 2
     assert third.remaining == 0
+
+
+def test_rightcodes_draw_default_daily_limit_is_ten(tmp_path: Path) -> None:
+    store = RightCodesDrawQuotaStore(tmp_path)
+
+    reservations = [store.reserve("10001", date_key="2026-05-09") for _ in range(11)]
+
+    assert RIGHTCODES_DRAW_DAILY_LIMIT == 10
+    assert all(result.allowed for result in reservations[:10])
+    assert reservations[9].used == 10
+    assert reservations[9].limit == 10
+    assert reservations[10].allowed is False
+    assert reservations[10].used == 10
+    assert reservations[10].limit == 10
 
 
 def test_rightcodes_draw_quota_refunds_failed_generation(tmp_path: Path) -> None:

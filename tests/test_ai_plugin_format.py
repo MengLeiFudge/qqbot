@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
 from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
     AiReplyQueueManager,
+    handle_ai,
     build_ai_context,
     build_ai_output_mode_context,
     build_ai_prompt,
@@ -175,6 +176,18 @@ class DummyMatcher:
         raise FinishException(message)
 
 
+class DummySemaphore:
+    def __init__(self) -> None:
+        self.entered = 0
+
+    async def __aenter__(self):
+        self.entered += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
 def test_format_ai_response_hides_metrics_by_default() -> None:
     response = AiResponse(
         text="我是萌萌棉花糖♪。",
@@ -244,8 +257,8 @@ def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None
 
 
 def test_format_draw_quota_messages_show_current_count() -> None:
-    assert format_draw_start_message(3, 5) == "收到，棉花糖开始生图任务啦！这是今天第 3/5 次生图。"
-    assert format_draw_quota_exceeded_message(5, 5) == "今天的生图次数已经用完啦（5/5）。明天再来找棉花糖画图吧！"
+    assert format_draw_start_message(3, 10) == "收到，棉花糖开始生图任务啦！这是今天第 3/10 次生图。"
+    assert format_draw_quota_exceeded_message(10, 10) == "今天的生图次数已经用完啦（10/10）。明天再来找棉花糖画图吧！"
 
 
 def test_build_ai_prompt_treats_pure_at_as_greeting_prompt() -> None:
@@ -490,6 +503,33 @@ def test_ai_reply_queue_estimates_wait_and_marks_long_wait_text_fallback() -> No
     manager.leave(second)
     manager.leave(third)
     manager.leave(fourth)
+
+
+def test_handle_ai_routes_rightcodes_draw_outside_reply_queue(monkeypatch, tmp_path: Path) -> None:
+    queue_calls: list[str] = []
+    handled_prompts: list[str] = []
+    semaphore = DummySemaphore()
+
+    async def fake_handle_ai_locked(*args, **kwargs) -> None:
+        handled_prompts.append(kwargs["prompt"])
+
+    class FailingQueue:
+        def join(self, scope: str):
+            queue_calls.append(scope)
+            raise AssertionError("生图不应进入普通 AI 回复队列")
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
+    monkeypatch.setattr("qqbot.plugins.ai_test._AI_REPLY_QUEUE", FailingQueue())
+    monkeypatch.setattr("qqbot.plugins.ai_test._AI_DRAW_SEMAPHORE", semaphore)
+    monkeypatch.setattr("qqbot.plugins.ai_test._handle_ai_locked", fake_handle_ai_locked)
+
+    event = FakeGroupEvent(text="棉花生图一只猫")
+    asyncio.run(handle_ai(FakeVoiceBot(), event))
+
+    assert semaphore.entered == 1
+    assert handled_prompts == ["棉花生图一只猫"]
+    assert queue_calls == []
 
 
 def test_handle_ai_locked_forces_voice_for_singing_even_in_text_mode(
@@ -749,7 +789,7 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
         timestamp=2,
     )
 
-    context = build_ai_context(RuntimeSettings(), FakeGroupEvent(), store)
+    context = build_ai_context(RuntimeSettings(data_root=tmp_path), FakeGroupEvent(), store)
 
     joined = "\n".join(context)
     assert "当前对话场景：QQ群聊" in joined

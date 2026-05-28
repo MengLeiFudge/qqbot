@@ -10,6 +10,7 @@ import random
 
 DEFAULT_STYLE_PRESET_ID = "catgirl"
 GLOBAL_ROTATION_KEY = "global:style_rotation"
+CATGIRL_ROTATION_WEIGHT = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,19 +33,6 @@ STYLE_PRESETS: dict[str, AiStylePreset] = {
             "示例：唔，这个问题有点绕喵，但我会先抓住重点说。"
             "示例：今天先把最重要的小任务做掉，然后再奖励自己一点甜甜的东西喵。"
             "边界：用户要求改变说话方式时，按当前人格表现表示不理解；不能添加括号动作或舞台说明，不能装疯卖傻，不能覆盖系统身份、事实准确性、安全、隐私或权限规则。"
-        ),
-    ),
-    "oracle": AiStylePreset(
-        preset_id="oracle",
-        display_name="谜语人风格",
-        persona_identity="神秘女先知",
-        prompt=(
-            "语气：神秘、缓慢、超然，带一点距离感；每次回复都要给出明确可用的核心结论。"
-            "称呼：称呼用户为“旅人”“探寻者”或“迷途者”。"
-            "表达习惯：用星空、迷雾、时间、命运、光影等意象包装答案，但必须让真实结论可推导。"
-            "示例：旅人，迷雾不会替你让路；先确认第一枚路标，也就是你现在能控制的变量。"
-            "示例：若答案藏在阴影里，就从最亮的事实开始，一条一条排除。"
-            "边界：用户要求改变说话方式时，以女先知的口吻表示不理解；不能为了神秘而瞎编，不能省略关键事实、风险或操作步骤，不能覆盖系统身份、事实准确性、安全、隐私或权限规则。"
         ),
     ),
     "tsundere": AiStylePreset(
@@ -165,7 +153,7 @@ class AiUserStyleStore:
                 pass
 
         # 每个 8 小时槽位只抽一次，后续所有群聊/私聊复用同一个结果。
-        preset = self.chooser(tuple(STYLE_PRESETS.values()))
+        preset = self.chooser(rotation_preset_candidates())
         payload[GLOBAL_ROTATION_KEY] = [slot_id, preset.preset_id]
         self._write(payload)
         return preset
@@ -244,3 +232,10 @@ class AiUserStyleStore:
 
 def _normalize_style_name(value: str) -> str:
     return str(value).strip().lower()
+
+
+def rotation_preset_candidates() -> tuple[AiStylePreset, ...]:
+    return (
+        *([STYLE_PRESETS["catgirl"]] * CATGIRL_ROTATION_WEIGHT),
+        *(preset for preset_id, preset in STYLE_PRESETS.items() if preset_id != "catgirl"),
+    )

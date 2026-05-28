@@ -76,6 +76,7 @@ AI_TTS_FORCE_MAX_CHARS = 500
 AI_TTS_TOTAL_TIMEOUT_SECONDS = 45.0
 AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST = 20.0
 AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS = 45.0
+AI_DRAW_CONCURRENCY_LIMIT = 2
 _BOT_LOOP_GUARD = BotLoopGuard()
 
 
@@ -123,6 +124,7 @@ class AiReplyQueueManager:
 
 
 _AI_REPLY_QUEUE = AiReplyQueueManager()
+_AI_DRAW_SEMAPHORE = asyncio.Semaphore(AI_DRAW_CONCURRENCY_LIMIT)
 
 
 ai_model_matcher = on_regex(
@@ -218,6 +220,25 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     message_id = getattr(event, "message_id", None)
     group_id = getattr(event, "group_id", None)
     user_id = event.get_user_id()
+    if should_handle_as_rightcodes_draw(prompt):
+        async with _AI_DRAW_SEMAPHORE:
+            await _handle_ai_locked(
+                bot,
+                event,
+                settings=settings,
+                store=store,
+                normalized_message=normalized_message,
+                prompt=prompt,
+                request_started=request_started,
+                request_wall_started=request_wall_started,
+                event_time=event_time,
+                message_id=message_id,
+                group_id=group_id,
+                user_id=user_id,
+                force_text_response=False,
+                force_voice_response=False,
+            )
+        return
     reply_scope = build_ai_reply_scope(event)
     voice_singing = should_use_tts_singing_mode(prompt)
     queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
@@ -361,7 +382,7 @@ async def _handle_ai_locked(
         self_restart_scheduler=restart_scheduler,
     )
     draw_quota_user_id: str | None = None
-    if looks_like_rightcodes_draw_command(prompt) and not looks_like_rightcodes_draw_help_command(prompt):
+    if should_handle_as_rightcodes_draw(prompt):
         logger.info(
             "RightCodes draw command detected: user_id={}, group_id={}, message_id={}, local_prepare={:.3f}s",
             user_id,
@@ -593,6 +614,10 @@ def build_ai_reply_scope(event: MessageEvent) -> str:
     if group_id is not None:
         return f"group:{group_id}"
     return f"private:{event.get_user_id()}"
+
+
+def should_handle_as_rightcodes_draw(prompt: str) -> bool:
+    return looks_like_rightcodes_draw_command(prompt) and not looks_like_rightcodes_draw_help_command(prompt)
 
 
 def build_ai_prompt(normalized_message: NormalizedMessage) -> str:
