@@ -56,6 +56,24 @@ def test_parse_rightcodes_draw_command_uses_default_model() -> None:
     assert RIGHTCODES_DRAW_DEFAULT_MODEL == "gpt-image-2"
 
 
+def test_parse_rightcodes_draw_command_accepts_prompt_without_space() -> None:
+    request = parse_rightcodes_draw_command("棉花生图一只拿着糖果的猫娘")
+
+    assert request == RightCodesDrawRequest(
+        prompt="一只拿着糖果的猫娘",
+        model=RIGHTCODES_DRAW_DEFAULT_MODEL,
+    )
+
+
+def test_parse_rightcodes_draw_command_accepts_multiline_prompt() -> None:
+    request = parse_rightcodes_draw_command("棉花生图 立体主义猫像\n圆形、三角与色块拼合")
+
+    assert request == RightCodesDrawRequest(
+        prompt="立体主义猫像\n圆形、三角与色块拼合",
+        model=RIGHTCODES_DRAW_DEFAULT_MODEL,
+    )
+
+
 def test_parse_rightcodes_draw_command_accepts_natural_draw_prompt() -> None:
     request = parse_rightcodes_draw_command("生成一个糖果城堡的图片")
 
@@ -89,6 +107,7 @@ def test_parse_rightcodes_draw_command_ignores_general_chat() -> None:
 
 def test_looks_like_rightcodes_draw_command_matches_draw_commands() -> None:
     assert looks_like_rightcodes_draw_command("棉花生图 一只猫")
+    assert looks_like_rightcodes_draw_command("棉花生图一只猫")
     assert looks_like_rightcodes_draw_command("生成一只猫的图片")
     assert not looks_like_rightcodes_draw_command("普通聊天")
 

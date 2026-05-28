@@ -248,7 +248,7 @@ def extract_rightcodes_draw_error_message(exc: Exception) -> str:
 
 
 def _extract_rightcodes_draw_prompt(text: str) -> str | None:
-    command_match = re.match(r"^(?:棉花糖|棉花)\s*生图\s+(.+)$", text)
+    command_match = re.match(r"^(?:棉花糖|棉花)\s*生图([\s\S]*)$", text)
     if command_match is not None:
         return command_match.group(1).strip()
     natural_match = re.match(r"^生成\s*(.+?)(?:的)?(?:图片|图像|图)\s*$", text)
