@@ -20,6 +20,7 @@ from qqbot.plugins.ai_test import (
     build_ai_output_mode_context,
     build_ai_prompt,
     build_ai_reply_scope,
+    build_recent_group_summary_context,
     build_memory_retrieval_plan_context,
     build_ai_system_context,
     build_ai_reply_message,
@@ -29,6 +30,7 @@ from qqbot.plugins.ai_test import (
     should_include_nickname_usage_context,
     should_suppress_group_ai_fallback,
     should_drop_queued_ai_request,
+    should_use_recent_group_summary_flow,
     format_ai_response,
     format_draw_quota_exceeded_message,
     format_draw_start_message,
@@ -67,12 +69,14 @@ class FakeGroupEvent:
         reply=None,
         sender=None,
         message=None,
+        message_id: int = 12345,
         group_id: int = 516286670,
         self_id: int = 1443944862,
     ) -> None:
         self.group_id = group_id
         self.user_id = user_id
         self.self_id = self_id
+        self.message_id = message_id
         self.text = text
         self.reply = reply
         self.sender = sender or FakeSender(user_id=int(user_id), card="萌泪", nickname="MLJ")
@@ -174,6 +178,28 @@ class FakeVoiceBot:
 
     async def call_api(self, api: str, **data: object) -> None:
         self.calls.append((api, data))
+
+
+class FakeSummaryBot(FakeVoiceBot):
+    def __init__(self, context_store: AiGroupContextStore) -> None:
+        super().__init__()
+        self.context_store = context_store
+
+    async def call_api(self, api: str, **data: object) -> None:
+        if api == "get_msg":
+            message_id = str(data.get("message_id", ""))
+            records = self.context_store.load_messages(516286670)
+            record = next((item for item in records if item.message_id == message_id), None)
+            if record is not None:
+                return {
+                    "message": record.text,
+                    "sender": {
+                        "user_id": int(record.user_id) if record.user_id.isdigit() else record.user_id,
+                        "card": record.sender_name,
+                        "nickname": record.sender_name,
+                    },
+                }
+        await super().call_api(api, **data)
 
 
 class FinishException(Exception):
@@ -479,6 +505,96 @@ def test_handle_ai_routes_rightcodes_draw_outside_reply_queue(monkeypatch, tmp_p
     assert queue_calls == []
 
 
+def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    contexts: list[tuple[str, ...]] = []
+    histories: list[tuple[object, ...]] = []
+    dummy_matcher = DummyMatcher()
+    context_store = AiGroupContextStore(tmp_path)
+    context_store.append_message(
+        group_id=516286670,
+        user_id=10001,
+        sender_name="用户A",
+        text="刚才在讨论机器人回复太慢。",
+        timestamp=1,
+        message_id=101,
+    )
+    context_store.append_message(
+        group_id=516286670,
+        user_id=10002,
+        sender_name="用户B",
+        text="主要是总结群聊不该查全量数据库。",
+        timestamp=2,
+        message_id=102,
+    )
+
+    class FakeGateway:
+        async def complete(self, request) -> AiResponse:
+            contexts.append(tuple(request.context))
+            histories.append(tuple(request.history))
+            return AiResponse(text="刚才主要在说机器人回复延迟，以及总结群聊不该查全量数据库。")
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+    monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
+        "openrouter": AiProfile(
+            name="openrouter",
+            provider="openai_compatible",
+            base_url="https://example.com/v1",
+            model="gpt-5.4-mini",
+            vision_model="gpt-5.4-mini",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+        )
+    })
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
+    monkeypatch.setattr(
+        "qqbot.plugins.ai_test.build_long_term_memory_context",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("近期群聊总结不应查长期记忆")),
+    )
+
+    event = FakeGroupEvent(text="棉花糖，总结一下群友说了什么", message_id=103)
+    settings = RuntimeSettings(
+        data_root=tmp_path,
+        ai_enabled=True,
+        ai_default_profile="openrouter",
+        ai_profile_file=tmp_path / "qqbot.toml",
+    )
+
+    finish_message = None
+    try:
+        asyncio.run(
+            _handle_ai_locked(
+                FakeSummaryBot(context_store),
+                event,
+                settings=settings,
+                store=SettingsStore(tmp_path, author_qq=605738729),
+                normalized_message=normalize_onebot_message(event.original_message),
+                prompt=event.text,
+                request_started=time.perf_counter(),
+                request_wall_started=time.time(),
+                event_time=None,
+                message_id=103,
+                group_id=event.group_id,
+                user_id=event.get_user_id(),
+            )
+        )
+    except FinishException as exc:
+        finish_message = exc.message
+
+    assert len(dummy_matcher.sent) == 1
+    assert "我来总结一下刚才群友说了什么" in str(dummy_matcher.sent[0])
+    assert "回复延迟" in str(finish_message)
+    assert histories == [()]
+    joined = "\n".join(contexts[0])
+    assert "快速总结本群近期聊天" in joined
+    assert "刚才在讨论机器人回复太慢" in joined
+    assert "总结群聊不该查全量数据库" in joined
+    assert "结构化记忆证据" not in joined
+
+
 def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
     tmp_path: Path,
     monkeypatch,
@@ -714,6 +830,46 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "当前发言者：萌泪(605738729)" in joined
     assert "用户A(10001): 今天讨论了机器人接入 AI。" in joined
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
+
+
+def test_recent_group_summary_flow_uses_recent_context_without_memory(tmp_path: Path) -> None:
+    store = AiGroupContextStore(tmp_path)
+    store.append_message(
+        group_id=516286670,
+        user_id=10001,
+        sender_name="用户A",
+        text="刚才在讨论机器人回复太慢。",
+        timestamp=1,
+        message_id=101,
+    )
+    store.append_message(
+        group_id=516286670,
+        user_id=10002,
+        sender_name="用户B",
+        text="主要是总结群聊不该查全量数据库。",
+        timestamp=2,
+        message_id=102,
+    )
+    event = FakeGroupEvent(text="棉花糖，总结一下群友说了什么")
+    normalized = normalize_onebot_message(event.original_message)
+
+    assert should_use_recent_group_summary_flow(event, normalized) is True
+    assert should_include_long_term_memory_context(event, normalized) is True
+
+    context = build_recent_group_summary_context(
+        RuntimeSettings(data_root=tmp_path),
+        event,
+        store,
+        normalized,
+    )
+
+    joined = "\n".join(context)
+    assert "快速总结本群近期聊天" in joined
+    assert "最近可见群聊记录" in joined
+    assert "用户A(10001): 刚才在讨论机器人回复太慢。" in joined
+    assert "用户B(10002): 主要是总结群聊不该查全量数据库。" in joined
+    assert "结构化记忆证据" not in joined
+    assert "本轮记忆检索计划" not in joined
 
 
 def test_ai_context_includes_current_sender_call_name(tmp_path: Path) -> None:

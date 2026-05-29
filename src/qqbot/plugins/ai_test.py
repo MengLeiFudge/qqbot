@@ -79,6 +79,7 @@ AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS = 20.0
 AI_DRAW_CONCURRENCY_LIMIT = 2
 AI_CONTINUOUS_REPLY_MAX_MESSAGES = 3
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
+AI_RECENT_GROUP_SUMMARY_MAX_RECORDS = 12
 _BOT_LOOP_GUARD = BotLoopGuard()
 
 
@@ -579,19 +580,38 @@ async def _handle_ai_locked(
     conversation_scope = AiUserStyleStore.rotation_slot_id(datetime.now())
     key = build_ai_conversation_key(conversation_store, event, profile, scope=conversation_scope)
     with prepare_timer.stage("history"):
-        history = conversation_store.load_messages(key)
-        if should_omit_ai_history_for_scope_query(event, normalized_message):
+        if should_use_recent_group_summary_flow(event, normalized_message):
+            history = ()
+        else:
+            history = conversation_store.load_messages(key)
+        if history and should_omit_ai_history_for_scope_query(event, normalized_message):
             history = ()
     with prepare_timer.stage("context"):
-        context_parts = list(
-            build_ai_context(
-                settings,
-                event,
-                group_context_store,
-                normalized_message,
-                settings_store=store,
+        if should_use_recent_group_summary_flow(event, normalized_message):
+            await send_recent_group_summary_ack(
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
             )
-        )
+            context_parts = list(
+                build_recent_group_summary_context(
+                    settings,
+                    event,
+                    group_context_store,
+                    normalized_message,
+                    settings_store=store,
+                )
+            )
+        else:
+            context_parts = list(
+                build_ai_context(
+                    settings,
+                    event,
+                    group_context_store,
+                    normalized_message,
+                    settings_store=store,
+                )
+            )
     with prepare_timer.stage("output_mode"):
         output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
         voice_singing = should_use_tts_singing_mode(prompt)
@@ -832,6 +852,24 @@ def build_ai_reply_scope(event: MessageEvent) -> str:
 
 def should_suppress_group_ai_fallback(group_id: object | None, response: AiResponse) -> bool:
     return group_id is not None and response.fallback and response.fallback_reason == "timeout"
+
+
+async def send_recent_group_summary_ack(
+    *,
+    group_id: int | str | None,
+    message_id: int | str | None,
+    user_id: int | str,
+) -> None:
+    if group_id is None:
+        return
+    await ai_chat_matcher.send(
+        build_ai_reply_message(
+            "好的，我来总结一下刚才群友说了什么。消息有点多，我需要一点时间。",
+            group_id=group_id,
+            message_id=message_id,
+            user_id=user_id,
+        )
+    )
 
 
 def should_handle_as_rightcodes_draw(prompt: str) -> bool:
@@ -1216,6 +1254,83 @@ def build_ai_context(
         )
         if memory_context:
             context.append(memory_context)
+    return tuple(context)
+
+
+def should_use_recent_group_summary_flow(
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+) -> bool:
+    if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
+        return False
+    text = build_scope_query_text(normalized_message)
+    compact = re.sub(r"\s+", "", text)
+    if not compact:
+        return False
+    summary_markers = ("总结", "概括", "归纳", "说了什么", "聊了什么")
+    recent_group_markers = (
+        "群友",
+        "群聊",
+        "大家",
+        "他们",
+        "刚才",
+        "刚刚",
+        "最近",
+        "前面",
+        "上面",
+        "这会",
+    )
+    return any(marker in compact for marker in summary_markers) and any(
+        marker in compact for marker in recent_group_markers
+    )
+
+
+def build_recent_group_summary_context(
+    settings: RuntimeSettings,
+    event: MessageEvent,
+    group_context_store: AiGroupContextStore,
+    normalized_message: NormalizedMessage | None = None,
+    *,
+    settings_store: SettingsStore | None = None,
+) -> tuple[str, ...]:
+    normalized_message = normalized_message or normalize_onebot_event(event)
+    settings_store = settings_store or SettingsStore(settings.data_root, settings.author_qq)
+    group_id = getattr(event, "group_id")
+    records = group_context_store.load_messages(
+        group_id,
+        limit=min(settings.ai_group_context_messages, AI_RECENT_GROUP_SUMMARY_MAX_RECORDS),
+    )
+    records = _drop_current_group_prompt(records, event, normalized_message)
+
+    context = [
+        build_ai_system_context(settings),
+        (
+            "当前任务：快速总结本群近期聊天。"
+            "只允许根据下面列出的最近群聊记录做简短总结；"
+            "不要使用长期记忆、私聊内容、其他群内容或未列出的历史。"
+            "如果记录不足，就直接说明最近可见消息不多。"
+        ),
+        f"当前群号：{group_id}",
+        build_current_sender_context(event),
+    ]
+    identity_context = build_ai_identity_context(settings, event, settings_store)
+    if identity_context:
+        context.append(identity_context)
+    message_context = build_message_structure_context(
+        normalized_message,
+        group_id=group_id,
+        nick_store=GroupNickStore(settings.data_root / "settings" / "group_nick.json"),
+    )
+    if message_context:
+        context.append(message_context)
+    if records:
+        lines = [
+            f"{record.sender_name}({record.user_id}): {record.text}"
+            for record in records
+        ]
+        context.append("最近可见群聊记录：\n" + "\n".join(lines))
+    else:
+        context.append("当前没有可用的近期群聊记录。")
     return tuple(context)
 
 
