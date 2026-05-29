@@ -20,6 +20,7 @@ from qqbot.plugins.ai_test import (
     build_ai_system_context,
     build_ai_reply_message,
     build_ai_reply_notice_message,
+    should_include_long_term_memory_context,
     format_ai_response,
     format_draw_quota_exceeded_message,
     format_draw_start_message,
@@ -749,7 +750,7 @@ def test_ai_context_includes_long_term_memory_search_results(tmp_path: Path) -> 
 
     context = build_ai_context(
         RuntimeSettings(data_root=tmp_path),
-        FakeGroupEvent(text="shapez 数据库怎么做"),
+        FakeGroupEvent(text="之前 shapez 数据库怎么做"),
         AiGroupContextStore(tmp_path),
     )
 
@@ -766,6 +767,42 @@ def test_ai_context_omits_long_term_memory_when_no_result(tmp_path: Path) -> Non
     )
 
     assert "长期记忆检索结果" not in "\n".join(context)
+
+
+def test_ai_context_skips_long_term_memory_for_plain_group_chat(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    memory_store.append_message(
+        group_id=516286670,
+        message_id=9,
+        direction="incoming",
+        user_id=10001,
+        sender_name="可可",
+        text="shapez 数据库要按聊天记录打标签。",
+        timestamp=1,
+    )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(text="shapez 数据库怎么做"),
+        AiGroupContextStore(tmp_path),
+    )
+
+    assert "长期记忆检索结果" not in "\n".join(context)
+
+
+def test_should_include_long_term_memory_context_for_memory_queries() -> None:
+    assert should_include_long_term_memory_context(
+        FakeGroupEvent(text="今天吃什么"),
+        normalize_onebot_message(FakeMessage("今天吃什么")),
+    ) is False
+    assert should_include_long_term_memory_context(
+        FakeGroupEvent(text="之前 shapez 数据库怎么做"),
+        normalize_onebot_message(FakeMessage("之前 shapez 数据库怎么做")),
+    ) is True
+    assert should_include_long_term_memory_context(
+        FakeGroupEvent(text="我和你私聊里说了什么？"),
+        normalize_onebot_message(FakeMessage("我和你私聊里说了什么？")),
+    ) is True
 
 
 def test_ai_context_separates_memory_facts_from_source_messages(tmp_path: Path) -> None:

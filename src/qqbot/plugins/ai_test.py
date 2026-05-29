@@ -6,6 +6,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from contextlib import contextmanager
 
 from nonebot import logger, on_message, on_regex
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
@@ -77,6 +78,19 @@ AI_DRAW_CONCURRENCY_LIMIT = 2
 AI_CONTINUOUS_REPLY_MAX_MESSAGES = 3
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
 _BOT_LOOP_GUARD = BotLoopGuard()
+
+
+@dataclass
+class AiPrepareTimer:
+    stages: dict[str, float]
+
+    @contextmanager
+    def stage(self, name: str):
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.stages[name] = self.stages.get(name, 0.0) + time.perf_counter() - started
 
 
 @dataclass(frozen=True)
@@ -363,9 +377,11 @@ async def _handle_ai_locked(
     if not settings.ai_enabled:
         await ai_chat_matcher.finish("AI 未启用。请设置 QQBOT_AI_ENABLED=true。")
 
-    profiles = load_ai_profiles(settings.ai_profile_file)
-    profile = get_current_ai_profile_name(settings, store, profiles)
-    profile_config = profiles.get(profile)
+    prepare_timer = AiPrepareTimer({})
+    with prepare_timer.stage("profiles"):
+        profiles = load_ai_profiles(settings.ai_profile_file)
+        profile = get_current_ai_profile_name(settings, store, profiles)
+        profile_config = profiles.get(profile)
     group_context_store = AiGroupContextStore(settings.data_root)
     conversation_store = AiConversationStore(
         settings.data_root,
@@ -373,36 +389,40 @@ async def _handle_ai_locked(
     )
     conversation_scope = AiUserStyleStore.rotation_slot_id(datetime.now())
     key = build_ai_conversation_key(conversation_store, event, profile, scope=conversation_scope)
-    history = conversation_store.load_messages(key)
-    if should_omit_ai_history_for_scope_query(event, normalized_message):
-        history = ()
-    context_parts = list(
-        build_ai_context(
-            settings,
-            event,
-            group_context_store,
-            normalized_message,
-            settings_store=store,
+    with prepare_timer.stage("history"):
+        history = conversation_store.load_messages(key)
+        if should_omit_ai_history_for_scope_query(event, normalized_message):
+            history = ()
+    with prepare_timer.stage("context"):
+        context_parts = list(
+            build_ai_context(
+                settings,
+                event,
+                group_context_store,
+                normalized_message,
+                settings_store=store,
+            )
         )
-    )
-    output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
-    voice_singing = should_use_tts_singing_mode(prompt)
-    voice_output_requested = output_mode == "voice" or force_voice_response
-    context_output_mode = "voice" if voice_output_requested else output_mode
-    voice_context = build_ai_output_mode_context(context_output_mode, singing=voice_singing)
-    if voice_context:
-        context_parts.append(voice_context)
-    restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
-    orchestrator = AiOrchestrator(
-        data_root=settings.data_root,
-        bot_name=settings.ai_bot_name,
-        action_executor=AiActionExecutor(
-            bot=bot,
+    with prepare_timer.stage("output_mode"):
+        output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
+        voice_singing = should_use_tts_singing_mode(prompt)
+        voice_output_requested = output_mode == "voice" or force_voice_response
+        context_output_mode = "voice" if voice_output_requested else output_mode
+        voice_context = build_ai_output_mode_context(context_output_mode, singing=voice_singing)
+        if voice_context:
+            context_parts.append(voice_context)
+    with prepare_timer.stage("orchestrator_init"):
+        restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
+        orchestrator = AiOrchestrator(
             data_root=settings.data_root,
+            bot_name=settings.ai_bot_name,
+            action_executor=AiActionExecutor(
+                bot=bot,
+                data_root=settings.data_root,
+                self_restart_scheduler=restart_scheduler,
+            ),
             self_restart_scheduler=restart_scheduler,
-        ),
-        self_restart_scheduler=restart_scheduler,
-    )
+        )
     draw_quota_user_id: str | None = None
     if should_handle_as_rightcodes_draw(prompt):
         logger.info(
@@ -448,15 +468,16 @@ async def _handle_ai_locked(
             message_id,
             time.perf_counter() - draw_start_send_started,
         )
-    local_result = await orchestrator.handle(
-        prompt,
-        AiOrchestratorContext(
-            actor_user_id=event.get_user_id(),
-            group_id=str(getattr(event, "group_id", "")) or None,
-            is_admin=store.is_bot_admin(int(event.get_user_id())),
-        ),
-        normalized_message,
-    )
+    with prepare_timer.stage("orchestrator"):
+        local_result = await orchestrator.handle(
+            prompt,
+            AiOrchestratorContext(
+                actor_user_id=event.get_user_id(),
+                group_id=str(getattr(event, "group_id", "")) or None,
+                is_admin=store.is_bot_admin(int(event.get_user_id())),
+            ),
+            normalized_message,
+        )
     if draw_quota_user_id is not None and not local_result.image_path:
         RightCodesDrawQuotaStore(settings.data_root).refund(draw_quota_user_id)
     if local_result.handled:
@@ -494,7 +515,8 @@ async def _handle_ai_locked(
     local_prepare_seconds = time.perf_counter() - local_prepare_started
 
     try:
-        gateway = build_ai_gateway(settings, profile)
+        with prepare_timer.stage("gateway_init"):
+            gateway = build_ai_gateway(settings, profile)
         response = await gateway.complete(
             AiRequest(
                 plugin_id="ai",
@@ -522,6 +544,7 @@ async def _handle_ai_locked(
         image_count=len(image_urls),
         queue_wait_seconds=queue_wait_seconds,
         local_prepare_seconds=local_prepare_seconds,
+        prepare_stages=prepare_timer.stages,
         total_seconds=total_seconds,
         response=response,
     )
@@ -693,6 +716,7 @@ def record_ai_diagnostics(
     total_seconds: float,
     response: AiResponse,
     queue_wait_seconds: float = 0.0,
+    prepare_stages: dict[str, float] | None = None,
 ) -> None:
     group_id = str(getattr(event, "group_id", "") or "")
     try:
@@ -711,6 +735,7 @@ def record_ai_diagnostics(
                 history_messages=history_messages,
                 image_count=image_count,
                 queue_wait_seconds=queue_wait_seconds,
+                prepare_stages=prepare_stages,
                 local_prepare_seconds=local_prepare_seconds,
                 total_seconds=total_seconds,
                 attempts=response.attempts,
@@ -978,15 +1003,61 @@ def build_ai_context(
         )
     else:
         context.append("当前没有可用的群聊历史记录。")
-    memory_context = build_long_term_memory_context(
-        settings,
-        group_id,
-        normalized_message,
-        event=event,
-    )
-    if memory_context:
-        context.append(memory_context)
+    if should_include_long_term_memory_context(event, normalized_message):
+        memory_context = build_long_term_memory_context(
+            settings,
+            group_id,
+            normalized_message,
+            event=event,
+        )
+        if memory_context:
+            context.append(memory_context)
     return tuple(context)
+
+
+def should_include_long_term_memory_context(
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+) -> bool:
+    if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
+        return True
+    text = build_scope_query_text(normalized_message)
+    if not text.strip():
+        return False
+    if is_private_memory_query(text) or is_cross_group_memory_query(text):
+        return True
+    if normalized_message.at_user_ids:
+        return True
+    memory_markers = (
+        "记得",
+        "记不记得",
+        "还记",
+        "记忆",
+        "长期",
+        "之前",
+        "以前",
+        "以后",
+        "上次",
+        "刚刚",
+        "刚才",
+        "说过",
+        "提过",
+        "聊过",
+        "总结",
+        "历史",
+        "记录",
+        "是谁",
+        "谁是",
+        "我是谁",
+        "你认识",
+        "你知道",
+        "叫什么",
+        "叫啥",
+        "喜欢什么",
+        "讨厌什么",
+        "结尾",
+    )
+    return any(marker in text for marker in memory_markers)
 
 
 def should_omit_ai_history_for_scope_query(

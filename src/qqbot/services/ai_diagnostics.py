@@ -55,6 +55,7 @@ class AiDiagnosticsRecord:
     image_count: int
     queue_wait_seconds: float
     local_prepare_seconds: float
+    prepare_stages: dict[str, float]
     total_seconds: float
     attempts: tuple[AiAttemptDiagnostics, ...]
 
@@ -76,6 +77,7 @@ class AiDiagnosticsRecord:
             "image_count": self.image_count,
             "queue_wait_seconds": self.queue_wait_seconds,
             "local_prepare_seconds": self.local_prepare_seconds,
+            "prepare_stages": self.prepare_stages,
             "total_seconds": self.total_seconds,
             "attempt_count": len(self.attempts),
             "attempts": [attempt.to_payload() for attempt in self.attempts],
@@ -139,6 +141,7 @@ class AiDiagnosticsStore:
             "avg_queue_wait_seconds": _avg(
                 float(record.get("queue_wait_seconds", 0.0) or 0.0) for record in records
             ),
+            "avg_prepare_stages": _avg_prepare_stages(records),
             "avg_total_seconds": _avg(
                 float(record.get("total_seconds", 0.0) or 0.0) for record in records
             ),
@@ -182,6 +185,7 @@ def build_ai_diagnostics_record(
     total_seconds: float,
     attempts: tuple[AiAttemptDiagnostics, ...],
     queue_wait_seconds: float = 0.0,
+    prepare_stages: dict[str, float] | None = None,
     now: int | None = None,
 ) -> AiDiagnosticsRecord:
     return AiDiagnosticsRecord(
@@ -201,6 +205,7 @@ def build_ai_diagnostics_record(
         image_count=image_count,
         queue_wait_seconds=max(0.0, float(queue_wait_seconds)),
         local_prepare_seconds=local_prepare_seconds,
+        prepare_stages=_normalize_prepare_stages(prepare_stages),
         total_seconds=total_seconds,
         attempts=attempts,
     )
@@ -215,6 +220,34 @@ def _avg(values) -> float | None:
     if not items:
         return None
     return sum(items) / len(items)
+
+
+def _normalize_prepare_stages(stages: dict[str, float] | None) -> dict[str, float]:
+    normalized: dict[str, float] = {}
+    for key, value in (stages or {}).items():
+        try:
+            normalized[str(key)] = max(0.0, float(value))
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _avg_prepare_stages(records: list[dict[str, object]]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for record in records:
+        stages = record.get("prepare_stages")
+        if not isinstance(stages, dict):
+            continue
+        for key, value in stages.items():
+            try:
+                seconds = float(value)
+            except (TypeError, ValueError):
+                continue
+            name = str(key)
+            totals[name] = totals.get(name, 0.0) + seconds
+            counts[name] = counts.get(name, 0) + 1
+    return {key: totals[key] / counts[key] for key in totals if counts.get(key, 0) > 0}
 
 
 def _percentile(values: list[float], percentile: float) -> float | None:

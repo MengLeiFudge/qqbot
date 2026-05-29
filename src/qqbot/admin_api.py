@@ -1295,6 +1295,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         ["重试后成功", payload.retry_success_count],
         ["排队等待均值", formatDuration(payload.avg_queue_wait_seconds)],
         ["本地准备均值", formatDuration(payload.avg_local_prepare_seconds)],
+        ["准备阶段均值", formatPrepareStages(payload.avg_prepare_stages)],
         ["首字均值", formatDuration(payload.avg_first_token_seconds)],
         ["首字 P95", formatDuration(payload.p95_first_token_seconds)],
         ["TPS 均值", formatRate(payload.avg_tokens_per_second)],
@@ -1321,11 +1322,13 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         const tps = attempt.tokens_per_second == null ? "-" : formatRate(attempt.tokens_per_second);
         return `#${{attempt.attempt}} ${{attempt.result}}，首字 ${{ttft}}，总 ${{formatDuration(attempt.total_seconds)}}，TPS ${{tps}}`;
       }}).join("；");
+      const prepareStages = formatPrepareStages(record.prepare_stages);
       return `
         <div class="diagnostic-row">
           <div class="diagnostic-title">${{escapeHtml(formatTime(record.timestamp))}} · ${{escapeHtml(record.profile)}} / ${{escapeHtml(record.model)}} · ${{escapeHtml(result)}}</div>
           <div class="diagnostic-meta">
             ${{escapeHtml(scope)}} · 排队 ${{escapeHtml(formatDuration(record.queue_wait_seconds))}} · 本地准备 ${{escapeHtml(formatDuration(record.local_prepare_seconds))}} · 端到端 ${{escapeHtml(formatDuration(record.total_seconds))}} · prompt ${{record.prompt_chars}} 字 · context ${{record.context_chars}} 字 · history ${{record.history_messages}} · image ${{record.image_count}}<br>
+            准备阶段：${{escapeHtml(prepareStages)}}<br>
             ${{escapeHtml(attempts || "无 provider attempt 记录")}}
           </div>
         </div>
@@ -1340,6 +1343,16 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     function formatRate(value) {{
       if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
       return `${{Number(value).toFixed(2)}}/s`;
+    }}
+
+    function formatPrepareStages(stages) {{
+      if (!stages || typeof stages !== "object") return "-";
+      const entries = Object.entries(stages)
+        .filter(([, value]) => value !== null && value !== undefined)
+        .sort((left, right) => Number(right[1]) - Number(left[1]))
+        .slice(0, 6);
+      if (!entries.length) return "-";
+      return entries.map(([name, value]) => `${{name}} ${{formatDuration(value)}}`).join("；");
     }}
 
     let codexBindingPayload = {{ groups: [], projects: [] }};

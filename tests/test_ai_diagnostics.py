@@ -63,6 +63,7 @@ def test_ai_diagnostics_store_appends_and_summarizes_recent_records(tmp_path: Pa
             local_prepare_seconds=0.4,
             total_seconds=1.4,
             queue_wait_seconds=0.3,
+            prepare_stages={"context": 0.2, "history": 0.1},
             attempts=(
                 AiAttemptDiagnostics(
                     attempt=1,
@@ -101,6 +102,7 @@ def test_ai_diagnostics_store_appends_and_summarizes_recent_records(tmp_path: Pa
             local_prepare_seconds=0.6,
             total_seconds=0.8,
             queue_wait_seconds=0.7,
+            prepare_stages={"context": 0.4, "history": 0.2},
             attempts=(
                 AiAttemptDiagnostics(
                     attempt=1,
@@ -126,9 +128,11 @@ def test_ai_diagnostics_store_appends_and_summarizes_recent_records(tmp_path: Pa
     assert summary["timeout_count"] == 1
     assert summary["avg_local_prepare_seconds"] == 0.5
     assert summary["avg_queue_wait_seconds"] == 0.5
+    assert summary["avg_prepare_stages"] == {"context": 0.30000000000000004, "history": 0.15000000000000002}
     assert summary["avg_total_seconds"] == 1.1
     assert summary["avg_first_token_seconds"] == 0.2
     assert summary["p95_first_token_seconds"] == 0.2
     assert summary["avg_tokens_per_second"] == 10.0
     assert [record["timestamp"] for record in summary["records"]] == [102, 101]
     assert [record["queue_wait_seconds"] for record in summary["records"]] == [0.7, 0.3]
+    assert summary["records"][0]["prepare_stages"] == {"context": 0.4, "history": 0.2}
