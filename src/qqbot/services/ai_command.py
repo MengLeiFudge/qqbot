@@ -27,12 +27,6 @@ class AiOutputModeCommand:
     mode: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class AiProactiveModeCommand:
-    action: str
-    enabled: bool | None = None
-
-
 def should_handle_ai_chat(
     event,
     text: str,
@@ -55,7 +49,6 @@ def should_handle_ai_chat(
         if (
             is_likely_command(prompt)
             or parse_ai_model_command(prompt) is not None
-            or parse_ai_proactive_mode_command(prompt) is not None
         ):
             return False
         if parse_ai_output_mode_command(prompt) is not None:
@@ -65,7 +58,6 @@ def should_handle_ai_chat(
         is_likely_command(prompt)
         or parse_ai_model_command(prompt) is not None
         or parse_ai_output_mode_command(prompt) is not None
-        or parse_ai_proactive_mode_command(prompt) is not None
     ):
         return False
     if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
@@ -146,38 +138,6 @@ def parse_ai_output_mode_command(text: str) -> AiOutputModeCommand | None:
         "文本回复",
     }:
         return AiOutputModeCommand(action="set", scope=scope, mode="text")
-    return None
-
-
-def parse_ai_proactive_mode_command(text: str) -> AiProactiveModeCommand | None:
-    normalized = re.sub(r"\s+", "", text.strip())
-    if not normalized:
-        return None
-    if normalized in {
-        "AI主动介入",
-        "本群AI主动介入",
-        "AI介入模式",
-        "本群AI介入模式",
-        "主动介入模式",
-    }:
-        return AiProactiveModeCommand(action="status")
-    if normalized in {
-        "开启AI主动介入",
-        "开启本群AI主动介入",
-        "本群开启AI主动介入",
-        "打开AI主动介入",
-        "打开本群AI主动介入",
-    }:
-        return AiProactiveModeCommand(action="set", enabled=True)
-    if normalized in {
-        "关闭AI主动介入",
-        "关闭本群AI主动介入",
-        "本群关闭AI主动介入",
-        "AI被动模式",
-        "本群AI被动模式",
-        "关闭主动介入",
-    }:
-        return AiProactiveModeCommand(action="set", enabled=False)
     return None
 
 

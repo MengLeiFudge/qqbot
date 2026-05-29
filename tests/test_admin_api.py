@@ -167,7 +167,9 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "全局插件" in body
     assert "AI 模型" in body
     assert "AI 回复模式" in body
+    assert "AI 主动介入" in body
     assert "AI 诊断" in body
+    assert "/admin/api/ai/proactive-modes" in body
     assert "Codex 群绑定项目" in body
     assert "/admin/api/codex/group-bindings" in body
     assert "renderCodexProjectOption" in body
@@ -194,6 +196,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "loadAiDiagnostics" in body
     assert "loadAiOutputModes" in body
     assert "saveAllAiOutputModes" in body
+    assert "saveGroupAiProactiveMode" in body
     assert "message-row" in body
     assert ".message-row.incoming" in body
     assert ".message-row.bot" in body
@@ -215,6 +218,32 @@ def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
     payload = json.loads(body)[0]
     assert payload["group_id"] == 516286670
     assert payload["display_name"] == "测试群（516286670）"
+
+
+def test_ai_proactive_mode_api_updates_group_setting(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/ai/proactive-modes/516286670",
+        {"enabled": True},
+    )
+
+    assert status_code == 200, body
+    payload = json.loads(body)
+    assert payload["default_proactive_enabled"] is False
+    assert payload["groups"] == [
+        {
+            "group_id": 516286670,
+            "group_name": "测试群",
+            "display_name": "测试群（516286670）",
+            "mode": "text",
+            "source": "default",
+            "proactive_enabled": True,
+            "proactive_source": "group",
+        }
+    ]
 
 
 def test_get_connected_group_names_skips_slow_onebot_api(monkeypatch) -> None:
@@ -1049,6 +1078,8 @@ def test_ai_output_mode_api_lists_and_updates_group_modes(tmp_path: Path) -> Non
             "display_name": "测试群（516286670）",
             "mode": "text",
             "source": "default",
+            "proactive_enabled": False,
+            "proactive_source": "default",
         }
     ]
     assert update_status == 200

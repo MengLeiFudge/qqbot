@@ -16,7 +16,6 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_command import (
     parse_ai_output_mode_command,
     build_ai_conversation_key,
-    parse_ai_proactive_mode_command,
     parse_ai_model_command,
     should_handle_ai_chat,
 )
@@ -139,12 +138,6 @@ ai_output_mode_matcher = on_regex(
     block=True,
     rule=direct_command_rule(),
 )
-ai_proactive_mode_matcher = on_regex(
-    r"^(?:(?:开启|打开|关闭)(?:本群)?|(?:本群)?(?:开启|打开|关闭)?|)AI主动介入$|^(?:本群)?AI(?:介入模式|被动模式)$|^主动介入模式$|^关闭主动介入$",
-    priority=10,
-    block=True,
-    rule=direct_command_rule(),
-)
 ai_chat_matcher = on_message(
     priority=70,
     block=True,
@@ -212,28 +205,6 @@ async def handle_ai_output_mode(event: MessageEvent) -> None:
     await ai_output_mode_matcher.finish(
         f"你的 AI 回复模式已切换为：{format_ai_output_mode(command.mode)}"
     )
-
-
-@ai_proactive_mode_matcher.handle()
-async def handle_ai_proactive_mode(event: MessageEvent) -> None:
-    group_id = getattr(event, "group_id", None)
-    if group_id is None:
-        await ai_proactive_mode_matcher.finish("AI 主动介入只能在群聊中设置。")
-
-    store = get_settings_store()
-    user_id = event.get_user_id()
-    if not store.is_bot_admin(int(user_id)):
-        await ai_proactive_mode_matcher.finish("只有 Bot 管理员才能设置本群 AI 主动介入。")
-
-    command = parse_ai_proactive_mode_command(event.get_plaintext())
-    if command is None:
-        return
-    if command.action == "set" and command.enabled is not None:
-        store.set_group_ai_proactive_enabled(group_id, command.enabled)
-
-    enabled = store.get_group_ai_proactive_enabled(group_id)
-    status = "开启" if enabled else "关闭"
-    await ai_proactive_mode_matcher.finish(f"本群 AI 主动介入：{status}")
 
 
 def should_handle_ai_event(event: MessageEvent) -> bool:

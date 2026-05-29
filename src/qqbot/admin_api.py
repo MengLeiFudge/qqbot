@@ -44,6 +44,10 @@ class AiOutputModeUpdateRequest(BaseModel):
     mode: str
 
 
+class AiProactiveModeUpdateRequest(BaseModel):
+    enabled: bool
+
+
 class CodexGroupBindingUpdateRequest(BaseModel):
     project_id: str = ""
 
@@ -322,6 +326,22 @@ def register_admin_routes(
             return admin_service.set_group_ai_output_mode(
                 group_id,
                 payload.mode,
+                await resolve_group_names(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/admin/api/ai/proactive-modes/{group_id}")
+    async def admin_update_group_ai_proactive_mode(
+        group_id: int,
+        payload: AiProactiveModeUpdateRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.set_group_ai_proactive_enabled(
+                group_id,
+                payload.enabled,
                 await resolve_group_names(),
             )
         except ValueError as exc:
@@ -783,6 +803,19 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           <div id="aiOutputModeList" class="binding-list"></div>
         </div>
         <div class="panel-block">
+          <h3>AI 主动介入</h3>
+          <div class="row">
+            <select id="aiProactiveBulkSelect">
+              <option value="false">关闭</option>
+              <option value="true">开启</option>
+            </select>
+            <button onclick="saveAllAiProactiveModes()">批量切换已知群</button>
+            <button onclick="loadAiProactiveModes()">刷新</button>
+            <span id="aiProactiveStatus" class="muted"></span>
+          </div>
+          <div id="aiProactiveList" class="binding-list"></div>
+        </div>
+        <div class="panel-block">
           <h3>AI 诊断</h3>
           <div class="row">
             <button onclick="loadAiDiagnostics()">刷新</button>
@@ -1096,6 +1129,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       status.textContent = "正在读取...";
       aiOutputModePayload = await api("/admin/api/ai/output-modes");
       renderAiOutputModes();
+      renderAiProactiveModes();
       status.textContent = `已读取：${{aiOutputModePayload.groups.length}} 个群`;
     }}
 
@@ -1144,6 +1178,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           body: JSON.stringify({{ mode: select.value }}),
         }});
         renderAiOutputModes();
+        renderAiProactiveModes();
         status.textContent = "已保存。";
       }} catch (error) {{
         status.textContent = `保存失败：${{error.message}}`;
@@ -1160,7 +1195,82 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           body: JSON.stringify({{ mode: select.value }}),
         }});
         renderAiOutputModes();
+        renderAiProactiveModes();
         status.textContent = `已批量切换为：${{formatAiOutputMode(select.value)}}`;
+      }} catch (error) {{
+        status.textContent = `批量保存失败：${{error.message}}`;
+      }}
+    }}
+
+    async function loadAiProactiveModes() {{
+      const status = document.getElementById("aiProactiveStatus");
+      status.textContent = "正在读取...";
+      const payload = await api("/admin/api/ai/output-modes");
+      aiOutputModePayload = payload;
+      renderAiOutputModes();
+      renderAiProactiveModes();
+      status.textContent = `已读取：${{payload.groups.length}} 个群`;
+    }}
+
+    function renderAiProactiveModes() {{
+      const list = document.getElementById("aiProactiveList");
+      if (!aiOutputModePayload.groups.length) {{
+        list.innerHTML = `<div class="muted">暂无已知群。</div>`;
+        return;
+      }}
+      list.innerHTML = aiOutputModePayload.groups.map(group => renderAiProactiveModeRow(group)).join("");
+    }}
+
+    function renderAiProactiveModeRow(group) {{
+      const source = group.proactive_source === "group" ? "面板设置" : "默认关闭";
+      return `
+        <div class="binding-row">
+          <div>
+            <div class="binding-title">${{escapeHtml(group.display_name)}}</div>
+            <div class="binding-meta">当前：${{group.proactive_enabled ? "开启" : "关闭"}} / 来源：${{escapeHtml(source)}}</div>
+          </div>
+          <select id="ai_proactive_mode_${{group.group_id}}">
+            <option value="false"${{group.proactive_enabled ? "" : " selected"}}>关闭</option>
+            <option value="true"${{group.proactive_enabled ? " selected" : ""}}>开启</option>
+          </select>
+          <button onclick="saveGroupAiProactiveMode(${{group.group_id}})">保存</button>
+        </div>
+      `;
+    }}
+
+    async function saveGroupAiProactiveMode(groupId) {{
+      const status = document.getElementById("aiProactiveStatus");
+      const select = document.getElementById(`ai_proactive_mode_${{groupId}}`);
+      status.textContent = "正在保存...";
+      try {{
+        aiOutputModePayload = await api(`/admin/api/ai/proactive-modes/${{groupId}}`, {{
+          method: "PUT",
+          body: JSON.stringify({{ enabled: select.value === "true" }}),
+        }});
+        renderAiOutputModes();
+        renderAiProactiveModes();
+        status.textContent = "已保存。";
+      }} catch (error) {{
+        status.textContent = `保存失败：${{error.message}}`;
+      }}
+    }}
+
+    async function saveAllAiProactiveModes() {{
+      const status = document.getElementById("aiProactiveStatus");
+      const select = document.getElementById("aiProactiveBulkSelect");
+      status.textContent = "正在批量保存...";
+      try {{
+        const payload = await api("/admin/api/ai/output-modes");
+        for (const group of payload.groups) {{
+          await api(`/admin/api/ai/proactive-modes/${{group.group_id}}`, {{
+            method: "PUT",
+            body: JSON.stringify({{ enabled: select.value === "true" }}),
+          }});
+        }}
+        aiOutputModePayload = await api("/admin/api/ai/output-modes");
+        renderAiOutputModes();
+        renderAiProactiveModes();
+        status.textContent = `已批量切换为：${{select.value === "true" ? "开启" : "关闭"}}`;
       }} catch (error) {{
         status.textContent = `批量保存失败：${{error.message}}`;
       }}
