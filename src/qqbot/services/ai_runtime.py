@@ -51,6 +51,7 @@ def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
             timeout_seconds=resolved.timeout_seconds,
             max_output_tokens=resolved.max_output_tokens,
             supports_vision=resolved.supports_vision,
+            extra_body=resolved.extra_body,
         )
     elif resolved.provider in {"xiaomi_mimo", "mimo_compatible"}:
         client = MimoCompatibleClient(

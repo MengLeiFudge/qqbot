@@ -32,6 +32,10 @@ max_output_tokens = 2048
 supports_vision = true
 note = "xiaomi"
 
+[model_providers.xiaomi.extra_body]
+reasoning = { effort = "low" }
+fast = true
+
 [model_providers.disabled]
 enabled = false
 provider = "openai_compatible"
@@ -65,6 +69,7 @@ def test_load_ai_profiles_and_resolve_enabled_profile(
     assert resolved.timeout_seconds == 9.0
     assert resolved.max_output_tokens == 2048
     assert resolved.supports_vision is True
+    assert resolved.extra_body == {"reasoning": {"effort": "low"}, "fast": True}
     assert load_ai_default_profile_name(profile_file) == "xiaomi"
 
 

@@ -7,8 +7,11 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from qqbot.services.ai_command import (
+    AiChatTriggerKind,
     build_ai_conversation_key,
+    classify_ai_chat_trigger,
     looks_like_ai_proactive_trigger,
+    looks_like_ai_named_trigger,
     parse_ai_output_mode_command,
     parse_ai_model_command,
     should_handle_ai_chat,
@@ -75,15 +78,16 @@ def test_group_message_requires_direct_at_for_ai_chat() -> None:
 def test_group_proactive_ai_chat_requires_enabled_trigger() -> None:
     event = FakeEvent("group", "10001", group_id="20001", to_me=False)
 
-    assert should_handle_ai_chat(event, "棉花糖在吗") is False
+    assert classify_ai_chat_trigger(event, "棉花糖在吗") == AiChatTriggerKind.NAMED
+    assert should_handle_ai_chat(event, "请问这个怎么修？") is False
     assert (
-        should_handle_ai_chat(
+        classify_ai_chat_trigger(
             event,
-            "棉花糖在吗",
+            "请问这个怎么修？",
             proactive_enabled=True,
             bot_names=("萌萌棉花糖♪",),
         )
-        is True
+        == AiChatTriggerKind.PROACTIVE
     )
     assert (
         should_handle_ai_chat(
@@ -94,6 +98,23 @@ def test_group_proactive_ai_chat_requires_enabled_trigger() -> None:
         )
         is False
     )
+
+
+def test_group_named_trigger_enters_even_when_proactive_disabled() -> None:
+    event = FakeEvent("group", "10001", group_id="20001", to_me=False)
+
+    assert classify_ai_chat_trigger(
+        event,
+        "呼叫棉花糖",
+        proactive_enabled=False,
+        bot_names=("萌萌棉花糖♪",),
+    ) == AiChatTriggerKind.NAMED
+    assert should_handle_ai_chat(
+        event,
+        "棉花糖帮我看下这个",
+        proactive_enabled=False,
+        bot_names=("萌萌棉花糖♪",),
+    ) is True
 
 
 def test_group_direct_at_without_text_enters_ai_chat() -> None:
@@ -254,6 +275,14 @@ def test_ai_proactive_trigger_matches_bot_name_or_direct_help() -> None:
     assert looks_like_ai_proactive_trigger("萌萌棉花糖在吗", bot_names=("萌萌棉花糖♪",))
     assert looks_like_ai_proactive_trigger("请问这个怎么修？", bot_names=())
     assert not looks_like_ai_proactive_trigger("我只是普通闲聊", bot_names=())
+
+
+def test_ai_named_trigger_requires_calling_bot() -> None:
+    assert looks_like_ai_named_trigger("呼叫棉花糖", bot_names=("萌萌棉花糖♪",))
+    assert looks_like_ai_named_trigger("棉花糖在吗", bot_names=("萌萌棉花糖♪",))
+    assert looks_like_ai_named_trigger("棉花糖帮我看看", bot_names=("萌萌棉花糖♪",))
+    assert looks_like_ai_named_trigger("我想听棉花糖啊呀～", bot_names=("萌萌棉花糖♪",))
+    assert not looks_like_ai_named_trigger("萌泪酱是棉花糖的主人", bot_names=("萌萌棉花糖♪",))
 
 
 def test_ai_output_mode_command_does_not_enter_ai_chat() -> None:

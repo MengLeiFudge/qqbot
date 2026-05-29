@@ -15,10 +15,11 @@ from nonebot.rule import Rule
 from qqbot.config import RuntimeSettings, load_settings
 from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_command import (
+    AiChatTriggerKind,
+    classify_ai_chat_trigger,
     parse_ai_output_mode_command,
     build_ai_conversation_key,
     parse_ai_model_command,
-    should_handle_ai_chat,
 )
 from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.ai_diagnostics import AiDiagnosticsStore, build_ai_diagnostics_record
@@ -74,6 +75,7 @@ AI_TTS_MAX_CHARS = 100
 AI_TTS_FORCE_MAX_CHARS = 500
 AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST = 20.0
 AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS = 45.0
+AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS = 20.0
 AI_DRAW_CONCURRENCY_LIMIT = 2
 AI_CONTINUOUS_REPLY_MAX_MESSAGES = 3
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
@@ -102,6 +104,34 @@ class AiReplyQueueTicket:
     force_text_response: bool
 
 
+@dataclass(frozen=True)
+class AiQueuedRequest:
+    bot: Bot
+    event: MessageEvent
+    settings: RuntimeSettings
+    store: SettingsStore
+    normalized_message: NormalizedMessage
+    prompt: str
+    request_started: float
+    request_wall_started: float
+    event_time: object
+    message_id: object
+    group_id: object | None
+    user_id: str
+    trigger_kind: AiChatTriggerKind
+    force_voice_response: bool
+
+
+@dataclass(frozen=True)
+class AiQueuedBatch:
+    scope: str
+    items: tuple[AiQueuedRequest, ...]
+
+    @property
+    def first(self) -> AiQueuedRequest:
+        return self.items[0]
+
+
 class AiReplyQueueManager:
     def __init__(
         self,
@@ -113,6 +143,7 @@ class AiReplyQueueManager:
         self.text_fallback_after_seconds = text_fallback_after_seconds
         self._locks: dict[str, asyncio.Lock] = {}
         self._queued_counts: dict[str, int] = {}
+        self._pending_batches: dict[str, list[AiQueuedRequest]] = {}
 
     def join(self, scope: str) -> AiReplyQueueTicket:
         queued_ahead = self._queued_counts.get(scope, 0)
@@ -134,6 +165,15 @@ class AiReplyQueueManager:
         self._queued_counts.pop(ticket.scope, None)
         if not ticket.lock.locked():
             self._locks.pop(ticket.scope, None)
+
+    def enqueue_pending(self, scope: str, request: AiQueuedRequest) -> None:
+        self._pending_batches.setdefault(scope, []).append(request)
+
+    def pop_pending_batch(self, scope: str) -> AiQueuedBatch | None:
+        pending = self._pending_batches.pop(scope, [])
+        if not pending:
+            return None
+        return AiQueuedBatch(scope=scope, items=tuple(pending))
 
 
 _AI_REPLY_QUEUE = AiReplyQueueManager()
@@ -222,17 +262,24 @@ async def handle_ai_output_mode(event: MessageEvent) -> None:
 
 
 def should_handle_ai_event(event: MessageEvent) -> bool:
+    return get_ai_chat_trigger_kind(event) != AiChatTriggerKind.IGNORE
+
+
+def get_ai_chat_trigger_kind(event: MessageEvent) -> AiChatTriggerKind:
     settings = load_settings()
-    group_id = getattr(event, "group_id", None)
-    proactive_enabled = False
-    if group_id is not None:
-        proactive_enabled = get_settings_store().get_group_ai_proactive_enabled(group_id)
-    return should_handle_ai_chat(
+    return classify_ai_chat_trigger(
         event,
         event.get_plaintext(),
-        proactive_enabled=proactive_enabled,
+        proactive_enabled=_is_group_ai_proactive_enabled(event),
         bot_names=(settings.ai_bot_name,),
     )
+
+
+def _is_group_ai_proactive_enabled(event: MessageEvent) -> bool:
+    group_id = getattr(event, "group_id", None)
+    if group_id is None:
+        return False
+    return get_settings_store().get_group_ai_proactive_enabled(group_id)
 
 
 @ai_chat_matcher.handle()
@@ -247,6 +294,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     message_id = getattr(event, "message_id", None)
     group_id = getattr(event, "group_id", None)
     user_id = event.get_user_id()
+    trigger_kind = get_ai_chat_trigger_kind(event)
     if should_handle_as_rightcodes_draw(prompt):
         async with _AI_DRAW_SEMAPHORE:
             await _handle_ai_locked(
@@ -264,6 +312,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 message_id=message_id,
                 group_id=group_id,
                 user_id=user_id,
+                trigger_kind=AiChatTriggerKind.DRAW,
                 force_text_response=False,
                 force_voice_response=False,
             )
@@ -273,29 +322,168 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     queue_wait_started = time.perf_counter()
     queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
     force_text_response = queue_ticket.force_text_response and not voice_singing
+    queued_request = AiQueuedRequest(
+        bot=bot,
+        event=event,
+        settings=settings,
+        store=store,
+        normalized_message=normalized_message,
+        prompt=prompt,
+        request_started=request_started,
+        request_wall_started=request_wall_started,
+        event_time=event_time,
+        message_id=message_id,
+        group_id=group_id,
+        user_id=user_id,
+        trigger_kind=trigger_kind,
+        force_voice_response=voice_singing,
+    )
     try:
-        async with queue_ticket.lock:
-            local_prepare_started = time.perf_counter()
-            await _handle_ai_locked(
-                bot,
-                event,
-                settings=settings,
-                store=store,
-                normalized_message=normalized_message,
-                prompt=prompt,
-                request_started=request_started,
-                local_prepare_started=local_prepare_started,
-                queue_wait_seconds=local_prepare_started - queue_wait_started,
-                request_wall_started=request_wall_started,
-                event_time=event_time,
-                message_id=message_id,
-                group_id=group_id,
-                user_id=user_id,
-                force_text_response=force_text_response,
-                force_voice_response=voice_singing,
+        if queue_ticket.lock.locked():
+            if should_drop_queued_ai_request(trigger_kind, queue_ticket.estimated_wait_seconds):
+                logger.info(
+                    "Drop queued proactive AI message: user_id={}, group_id={}, message_id={}, estimated_wait={:.3f}s",
+                    user_id,
+                    group_id,
+                    message_id,
+                    queue_ticket.estimated_wait_seconds,
+                )
+                return
+            _AI_REPLY_QUEUE.enqueue_pending(reply_scope, queued_request)
+            logger.info(
+                "Merge queued AI message into pending batch: scope={}, trigger={}, user_id={}, group_id={}, message_id={}, estimated_wait={:.3f}s",
+                reply_scope,
+                trigger_kind.value,
+                user_id,
+                group_id,
+                message_id,
+                queue_ticket.estimated_wait_seconds,
             )
+            return
+        async with queue_ticket.lock:
+            await _process_ai_queue_batch(
+                AiQueuedBatch(scope=reply_scope, items=(queued_request,)),
+                queue_wait_started=queue_wait_started,
+                force_text_response=force_text_response,
+            )
+            while True:
+                pending_batch = _AI_REPLY_QUEUE.pop_pending_batch(reply_scope)
+                if pending_batch is None:
+                    break
+                merged_batch = merge_ai_queued_batch(pending_batch)
+                if should_drop_queued_ai_request(
+                    merged_batch.first.trigger_kind,
+                    time.perf_counter() - pending_batch.first.request_started,
+                ):
+                    logger.info(
+                        "Drop stale proactive AI batch: scope={}, count={}, waited={:.3f}s",
+                        reply_scope,
+                        len(pending_batch.items),
+                        time.perf_counter() - pending_batch.first.request_started,
+                    )
+                    continue
+                await _process_ai_queue_batch(
+                    merged_batch,
+                    queue_wait_started=pending_batch.first.request_started,
+                    force_text_response=force_text_response,
+                )
     finally:
         _AI_REPLY_QUEUE.leave(queue_ticket)
+
+
+async def _process_ai_queue_batch(
+    batch: AiQueuedBatch,
+    *,
+    queue_wait_started: float,
+    force_text_response: bool,
+) -> None:
+    request = batch.first
+    local_prepare_started = time.perf_counter()
+    await _handle_ai_locked(
+        request.bot,
+        request.event,
+        settings=request.settings,
+        store=request.store,
+        normalized_message=request.normalized_message,
+        prompt=request.prompt,
+        request_started=request.request_started,
+        local_prepare_started=local_prepare_started,
+        queue_wait_seconds=local_prepare_started - queue_wait_started,
+        request_wall_started=request.request_wall_started,
+        event_time=request.event_time,
+        message_id=request.message_id,
+        group_id=request.group_id,
+        user_id=request.user_id,
+        trigger_kind=request.trigger_kind,
+        force_text_response=force_text_response,
+        force_voice_response=request.force_voice_response,
+    )
+
+
+def merge_ai_queued_batch(batch: AiQueuedBatch) -> AiQueuedBatch:
+    if len(batch.items) <= 1:
+        return batch
+    first = batch.first
+    lines = ["同一会话在等待期间又收到这些消息，请综合后一次性简短回复："]
+    for index, item in enumerate(batch.items, start=1):
+        lines.append(f"{index}. {item.prompt}")
+    merged_prompt = "\n".join(lines)
+    merged_outline = "\n".join(item.normalized_message.outline for item in batch.items if item.normalized_message.outline)
+    merged_text = "\n".join(item.normalized_message.text for item in batch.items if item.normalized_message.text)
+    merged_images: list[str] = []
+    for item in batch.items:
+        merged_images.extend(item.normalized_message.image_urls)
+    merged_message = NormalizedMessage(
+        text=merged_text or merged_prompt,
+        outline=merged_outline or merged_prompt,
+        image_urls=tuple(dict.fromkeys(merged_images)),
+        at_user_ids=first.normalized_message.at_user_ids,
+        audio_urls=first.normalized_message.audio_urls,
+        video_urls=first.normalized_message.video_urls,
+        reply=first.normalized_message.reply,
+    )
+    merged_request = AiQueuedRequest(
+        bot=first.bot,
+        event=first.event,
+        settings=first.settings,
+        store=first.store,
+        normalized_message=merged_message,
+        prompt=merged_prompt,
+        request_started=first.request_started,
+        request_wall_started=first.request_wall_started,
+        event_time=first.event_time,
+        message_id=first.message_id,
+        group_id=first.group_id,
+        user_id=first.user_id,
+        trigger_kind=_merge_trigger_kind(item.trigger_kind for item in batch.items),
+        force_voice_response=any(item.force_voice_response for item in batch.items),
+    )
+    return AiQueuedBatch(scope=batch.scope, items=(merged_request,))
+
+
+def _merge_trigger_kind(kinds) -> AiChatTriggerKind:
+    ordered = (
+        AiChatTriggerKind.DIRECT,
+        AiChatTriggerKind.NAMED,
+        AiChatTriggerKind.PRIVATE,
+        AiChatTriggerKind.DRAW,
+        AiChatTriggerKind.PROACTIVE,
+    )
+    kind_set = set(kinds)
+    for kind in ordered:
+        if kind in kind_set:
+            return kind
+    return AiChatTriggerKind.PROACTIVE
+
+
+def should_drop_queued_ai_request(
+    trigger_kind: AiChatTriggerKind,
+    estimated_wait_seconds: float,
+) -> bool:
+    return (
+        trigger_kind == AiChatTriggerKind.PROACTIVE
+        and estimated_wait_seconds > AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS
+    )
 
 
 async def _handle_ai_locked(
@@ -312,6 +500,7 @@ async def _handle_ai_locked(
     message_id: object,
     group_id: object | None,
     user_id: str,
+    trigger_kind: AiChatTriggerKind = AiChatTriggerKind.DIRECT,
     local_prepare_started: float | None = None,
     queue_wait_seconds: float = 0.0,
     force_text_response: bool = False,

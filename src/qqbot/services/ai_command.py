@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 import re
 
 from qqbot.services.ai_conversation_store import AiConversationStore
@@ -27,6 +28,15 @@ class AiOutputModeCommand:
     mode: str | None = None
 
 
+class AiChatTriggerKind(StrEnum):
+    IGNORE = "ignore"
+    PRIVATE = "private"
+    DIRECT = "direct"
+    NAMED = "named"
+    PROACTIVE = "proactive"
+    DRAW = "draw"
+
+
 def should_handle_ai_chat(
     event,
     text: str,
@@ -34,37 +44,56 @@ def should_handle_ai_chat(
     proactive_enabled: bool = False,
     bot_names: tuple[str, ...] = (),
 ) -> bool:
+    return classify_ai_chat_trigger(
+        event,
+        text,
+        proactive_enabled=proactive_enabled,
+        bot_names=bot_names,
+    ) != AiChatTriggerKind.IGNORE
+
+
+def classify_ai_chat_trigger(
+    event,
+    text: str,
+    *,
+    proactive_enabled: bool = False,
+    bot_names: tuple[str, ...] = (),
+) -> AiChatTriggerKind:
     prompt = text.strip()
     if not prompt:
         if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
-            return False
-        return is_direct_command_event(event)
+            return AiChatTriggerKind.IGNORE
+        return AiChatTriggerKind.DIRECT if is_direct_command_event(event) else AiChatTriggerKind.IGNORE
     if is_before_onebot_connect(getattr(event, "time", None)):
-        return False
+        return AiChatTriggerKind.IGNORE
     if is_group_manager_welcome_message(event, prompt):
-        return False
+        return AiChatTriggerKind.IGNORE
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         if prompt.startswith("/"):
-            return False
+            return AiChatTriggerKind.IGNORE
         if (
             is_likely_command(prompt)
             or parse_ai_model_command(prompt) is not None
         ):
-            return False
+            return AiChatTriggerKind.IGNORE
         if parse_ai_output_mode_command(prompt) is not None:
-            return False
-        return True
+            return AiChatTriggerKind.IGNORE
+        return AiChatTriggerKind.PRIVATE
     if (
         is_likely_command(prompt)
         or parse_ai_model_command(prompt) is not None
         or parse_ai_output_mode_command(prompt) is not None
     ):
-        return False
+        return AiChatTriggerKind.IGNORE
     if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
-        return True
+        return AiChatTriggerKind.DRAW
     if is_direct_command_event(event):
-        return True
-    return proactive_enabled and looks_like_ai_proactive_trigger(prompt, bot_names=bot_names)
+        return AiChatTriggerKind.DIRECT
+    if looks_like_ai_named_trigger(prompt, bot_names=bot_names):
+        return AiChatTriggerKind.NAMED
+    if proactive_enabled and looks_like_ai_proactive_trigger(prompt, bot_names=bot_names):
+        return AiChatTriggerKind.PROACTIVE
+    return AiChatTriggerKind.IGNORE
 
 
 def is_group_manager_welcome_message(event, text: str) -> bool:
@@ -146,10 +175,7 @@ def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = (
     if not normalized:
         return False
     compact = re.sub(r"\s+", "", normalized)
-    lower = compact.lower()
-
-    names = _build_ai_proactive_names(bot_names)
-    if any(name and name in lower for name in names):
+    if looks_like_ai_named_trigger(compact, bot_names=bot_names):
         return True
 
     question_markers = ("?", "？", "吗", "么", "呢")
@@ -172,6 +198,85 @@ def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = (
     ):
         return True
     return False
+
+
+def looks_like_ai_named_trigger(text: str, *, bot_names: tuple[str, ...] = ()) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    compact = re.sub(r"\s+", "", normalized)
+    lower = compact.lower()
+    names = _build_ai_proactive_names(bot_names)
+    for name in names:
+        if not name:
+            continue
+        start = lower.find(name)
+        while start >= 0:
+            end = start + len(name)
+            if _named_reference_is_call(compact[:start], compact[end:], compact):
+                return True
+            start = lower.find(name, start + len(name))
+    return False
+
+
+def _named_reference_is_call(before: str, after: str, compact: str) -> bool:
+    stripped_after = after.lstrip("，,。.!！:：~～")
+    if not before and not stripped_after:
+        return True
+
+    call_prefixes = ("呼叫", "召唤", "叫一下", "叫下", "找", "叫")
+    if any(before.endswith(prefix) for prefix in call_prefixes):
+        return True
+
+    intent_prefixes = (
+        "想听",
+        "想看",
+        "想问",
+        "想让",
+        "要听",
+        "要问",
+        "能听",
+        "能不能听",
+    )
+    if any(before.endswith(prefix) for prefix in intent_prefixes):
+        return True
+
+    request_starters = (
+        "在吗",
+        "出来",
+        "帮",
+        "帮我",
+        "看下",
+        "看一下",
+        "看看",
+        "问",
+        "请问",
+        "回答",
+        "解释",
+        "说说",
+        "讲讲",
+        "能",
+        "可以",
+        "可不可以",
+        "要不要",
+        "怎么",
+        "为什么",
+        "为啥",
+        "咋",
+    )
+    if stripped_after.startswith(request_starters):
+        return True
+
+    question_markers = ("?", "？", "吗", "么", "呢", "什么时候", "谁", "哪里", "哪")
+    if any(marker in compact for marker in question_markers):
+        return True
+
+    soft_call_suffixes = ("呀", "啊", "欸", "诶", "喂")
+    return (
+        not before
+        and 0 < len(stripped_after) <= 3
+        and stripped_after.endswith(soft_call_suffixes)
+    )
 
 
 def _build_ai_proactive_names(bot_names: tuple[str, ...]) -> tuple[str, ...]:

@@ -19,6 +19,7 @@ class AiProfile:
     max_output_tokens: int = 4096
     supports_vision: bool = False
     note: str = ""
+    extra_body: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,7 @@ class ResolvedAiProfile:
     max_output_tokens: int
     supports_vision: bool = False
     note: str = ""
+    extra_body: dict[str, object] | None = None
 
 
 def load_ai_profiles(path: Path) -> dict[str, AiProfile]:
@@ -61,6 +63,7 @@ def load_ai_profiles(path: Path) -> dict[str, AiProfile]:
             max_output_tokens=int(raw.get("max_output_tokens", 4096)),
             supports_vision=bool(raw.get("supports_vision", False)),
             note=str(raw.get("note", "")).strip(),
+            extra_body=_normalize_extra_body(raw.get("extra_body")),
         )
         _validate_profile(profile)
         profiles[profile.name] = profile
@@ -110,6 +113,7 @@ def resolve_ai_profile(profiles: dict[str, AiProfile], name: str) -> ResolvedAiP
         max_output_tokens=max(1, profile.max_output_tokens),
         supports_vision=profile.supports_vision,
         note=profile.note,
+        extra_body=profile.extra_body,
     )
 
 
@@ -132,6 +136,14 @@ def _get_raw_profiles(data: dict[str, object]) -> object:
     if isinstance(raw_ai, dict) and "providers" in raw_ai:
         return raw_ai.get("providers")
     return data.get("model_providers", data.get("profiles", {}))
+
+
+def _normalize_extra_body(raw: object) -> dict[str, object] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("AI profile extra_body 必须是对象")
+    return dict(raw)
 
 
 def _looks_like_direct_api_key(value: str) -> bool:

@@ -122,6 +122,29 @@ def test_openai_compatible_client_accepts_base_url_with_trailing_slash() -> None
     assert http_client.calls[0]["url"] == "https://token-plan-cn.xiaomimimo.com/v1/responses"
 
 
+def test_openai_compatible_client_merges_extra_body_into_payload() -> None:
+    http_client = FakeHttpClient()
+    client = OpenAICompatibleClient(
+        base_url="https://example.invalid/v1",
+        api_key="secret-key",
+        model="gpt-5.4-mini",
+        max_output_tokens=2048,
+        extra_body={"max_output_tokens": 512, "reasoning": {"effort": "low"}, "fast": True},
+        http_client=http_client,
+    )
+
+    asyncio.run(
+        client.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="你好", user_id="10001")
+        )
+    )
+
+    payload = http_client.calls[0]["json"]
+    assert payload["max_output_tokens"] == 512
+    assert payload["reasoning"] == {"effort": "low"}
+    assert payload["fast"] is True
+
+
 def test_openai_compatible_client_streams_responses_with_metrics() -> None:
     http_client = FakeHttpClient()
     client = OpenAICompatibleClient(

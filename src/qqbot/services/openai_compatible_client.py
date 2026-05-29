@@ -41,6 +41,7 @@ class OpenAICompatibleClient(AiClient):
         timeout_seconds: float = 45.0,
         max_output_tokens: int = 4096,
         supports_vision: bool = False,
+        extra_body: dict[str, object] | None = None,
         http_client: AsyncPostClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -49,6 +50,7 @@ class OpenAICompatibleClient(AiClient):
         self.timeout_seconds = timeout_seconds
         self.max_output_tokens = max(1, int(max_output_tokens))
         self.supports_vision = supports_vision
+        self.extra_body = dict(extra_body or {})
         self.http_client = http_client
 
     async def complete(self, request: AiRequest) -> str:
@@ -150,7 +152,7 @@ class OpenAICompatibleClient(AiClient):
             yield line
 
     def _build_responses_payload(self, request: AiRequest, *, stream: bool) -> dict[str, object]:
-        return {
+        payload = {
             "model": self.model,
             "instructions": self._build_instructions(request),
             "input": self._build_input(request),
@@ -158,6 +160,8 @@ class OpenAICompatibleClient(AiClient):
             "stream": stream,
             "store": False,
         }
+        payload.update(self.extra_body)
+        return payload
 
     @staticmethod
     def _build_instructions(request: AiRequest) -> str:

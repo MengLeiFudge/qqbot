@@ -43,6 +43,10 @@ api_key_env = "QQBOT_AI_KEY_OPENROUTER"
 timeout_seconds = 45
 max_output_tokens = 4096
 
+[ai.providers.openrouter.extra_body]
+reasoning = { effort = "low" }
+fast = true
+
 [ai.providers.tokenflux]
 provider = "openai_compatible"
 base_url = "https://example.com/v1"

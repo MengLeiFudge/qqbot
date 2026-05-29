@@ -10,6 +10,9 @@ if str(SRC) not in sys.path:
 
 from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
+    AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS,
+    AiQueuedBatch,
+    AiQueuedRequest,
     AiReplyQueueManager,
     ai_chat_matcher,
     handle_ai,
@@ -21,9 +24,11 @@ from qqbot.plugins.ai_test import (
     build_ai_system_context,
     build_ai_reply_message,
     build_ai_reply_notice_message,
+    merge_ai_queued_batch,
     should_include_long_term_memory_context,
     should_include_nickname_usage_context,
     should_suppress_group_ai_fallback,
+    should_drop_queued_ai_request,
     format_ai_response,
     format_draw_quota_exceeded_message,
     format_draw_start_message,
@@ -36,6 +41,7 @@ from qqbot.plugins.ai_test import (
     try_send_ai_voice_response,
     _handle_ai_locked,
 )
+from qqbot.services.ai_command import AiChatTriggerKind
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
@@ -371,6 +377,79 @@ def test_ai_reply_queue_estimates_wait_and_marks_long_wait_text_fallback() -> No
     manager.leave(second)
     manager.leave(third)
     manager.leave(fourth)
+
+
+def make_queued_request(
+    prompt: str,
+    *,
+    message_id: int = 1,
+    trigger_kind: AiChatTriggerKind = AiChatTriggerKind.PROACTIVE,
+) -> AiQueuedRequest:
+    event = FakeGroupEvent(text=prompt)
+    return AiQueuedRequest(
+        bot=FakeVoiceBot(),
+        event=event,
+        settings=RuntimeSettings(ai_enabled=True),
+        store=SettingsStore(Path("/tmp/qqbot-test-store"), author_qq=605738729),
+        normalized_message=normalize_onebot_message(event.original_message),
+        prompt=prompt,
+        request_started=1.0,
+        request_wall_started=1.0,
+        event_time=None,
+        message_id=message_id,
+        group_id=event.group_id,
+        user_id=event.get_user_id(),
+        trigger_kind=trigger_kind,
+        force_voice_response=False,
+    )
+
+
+def test_ai_queue_manager_collects_pending_batch() -> None:
+    manager = AiReplyQueueManager()
+    first = make_queued_request("第一条", message_id=1)
+    second = make_queued_request("第二条", message_id=2)
+
+    manager.enqueue_pending("group_user:1:2", first)
+    manager.enqueue_pending("group_user:1:2", second)
+    batch = manager.pop_pending_batch("group_user:1:2")
+
+    assert batch is not None
+    assert [item.prompt for item in batch.items] == ["第一条", "第二条"]
+    assert manager.pop_pending_batch("group_user:1:2") is None
+
+
+def test_merge_ai_queued_batch_combines_prompts_and_keeps_first_anchor() -> None:
+    batch = AiQueuedBatch(
+        scope="group_user:1:2",
+        items=(
+            make_queued_request("第一条", message_id=11, trigger_kind=AiChatTriggerKind.PROACTIVE),
+            make_queued_request("第二条", message_id=12, trigger_kind=AiChatTriggerKind.NAMED),
+        ),
+    )
+
+    merged = merge_ai_queued_batch(batch)
+
+    assert len(merged.items) == 1
+    request = merged.first
+    assert "1. 第一条" in request.prompt
+    assert "2. 第二条" in request.prompt
+    assert request.message_id == 11
+    assert request.trigger_kind == AiChatTriggerKind.NAMED
+
+
+def test_should_drop_only_stale_proactive_queue_requests() -> None:
+    assert should_drop_queued_ai_request(
+        AiChatTriggerKind.PROACTIVE,
+        AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS + 0.1,
+    ) is True
+    assert should_drop_queued_ai_request(
+        AiChatTriggerKind.PROACTIVE,
+        AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS,
+    ) is False
+    assert should_drop_queued_ai_request(
+        AiChatTriggerKind.NAMED,
+        AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS + 100,
+    ) is False
 
 
 def test_handle_ai_routes_rightcodes_draw_outside_reply_queue(monkeypatch, tmp_path: Path) -> None:
