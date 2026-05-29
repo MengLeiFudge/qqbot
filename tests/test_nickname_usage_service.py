@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +77,21 @@ def test_nickname_usage_summary_respects_recent_limit(tmp_path: Path) -> None:
 
     assert summary.sample_size == 1
     assert [(entry.name, entry.count) for entry in summary.entries] == [("新称呼", 1)]
+
+
+def test_nickname_usage_summary_degrades_on_locked_memory_store() -> None:
+    class LockedMemoryStore:
+        def load_recent_group_user_messages(self, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+    summary = NicknameUsageService(LockedMemoryStore()).summarize(
+        group_id=1163635014,
+        user_id=1728704949,
+        limit=100,
+    )
+
+    assert summary.sample_size == 0
+    assert summary.entries == ()
 
 
 def test_nickname_usage_finds_identity_candidate_by_recent_sender_name(

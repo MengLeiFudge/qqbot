@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import sqlite3
 
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore, normalize_call_name
@@ -39,11 +40,14 @@ class NicknameUsageService:
         user_id: int | str,
         limit: int = 100,
     ) -> NicknameUsageSummary:
-        records = self.memory_store.load_recent_group_user_messages(
-            group_id=group_id,
-            user_id=user_id,
-            limit=limit,
-        )
+        try:
+            records = self.memory_store.load_recent_group_user_messages(
+                group_id=group_id,
+                user_id=user_id,
+                limit=limit,
+            )
+        except sqlite3.OperationalError:
+            return NicknameUsageSummary(sample_size=0, entries=())
         counter: Counter[str] = Counter()
         for record in records:
             name = normalize_call_name(record.sender_name)

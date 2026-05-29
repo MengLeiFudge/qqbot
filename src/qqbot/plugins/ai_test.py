@@ -243,6 +243,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 normalized_message=normalized_message,
                 prompt=prompt,
                 request_started=request_started,
+                local_prepare_started=request_started,
+                queue_wait_seconds=0.0,
                 request_wall_started=request_wall_started,
                 event_time=event_time,
                 message_id=message_id,
@@ -254,10 +256,12 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         return
     reply_scope = build_ai_reply_scope(event)
     voice_singing = should_use_tts_singing_mode(prompt)
+    queue_wait_started = time.perf_counter()
     queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
     force_text_response = queue_ticket.force_text_response and not voice_singing
     try:
         async with queue_ticket.lock:
+            local_prepare_started = time.perf_counter()
             await _handle_ai_locked(
                 bot,
                 event,
@@ -266,6 +270,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 normalized_message=normalized_message,
                 prompt=prompt,
                 request_started=request_started,
+                local_prepare_started=local_prepare_started,
+                queue_wait_seconds=local_prepare_started - queue_wait_started,
                 request_wall_started=request_wall_started,
                 event_time=event_time,
                 message_id=message_id,
@@ -292,9 +298,12 @@ async def _handle_ai_locked(
     message_id: object,
     group_id: object | None,
     user_id: str,
+    local_prepare_started: float | None = None,
+    queue_wait_seconds: float = 0.0,
     force_text_response: bool = False,
     force_voice_response: bool = False,
 ) -> None:
+    local_prepare_started = local_prepare_started if local_prepare_started is not None else request_started
     if group_id is not None and is_before_onebot_connect(event_time):
         logger.info(
             "Skip old group AI message: user_id={}, group_id={}, message_id={}, event_time={}",
@@ -482,7 +491,7 @@ async def _handle_ai_locked(
 
     context_parts.extend(part for part in local_result.extra_context if part.strip())
     image_urls = collect_message_image_urls(normalized_message)
-    local_prepare_seconds = time.perf_counter() - request_started
+    local_prepare_seconds = time.perf_counter() - local_prepare_started
 
     try:
         gateway = build_ai_gateway(settings, profile)
@@ -511,6 +520,7 @@ async def _handle_ai_locked(
         context_parts=tuple(context_parts),
         history_messages=len(history),
         image_count=len(image_urls),
+        queue_wait_seconds=queue_wait_seconds,
         local_prepare_seconds=local_prepare_seconds,
         total_seconds=total_seconds,
         response=response,
@@ -601,7 +611,7 @@ async def try_send_ai_voice_response(
 def build_ai_reply_scope(event: MessageEvent) -> str:
     group_id = getattr(event, "group_id", None)
     if group_id is not None:
-        return f"group:{group_id}"
+        return f"group_user:{group_id}:{event.get_user_id()}"
     return f"private:{event.get_user_id()}"
 
 
@@ -682,6 +692,7 @@ def record_ai_diagnostics(
     local_prepare_seconds: float,
     total_seconds: float,
     response: AiResponse,
+    queue_wait_seconds: float = 0.0,
 ) -> None:
     group_id = str(getattr(event, "group_id", "") or "")
     try:
@@ -699,6 +710,7 @@ def record_ai_diagnostics(
                 context_chars=sum(len(part) for part in context_parts),
                 history_messages=history_messages,
                 image_count=image_count,
+                queue_wait_seconds=queue_wait_seconds,
                 local_prepare_seconds=local_prepare_seconds,
                 total_seconds=total_seconds,
                 attempts=response.attempts,

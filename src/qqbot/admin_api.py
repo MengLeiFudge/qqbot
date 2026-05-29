@@ -1293,6 +1293,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         ["样本数", payload.count],
         ["成功 / 兜底", `${{payload.success_count}} / ${{payload.fallback_count}}`],
         ["重试后成功", payload.retry_success_count],
+        ["排队等待均值", formatDuration(payload.avg_queue_wait_seconds)],
         ["本地准备均值", formatDuration(payload.avg_local_prepare_seconds)],
         ["首字均值", formatDuration(payload.avg_first_token_seconds)],
         ["首字 P95", formatDuration(payload.p95_first_token_seconds)],
@@ -1324,7 +1325,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         <div class="diagnostic-row">
           <div class="diagnostic-title">${{escapeHtml(formatTime(record.timestamp))}} · ${{escapeHtml(record.profile)}} / ${{escapeHtml(record.model)}} · ${{escapeHtml(result)}}</div>
           <div class="diagnostic-meta">
-            ${{escapeHtml(scope)}} · 本地准备 ${{escapeHtml(formatDuration(record.local_prepare_seconds))}} · 端到端 ${{escapeHtml(formatDuration(record.total_seconds))}} · prompt ${{record.prompt_chars}} 字 · context ${{record.context_chars}} 字 · history ${{record.history_messages}} · image ${{record.image_count}}<br>
+            ${{escapeHtml(scope)}} · 排队 ${{escapeHtml(formatDuration(record.queue_wait_seconds))}} · 本地准备 ${{escapeHtml(formatDuration(record.local_prepare_seconds))}} · 端到端 ${{escapeHtml(formatDuration(record.total_seconds))}} · prompt ${{record.prompt_chars}} 字 · context ${{record.context_chars}} 字 · history ${{record.history_messages}} · image ${{record.image_count}}<br>
             ${{escapeHtml(attempts || "无 provider attempt 记录")}}
           </div>
         </div>

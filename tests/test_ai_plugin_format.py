@@ -15,6 +15,7 @@ from qqbot.plugins.ai_test import (
     build_ai_context,
     build_ai_output_mode_context,
     build_ai_prompt,
+    build_ai_reply_scope,
     build_memory_retrieval_plan_context,
     build_ai_system_context,
     build_ai_reply_message,
@@ -240,6 +241,12 @@ def test_build_ai_reply_message_keeps_private_response_plain() -> None:
         message_id=12345,
         user_id="605738729",
     ) == "你好呀"
+
+
+def test_build_ai_reply_scope_isolates_group_user_sessions() -> None:
+    assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20001")) == "group_user:10001:20001"
+    assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20002")) == "group_user:10001:20002"
+    assert build_ai_reply_scope(FakePrivateEvent(user_id="20001")) == "private:20001"
 
 
 def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None:

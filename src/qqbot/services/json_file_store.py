@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import threading
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -29,7 +30,7 @@ def atomic_write_json(path: Path, payload: object) -> None:
             encoding="utf-8",
         )
         try:
-            temp_path.replace(path)
+            _replace_with_retry(temp_path, path)
         finally:
             if temp_path.exists():
                 temp_path.unlink()
@@ -39,6 +40,21 @@ def get_file_lock(path: Path) -> threading.Lock:
     key = path.resolve()
     with _WRITE_LOCKS_GUARD:
         return _WRITE_LOCKS.setdefault(key, threading.Lock())
+
+
+def _replace_with_retry(temp_path: Path, path: Path, *, attempts: int = 5) -> None:
+    last_error: PermissionError | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            temp_path.replace(path)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            if attempt >= attempts - 1:
+                break
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _load_recoverable_json_array(text: str) -> list[Any]:

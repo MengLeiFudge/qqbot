@@ -1123,6 +1123,7 @@ def test_ai_diagnostics_api_returns_summary(tmp_path: Path) -> None:
             image_count=0,
             local_prepare_seconds=0.25,
             total_seconds=1.25,
+            queue_wait_seconds=0.5,
             attempts=(
                 AiAttemptDiagnostics(
                     attempt=1,
@@ -1144,8 +1145,10 @@ def test_ai_diagnostics_api_returns_summary(tmp_path: Path) -> None:
     payload = json.loads(body)
     assert payload["count"] == 1
     assert payload["success_count"] == 1
+    assert payload["avg_queue_wait_seconds"] == 0.5
     assert payload["avg_first_token_seconds"] == 0.35
     assert payload["records"][0]["profile"] == "xiaomi"
+    assert payload["records"][0]["queue_wait_seconds"] == 0.5
     assert payload["records"][0]["prompt_chars"] == 12
 
 

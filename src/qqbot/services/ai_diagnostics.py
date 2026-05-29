@@ -53,6 +53,7 @@ class AiDiagnosticsRecord:
     context_chars: int
     history_messages: int
     image_count: int
+    queue_wait_seconds: float
     local_prepare_seconds: float
     total_seconds: float
     attempts: tuple[AiAttemptDiagnostics, ...]
@@ -73,6 +74,7 @@ class AiDiagnosticsRecord:
             "context_chars": self.context_chars,
             "history_messages": self.history_messages,
             "image_count": self.image_count,
+            "queue_wait_seconds": self.queue_wait_seconds,
             "local_prepare_seconds": self.local_prepare_seconds,
             "total_seconds": self.total_seconds,
             "attempt_count": len(self.attempts),
@@ -134,6 +136,9 @@ class AiDiagnosticsStore:
             "avg_local_prepare_seconds": _avg(
                 float(record.get("local_prepare_seconds", 0.0) or 0.0) for record in records
             ),
+            "avg_queue_wait_seconds": _avg(
+                float(record.get("queue_wait_seconds", 0.0) or 0.0) for record in records
+            ),
             "avg_total_seconds": _avg(
                 float(record.get("total_seconds", 0.0) or 0.0) for record in records
             ),
@@ -176,6 +181,7 @@ def build_ai_diagnostics_record(
     local_prepare_seconds: float,
     total_seconds: float,
     attempts: tuple[AiAttemptDiagnostics, ...],
+    queue_wait_seconds: float = 0.0,
     now: int | None = None,
 ) -> AiDiagnosticsRecord:
     return AiDiagnosticsRecord(
@@ -193,6 +199,7 @@ def build_ai_diagnostics_record(
         context_chars=context_chars,
         history_messages=history_messages,
         image_count=image_count,
+        queue_wait_seconds=max(0.0, float(queue_wait_seconds)),
         local_prepare_seconds=local_prepare_seconds,
         total_seconds=total_seconds,
         attempts=attempts,

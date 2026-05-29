@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 import sys
 
@@ -106,6 +107,36 @@ def test_group_nick_store_writes_atomically_without_tmp_file_left(tmp_path: Path
     )
 
     assert GroupNickStore(path).resolve_display_name(10001, 605738729) == "萌泪酱"
+    assert not list(path.parent.glob(".group_nick.json.*.tmp"))
+
+
+def test_group_nick_store_retries_permission_denied_replace(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "run" / "settings" / "group_nick.json"
+    original_replace = Path.replace
+    calls = 0
+
+    def flaky_replace(self: Path, target: Path) -> Path:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("[WinError 5] 拒绝访问")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+
+    GroupNickStore(path).record_group_sender(
+        group_id=10001,
+        qq=605738729,
+        card="萌泪酱",
+        nickname="MLJ",
+        updated_at=1,
+    )
+
+    assert calls == 2
+    assert json.loads(path.read_text(encoding="utf-8"))["10001"]["605738729"]["card"] == "萌泪酱"
     assert not list(path.parent.glob(".group_nick.json.*.tmp"))
 
 
