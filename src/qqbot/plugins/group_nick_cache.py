@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from nonebot import logger
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import GroupMessageEvent
 
@@ -13,6 +14,9 @@ from qqbot.services.group_nick_store import GroupNickStore, get_group_nick_store
 from qqbot.services.message_normalizer import normalize_onebot_event
 
 group_nick_cache_matcher = on_message(priority=1, block=False)
+_GROUP_CACHE_QUEUE: asyncio.Queue[GroupMessageEvent] | None = None
+_GROUP_CACHE_WORKER: asyncio.Task | None = None
+_GROUP_CACHE_QUEUE_MAX_SIZE = 1000
 
 
 def record_group_nick_event(event: GroupMessageEvent, store: GroupNickStore) -> None:
@@ -111,8 +115,51 @@ def record_group_cache_event(event: GroupMessageEvent) -> None:
 
 
 async def handle_group_nick_cache_event(event: GroupMessageEvent) -> None:
-    # 群聊记录会写 JSON 和 SQLite；放到线程池，避免积压消息堵住 NoneBot 事件循环。
-    await asyncio.to_thread(record_group_cache_event, event)
+    # 高频群聊旁路缓存不阻塞消息分发；慢写入交给单 worker 串行落库。
+    queue = _ensure_group_cache_queue()
+    try:
+        queue.put_nowait(event)
+    except asyncio.QueueFull:
+        logger.warning(
+            "Group cache queue full, drop event: group_id={}, user_id={}, message_id={}",
+            getattr(event, "group_id", None),
+            event.get_user_id() if hasattr(event, "get_user_id") else "",
+            getattr(event, "message_id", ""),
+        )
+
+
+def _ensure_group_cache_queue() -> asyncio.Queue[GroupMessageEvent]:
+    global _GROUP_CACHE_QUEUE
+    global _GROUP_CACHE_WORKER
+    if _GROUP_CACHE_QUEUE is None:
+        _GROUP_CACHE_QUEUE = asyncio.Queue(maxsize=_GROUP_CACHE_QUEUE_MAX_SIZE)
+    if _GROUP_CACHE_WORKER is None or _GROUP_CACHE_WORKER.done():
+        _GROUP_CACHE_WORKER = asyncio.create_task(
+            _run_group_cache_worker(_GROUP_CACHE_QUEUE)
+        )
+    return _GROUP_CACHE_QUEUE
+
+
+async def _run_group_cache_worker(queue: asyncio.Queue[GroupMessageEvent]) -> None:
+    while True:
+        event = await queue.get()
+        try:
+            await _record_group_cache_event_in_background(event)
+        finally:
+            queue.task_done()
+
+
+async def _record_group_cache_event_in_background(event: GroupMessageEvent) -> None:
+    try:
+        await asyncio.to_thread(record_group_cache_event, event)
+    except Exception as exc:
+        logger.warning(
+            "Group cache background write failed: group_id={}, user_id={}, message_id={}, error={}",
+            getattr(event, "group_id", None),
+            event.get_user_id() if hasattr(event, "get_user_id") else "",
+            getattr(event, "message_id", ""),
+            exc,
+        )
 
 
 @group_nick_cache_matcher.handle()

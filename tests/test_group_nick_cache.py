@@ -13,11 +13,13 @@ if str(SRC) not in sys.path:
 
 from qqbot.plugins.group_nick_cache import (
     handle_group_nick_cache_event,
+    _record_group_cache_event_in_background,
     record_group_chat_memory,
     record_group_message_context,
     record_group_message_log,
     record_group_nick_event,
 )
+from qqbot.plugins import group_nick_cache
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
@@ -190,7 +192,23 @@ def test_record_group_chat_memory_persists_normalized_incoming_message(tmp_path:
     assert records[0].has_image is True
 
 
-def test_handle_group_nick_cache_event_runs_blocking_writes_in_thread(monkeypatch) -> None:
+def test_handle_group_nick_cache_event_enqueues_background_write(monkeypatch) -> None:
+    event = FakeGroupMessageEvent(
+        group_id=516286670,
+        sender=FakeSender(card="萌泪", nickname="MLJ"),
+        time=1_800_000_000,
+        user_id=605738729,
+    )
+    queue: asyncio.Queue = asyncio.Queue()
+
+    monkeypatch.setattr(group_nick_cache, "_ensure_group_cache_queue", lambda: queue)
+
+    asyncio.run(handle_group_nick_cache_event(event))
+
+    assert queue.get_nowait() is event
+
+
+def test_group_cache_background_write_runs_blocking_work_in_thread(monkeypatch) -> None:
     event = FakeGroupMessageEvent(
         group_id=516286670,
         sender=FakeSender(card="萌泪", nickname="MLJ"),
@@ -205,6 +223,6 @@ def test_handle_group_nick_cache_event_runs_blocking_writes_in_thread(monkeypatc
 
     monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
 
-    asyncio.run(handle_group_nick_cache_event(event))
+    asyncio.run(_record_group_cache_event_in_background(event))
 
     assert len(calls) == 1

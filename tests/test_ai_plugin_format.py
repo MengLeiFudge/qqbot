@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
 from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
     AiReplyQueueManager,
+    ai_chat_matcher,
     handle_ai,
     build_ai_context,
     build_ai_output_mode_context,
@@ -21,6 +22,7 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_message,
     build_ai_reply_notice_message,
     should_include_long_term_memory_context,
+    should_include_nickname_usage_context,
     format_ai_response,
     format_draw_quota_exceeded_message,
     format_draw_start_message,
@@ -42,6 +44,10 @@ from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, C
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_message
 from qqbot.services.settings_store import SettingsStore
+
+
+def test_ai_chat_matcher_runs_before_non_ai_group_side_effect_matchers() -> None:
+    assert ai_chat_matcher.priority < 50
 
 
 class FakeGroupEvent:
@@ -689,6 +695,35 @@ def test_ai_context_includes_current_sender_nickname_usage_summary(tmp_path: Pat
     assert "勺子鱼 1/3 条，占 33%" in joined
 
 
+def test_ai_context_omits_current_sender_nickname_usage_for_plain_chat(tmp_path: Path) -> None:
+    memory_store = ChatMemoryStore(tmp_path)
+    for index, sender_name in enumerate(["萌泪", "萌泪酱"], start=1):
+        memory_store.append_message(
+            group_id=1163635014,
+            message_id=f"plain-nickname-{index}",
+            direction="incoming",
+            user_id=605738729,
+            sender_name=sender_name,
+            text=f"普通历史消息 {index}",
+            timestamp=index,
+        )
+
+    context = build_ai_context(
+        RuntimeSettings(data_root=tmp_path),
+        FakeGroupEvent(
+            group_id=1163635014,
+            user_id="605738729",
+            text="呼叫棉花糖",
+            sender=FakeSender(user_id=605738729, card="萌泪", nickname="萌泪酱"),
+        ),
+        AiGroupContextStore(tmp_path),
+    )
+
+    joined = "\n".join(context)
+    assert "建议称呼当前发言者：萌泪" in joined
+    assert "当前发言者最近" not in joined
+
+
 def test_ai_context_includes_text_identity_query_nickname_candidate(tmp_path: Path) -> None:
     nick_store = GroupNickStore(tmp_path / "settings" / "group_nick.json")
     nick_store.record_group_sender(
@@ -802,6 +837,17 @@ def test_should_include_long_term_memory_context_for_memory_queries() -> None:
     assert should_include_long_term_memory_context(
         FakeGroupEvent(text="我和你私聊里说了什么？"),
         normalize_onebot_message(FakeMessage("我和你私聊里说了什么？")),
+    ) is True
+
+
+def test_should_include_nickname_usage_context_only_for_identity_queries() -> None:
+    assert should_include_nickname_usage_context(
+        FakeGroupEvent(text="呼叫棉花糖"),
+        normalize_onebot_message(FakeMessage("呼叫棉花糖")),
+    ) is False
+    assert should_include_nickname_usage_context(
+        FakeGroupEvent(text="我是谁"),
+        normalize_onebot_message(FakeMessage("我是谁")),
     ) is True
 
 

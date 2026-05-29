@@ -153,7 +153,7 @@ ai_output_mode_matcher = on_regex(
     rule=direct_command_rule(),
 )
 ai_chat_matcher = on_message(
-    priority=70,
+    priority=2,
     block=True,
     rule=Rule(lambda event: should_handle_ai_event(event)),
 )
@@ -957,7 +957,15 @@ def build_ai_context(
         )
     context.append(f"当前群号：{group_id}")
     context.append(build_current_sender_context(event))
-    current_sender_call_name_context = build_current_sender_call_name_context(settings, event)
+    include_nickname_usage = should_include_nickname_usage_context(
+        event,
+        normalized_message,
+    )
+    current_sender_call_name_context = build_current_sender_call_name_context(
+        settings,
+        event,
+        include_usage=include_nickname_usage,
+    )
     if current_sender_call_name_context:
         context.append(current_sender_call_name_context)
     retrieval_plan_context = build_memory_retrieval_plan_context(event, normalized_message)
@@ -1576,6 +1584,8 @@ def build_current_sender_context(event: MessageEvent) -> str:
 def build_current_sender_call_name_context(
     settings: RuntimeSettings,
     event: MessageEvent,
+    *,
+    include_usage: bool = True,
 ) -> str:
     group_id = getattr(event, "group_id", None)
     user_id = event.get_user_id()
@@ -1592,10 +1602,14 @@ def build_current_sender_call_name_context(
         )
     if not call_name or call_name == str(user_id):
         return ""
-    usage_context = build_current_sender_nickname_usage_context(
-        settings,
-        group_id=group_id,
-        user_id=user_id,
+    usage_context = (
+        build_current_sender_nickname_usage_context(
+            settings,
+            group_id=group_id,
+            user_id=user_id,
+        )
+        if include_usage
+        else ""
     )
     return (
         f"建议称呼当前发言者：{call_name}。"
@@ -1604,6 +1618,31 @@ def build_current_sender_call_name_context(
         "不要把其他群友对第三人的称呼纠正当成当前发言者的名字，"
         "除非当前发言者本人明确要求你这样称呼自己。"
     )
+
+
+def should_include_nickname_usage_context(
+    event: MessageEvent,
+    normalized_message: NormalizedMessage,
+) -> bool:
+    if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
+        return False
+    text = build_scope_query_text(normalized_message)
+    if not text.strip():
+        return False
+    identity_markers = (
+        "我是谁",
+        "你认识我",
+        "你知道我",
+        "怎么叫我",
+        "怎么称呼我",
+        "叫我什么",
+        "我叫什么",
+        "我叫啥",
+        "我的名字",
+        "我的昵称",
+        "我的群名片",
+    )
+    return any(marker in text for marker in identity_markers)
 
 
 def build_current_sender_nickname_usage_context(

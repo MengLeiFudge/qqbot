@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 
 from nonebot import logger, on_message
+from nonebot.rule import Rule
 from nonebot.adapters.onebot.v11 import Bot, PrivateMessageEvent
 
 from qqbot.config import load_settings
@@ -25,7 +26,11 @@ _OFFLINE_PRIVATE_REPLAYED_USERS: set[str] = set()
 _OFFLINE_PRIVATE_PENDING_MESSAGE_IDS: dict[str, list[str]] = {}
 _OFFLINE_PRIVATE_REPLAY_TASKS: dict[str, asyncio.Task] = {}
 
-private_memory_cache_matcher = on_message(priority=1, block=False)
+private_memory_cache_matcher = on_message(
+    priority=1,
+    block=False,
+    rule=Rule(lambda event: isinstance(event, PrivateMessageEvent)),
+)
 
 
 def record_private_chat_memory(event: PrivateMessageEvent, store: ChatMemoryStore) -> None:
