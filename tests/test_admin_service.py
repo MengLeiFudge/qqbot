@@ -31,8 +31,8 @@ def test_list_groups_reads_existing_feature_files(tmp_path: Path) -> None:
     service = build_service(tmp_path)
     state_root = tmp_path / "run" / "settings" / "func_state"
     state_root.mkdir(parents=True)
-    (state_root / "10002.json").write_text('{"随机复读": true}', encoding="utf-8")
-    (state_root / "10001.json").write_text('{"随机禁言": true}', encoding="utf-8")
+    (state_root / "10002.json").write_text('{"group_assistant": true}', encoding="utf-8")
+    (state_root / "10001.json").write_text('{"arc": true}', encoding="utf-8")
 
     groups = service.list_groups({10001: "测试群 A", 10002: "测试群 B"})
 
@@ -192,35 +192,17 @@ def test_ai_output_mode_management_rejects_invalid_mode_and_group(tmp_path: Path
         service.set_group_ai_proactive_enabled(0, True)
 
 
-def test_group_control_config_lists_and_updates_global_settings(tmp_path: Path) -> None:
+def test_group_control_config_describes_current_policy(tmp_path: Path) -> None:
     service = build_service(tmp_path)
 
-    initial = service.get_group_control_config()
-    updated = service.set_group_control_config(
-        reread_probability_percent=12.5,
-        thunder_probability_percent=2.5,
-        min_seconds=20,
-        max_seconds=5,
-    )
+    payload = service.get_group_control_config()
 
-    assert initial == {
-        "reread_chance": 0.05,
-        "reread_probability_percent": 5.0,
-        "thunder_chance": 0.05,
-        "thunder_probability_percent": 5.0,
-        "thunder_min_seconds": 5,
-        "thunder_max_seconds": 20,
+    assert payload == {
+        "reread_policy": "consecutive_duplicate_once",
+        "reread_description": "同一群连续两条相同消息时复读一次，后续相同消息不再复读，直到出现不同消息。",
+        "random_thunder_enabled": False,
+        "manual_controls": ["禁言", "解禁", "群禁言", "群解禁", "踢出"],
     }
-    assert updated == {
-        "reread_chance": 0.125,
-        "reread_probability_percent": 12.5,
-        "thunder_chance": 0.025,
-        "thunder_probability_percent": 2.5,
-        "thunder_min_seconds": 5,
-        "thunder_max_seconds": 20,
-    }
-    assert service.store.get_reread_chance(319567534) == 0.125
-    assert service.store.get_thunder_config(319567534) == (0.025, 5, 20)
 
 
 def test_kun_admin_service_gets_and_updates_user(tmp_path: Path) -> None:

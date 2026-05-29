@@ -179,7 +179,9 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "群管管理" in body
     assert "群管配置" in body
     assert "/admin/api/group-control" in body
-    assert "随机复读概率" in body
+    assert "随机复读概率" not in body
+    assert "随机禁言概率" not in body
+    assert "已移除自动随机禁言" in body
     assert "养鲲管理" in body
     assert "养鲲数据" in body
     assert "用户选择" in body
@@ -935,7 +937,7 @@ def test_plugins_api_lists_and_updates_global_state(tmp_path: Path) -> None:
     assert json.loads(update_body)["plugin"]["global_enabled"] is False
 
 
-def test_group_control_api_lists_and_updates_config(tmp_path: Path) -> None:
+def test_group_control_api_lists_policy(tmp_path: Path) -> None:
     app = build_app(tmp_path)
 
     list_status, list_body = asgi_request(
@@ -943,36 +945,16 @@ def test_group_control_api_lists_and_updates_config(tmp_path: Path) -> None:
         "GET",
         "/admin/api/group-control",
     )
-    update_status, update_body = asgi_request(
-        app,
-        "PUT",
-        "/admin/api/group-control",
-        json_body={
-            "reread_probability_percent": 12.5,
-            "thunder_probability_percent": 2.5,
-            "min_seconds": 20,
-            "max_seconds": 5,
-        },
-    )
+    update_status, _update_body = asgi_request(app, "PUT", "/admin/api/group-control")
 
     assert list_status == 200
     assert json.loads(list_body) == {
-        "reread_chance": 0.05,
-        "reread_probability_percent": 5.0,
-        "thunder_chance": 0.05,
-        "thunder_probability_percent": 5.0,
-        "thunder_min_seconds": 5,
-        "thunder_max_seconds": 20,
+        "reread_policy": "consecutive_duplicate_once",
+        "reread_description": "同一群连续两条相同消息时复读一次，后续相同消息不再复读，直到出现不同消息。",
+        "random_thunder_enabled": False,
+        "manual_controls": ["禁言", "解禁", "群禁言", "群解禁", "踢出"],
     }
-    assert update_status == 200
-    assert json.loads(update_body) == {
-        "reread_chance": 0.125,
-        "reread_probability_percent": 12.5,
-        "thunder_chance": 0.025,
-        "thunder_probability_percent": 2.5,
-        "thunder_min_seconds": 5,
-        "thunder_max_seconds": 20,
-    }
+    assert update_status == 405
 
 
 def test_kun_api_gets_and_updates_user(tmp_path: Path) -> None:

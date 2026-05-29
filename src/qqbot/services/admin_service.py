@@ -15,9 +15,7 @@ from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
 from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_plugin_specs
-from qqbot.services.reread_service import clamp_reread_percent
 from qqbot.services.settings_store import AI_OUTPUT_MODES, AI_OUTPUT_TEXT_MODE, SettingsStore
-from qqbot.services.thunder_service import clamp_thunder_percent, normalize_thunder_range
 
 STARTUP_LOG_FILES = {"launcher.log", "qqbot_stdout.log", "qqbot_stderr.log"}
 
@@ -137,33 +135,12 @@ class AdminService:
         }
 
     def get_group_control_config(self) -> dict[str, object]:
-        reread_chance = self.store.get_reread_chance(0)
-        thunder_chance, min_seconds, max_seconds = self.store.get_thunder_config(0)
-        return self._build_group_control_config(
-            reread_chance,
-            thunder_chance,
-            min_seconds,
-            max_seconds,
-        )
-
-    def set_group_control_config(
-        self,
-        reread_probability_percent: float,
-        thunder_probability_percent: float,
-        min_seconds: int,
-        max_seconds: int,
-    ) -> dict[str, object]:
-        reread_chance = clamp_reread_percent(reread_probability_percent)
-        thunder_chance = clamp_thunder_percent(thunder_probability_percent)
-        min_seconds, max_seconds = normalize_thunder_range(min_seconds, max_seconds)
-        self.store.set_reread_chance(0, reread_chance)
-        self.store.set_thunder_config(0, thunder_chance, min_seconds, max_seconds)
-        return self._build_group_control_config(
-            reread_chance,
-            thunder_chance,
-            min_seconds,
-            max_seconds,
-        )
+        return {
+            "reread_policy": "consecutive_duplicate_once",
+            "reread_description": "同一群连续两条相同消息时复读一次，后续相同消息不再复读，直到出现不同消息。",
+            "random_thunder_enabled": False,
+            "manual_controls": ["禁言", "解禁", "群禁言", "群解禁", "踢出"],
+        }
 
     def get_kun_user(self, qq: int) -> dict[str, object]:
         payload = self._kun_service().build_admin_user_snapshot(qq)
@@ -498,22 +475,6 @@ class AdminService:
         if normalized not in AI_OUTPUT_MODES:
             raise ValueError("AI output mode must be text or voice.")
         return normalized
-
-    @staticmethod
-    def _build_group_control_config(
-        reread_chance: float,
-        thunder_chance: float,
-        min_seconds: int,
-        max_seconds: int,
-    ) -> dict[str, object]:
-        return {
-            "reread_chance": reread_chance,
-            "reread_probability_percent": reread_chance * 100,
-            "thunder_chance": thunder_chance,
-            "thunder_probability_percent": thunder_chance * 100,
-            "thunder_min_seconds": min_seconds,
-            "thunder_max_seconds": max_seconds,
-        }
 
     def _build_admin_display_item(
         self,

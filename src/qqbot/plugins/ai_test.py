@@ -549,6 +549,9 @@ async def _handle_ai_locked(
         response=response,
     )
 
+    if should_suppress_group_ai_fallback(group_id, response):
+        return
+
     if not response.fallback:
         conversation_store.append_turn(key, prompt, response.text)
 
@@ -636,6 +639,10 @@ def build_ai_reply_scope(event: MessageEvent) -> str:
     if group_id is not None:
         return f"group_user:{group_id}:{event.get_user_id()}"
     return f"private:{event.get_user_id()}"
+
+
+def should_suppress_group_ai_fallback(group_id: object | None, response: AiResponse) -> bool:
+    return group_id is not None and response.fallback and response.fallback_reason == "timeout"
 
 
 def should_handle_as_rightcodes_draw(prompt: str) -> bool:

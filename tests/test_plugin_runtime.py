@@ -204,26 +204,30 @@ class FakeBot:
             return {"group_id": data.get("group_id"), "group_name": "测试群"}
 
 
-class FakeThunderEvent:
+class FakeRereadEvent:
     group_id = 2333
     time = 10
+    self_id = "114514"
+
+    def __init__(self, text: str = "我的城堡还没倒，我还能战！") -> None:
+        self.text = text
 
     def get_user_id(self) -> str:
         return "744306344"
 
     def get_plaintext(self) -> str:
-        return "我的城堡还没倒，我还能战！"
+        return self.text
+
+    def get_message(self) -> Message:
+        return Message(self.text)
 
 
-class FakeThunderStore:
+class FakeRereadStore:
     def get_group_feature_state(self, group_id: int, feature) -> bool:
         return True
 
     def is_bot_admin_or_self(self, qq: int, self_id: object) -> bool:
         return True
-
-    def get_thunder_config(self, group_id: int) -> tuple[float, int, int]:
-        return 1.0, 10, 10
 
 
 class FakeSocialStore:
@@ -234,75 +238,55 @@ class FakeSocialStore:
         return int(qq) == 605738729 or str(qq) == str(self_id)
 
 
-def test_thunder_does_not_announce_when_group_ban_fails(monkeypatch) -> None:
+def test_reread_repeats_second_duplicate_once(monkeypatch) -> None:
     sent_messages: list[object] = []
-
-    class FailedBanBot(FakeBot):
-        async def call_api(self, api: str, **data: object) -> dict[str, object]:
-            self.calls.append((api, data))
-            return {"status": "failed", "retcode": 1400}
 
     async def fake_send(message: object) -> None:
         sent_messages.append(message)
 
-    monkeypatch.setattr(thunder, "get_settings_store", lambda: FakeThunderStore())
-    monkeypatch.setattr(thunder.random, "random", lambda: 0.0)
-    monkeypatch.setattr(thunder.random, "randint", lambda _a, _b: 10)
-    monkeypatch.setattr(thunder.thunder_message_matcher, "send", fake_send)
+    monkeypatch.setattr(reread, "get_settings_store", lambda: FakeRereadStore())
+    monkeypatch.setattr(reread, "_REREAD_STATE", reread.RereadRepeatState())
+    monkeypatch.setattr(reread.reread_message_matcher, "send", fake_send)
 
-    asyncio.run(thunder.handle_thunder_message(FailedBanBot("114514"), FakeThunderEvent()))
+    asyncio.run(reread.handle_reread_message(FakeRereadEvent("复读内容")))
+    asyncio.run(reread.handle_reread_message(FakeRereadEvent("复读内容")))
+    asyncio.run(reread.handle_reread_message(FakeRereadEvent("复读内容")))
 
-    assert sent_messages == []
+    assert [str(message) for message in sent_messages] == ["复读内容"]
 
 
-def test_thunder_announcement_uses_at_message_segment(monkeypatch) -> None:
+def test_reread_resets_after_different_message(monkeypatch) -> None:
     sent_messages: list[object] = []
-
-    class SuccessfulBanBot(FakeBot):
-        async def call_api(self, api: str, **data: object) -> dict[str, object]:
-            self.calls.append((api, data))
-            return {"status": "ok", "retcode": 0}
 
     async def fake_send(message: object) -> None:
         sent_messages.append(message)
 
-    monkeypatch.setattr(thunder, "get_settings_store", lambda: FakeThunderStore())
-    monkeypatch.setattr(thunder.random, "random", lambda: 0.0)
-    monkeypatch.setattr(thunder.random, "randint", lambda _a, _b: 10)
-    monkeypatch.setattr(thunder.thunder_message_matcher, "send", fake_send)
+    monkeypatch.setattr(reread, "get_settings_store", lambda: FakeRereadStore())
+    monkeypatch.setattr(reread, "_REREAD_STATE", reread.RereadRepeatState())
+    monkeypatch.setattr(reread.reread_message_matcher, "send", fake_send)
 
-    asyncio.run(thunder.handle_thunder_message(SuccessfulBanBot("114514"), FakeThunderEvent()))
+    for text in ("A", "A", "B", "B"):
+        asyncio.run(reread.handle_reread_message(FakeRereadEvent(text)))
 
-    assert len(sent_messages) == 1
-    assert isinstance(sent_messages[0], Message)
-    assert [segment.type for segment in sent_messages[0]] == ["at", "text"]
-    assert sent_messages[0][0].data["qq"] == "744306344"
+    assert [str(message) for message in sent_messages] == ["A", "B"]
 
 
-def test_thunder_skips_old_group_message(monkeypatch) -> None:
+def test_reread_skips_old_group_message(monkeypatch) -> None:
     sent_messages: list[object] = []
 
-    class SuccessfulBanBot(FakeBot):
-        async def call_api(self, api: str, **data: object) -> dict[str, object]:
-            self.calls.append((api, data))
-            return {"status": "ok", "retcode": 0}
-
-    class OldThunderEvent(FakeThunderEvent):
+    class OldRereadEvent(FakeRereadEvent):
         time = 9
 
     async def fake_send(message: object) -> None:
         sent_messages.append(message)
 
-    monkeypatch.setattr(thunder, "is_before_onebot_connect", lambda event_time: event_time == 9)
-    monkeypatch.setattr(thunder, "get_settings_store", lambda: FakeThunderStore())
-    monkeypatch.setattr(thunder.random, "random", lambda: 0.0)
-    monkeypatch.setattr(thunder.random, "randint", lambda _a, _b: 10)
-    monkeypatch.setattr(thunder.thunder_message_matcher, "send", fake_send)
-    bot = SuccessfulBanBot("114514")
+    monkeypatch.setattr(reread, "is_before_onebot_connect", lambda event_time: event_time == 9)
+    monkeypatch.setattr(reread, "get_settings_store", lambda: FakeRereadStore())
+    monkeypatch.setattr(reread, "_REREAD_STATE", reread.RereadRepeatState())
+    monkeypatch.setattr(reread.reread_message_matcher, "send", fake_send)
 
-    asyncio.run(thunder.handle_thunder_message(bot, OldThunderEvent()))
+    asyncio.run(reread.handle_reread_message(OldRereadEvent("旧消息")))
 
-    assert bot.calls == []
     assert sent_messages == []
 
 

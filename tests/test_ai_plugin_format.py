@@ -23,6 +23,7 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_notice_message,
     should_include_long_term_memory_context,
     should_include_nickname_usage_context,
+    should_suppress_group_ai_fallback,
     format_ai_response,
     format_draw_quota_exceeded_message,
     format_draw_start_message,
@@ -254,6 +255,17 @@ def test_build_ai_reply_scope_isolates_group_user_sessions() -> None:
     assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20001")) == "group_user:10001:20001"
     assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20002")) == "group_user:10001:20002"
     assert build_ai_reply_scope(FakePrivateEvent(user_id="20001")) == "private:20001"
+
+
+def test_should_suppress_group_ai_timeout_fallback_only_for_group_timeout() -> None:
+    timeout_response = AiResponse("超时", fallback=True, fallback_reason="timeout")
+    error_response = AiResponse("失败", fallback=True, fallback_reason="client_error")
+    normal_response = AiResponse("正常")
+
+    assert should_suppress_group_ai_fallback(516286670, timeout_response) is True
+    assert should_suppress_group_ai_fallback(None, timeout_response) is False
+    assert should_suppress_group_ai_fallback(516286670, error_response) is False
+    assert should_suppress_group_ai_fallback(516286670, normal_response) is False
 
 
 def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None:

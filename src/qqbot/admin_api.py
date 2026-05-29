@@ -77,13 +77,6 @@ class LocalArtifactPublishRequest(BaseModel):
     files: list[LocalArtifactPublishFileRequest]
 
 
-class GroupControlUpdateRequest(BaseModel):
-    reread_probability_percent: float
-    thunder_probability_percent: float
-    min_seconds: int
-    max_seconds: int
-
-
 class KunUserUpdateRequest(BaseModel):
     updates: dict[str, object]
 
@@ -230,19 +223,6 @@ def register_admin_routes(
         admin_service: AdminService = Depends(service),
     ) -> dict[str, object]:
         return admin_service.get_group_control_config()
-
-    @app.put("/admin/api/group-control")
-    async def admin_update_group_control(
-        payload: GroupControlUpdateRequest,
-        _: None = Depends(require_local_request),
-        admin_service: AdminService = Depends(service),
-    ) -> dict[str, object]:
-        return admin_service.set_group_control_config(
-            payload.reread_probability_percent,
-            payload.thunder_probability_percent,
-            payload.min_seconds,
-            payload.max_seconds,
-        )
 
     @app.get("/admin/api/kun/users")
     async def admin_kun_users(
@@ -694,25 +674,20 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           <h3>群管配置</h3>
           <div class="row">
             <button onclick="loadGroupControlConfig()">读取</button>
-            <button onclick="saveGroupControlConfig()">保存</button>
             <span id="groupControlStatus" class="muted"></span>
           </div>
-          <div class="form-grid">
-            <div class="field">
-              <label for="rereadProbabilityInput">随机复读概率（%）</label>
-              <input id="rereadProbabilityInput" type="number" min="0.01" max="50" step="0.01">
+          <div class="status">
+            <div>
+              <strong>复读</strong>
+              <p id="rereadPolicyText" class="muted">待读取。</p>
             </div>
-            <div class="field">
-              <label for="thunderProbabilityInput">随机禁言概率（%）</label>
-              <input id="thunderProbabilityInput" type="number" min="0.01" max="50" step="0.01">
+            <div>
+              <strong>随机禁言</strong>
+              <p id="randomThunderText" class="muted">待读取。</p>
             </div>
-            <div class="field">
-              <label for="thunderMinSecondsInput">最短禁言秒数</label>
-              <input id="thunderMinSecondsInput" type="number" min="1" max="30" step="1">
-            </div>
-            <div class="field">
-              <label for="thunderMaxSecondsInput">最长禁言秒数</label>
-              <input id="thunderMaxSecondsInput" type="number" min="1" max="30" step="1">
+            <div>
+              <strong>手动群管</strong>
+              <p id="manualControlsText" class="muted">待读取。</p>
             </div>
           </div>
         </div>
@@ -1430,30 +1405,10 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     async function loadGroupControlConfig() {{
       const status = document.getElementById("groupControlStatus");
       const payload = await api("/admin/api/group-control");
-      document.getElementById("rereadProbabilityInput").value = Number(payload.reread_probability_percent).toFixed(2);
-      document.getElementById("thunderProbabilityInput").value = Number(payload.thunder_probability_percent).toFixed(2);
-      document.getElementById("thunderMinSecondsInput").value = payload.thunder_min_seconds;
-      document.getElementById("thunderMaxSecondsInput").value = payload.thunder_max_seconds;
-      status.textContent = `当前：复读 ${{Number(payload.reread_probability_percent).toFixed(2)}}%，禁言 ${{Number(payload.thunder_probability_percent).toFixed(2)}}%，${{payload.thunder_min_seconds}}s-${{payload.thunder_max_seconds}}s`;
-    }}
-
-    async function saveGroupControlConfig() {{
-      const status = document.getElementById("groupControlStatus");
-      status.textContent = "正在保存...";
-      const payload = await api("/admin/api/group-control", {{
-        method: "PUT",
-        body: JSON.stringify({{
-          reread_probability_percent: Number(document.getElementById("rereadProbabilityInput").value),
-          thunder_probability_percent: Number(document.getElementById("thunderProbabilityInput").value),
-          min_seconds: Number(document.getElementById("thunderMinSecondsInput").value),
-          max_seconds: Number(document.getElementById("thunderMaxSecondsInput").value),
-        }}),
-      }});
-      document.getElementById("rereadProbabilityInput").value = Number(payload.reread_probability_percent).toFixed(2);
-      document.getElementById("thunderProbabilityInput").value = Number(payload.thunder_probability_percent).toFixed(2);
-      document.getElementById("thunderMinSecondsInput").value = payload.thunder_min_seconds;
-      document.getElementById("thunderMaxSecondsInput").value = payload.thunder_max_seconds;
-      status.textContent = `已保存：复读 ${{Number(payload.reread_probability_percent).toFixed(2)}}%，禁言 ${{Number(payload.thunder_probability_percent).toFixed(2)}}%，${{payload.thunder_min_seconds}}s-${{payload.thunder_max_seconds}}s`;
+      document.getElementById("rereadPolicyText").textContent = payload.reread_description || "连续相同消息复读一次。";
+      document.getElementById("randomThunderText").textContent = payload.random_thunder_enabled ? "已启用" : "已移除自动随机禁言。";
+      document.getElementById("manualControlsText").textContent = (payload.manual_controls || []).join("、") || "无";
+      status.textContent = "已读取。";
     }}
 
     const kunEditableLabels = {{

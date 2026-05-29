@@ -9,8 +9,10 @@ if str(SRC) not in sys.path:
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 from qqbot.services.reread_service import (
+    RereadRepeatState,
     clamp_reread_percent,
     format_reread_chance,
+    normalize_reread_key,
     render_reread_message,
     should_skip_reread_message,
 )
@@ -33,6 +35,27 @@ def test_set_reread_percent_is_global_and_clamped(tmp_path: Path) -> None:
     store.set_reread_chance(516286670, clamp_reread_percent(80))
     assert store.get_reread_chance(516286670) == 0.5
     assert store.get_reread_chance(319567534) == 0.5
+
+
+def test_reread_repeat_state_repeats_second_duplicate_once() -> None:
+    state = RereadRepeatState()
+
+    assert state.should_repeat(10001, "你好") is False
+    assert state.should_repeat(10001, "你好") is True
+    assert state.should_repeat(10001, "你好") is False
+
+    assert state.should_repeat(10001, "换一句") is False
+    assert state.should_repeat(10001, "换一句") is True
+
+
+def test_reread_repeat_state_is_group_scoped_and_normalizes_spaces() -> None:
+    state = RereadRepeatState()
+
+    assert state.should_repeat(10001, "你好   世界") is False
+    assert state.should_repeat(10002, "你好 世界") is False
+    assert state.should_repeat(10001, "你好 世界") is True
+    assert state.should_repeat(10002, "你好 世界") is True
+    assert normalize_reread_key("  你好\n世界  ") == "你好 世界"
 
 
 def test_render_reread_message_keeps_plain_text() -> None:
