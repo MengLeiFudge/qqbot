@@ -117,6 +117,33 @@ class SettingsStore:
             if str(group_id).strip().isdigit()
         }
 
+    def get_group_ai_proactive_enabled(self, group_id: int | str) -> bool:
+        settings = self._read_json(self.settings_root / "ai_proactive.json", {})
+        groups = settings.get("groups", {})
+        if not isinstance(groups, dict):
+            return False
+        return bool(groups.get(str(group_id), False))
+
+    def set_group_ai_proactive_enabled(self, group_id: int | str, enabled: bool) -> None:
+        settings = self._read_json(self.settings_root / "ai_proactive.json", {})
+        groups = settings.get("groups", {})
+        if not isinstance(groups, dict):
+            groups = {}
+        groups[str(group_id)] = bool(enabled)
+        settings["groups"] = groups
+        self._write_json(self.settings_root / "ai_proactive.json", settings)
+
+    def list_group_ai_proactive_modes(self) -> dict[str, bool]:
+        settings = self._read_json(self.settings_root / "ai_proactive.json", {})
+        groups = settings.get("groups", {})
+        if not isinstance(groups, dict):
+            return {}
+        return {
+            str(group_id): bool(enabled)
+            for group_id, enabled in groups.items()
+            if str(group_id).strip().isdigit()
+        }
+
     def set_user_ai_output_mode(self, user_id: int | str, mode: str) -> None:
         settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
         users = settings.get("users", {})
@@ -155,9 +182,16 @@ class SettingsStore:
             func_state_path.unlink()
             removed.append(str(func_state_path))
 
-        for file_name in ("lolicon.json", "codex_group_bindings.json"):
+        for file_name in ("lolicon.json", "codex_group_bindings.json", "ai_proactive.json"):
             path = self.settings_root / file_name
             payload = self._read_json(path, {})
+            groups = payload.get("groups") if file_name == "ai_proactive.json" else None
+            if isinstance(groups, dict) and group_key in groups:
+                groups.pop(group_key, None)
+                payload["groups"] = groups
+                self._write_json(path, payload)
+                removed.append(f"{path}:groups.{group_key}")
+                continue
             if group_key in payload:
                 payload.pop(group_key, None)
                 self._write_json(path, payload)

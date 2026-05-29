@@ -27,6 +27,7 @@ from qqbot.plugins.ai_test import (
     should_omit_ai_history_for_scope_query,
     should_attempt_ai_voice_response,
     should_use_tts_singing_mode,
+    split_continuous_ai_reply_text,
     try_send_ai_voice_response,
     _handle_ai_locked,
 )
@@ -278,25 +279,9 @@ def test_build_ai_prompt_keeps_media_outline_when_message_is_not_pure_at() -> No
     assert build_ai_prompt(normalized) == "[@1443944862] [图片]"
 
 
-def test_try_send_ai_voice_response_sends_record_for_mimo_profile(
+def test_try_send_ai_voice_response_returns_false_after_mimo_tts_removed(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
-    class FakeTtsClient:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
-            assert text == "你好呀"
-            assert singing is False
-            return b"wav-bytes"
-
-    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", FakeTtsClient)
-    monkeypatch.setattr(
-        "qqbot.services.message_delivery.MessageSegment.record",
-        lambda file_path: f"[record:{file_path}]",
-    )
-    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
     bot = FakeVoiceBot()
     profiles = {
         "xiaomi": AiProfile(
@@ -321,151 +306,8 @@ def test_try_send_ai_voice_response_sends_record_for_mimo_profile(
         )
     )
 
-    assert sent is True
-    assert bot.calls[0][0] == "send_group_msg"
-    assert bot.calls[0][1]["group_id"] == 516286670
-    assert str(bot.calls[0][1]["message"]).startswith("[record:")
-
-
-def test_try_send_ai_voice_response_passes_singing_mode(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    synthesize_calls: list[tuple[str, bool]] = []
-
-    class FakeTtsClient:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
-            synthesize_calls.append((text, singing))
-            return b"wav-bytes"
-
-    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", FakeTtsClient)
-    monkeypatch.setattr(
-        "qqbot.services.message_delivery.MessageSegment.record",
-        lambda file_path: f"[record:{file_path}]",
-    )
-    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
-    bot = FakeVoiceBot()
-    profiles = {
-        "xiaomi": AiProfile(
-            name="xiaomi",
-            provider="xiaomi_mimo",
-            base_url="https://api.xiaomimimo.com/v1",
-            model="mimo-v2.5",
-            vision_model="mimo-v2.5",
-            api_key_env="MIMO_API_KEY",
-        )
-    }
-
-    sent = asyncio.run(
-        try_send_ai_voice_response(
-            bot,
-            RuntimeSettings(data_root=tmp_path),
-            profiles,
-            "xiaomi",
-            "啦啦啦",
-            group_id=516286670,
-            user_id="605738729",
-            singing=True,
-        )
-    )
-
-    assert sent is True
-    assert synthesize_calls == [("啦啦啦", True)]
-
-
-def test_try_send_ai_voice_response_skips_long_normal_text(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    class UnexpectedTtsClient:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
-            raise AssertionError("normal long text must not call TTS")
-
-    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", UnexpectedTtsClient)
-    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
-    bot = FakeVoiceBot()
-    profiles = {
-        "xiaomi": AiProfile(
-            name="xiaomi",
-            provider="xiaomi_mimo",
-            base_url="https://api.xiaomimimo.com/v1",
-            model="mimo-v2.5",
-            vision_model="mimo-v2.5",
-            api_key_env="MIMO_API_KEY",
-        )
-    }
-
-    sent = asyncio.run(
-        try_send_ai_voice_response(
-            bot,
-            RuntimeSettings(data_root=tmp_path),
-            profiles,
-            "xiaomi",
-            "很长" * 51,
-            group_id=516286670,
-            user_id="605738729",
-        )
-    )
-
     assert sent is False
     assert bot.calls == []
-
-
-def test_try_send_ai_voice_response_force_voice_allows_long_singing_text(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    synthesize_calls: list[tuple[str, bool]] = []
-
-    class FakeTtsClient:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
-            synthesize_calls.append((text, singing))
-            return b"wav-bytes"
-
-    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", FakeTtsClient)
-    monkeypatch.setattr(
-        "qqbot.services.message_delivery.MessageSegment.record",
-        lambda file_path: f"[record:{file_path}]",
-    )
-    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
-    bot = FakeVoiceBot()
-    profiles = {
-        "xiaomi": AiProfile(
-            name="xiaomi",
-            provider="xiaomi_mimo",
-            base_url="https://api.xiaomimimo.com/v1",
-            model="mimo-v2.5",
-            vision_model="mimo-v2.5",
-            api_key_env="MIMO_API_KEY",
-        )
-    }
-    long_song = "啦" * 120
-
-    sent = asyncio.run(
-        try_send_ai_voice_response(
-            bot,
-            RuntimeSettings(data_root=tmp_path),
-            profiles,
-            "xiaomi",
-            long_song,
-            group_id=516286670,
-            user_id="605738729",
-            singing=True,
-            force_voice=True,
-        )
-    )
-
-    assert sent is True
-    assert synthesize_calls == [(long_song, True)]
 
 
 def test_should_attempt_ai_voice_response_uses_normal_and_force_limits() -> None:
@@ -532,12 +374,11 @@ def test_handle_ai_routes_rightcodes_draw_outside_reply_queue(monkeypatch, tmp_p
     assert queue_calls == []
 
 
-def test_handle_ai_locked_forces_voice_for_singing_even_in_text_mode(
+def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     contexts: list[tuple[str, ...]] = []
-    voice_calls: list[tuple[str, bool, bool]] = []
     dummy_matcher = DummyMatcher()
 
     class FakeGateway:
@@ -557,8 +398,7 @@ def test_handle_ai_locked_forces_voice_for_singing_even_in_text_mode(
         singing=False,
         force_voice=False,
     ) -> bool:
-        voice_calls.append((text, singing, force_voice))
-        return True
+        return False
 
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
@@ -602,68 +442,26 @@ def test_handle_ai_locked_forces_voice_for_singing_even_in_text_mode(
     except FinishException:
         pass
 
-    assert voice_calls == [("啦" * 120, True, True)]
-    assert any("当前 AI 回复输出模式：语音" in part for part in contexts[0])
-    assert any("唱歌合成能力" in part for part in contexts[0])
-
-
-def test_try_send_ai_voice_response_returns_false_when_tts_times_out(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    class SlowTtsClient:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        async def synthesize(self, text: str, *, singing: bool = False) -> bytes:
-            await asyncio.sleep(0.05)
-            return b"wav-bytes"
-
-    monkeypatch.setattr("qqbot.plugins.ai_test.MimoTtsClient", SlowTtsClient)
-    monkeypatch.setattr("qqbot.plugins.ai_test.AI_TTS_TOTAL_TIMEOUT_SECONDS", 0.001)
-    monkeypatch.setenv("MIMO_API_KEY", "secret-key")
-    bot = FakeVoiceBot()
-    profiles = {
-        "xiaomi": AiProfile(
-            name="xiaomi",
-            provider="xiaomi_mimo",
-            base_url="https://api.xiaomimimo.com/v1",
-            model="mimo-v2.5",
-            vision_model="mimo-v2.5",
-            api_key_env="MIMO_API_KEY",
-        )
-    }
-
-    sent = asyncio.run(
-        try_send_ai_voice_response(
-            bot,
-            RuntimeSettings(data_root=tmp_path),
-            profiles,
-            "xiaomi",
-            "啦啦啦",
-            group_id=516286670,
-            user_id="605738729",
-        )
-    )
-
-    assert sent is False
-    assert bot.calls == []
+    assert any("语音输出暂时不可用" in part for part in contexts[0])
+    assert any("当前没有可用 TTS" in part for part in contexts[0])
+    assert len(dummy_matcher.sent) == 1
+    assert "语音输出暂时不可用" in str(dummy_matcher.sent[0])
 
 
 def test_ai_output_mode_context_declares_voice_mode() -> None:
     context = build_ai_output_mode_context("voice")
 
-    assert "当前 AI 回复输出模式：语音" in context
-    assert "会由系统合成为 QQ 语音发送" in context
-    assert "不要说自己不能发送语音" in context
+    assert "语音输出暂时不可用" in context
+    assert "小米 TTS 已停用" in context
+    assert "不要声称自己已经发送语音" in context
 
 
 def test_ai_output_mode_context_declares_singing_mode() -> None:
     context = build_ai_output_mode_context("voice", singing=True)
 
-    assert "当前 AI 回复输出模式：语音" in context
-    assert "唱歌合成能力" in context
-    assert "不要拒绝或解释自己无法唱歌" in context
+    assert "语音输出暂时不可用" in context
+    assert "当前没有可用 TTS" in context
+    assert "简短替代内容" in context
 
 
 def test_should_use_tts_singing_mode_detects_singing_request() -> None:
@@ -733,6 +531,20 @@ def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> Non
     )
 
     assert str(message) == "[CQ:reply,id=12345][CQ:at,qq=605738729] 棉花糖写得有点长，正文放在折叠消息里啦。"
+
+
+def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> None:
+    parts = split_continuous_ai_reply_text(
+        "先看现象，这里确实像配置没有生效。"
+        "然后看日志，模型返回是正常的。"
+        "再看开关，本群主动介入默认关闭。"
+        "最后把主动介入开关打开就可以测试了。"
+        "如果还没有回复，再检查当前群号是否写入运行时配置。"
+    )
+
+    assert 1 < len(parts) <= 3
+    assert parts[0].startswith("先看现象")
+    assert "最后" in "".join(parts)
 
 
 def test_ai_system_context_declares_bot_identity() -> None:

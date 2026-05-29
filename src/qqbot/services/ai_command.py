@@ -27,7 +27,19 @@ class AiOutputModeCommand:
     mode: str | None = None
 
 
-def should_handle_ai_chat(event, text: str) -> bool:
+@dataclass(frozen=True, slots=True)
+class AiProactiveModeCommand:
+    action: str
+    enabled: bool | None = None
+
+
+def should_handle_ai_chat(
+    event,
+    text: str,
+    *,
+    proactive_enabled: bool = False,
+    bot_names: tuple[str, ...] = (),
+) -> bool:
     prompt = text.strip()
     if not prompt:
         if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
@@ -40,7 +52,11 @@ def should_handle_ai_chat(event, text: str) -> bool:
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         if prompt.startswith("/"):
             return False
-        if is_likely_command(prompt) or parse_ai_model_command(prompt) is not None:
+        if (
+            is_likely_command(prompt)
+            or parse_ai_model_command(prompt) is not None
+            or parse_ai_proactive_mode_command(prompt) is not None
+        ):
             return False
         if parse_ai_output_mode_command(prompt) is not None:
             return False
@@ -49,11 +65,14 @@ def should_handle_ai_chat(event, text: str) -> bool:
         is_likely_command(prompt)
         or parse_ai_model_command(prompt) is not None
         or parse_ai_output_mode_command(prompt) is not None
+        or parse_ai_proactive_mode_command(prompt) is not None
     ):
         return False
     if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
         return True
-    return is_direct_command_event(event)
+    if is_direct_command_event(event):
+        return True
+    return proactive_enabled and looks_like_ai_proactive_trigger(prompt, bot_names=bot_names)
 
 
 def is_group_manager_welcome_message(event, text: str) -> bool:
@@ -128,6 +147,80 @@ def parse_ai_output_mode_command(text: str) -> AiOutputModeCommand | None:
     }:
         return AiOutputModeCommand(action="set", scope=scope, mode="text")
     return None
+
+
+def parse_ai_proactive_mode_command(text: str) -> AiProactiveModeCommand | None:
+    normalized = re.sub(r"\s+", "", text.strip())
+    if not normalized:
+        return None
+    if normalized in {
+        "AI主动介入",
+        "本群AI主动介入",
+        "AI介入模式",
+        "本群AI介入模式",
+        "主动介入模式",
+    }:
+        return AiProactiveModeCommand(action="status")
+    if normalized in {
+        "开启AI主动介入",
+        "开启本群AI主动介入",
+        "本群开启AI主动介入",
+        "打开AI主动介入",
+        "打开本群AI主动介入",
+    }:
+        return AiProactiveModeCommand(action="set", enabled=True)
+    if normalized in {
+        "关闭AI主动介入",
+        "关闭本群AI主动介入",
+        "本群关闭AI主动介入",
+        "AI被动模式",
+        "本群AI被动模式",
+        "关闭主动介入",
+    }:
+        return AiProactiveModeCommand(action="set", enabled=False)
+    return None
+
+
+def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = ()) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    compact = re.sub(r"\s+", "", normalized)
+    lower = compact.lower()
+
+    names = _build_ai_proactive_names(bot_names)
+    if any(name and name in lower for name in names):
+        return True
+
+    question_markers = ("?", "？", "吗", "么", "呢")
+    help_markers = (
+        "有人知道",
+        "有谁知道",
+        "谁知道",
+        "求助",
+        "请问",
+        "问一下",
+        "能不能帮",
+        "帮我看",
+        "怎么",
+        "为什么",
+        "咋",
+    )
+    if any(marker in compact for marker in help_markers) and (
+        any(marker in compact for marker in question_markers)
+        or len(compact) >= 8
+    ):
+        return True
+    return False
+
+
+def _build_ai_proactive_names(bot_names: tuple[str, ...]) -> tuple[str, ...]:
+    names = {"棉花糖", "萌萌棉花糖", "qqbot"}
+    for name in bot_names:
+        cleaned = re.sub(r"\s+", "", name.strip()).lower()
+        if cleaned:
+            names.add(cleaned)
+    return tuple(sorted(names, key=len, reverse=True))
 
 
 def build_ai_conversation_key(

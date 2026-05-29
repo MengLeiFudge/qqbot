@@ -16,6 +16,7 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_command import (
     parse_ai_output_mode_command,
     build_ai_conversation_key,
+    parse_ai_proactive_mode_command,
     parse_ai_model_command,
     should_handle_ai_chat,
 )
@@ -29,25 +30,23 @@ from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_profile_registry import (
     list_enabled_profiles,
     load_ai_profiles,
-    resolve_ai_profile,
 )
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
 from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.admin_service import AdminService
 from qqbot.services.bot_loop_guard import BotLoopGuard
-from qqbot.services.command_guard import direct_command_rule
+from qqbot.services.command_guard import direct_command_rule, is_direct_command_event
 from qqbot.services.group_nick_store import GroupNickStore, normalize_call_name
 from qqbot.services.message_delivery import (
     COLLAPSIBLE_TEXT_THRESHOLD_CHARS,
-    call_record_api,
     finish_split_text,
+    send_split_text,
 )
 from qqbot.services.message_normalizer import (
     NormalizedMessage,
     normalize_onebot_event,
     normalize_onebot_event_with_fetcher,
 )
-from qqbot.services.mimo_tts_client import MimoTtsClient
 from qqbot.services.memory_retrieval_service import (
     RetrievalPlan,
     format_evidence_bundle,
@@ -73,10 +72,11 @@ from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 AI_TTS_MAX_CHARS = 100
 AI_TTS_FORCE_MAX_CHARS = 500
-AI_TTS_TOTAL_TIMEOUT_SECONDS = 45.0
 AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST = 20.0
 AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS = 45.0
 AI_DRAW_CONCURRENCY_LIMIT = 2
+AI_CONTINUOUS_REPLY_MAX_MESSAGES = 3
+AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
 _BOT_LOOP_GUARD = BotLoopGuard()
 
 
@@ -139,10 +139,16 @@ ai_output_mode_matcher = on_regex(
     block=True,
     rule=direct_command_rule(),
 )
+ai_proactive_mode_matcher = on_regex(
+    r"^(?:(?:开启|打开|关闭)(?:本群)?|(?:本群)?(?:开启|打开|关闭)?|)AI主动介入$|^(?:本群)?AI(?:介入模式|被动模式)$|^主动介入模式$|^关闭主动介入$",
+    priority=10,
+    block=True,
+    rule=direct_command_rule(),
+)
 ai_chat_matcher = on_message(
     priority=70,
     block=True,
-    rule=Rule(lambda event: should_handle_ai_chat(event, event.get_plaintext())),
+    rule=Rule(lambda event: should_handle_ai_event(event)),
 )
 
 
@@ -205,6 +211,42 @@ async def handle_ai_output_mode(event: MessageEvent) -> None:
     store.set_user_ai_output_mode(user_id, command.mode)
     await ai_output_mode_matcher.finish(
         f"你的 AI 回复模式已切换为：{format_ai_output_mode(command.mode)}"
+    )
+
+
+@ai_proactive_mode_matcher.handle()
+async def handle_ai_proactive_mode(event: MessageEvent) -> None:
+    group_id = getattr(event, "group_id", None)
+    if group_id is None:
+        await ai_proactive_mode_matcher.finish("AI 主动介入只能在群聊中设置。")
+
+    store = get_settings_store()
+    user_id = event.get_user_id()
+    if not store.is_bot_admin(int(user_id)):
+        await ai_proactive_mode_matcher.finish("只有 Bot 管理员才能设置本群 AI 主动介入。")
+
+    command = parse_ai_proactive_mode_command(event.get_plaintext())
+    if command is None:
+        return
+    if command.action == "set" and command.enabled is not None:
+        store.set_group_ai_proactive_enabled(group_id, command.enabled)
+
+    enabled = store.get_group_ai_proactive_enabled(group_id)
+    status = "开启" if enabled else "关闭"
+    await ai_proactive_mode_matcher.finish(f"本群 AI 主动介入：{status}")
+
+
+def should_handle_ai_event(event: MessageEvent) -> bool:
+    settings = load_settings()
+    group_id = getattr(event, "group_id", None)
+    proactive_enabled = False
+    if group_id is not None:
+        proactive_enabled = get_settings_store().get_group_ai_proactive_enabled(group_id)
+    return should_handle_ai_chat(
+        event,
+        event.get_plaintext(),
+        proactive_enabled=proactive_enabled,
+        bot_names=(settings.ai_bot_name,),
     )
 
 
@@ -532,7 +574,7 @@ async def _handle_ai_locked(
             await ai_chat_matcher.finish()
             return
         if should_attempt_voice:
-            response_text = "语音生成失败啦，先用文字回复你：\n" + response_text
+            response_text = "语音输出暂时不可用，先用文字回复你：\n" + response_text
 
     if group_id is not None and len(response_text) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
         await ai_chat_matcher.send(
@@ -550,6 +592,15 @@ async def _handle_ai_locked(
             message_id=message_id,
             user_id=user_id,
         )
+
+    if group_id is not None and isinstance(response_message, Message):
+        await finish_continuous_group_ai_reply(
+            response_text,
+            group_id=group_id,
+            message_id=message_id,
+            user_id=user_id,
+        )
+        return
 
     await finish_split_text(
         ai_chat_matcher,
@@ -572,41 +623,8 @@ async def try_send_ai_voice_response(
     singing: bool = False,
     force_voice: bool = False,
 ) -> bool:
-    if not should_attempt_ai_voice_response(text, force_voice=force_voice):
-        return False
-    try:
-        resolved = resolve_ai_profile(profiles, profile)
-        if resolved.provider not in {"xiaomi_mimo", "mimo_compatible"}:
-            return False
-        client = MimoTtsClient(
-            base_url=resolved.base_url,
-            api_key=resolved.api_key,
-            timeout_seconds=resolved.timeout_seconds,
-        )
-        audio_bytes = await asyncio.wait_for(
-            client.synthesize(text, singing=singing),
-            timeout=AI_TTS_TOTAL_TIMEOUT_SECONDS,
-        )
-        await asyncio.wait_for(
-            call_record_api(
-                bot,
-                settings.data_root,
-                audio_bytes=audio_bytes,
-                group_id=group_id,
-                user_id=None if group_id is not None else user_id,
-            ),
-            timeout=10.0,
-        )
-        return True
-    except Exception as exc:
-        logger.warning(
-            "AI voice response failed: profile={}, group_id={}, user_id={}, error={}",
-            profile,
-            group_id,
-            user_id,
-            exc,
-        )
-        return False
+    # 小米 TTS 已停用；后续如接入 OpenAI TTS，应在这里替换为新的语音 provider。
+    return False
 
 
 def build_ai_reply_scope(event: MessageEvent) -> str:
@@ -644,13 +662,13 @@ def build_ai_output_mode_context(mode: str, *, singing: bool = False) -> str:
     if mode != "voice":
         return ""
     context = (
-        "当前 AI 回复输出模式：语音。你的本轮文本回复会由系统合成为 QQ 语音发送；"
-        "不要说自己不能发送语音，也不要要求用户改用语音指令。"
+        "当前用户希望 AI 用语音回复，但小米 TTS 已停用，语音输出暂时不可用；"
+        "本轮请直接给出适合文字发送的简短回复，不要声称自己已经发送语音。"
     )
     if singing:
         context += (
-            "用户这轮在请求唱歌或哼唱，系统会尝试使用 MiMo TTS 的唱歌合成能力；"
-            "请直接给出适合短语音演唱的内容，不要拒绝或解释自己无法唱歌。"
+            "用户这轮在请求唱歌或哼唱；当前没有可用 TTS，"
+            "请用文字说明语音暂不可用，并尽量给出简短替代内容。"
         )
     return context
 
@@ -803,6 +821,74 @@ def build_ai_reply_notice_message(
     )
 
 
+async def finish_continuous_group_ai_reply(
+    text: str,
+    *,
+    group_id: int | str,
+    message_id: int | str | None,
+    user_id: int | str,
+) -> None:
+    parts = split_continuous_ai_reply_text(text)
+    messages: list[str | Message] = []
+    for index, part in enumerate(parts):
+        if index == 0:
+            messages.append(
+                build_ai_reply_message(
+                    part,
+                    group_id=group_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                )
+            )
+            continue
+        messages.append(part)
+
+    for message in messages[:-1]:
+        await send_split_text(ai_chat_matcher, message, group_id=group_id)
+    await finish_split_text(ai_chat_matcher, messages[-1], group_id=group_id)
+
+
+def split_continuous_ai_reply_text(text: str) -> list[str]:
+    normalized = "\n".join(part.strip() for part in str(text).splitlines() if part.strip())
+    if len(normalized) <= AI_CONTINUOUS_REPLY_TARGET_CHARS:
+        return [normalized]
+
+    raw_parts = _split_ai_reply_sentences(normalized)
+    parts: list[str] = []
+    current = ""
+    for raw_part in raw_parts:
+        candidate = raw_part.strip()
+        if not candidate:
+            continue
+        if not current:
+            current = candidate
+            continue
+        if len(current) + len(candidate) <= AI_CONTINUOUS_REPLY_TARGET_CHARS:
+            current += candidate
+            continue
+        parts.append(current)
+        current = candidate
+        if len(parts) >= AI_CONTINUOUS_REPLY_MAX_MESSAGES - 1:
+            break
+
+    if current:
+        parts.append(current)
+
+    consumed = sum(len(part) for part in parts)
+    if consumed < len(normalized) and parts:
+        tail = normalized[consumed:].strip()
+        if tail:
+            parts[-1] = (parts[-1] + tail).strip()
+    return parts[:AI_CONTINUOUS_REPLY_MAX_MESSAGES] or [normalized]
+
+
+def _split_ai_reply_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[。！？!?；;])", text)
+    if len(parts) > 1:
+        return parts
+    return re.split(r"(?<=，|,)", text)
+
+
 def build_ai_system_context(settings: RuntimeSettings) -> str:
     return (
         f"你是 QQ 机器人“{settings.ai_bot_name}”。"
@@ -854,7 +940,13 @@ def build_ai_context(
         limit=settings.ai_group_context_messages,
     )
     records = _drop_current_group_prompt(records, event, normalized_message)
-    context.append("当前对话场景：QQ群聊。用户是在群里 @ 你。")
+    if is_direct_command_event(event):
+        context.append("当前对话场景：QQ群聊。用户是在群里 @ 你。")
+    else:
+        context.append(
+            "当前对话场景：QQ群聊。你是按本群主动介入开关参与对话；"
+            "不要表现得像用户已经 @ 你，回复要短，先接住当前话题。"
+        )
     context.append(f"当前群号：{group_id}")
     context.append(build_current_sender_context(event))
     current_sender_call_name_context = build_current_sender_call_name_context(settings, event)

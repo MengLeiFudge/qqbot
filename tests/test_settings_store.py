@@ -114,6 +114,18 @@ def test_ai_output_mode_defaults_to_text_and_saves_group_private_preferences(tmp
     assert store.list_group_ai_output_modes() == {"516286670": "text"}
 
 
+def test_ai_proactive_mode_defaults_off_and_saves_group_preferences(tmp_path: Path) -> None:
+    store = SettingsStore(tmp_path, author_qq=605738729)
+
+    assert store.get_group_ai_proactive_enabled(516286670) is False
+
+    store.set_group_ai_proactive_enabled(516286670, True)
+
+    assert store.get_group_ai_proactive_enabled(516286670) is True
+    assert store.get_group_ai_proactive_enabled(10001) is False
+    assert store.list_group_ai_proactive_modes() == {"516286670": True}
+
+
 def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path, author_qq=605738729)
     func_state = tmp_path / "settings" / "func_state" / "10001.json"
@@ -121,6 +133,7 @@ def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: P
     func_state.write_text('{"Arc": true}', encoding="utf-8")
     store.set_lolicon_config(10001, True, False)
     store.set_codex_group_binding(10001, "qqbot")
+    store.set_group_ai_proactive_enabled(10001, True)
 
     removed = store.remove_group_scoped_settings(10001)
 
@@ -128,3 +141,4 @@ def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: P
     assert not func_state.exists()
     assert store.get_lolicon_config(10001) == (False, False)
     assert store.list_codex_group_bindings() == {}
+    assert store.get_group_ai_proactive_enabled(10001) is False

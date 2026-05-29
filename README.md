@@ -15,7 +15,7 @@
 - 群功能：捐献、Lolicon 美图
 - 游戏/工具插件：异形工厂、养鲲、Arc、落樱之都
 - 社交事件：自动同意好友申请、自动同意邀请入群、戳一戳响应
-- AI 接入：多 provider 配置、流式响应、群上下文、个人回复风格、RightCodes 生图、需求提案、Codex 会话中转
+- AI 接入：OpenAI-compatible 多 provider 配置、流式响应、群上下文、按群主动介入、连续短回复、个人回复风格、RightCodes 生图、需求提案、Codex 会话中转
 
 ## 目录结构
 
@@ -46,7 +46,7 @@
 QQBOT_CONFIG_FILE=./config/qqbot.toml
 QQBOT_ONEBOT_ACCESS_TOKEN=你的 OneBot token
 QQBOT_NAPCAT_QQ=你的机器人 QQ
-QQBOT_AI_KEY_XIAOMI=你的 API Key
+QQBOT_AI_KEY_OPENROUTER=你的 OpenAI-compatible API Key
 QQBOT_AI_KEY_RIGHTCODES=你的 RightCodes API Key
 ```
 
@@ -55,22 +55,25 @@ AI provider 示例：
 ```toml
 [ai]
 enabled = true
-default_profile = "xiaomi"
+default_profile = "openrouter"
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
 bot_name = "QQBot"
 
-[ai.providers.xiaomi]
+[ai.providers.openrouter]
 enabled = true
-provider = "xiaomi_mimo"
-base_url = "https://api.xiaomimimo.com/v1"
-model = "mimo-v2.5"
-vision_model = "mimo-v2.5"
-api_key_env = "QQBOT_AI_KEY_XIAOMI"
-timeout_seconds = 15
+provider = "openai_compatible"
+base_url = "https://example.com/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_OPENROUTER"
+timeout_seconds = 45
 max_output_tokens = 4096
 ```
+
+群聊普通 AI 对话默认仍需要 @ 机器人。Bot 管理员可以在群聊中发送 `开启本群AI主动介入`，让机器人在保守判定为合适的时机主动参与；发送 `本群AI被动模式` 可关闭。主动介入第一条回复会引用触发消息并 @ 提问人，后续连续短回复不重复引用。
+
+小米 MiMo 对话和 TTS 已停用。语音回复模式暂时降级为文字回复；后续接入新的 TTS provider 前，不会再调用小米转语音。
 
 ## 启动
 

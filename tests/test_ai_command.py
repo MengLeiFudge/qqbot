@@ -8,7 +8,9 @@ if str(SRC) not in sys.path:
 
 from qqbot.services.ai_command import (
     build_ai_conversation_key,
+    looks_like_ai_proactive_trigger,
     parse_ai_output_mode_command,
+    parse_ai_proactive_mode_command,
     parse_ai_model_command,
     should_handle_ai_chat,
 )
@@ -66,6 +68,30 @@ def test_group_message_requires_direct_at_for_ai_chat() -> None:
         should_handle_ai_chat(
             FakeEvent("group", "10001", group_id="20001", to_me=True),
             "菜单",
+        )
+        is False
+    )
+
+
+def test_group_proactive_ai_chat_requires_enabled_trigger() -> None:
+    event = FakeEvent("group", "10001", group_id="20001", to_me=False)
+
+    assert should_handle_ai_chat(event, "棉花糖在吗") is False
+    assert (
+        should_handle_ai_chat(
+            event,
+            "棉花糖在吗",
+            proactive_enabled=True,
+            bot_names=("萌萌棉花糖♪",),
+        )
+        is True
+    )
+    assert (
+        should_handle_ai_chat(
+            event,
+            "今天天气不错",
+            proactive_enabled=True,
+            bot_names=("萌萌棉花糖♪",),
         )
         is False
     )
@@ -225,6 +251,28 @@ def test_parse_ai_output_mode_command_accepts_group_and_private_commands() -> No
     assert parse_ai_output_mode_command("AI模型") is None
 
 
+def test_parse_ai_proactive_mode_command_accepts_group_mode_commands() -> None:
+    status = parse_ai_proactive_mode_command("本群AI主动介入")
+    enabled = parse_ai_proactive_mode_command("开启本群AI主动介入")
+    disabled = parse_ai_proactive_mode_command("本群AI被动模式")
+
+    assert status is not None
+    assert status.action == "status"
+    assert enabled is not None
+    assert enabled.action == "set"
+    assert enabled.enabled is True
+    assert disabled is not None
+    assert disabled.action == "set"
+    assert disabled.enabled is False
+    assert parse_ai_proactive_mode_command("AI模型") is None
+
+
+def test_ai_proactive_trigger_matches_bot_name_or_direct_help() -> None:
+    assert looks_like_ai_proactive_trigger("萌萌棉花糖在吗", bot_names=("萌萌棉花糖♪",))
+    assert looks_like_ai_proactive_trigger("请问这个怎么修？", bot_names=())
+    assert not looks_like_ai_proactive_trigger("我只是普通闲聊", bot_names=())
+
+
 def test_ai_output_mode_command_does_not_enter_ai_chat() -> None:
     assert (
         should_handle_ai_chat(
@@ -235,6 +283,7 @@ def test_ai_output_mode_command_does_not_enter_ai_chat() -> None:
     )
     assert should_handle_ai_chat(FakeEvent("private", "10001"), "我的AI文字模式") is False
     assert should_handle_ai_chat(FakeEvent("private", "10001"), "切换语音") is False
+    assert should_handle_ai_chat(FakeEvent("private", "10001"), "开启本群AI主动介入") is False
 
 
 def test_build_ai_conversation_key_uses_private_or_group_user_scope(tmp_path: Path) -> None:
