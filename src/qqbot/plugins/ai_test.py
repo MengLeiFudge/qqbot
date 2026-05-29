@@ -851,7 +851,7 @@ def build_ai_reply_scope(event: MessageEvent) -> str:
 
 
 def should_suppress_group_ai_fallback(group_id: object | None, response: AiResponse) -> bool:
-    return group_id is not None and response.fallback and response.fallback_reason == "timeout"
+    return group_id is not None and response.fallback
 
 
 async def send_recent_group_summary_ack(
