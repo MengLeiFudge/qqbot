@@ -24,6 +24,7 @@ from qqbot.plugins.ai_test import (
     build_recent_group_summary_context,
     build_memory_retrieval_plan_context,
     build_ai_system_context,
+    ack_task_retry_delay_seconds,
     build_ai_reply_message,
     build_ai_reply_notice_message,
     build_group_output_strategy_context,
@@ -437,17 +438,29 @@ def test_should_suppress_all_group_ai_fallbacks() -> None:
 def test_format_ack_task_failure_message_handles_non_timeout_fallback() -> None:
     assert (
         format_ack_task_failure_message(AiResponse("失败", fallback=True, fallback_reason="client_error"))
-        == "刚刚处理失败了 这次没拿到结果"
+        == "我这边还没拿到稳定结果"
     )
 
 
-def test_should_retry_ack_task_fallback_only_retries_timeout_after_ack() -> None:
+def test_should_retry_ack_task_fallback_retries_recoverable_fallbacks_after_ack() -> None:
     assert should_retry_ack_task_fallback(
         AiResponse("超时", fallback=True, fallback_reason="timeout"),
         pending_task_id="task-1",
     ) is True
     assert should_retry_ack_task_fallback(
         AiResponse("失败", fallback=True, fallback_reason="client_error"),
+        pending_task_id="task-1",
+    ) is True
+    assert should_retry_ack_task_fallback(
+        AiResponse("空内容", fallback=True, fallback_reason="empty"),
+        pending_task_id="task-1",
+    ) is True
+    assert should_retry_ack_task_fallback(
+        AiResponse("拒绝", fallback=True, fallback_reason="safety_rejected"),
+        pending_task_id="task-1",
+    ) is False
+    assert should_retry_ack_task_fallback(
+        AiResponse("没配置", fallback=True, fallback_reason="not_configured"),
         pending_task_id="task-1",
     ) is False
     assert should_retry_ack_task_fallback(
@@ -458,6 +471,8 @@ def test_should_retry_ack_task_fallback_only_retries_timeout_after_ack() -> None
         AiResponse("正常"),
         pending_task_id="task-1",
     ) is False
+    assert ack_task_retry_delay_seconds(AiResponse("超时", fallback=True, fallback_reason="timeout")) == 10.0
+    assert ack_task_retry_delay_seconds(AiResponse("失败", fallback=True, fallback_reason="client_error")) == 15.0
 
 
 def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None:
@@ -875,17 +890,27 @@ def test_handle_ai_locked_retries_timeout_after_ack_until_success(
     assert records[0].error == ""
 
 
-def test_handle_ai_locked_sends_failure_closure_after_ack_non_timeout_fallback(
+def test_handle_ai_locked_retries_client_error_after_ack_until_success(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     dummy_matcher = DummyMatcher()
 
     class FakeGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
         async def complete(self, request) -> AiResponse:
-            return AiResponse("失败", fallback=True, fallback_reason="client_error")
+            self.calls += 1
+            if self.calls == 1:
+                return AiResponse("失败", fallback=True, fallback_reason="client_error")
+            return AiResponse("shapez 速通开局先把基础图形线跑稳")
+
+    async def fake_sleep(seconds: float) -> None:
+        return None
 
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+    monkeypatch.setattr("qqbot.plugins.ai_test.asyncio.sleep", fake_sleep)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
         "openrouter": AiProfile(
@@ -913,31 +938,34 @@ def test_handle_ai_locked_sends_failure_closure_after_ack_non_timeout_fallback(
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
-    asyncio.run(
-        _handle_ai_locked(
-            FakeVoiceBot(),
-            event,
-            settings=settings,
-            store=SettingsStore(tmp_path, author_qq=605738729),
-            normalized_message=normalize_onebot_message(event.original_message),
-            prompt=event.text,
-            request_started=time.perf_counter(),
-            request_wall_started=time.time(),
-            event_time=None,
-            message_id=event.message_id,
-            group_id=event.group_id,
-            user_id=event.get_user_id(),
-            trigger_kind=AiChatTriggerKind.NAMED,
+    try:
+        asyncio.run(
+            _handle_ai_locked(
+                FakeVoiceBot(),
+                event,
+                settings=settings,
+                store=SettingsStore(tmp_path, author_qq=605738729),
+                normalized_message=normalize_onebot_message(event.original_message),
+                prompt=event.text,
+                request_started=time.perf_counter(),
+                request_wall_started=time.time(),
+                event_time=None,
+                message_id=event.message_id,
+                group_id=event.group_id,
+                user_id=event.get_user_id(),
+                trigger_kind=AiChatTriggerKind.NAMED,
+            )
         )
-    )
+    except FinishException as exc:
+        dummy_matcher.sent.append(exc.message)
 
     assert [str(message) for message in dummy_matcher.sent] == [
         "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] 我先看看",
-        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] 刚刚处理失败了 这次没拿到结果",
+        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] shapez 速通开局先把基础图形线跑稳",
     ]
     records = AiPendingTaskStore(tmp_path).list_records()
-    assert records[0].status == "failed"
-    assert records[0].error == "client_error"
+    assert records[0].status == "completed"
+    assert records[0].error == ""
 
 
 def test_recent_answer_followup_quotes_consistent_group_answer() -> None:

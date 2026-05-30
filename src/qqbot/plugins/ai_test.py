@@ -90,6 +90,7 @@ AI_CONTINUOUS_REPLY_MAX_MESSAGES = 3
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
 AI_RECENT_GROUP_SUMMARY_MAX_RECORDS = 12
 AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS = 10.0
+AI_ACK_FALLBACK_RETRY_DELAY_SECONDS = 15.0
 AI_RECENT_ANSWER_LOOKBACK_SECONDS = 180
 AI_RECENT_ANSWER_MAX_RECORDS = 8
 _BOT_LOOP_GUARD = BotLoopGuard()
@@ -968,22 +969,35 @@ async def complete_ai_request_until_ack_task_done(
             return response
         attempt += 1
         logger.info(
-            "Retry acked AI task after timeout: task_id={}, user_id={}, group_id={}, message_id={}, attempt={}",
+            "Retry acked AI task after fallback: task_id={}, user_id={}, group_id={}, message_id={}, attempt={}, reason={}",
             pending_task_id,
             user_id,
             group_id,
             message_id,
             attempt,
+            response.fallback_reason,
         )
-        await asyncio.sleep(AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS)
+        await asyncio.sleep(ack_task_retry_delay_seconds(response))
 
 
 def should_retry_ack_task_fallback(response: AiResponse, *, pending_task_id: str) -> bool:
-    return bool(pending_task_id and response.fallback and response.fallback_reason == "timeout")
+    if not pending_task_id or not response.fallback:
+        return False
+    return response.fallback_reason not in {"not_configured", "safety_rejected"}
+
+
+def ack_task_retry_delay_seconds(response: AiResponse) -> float:
+    if response.fallback_reason == "timeout":
+        return AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS
+    return AI_ACK_FALLBACK_RETRY_DELAY_SECONDS
 
 
 def format_ack_task_failure_message(response: AiResponse) -> str:
-    return "刚刚处理失败了 这次没拿到结果"
+    if response.fallback_reason == "safety_rejected":
+        return "这个我不能继续回答"
+    if response.fallback_reason == "not_configured":
+        return "现在 AI 配置没接上"
+    return "我这边还没拿到稳定结果"
 
 
 async def send_recent_group_summary_ack(
