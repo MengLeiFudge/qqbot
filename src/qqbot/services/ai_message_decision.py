@@ -173,6 +173,8 @@ def get_complex_ack_reason(
         return "消息包含图片，需要图片处理或图片上下文。"
     if _needs_web_search(text):
         return "问题包含最新/联网信号，需要外部资料检索。"
+    if _needs_precise_reasoning(text):
+        return "问题包含数学、计算或严密推理信号，需要优先保证准确性。"
     if _needs_code_search(text) or fe_feedback_kind in {
         FeFeedbackKind.BUG,
         FeFeedbackKind.NEW_FEATURE,
@@ -358,6 +360,28 @@ def _needs_domain_knowledge(text: str, domain: AiDomain) -> bool:
             "spz",
         )
     )
+
+
+def _needs_precise_reasoning(text: str) -> bool:
+    normalized = text.lower()
+    if any(
+        keyword in normalized
+        for keyword in (
+            "数学",
+            "证明",
+            "推导",
+            "计算",
+            "算一下",
+            "方程",
+            "概率",
+            "期望",
+            "复杂度",
+            "最优",
+            "公式",
+        )
+    ):
+        return True
+    return bool(re.search(r"\d+\s*[-+*/^=]\s*\d+", normalized))
 
 
 def _looks_not_one_sentence(text: str) -> bool:

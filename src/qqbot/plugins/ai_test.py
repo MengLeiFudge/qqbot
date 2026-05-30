@@ -26,7 +26,9 @@ from qqbot.services.ai_diagnostics import AiDiagnosticsStore, build_ai_diagnosti
 from qqbot.services.ai_gateway import AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.ai_message_decision import (
+    AiDomain,
     AiLatencyPolicy,
+    AiMessageDifficulty,
     AiMessageDecision,
     build_decision_context,
     decide_ai_message,
@@ -87,6 +89,9 @@ AI_DRAW_CONCURRENCY_LIMIT = 2
 AI_CONTINUOUS_REPLY_MAX_MESSAGES = 3
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
 AI_RECENT_GROUP_SUMMARY_MAX_RECORDS = 12
+AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS = 10.0
+AI_RECENT_ANSWER_LOOKBACK_SECONDS = 180
+AI_RECENT_ANSWER_MAX_RECORDS = 8
 _BOT_LOOP_GUARD = BotLoopGuard()
 
 
@@ -641,6 +646,9 @@ async def _handle_ai_locked(
                 )
             )
         context_parts.append(build_decision_context(decision))
+        output_strategy_context = build_group_output_strategy_context(group_id, decision=decision)
+        if output_strategy_context:
+            context_parts.append(output_strategy_context)
     with prepare_timer.stage("output_mode"):
         output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
         voice_singing = should_use_tts_singing_mode(prompt)
@@ -771,20 +779,26 @@ async def _handle_ai_locked(
     image_urls = collect_message_image_urls(normalized_message)
     local_prepare_seconds = time.perf_counter() - local_prepare_started
 
+    request = AiRequest(
+        plugin_id="ai",
+        capability="chat",
+        prompt=prompt,
+        user_id=event.get_user_id(),
+        group_id=str(getattr(event, "group_id", "")) or None,
+        image_urls=image_urls,
+        context=tuple(context_parts),
+        history=history,
+    )
     try:
         with prepare_timer.stage("gateway_init"):
             gateway = build_ai_gateway(settings, profile)
-        response = await gateway.complete(
-            AiRequest(
-                plugin_id="ai",
-                capability="chat",
-                prompt=prompt,
-                user_id=event.get_user_id(),
-                group_id=str(getattr(event, "group_id", "")) or None,
-                image_urls=image_urls,
-                context=tuple(context_parts),
-                history=history,
-            )
+        response = await complete_ai_request_until_ack_task_done(
+            gateway,
+            request,
+            pending_task_id=pending_task_id,
+            group_id=group_id,
+            user_id=user_id,
+            message_id=message_id,
         )
     except ValueError as exc:
         await ai_chat_matcher.finish(str(exc))
@@ -808,6 +822,14 @@ async def _handle_ai_locked(
 
     if should_suppress_group_ai_fallback(group_id, response):
         if pending_task_id:
+            await ai_chat_matcher.send(
+                build_ai_reply_message(
+                    format_ack_task_failure_message(response),
+                    group_id=group_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                )
+            )
             AiPendingTaskStore(settings.data_root).complete_task(
                 pending_task_id,
                 error=response.fallback_reason or "fallback",
@@ -845,7 +867,20 @@ async def _handle_ai_locked(
         if should_attempt_voice:
             response_text = "语音输出暂时不可用，先用文字回复你：\n" + response_text
 
-    if group_id is not None and len(response_text) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
+    response_followup = None
+    if pending_task_id and group_id is not None:
+        response_followup = build_recent_answer_followup_message(
+            response_text,
+            group_context_store.load_messages(group_id, limit=settings.ai_group_context_messages),
+            group_id=group_id,
+            message_id=message_id,
+            request_wall_started=request_wall_started,
+            user_id=user_id,
+        )
+
+    if response_followup is not None:
+        response_message = response_followup
+    elif group_id is not None and len(response_text) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
         await ai_chat_matcher.send(
             build_ai_reply_notice_message(
                 group_id=group_id,
@@ -862,17 +897,25 @@ async def _handle_ai_locked(
             user_id=user_id,
         )
 
+    if response_followup is not None:
+        if pending_task_id:
+            AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
+        await finish_split_text(ai_chat_matcher, response_message, group_id=group_id)
+        return
+
     if group_id is not None and isinstance(response_message, Message):
+        if pending_task_id:
+            AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
         await finish_continuous_group_ai_reply(
             response_text,
             group_id=group_id,
             message_id=message_id,
             user_id=user_id,
         )
-        if pending_task_id:
-            AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
         return
 
+    if pending_task_id:
+        AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
     await finish_split_text(
         ai_chat_matcher,
         response_message,
@@ -880,8 +923,6 @@ async def _handle_ai_locked(
         bot=bot,
         title="棉花糖的 AI 回复",
     )
-    if pending_task_id:
-        AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
 
 
 async def try_send_ai_voice_response(
@@ -909,6 +950,40 @@ def build_ai_reply_scope(event: MessageEvent) -> str:
 
 def should_suppress_group_ai_fallback(group_id: object | None, response: AiResponse) -> bool:
     return group_id is not None and response.fallback
+
+
+async def complete_ai_request_until_ack_task_done(
+    gateway: object,
+    request: AiRequest,
+    *,
+    pending_task_id: str,
+    group_id: object | None,
+    user_id: str,
+    message_id: object,
+) -> AiResponse:
+    attempt = 0
+    while True:
+        response = await gateway.complete(request)
+        if not should_retry_ack_task_fallback(response, pending_task_id=pending_task_id):
+            return response
+        attempt += 1
+        logger.info(
+            "Retry acked AI task after timeout: task_id={}, user_id={}, group_id={}, message_id={}, attempt={}",
+            pending_task_id,
+            user_id,
+            group_id,
+            message_id,
+            attempt,
+        )
+        await asyncio.sleep(AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS)
+
+
+def should_retry_ack_task_fallback(response: AiResponse, *, pending_task_id: str) -> bool:
+    return bool(pending_task_id and response.fallback and response.fallback_reason == "timeout")
+
+
+def format_ack_task_failure_message(response: AiResponse) -> str:
+    return "刚刚处理失败了 这次没拿到结果"
 
 
 async def send_recent_group_summary_ack(
@@ -1136,6 +1211,141 @@ def build_ai_reply_notice_message(
     )
 
 
+def build_recent_answer_followup_message(
+    response_text: str,
+    records: tuple[AiGroupMessageRecord, ...],
+    *,
+    group_id: int | str,
+    message_id: int | str | None,
+    request_wall_started: float,
+    user_id: int | str,
+) -> Message | None:
+    recent_answers = find_recent_group_answers_after_request(
+        response_text,
+        records,
+        message_id=message_id,
+        request_wall_started=request_wall_started,
+        user_id=user_id,
+    )
+    if not recent_answers:
+        return None
+    best = recent_answers[0]
+    if recent_group_answer_is_consistent(response_text, best.text):
+        return build_ai_reply_message(
+            "是这样",
+            group_id=group_id,
+            message_id=best.message_id,
+            user_id=best.user_id,
+        )
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class RecentGroupAnswer:
+    user_id: str
+    message_id: str
+    text: str
+    timestamp: int
+
+
+def find_recent_group_answers_after_request(
+    response_text: str,
+    records: tuple[AiGroupMessageRecord, ...],
+    *,
+    message_id: int | str | None,
+    request_wall_started: float,
+    user_id: int | str,
+) -> tuple[RecentGroupAnswer, ...]:
+    request_timestamp = int(request_wall_started)
+    response_keywords = _extract_answer_keywords(response_text)
+    if not response_keywords:
+        return ()
+    candidates: list[RecentGroupAnswer] = []
+    for record in records:
+        if record.message_id and str(record.message_id) == str(message_id or ""):
+            continue
+        if str(record.user_id) == str(user_id):
+            continue
+        if record.timestamp < request_timestamp:
+            continue
+        if record.timestamp - request_timestamp > AI_RECENT_ANSWER_LOOKBACK_SECONDS:
+            continue
+        if is_non_answer_group_record(record.text):
+            continue
+        overlap = _keyword_overlap_score(response_keywords, _extract_answer_keywords(record.text))
+        if overlap < 0.45:
+            continue
+        candidates.append(
+            RecentGroupAnswer(
+                user_id=record.user_id,
+                message_id=record.message_id,
+                text=record.text,
+                timestamp=record.timestamp,
+            )
+        )
+    candidates.sort(key=lambda item: item.timestamp, reverse=True)
+    return tuple(candidates[:AI_RECENT_ANSWER_MAX_RECORDS])
+
+
+def recent_group_answer_is_consistent(response_text: str, answer_text: str) -> bool:
+    response_keywords = _extract_answer_keywords(response_text)
+    answer_keywords = _extract_answer_keywords(answer_text)
+    return _keyword_overlap_score(response_keywords, answer_keywords) >= 0.55
+
+
+def is_non_answer_group_record(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if stripped in {"[图片]", "[表情]", "[forward]"}:
+        return True
+    if len(stripped) <= 1:
+        return True
+    if stripped.startswith("[@") and len(stripped) <= 20:
+        return True
+    return False
+
+
+def _extract_answer_keywords(text: str) -> set[str]:
+    normalized = re.sub(r"\[CQ:[^\]]+\]", " ", text.lower())
+    normalized = re.sub(r"\[[^\]]+\]", " ", normalized)
+    tokens = re.findall(r"[a-z0-9_+\-.]{2,}|[\u4e00-\u9fff]{2,}", normalized)
+    stopwords = {
+        "这个",
+        "那个",
+        "就是",
+        "可以",
+        "应该",
+        "一下",
+        "不是",
+        "没有",
+        "什么",
+        "怎么",
+        "因为",
+        "所以",
+        "如果",
+        "然后",
+        "需要",
+        "直接",
+        "先把",
+        "先看",
+    }
+    keywords: set[str] = set()
+    for token in tokens:
+        if token in stopwords:
+            continue
+        keywords.add(token)
+        if re.fullmatch(r"[\u4e00-\u9fff]{4,}", token):
+            keywords.update(token[index : index + 2] for index in range(len(token) - 1))
+    return keywords
+
+
+def _keyword_overlap_score(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / max(1, min(len(left), len(right)))
+
+
 async def finish_continuous_group_ai_reply(
     text: str,
     *,
@@ -1318,6 +1528,9 @@ def build_ai_context(
         )
     else:
         context.append("当前没有可用的群聊历史记录。")
+    output_strategy_context = build_group_output_strategy_context(group_id, decision=None)
+    if output_strategy_context:
+        context.append(output_strategy_context)
     if should_include_long_term_memory_context(event, normalized_message):
         memory_context = build_long_term_memory_context(
             settings,
@@ -1328,6 +1541,43 @@ def build_ai_context(
         if memory_context:
             context.append(memory_context)
     return tuple(context)
+
+
+def build_group_output_strategy_context(
+    group_id: int | str | None,
+    *,
+    decision: AiMessageDecision | None,
+) -> str:
+    if group_id is None:
+        return ""
+    parts = [
+        "群聊输出策略：速度优先，能一句话说清就先短答；普通闲聊可拆成 1-3 条短消息。"
+        "话语逻辑只控制拆条、长度、是否引用和标点密度，不改变你的身份或人格语气。"
+        "是否引用消息要视情况决定：ack、隔了较久、多人同时聊、回答图片/日志/报错、需要精确指向某个问题时引用；"
+        "紧接上一句闲聊或连续补充时不必每条引用。"
+        "如果最近群友已经给出一致且完整的答案，只需认可，例如“是这样”；"
+        "如果群友答案不全，只补充缺口；如果明显错误，只纠正错误点，不重复已说过的内容。"
+    ]
+    if decision is not None and (
+        decision.difficulty in {AiMessageDifficulty.COMPLEX, AiMessageDifficulty.LONG_RUNNING}
+        or decision.domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING}
+    ):
+        parts.append(
+            "本轮属于复杂问题或强领域关联问题：不要为了快牺牲准确性。"
+            "优先基于题目、领域资料、源码、引用消息或最近群聊证据核对后回答；"
+            "必要时说明依据来自哪个文件、源码位置或可见群聊证据。"
+        )
+    if str(group_id) == "1163635014":
+        parts.append(
+            "本群是 shapez/spz 群；shapez 相关问题默认强关联，速度让位于准确性。"
+            "回答基础机制、萌新或速通问题时优先使用已确认资料，不确定就说明需要查资料。"
+        )
+    elif str(group_id) == "319567534":
+        parts.append(
+            "本群是万物分馏/FE 群；报错、兼容、代码、配方和功能行为问题默认强关联，"
+            "回答时优先给结论和证据，涉及新功能或功能变动必须等待用户确认。"
+        )
+    return "".join(parts)
 
 
 def should_use_recent_group_summary_flow(

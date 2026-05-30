@@ -26,15 +26,21 @@ from qqbot.plugins.ai_test import (
     build_ai_system_context,
     build_ai_reply_message,
     build_ai_reply_notice_message,
+    build_group_output_strategy_context,
+    build_recent_answer_followup_message,
+    complete_ai_request_until_ack_task_done,
+    find_recent_group_answers_after_request,
     merge_ai_queued_batch,
     should_include_long_term_memory_context,
     should_include_nickname_usage_context,
     should_suppress_group_ai_fallback,
+    should_retry_ack_task_fallback,
     should_drop_queued_ai_request,
     should_use_recent_group_summary_flow,
     format_ai_response,
     format_draw_quota_exceeded_message,
     format_draw_start_message,
+    format_ack_task_failure_message,
     format_local_ai_result,
     format_memory_context,
     should_omit_ai_history_for_scope_query,
@@ -45,10 +51,13 @@ from qqbot.plugins.ai_test import (
     _handle_ai_locked,
 )
 from qqbot.services.ai_command import AiChatTriggerKind
-from qqbot.services.ai_gateway import AiMetrics, AiResponse
-from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.ai_gateway import AiMetrics, AiRequest, AiResponse
+from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.ai_message_decision import (
     AiDomain,
+    AiFormatPolicy,
+    AiMessageDifficulty,
+    AiMessageDecision,
     AiLatencyPolicy,
     AiMessageIntent,
     FeFeedbackKind,
@@ -322,6 +331,18 @@ def test_message_decision_marks_domain_knowledge_as_ack_task() -> None:
     assert "萌新必看" in build_decision_context(decision)
 
 
+def test_message_decision_marks_math_as_accuracy_first_ack_task() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.DIRECT,
+        normalized_message=NormalizedMessage(text="帮我证明 12+34=46 为什么成立", outline="帮我证明 12+34=46 为什么成立"),
+        group_id=516286670,
+    )
+
+    assert decision.difficulty == AiMessageDifficulty.COMPLEX
+    assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert "严密推理" in decision.reason
+
+
 def test_message_decision_classifies_fe_bug_and_feature_boundaries() -> None:
     bug = decide_ai_message(
         trigger_kind=AiChatTriggerKind.PROACTIVE,
@@ -384,6 +405,32 @@ def test_should_suppress_all_group_ai_fallbacks() -> None:
     assert should_suppress_group_ai_fallback(516286670, error_response) is True
     assert should_suppress_group_ai_fallback(516286670, empty_response) is True
     assert should_suppress_group_ai_fallback(516286670, normal_response) is False
+
+
+def test_format_ack_task_failure_message_handles_non_timeout_fallback() -> None:
+    assert (
+        format_ack_task_failure_message(AiResponse("失败", fallback=True, fallback_reason="client_error"))
+        == "刚刚处理失败了 这次没拿到结果"
+    )
+
+
+def test_should_retry_ack_task_fallback_only_retries_timeout_after_ack() -> None:
+    assert should_retry_ack_task_fallback(
+        AiResponse("超时", fallback=True, fallback_reason="timeout"),
+        pending_task_id="task-1",
+    ) is True
+    assert should_retry_ack_task_fallback(
+        AiResponse("失败", fallback=True, fallback_reason="client_error"),
+        pending_task_id="task-1",
+    ) is False
+    assert should_retry_ack_task_fallback(
+        AiResponse("超时", fallback=True, fallback_reason="timeout"),
+        pending_task_id="",
+    ) is False
+    assert should_retry_ack_task_fallback(
+        AiResponse("正常"),
+        pending_task_id="task-1",
+    ) is False
 
 
 def test_format_local_ai_result_keeps_image_text_without_extra_newline() -> None:
@@ -686,6 +733,318 @@ def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
     assert "结构化记忆证据" not in joined
 
 
+def test_complete_ai_request_keeps_retrying_timeout_after_ack(
+    monkeypatch,
+) -> None:
+    sleeps: list[float] = []
+
+    class FakeGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, request) -> AiResponse:
+            self.calls += 1
+            if self.calls < 3:
+                return AiResponse("超时", fallback=True, fallback_reason="timeout")
+            return AiResponse("最终结果")
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    gateway = FakeGateway()
+    monkeypatch.setattr("qqbot.plugins.ai_test.asyncio.sleep", fake_sleep)
+    response = asyncio.run(
+        complete_ai_request_until_ack_task_done(
+            gateway,
+            AiRequest(plugin_id="ai", capability="chat", prompt="你好", user_id="10001"),
+            pending_task_id="task-1",
+            group_id=1163635014,
+            user_id="10001",
+            message_id=12345,
+        )
+    )
+
+    assert response.text == "最终结果"
+    assert response.fallback is False
+    assert gateway.calls == 3
+    assert sleeps == [10.0, 10.0]
+
+
+def test_handle_ai_locked_retries_timeout_after_ack_until_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dummy_matcher = DummyMatcher()
+
+    class FakeGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, request) -> AiResponse:
+            self.calls += 1
+            if self.calls == 1:
+                return AiResponse("超时", fallback=True, fallback_reason="timeout")
+            return AiResponse("shapez 速通开局先把基础图形线跑稳")
+
+    async def fake_sleep(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+    monkeypatch.setattr("qqbot.plugins.ai_test.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
+        "openrouter": AiProfile(
+            name="openrouter",
+            provider="openai_compatible",
+            base_url="https://example.com/v1",
+            model="gpt-5.4-mini",
+            vision_model="gpt-5.4-mini",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+        )
+    })
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
+
+    event = FakeGroupEvent(
+        text="shapez 速通开局怎么做",
+        message_id=1398753261,
+        group_id=1163635014,
+        user_id="3120618805",
+    )
+    settings = RuntimeSettings(
+        data_root=tmp_path,
+        ai_enabled=True,
+        ai_default_profile="openrouter",
+        ai_profile_file=tmp_path / "qqbot.toml",
+    )
+
+    try:
+        asyncio.run(
+            _handle_ai_locked(
+                FakeVoiceBot(),
+                event,
+                settings=settings,
+                store=SettingsStore(tmp_path, author_qq=605738729),
+                normalized_message=normalize_onebot_message(event.original_message),
+                prompt=event.text,
+                request_started=time.perf_counter(),
+                request_wall_started=time.time(),
+                event_time=None,
+                message_id=event.message_id,
+                group_id=event.group_id,
+                user_id=event.get_user_id(),
+                trigger_kind=AiChatTriggerKind.NAMED,
+            )
+        )
+    except FinishException as exc:
+        dummy_matcher.sent.append(exc.message)
+
+    assert [str(message) for message in dummy_matcher.sent] == [
+        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] 我先看看",
+        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] shapez 速通开局先把基础图形线跑稳",
+    ]
+    records = AiPendingTaskStore(tmp_path).list_records()
+    assert records[0].status == "completed"
+    assert records[0].error == ""
+
+
+def test_handle_ai_locked_sends_failure_closure_after_ack_non_timeout_fallback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dummy_matcher = DummyMatcher()
+
+    class FakeGateway:
+        async def complete(self, request) -> AiResponse:
+            return AiResponse("失败", fallback=True, fallback_reason="client_error")
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+    monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
+        "openrouter": AiProfile(
+            name="openrouter",
+            provider="openai_compatible",
+            base_url="https://example.com/v1",
+            model="gpt-5.4-mini",
+            vision_model="gpt-5.4-mini",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+        )
+    })
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
+
+    event = FakeGroupEvent(
+        text="shapez 速通开局怎么做",
+        message_id=1398753261,
+        group_id=1163635014,
+        user_id="3120618805",
+    )
+    settings = RuntimeSettings(
+        data_root=tmp_path,
+        ai_enabled=True,
+        ai_default_profile="openrouter",
+        ai_profile_file=tmp_path / "qqbot.toml",
+    )
+
+    asyncio.run(
+        _handle_ai_locked(
+            FakeVoiceBot(),
+            event,
+            settings=settings,
+            store=SettingsStore(tmp_path, author_qq=605738729),
+            normalized_message=normalize_onebot_message(event.original_message),
+            prompt=event.text,
+            request_started=time.perf_counter(),
+            request_wall_started=time.time(),
+            event_time=None,
+            message_id=event.message_id,
+            group_id=event.group_id,
+            user_id=event.get_user_id(),
+            trigger_kind=AiChatTriggerKind.NAMED,
+        )
+    )
+
+    assert [str(message) for message in dummy_matcher.sent] == [
+        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] 我先看看",
+        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] 刚刚处理失败了 这次没拿到结果",
+    ]
+    records = AiPendingTaskStore(tmp_path).list_records()
+    assert records[0].status == "failed"
+    assert records[0].error == "client_error"
+
+
+def test_recent_answer_followup_quotes_consistent_group_answer() -> None:
+    records = (
+        AiGroupMessageRecord(
+            user_id="10002",
+            sender_name="群友A",
+            text="shapez 速通开局先把基础图形线跑稳",
+            timestamp=120,
+            message_id="456",
+        ),
+    )
+
+    message = build_recent_answer_followup_message(
+        "shapez 速通开局先把基础图形线跑稳，再补切割器",
+        records,
+        group_id=1163635014,
+        message_id=123,
+        request_wall_started=100,
+        user_id="10001",
+    )
+
+    assert str(message) == "[CQ:reply,id=456][CQ:at,qq=10002] 是这样"
+
+
+def test_recent_answer_followup_ignores_old_or_self_messages() -> None:
+    records = (
+        AiGroupMessageRecord(
+            user_id="10002",
+            sender_name="群友A",
+            text="shapez 速通开局先把基础图形线跑稳",
+            timestamp=80,
+            message_id="456",
+        ),
+        AiGroupMessageRecord(
+            user_id="10001",
+            sender_name="提问者",
+            text="shapez 速通开局先把基础图形线跑稳",
+            timestamp=120,
+            message_id="457",
+        ),
+    )
+
+    assert (
+        build_recent_answer_followup_message(
+            "shapez 速通开局先把基础图形线跑稳",
+            records,
+            group_id=1163635014,
+            message_id=123,
+            request_wall_started=100,
+            user_id="10001",
+        )
+        is None
+    )
+
+
+def test_find_recent_group_answers_skips_media_only_records() -> None:
+    records = (
+        AiGroupMessageRecord(
+            user_id="10002",
+            sender_name="群友A",
+            text="[图片]",
+            timestamp=120,
+            message_id="456",
+        ),
+    )
+
+    assert (
+        find_recent_group_answers_after_request(
+            "shapez 速通开局先把基础图形线跑稳",
+            records,
+            message_id=123,
+            request_wall_started=100,
+            user_id="10001",
+        )
+        == ()
+    )
+
+
+def test_handle_ai_locked_keeps_group_fallback_silent_without_ack(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dummy_matcher = DummyMatcher()
+
+    class FakeGateway:
+        async def complete(self, request) -> AiResponse:
+            return AiResponse("超时", fallback=True, fallback_reason="timeout")
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+    monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
+        "openrouter": AiProfile(
+            name="openrouter",
+            provider="openai_compatible",
+            base_url="https://example.com/v1",
+            model="gpt-5.4-mini",
+            vision_model="gpt-5.4-mini",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+        )
+    })
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
+
+    event = FakeGroupEvent(text="你好", message_id=23456, group_id=516286670, user_id="605738729")
+    settings = RuntimeSettings(
+        data_root=tmp_path,
+        ai_enabled=True,
+        ai_default_profile="openrouter",
+        ai_profile_file=tmp_path / "qqbot.toml",
+    )
+
+    asyncio.run(
+        _handle_ai_locked(
+            FakeVoiceBot(),
+            event,
+            settings=settings,
+            store=SettingsStore(tmp_path, author_qq=605738729),
+            normalized_message=normalize_onebot_message(event.original_message),
+            prompt=event.text,
+            request_started=time.perf_counter(),
+            request_wall_started=time.time(),
+            event_time=None,
+            message_id=event.message_id,
+            group_id=event.group_id,
+            user_id=event.get_user_id(),
+            trigger_kind=AiChatTriggerKind.DIRECT,
+        )
+    )
+
+    assert dummy_matcher.sent == []
+    assert AiPendingTaskStore(tmp_path).list_records() == ()
+
+
 def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
     tmp_path: Path,
     monkeypatch,
@@ -921,6 +1280,29 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "当前发言者：萌泪(605738729)" in joined
     assert "用户A(10001): 今天讨论了机器人接入 AI。" in joined
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
+    assert "群聊输出策略" in joined
+    assert "是否引用消息要视情况决定" in joined
+    assert "如果最近群友已经给出一致且完整的答案" in joined
+
+
+def test_group_output_strategy_marks_shapez_as_accuracy_first() -> None:
+    decision = AiMessageDecision(
+        should_reply=True,
+        trigger_kind=AiChatTriggerKind.NAMED,
+        intent=AiMessageIntent.DOMAIN_QA,
+        difficulty=AiMessageDifficulty.COMPLEX,
+        latency_policy=AiLatencyPolicy.ACK_THEN_ASYNC,
+        format_policy=AiFormatPolicy.SINGLE_MESSAGE,
+        domain=AiDomain.SHAPEZ,
+        confidence=0.9,
+        reason="shapez 领域问题",
+    )
+
+    context = build_group_output_strategy_context(1163635014, decision=decision)
+
+    assert "速度优先" in context
+    assert "不要为了快牺牲准确性" in context
+    assert "本群是 shapez/spz 群" in context
 
 
 def test_recent_group_summary_flow_uses_recent_context_without_memory(tmp_path: Path) -> None:
