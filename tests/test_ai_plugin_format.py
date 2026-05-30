@@ -30,6 +30,8 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_notice_message,
     build_group_output_strategy_context,
     build_recent_answer_followup_message,
+    build_ai_gateway_chain,
+    complete_ai_request_with_profile_fallbacks,
     complete_ai_request_until_ack_task_done,
     find_recent_group_answers_after_request,
     merge_ai_queued_batch,
@@ -53,6 +55,7 @@ from qqbot.plugins.ai_test import (
     _handle_ai_locked,
 )
 from qqbot.services.ai_command import AiChatTriggerKind
+from qqbot.services.ai_diagnostics import AiAttemptDiagnostics
 from qqbot.services.ai_gateway import AiMetrics, AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
 from qqbot.services.ai_message_decision import (
@@ -857,6 +860,99 @@ def test_complete_ai_request_stops_retrying_after_fallback_limit(
     assert response.fallback_reason == "client_error"
     assert gateway.calls == 3
     assert sleeps == [15.0, 15.0]
+
+
+def test_complete_ai_request_tries_next_profile_after_retryable_fallback(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeGateway:
+        def __init__(self, profile_name: str, response: AiResponse) -> None:
+            self.profile_name = profile_name
+            self.response = response
+
+        async def complete(self, request) -> AiResponse:
+            calls.append(self.profile_name)
+            return self.response
+
+    async def fake_sleep(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.asyncio.sleep", fake_sleep)
+    response = asyncio.run(
+        complete_ai_request_with_profile_fallbacks(
+            (
+                FakeGateway(
+                    "openrouter",
+                    AiResponse(
+                        "坏了",
+                        fallback=True,
+                        fallback_reason="client_error",
+                        attempts=(
+                            AiAttemptDiagnostics(
+                                attempt=1,
+                                timeout_seconds=12.0,
+                                result="client_error",
+                                total_seconds=1.0,
+                                profile_name="openrouter",
+                            ),
+                        ),
+                        profile_name="openrouter",
+                    ),
+                ),
+                FakeGateway(
+                    "routin",
+                    AiResponse(
+                        "好了",
+                        attempts=(
+                            AiAttemptDiagnostics(
+                                attempt=1,
+                                timeout_seconds=45.0,
+                                result="success",
+                                total_seconds=2.0,
+                                profile_name="routin",
+                            ),
+                        ),
+                        profile_name="routin",
+                    ),
+                ),
+            ),
+            AiRequest(plugin_id="ai", capability="chat", prompt="你好", user_id="10001"),
+            pending_task_id="",
+            group_id=1163635014,
+            user_id="10001",
+            message_id=12345,
+        )
+    )
+
+    assert response.fallback is False
+    assert response.text == "好了"
+    assert response.profile_name == "routin"
+    assert calls == ["openrouter", "routin"]
+    assert [attempt.profile_name for attempt in response.attempts] == ["openrouter", "routin"]
+
+
+def test_build_ai_gateway_chain_skips_failed_profile_cooldown(tmp_path: Path, monkeypatch) -> None:
+    import qqbot.plugins.ai_test as ai_test_module
+
+    built: list[str] = []
+
+    def fake_build_gateway(settings, profile_name):
+        built.append(profile_name)
+        return object()
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", fake_build_gateway)
+    monkeypatch.setitem(
+        ai_test_module._AI_PROFILE_FAILURE_UNTIL,
+        "openrouter",
+        time.monotonic() + 60,
+    )
+
+    chain = build_ai_gateway_chain(RuntimeSettings(data_root=tmp_path), ("openrouter", "routin"))
+
+    assert len(chain) == 1
+    assert built == ["routin"]
 
 
 def test_handle_ai_locked_retries_timeout_after_ack_until_success(

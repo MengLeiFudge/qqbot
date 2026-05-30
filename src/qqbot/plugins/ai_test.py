@@ -41,6 +41,7 @@ from qqbot.services.ai_profile_registry import (
     load_ai_profiles,
 )
 from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
+from qqbot.services.ai_runtime import list_ai_profile_fallback_order
 from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.admin_service import AdminService
 from qqbot.services.bot_loop_guard import BotLoopGuard
@@ -93,7 +94,9 @@ AI_ACK_FALLBACK_RETRY_DELAY_SECONDS = 15.0
 AI_ACK_FALLBACK_MAX_ATTEMPTS = 3
 AI_RECENT_ANSWER_LOOKBACK_SECONDS = 180
 AI_RECENT_ANSWER_MAX_RECORDS = 8
+AI_PROFILE_FALLBACK_COOLDOWN_SECONDS = 120.0
 _BOT_LOOP_GUARD = BotLoopGuard()
+_AI_PROFILE_FAILURE_UNTIL: dict[str, float] = {}
 
 
 @dataclass
@@ -617,6 +620,12 @@ async def _handle_ai_locked(
         profiles = load_ai_profiles(settings.ai_profile_file)
         profile = get_current_ai_profile_name(settings, store, profiles)
         profile_config = profiles.get(profile)
+        profile_order = list_ai_profile_fallback_order(
+            settings,
+            store,
+            profiles,
+            preferred_profile=profile,
+        )
     group_context_store = AiGroupContextStore(settings.data_root)
     conversation_store = AiConversationStore(
         settings.data_root,
@@ -803,9 +812,9 @@ async def _handle_ai_locked(
     )
     try:
         with prepare_timer.stage("gateway_init"):
-            gateway = build_ai_gateway(settings, profile)
-        response = await complete_ai_request_until_ack_task_done(
-            gateway,
+            gateway_chain = build_ai_gateway_chain(settings, profile_order)
+        response = await complete_ai_request_with_profile_fallbacks(
+            gateway_chain,
             request,
             pending_task_id=pending_task_id,
             group_id=group_id,
@@ -815,11 +824,13 @@ async def _handle_ai_locked(
     except ValueError as exc:
         await ai_chat_matcher.finish(str(exc))
     total_seconds = time.perf_counter() - request_started
+    effective_profile = response.profile_name or profile
+    effective_profile_config = profiles.get(effective_profile) or profile_config
     record_ai_diagnostics(
         settings=settings,
-        profile=profile,
-        provider=profile_config.provider if profile_config is not None else "",
-        model=profile_config.model if profile_config is not None else "",
+        profile=effective_profile,
+        provider=effective_profile_config.provider if effective_profile_config is not None else "",
+        model=effective_profile_config.model if effective_profile_config is not None else "",
         event=event,
         prompt=prompt,
         context_parts=tuple(context_parts),
@@ -852,7 +863,7 @@ async def _handle_ai_locked(
         conversation_store.append_turn(key, prompt, response.text)
 
     response_text = format_ai_response(
-        profile,
+        effective_profile,
         response,
         show_metrics=settings.ai_show_metrics,
     )
@@ -866,7 +877,7 @@ async def _handle_ai_locked(
             bot,
             settings,
             profiles,
-            profile,
+            effective_profile,
             response_text,
             group_id=group_id,
             user_id=user_id,
@@ -1014,6 +1025,97 @@ def ack_task_retry_delay_seconds(response: AiResponse) -> float:
     if response.fallback_reason == "timeout":
         return AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS
     return AI_ACK_FALLBACK_RETRY_DELAY_SECONDS
+
+
+def build_ai_gateway_chain(settings: RuntimeSettings, profile_order: tuple[str, ...]) -> tuple[object, ...]:
+    gateways: list[object] = []
+    for profile_name in profile_order:
+        if _profile_is_in_cooldown(profile_name):
+            continue
+        gateways.append(build_ai_gateway(settings, profile_name))
+    if gateways:
+        return tuple(gateways)
+    return tuple(build_ai_gateway(settings, profile_name) for profile_name in profile_order[:1])
+
+
+async def complete_ai_request_with_profile_fallbacks(
+    gateways: tuple[object, ...],
+    request: AiRequest,
+    *,
+    pending_task_id: str,
+    group_id: object | None,
+    user_id: str,
+    message_id: object,
+) -> AiResponse:
+    last_response: AiResponse | None = None
+    attempts: list[object] = []
+    use_profile_first_fallback = len(gateways) > 1
+    for gateway in gateways:
+        if use_profile_first_fallback:
+            response = await gateway.complete(request)
+        else:
+            response = await complete_ai_request_until_ack_task_done(
+                gateway,
+                request,
+                pending_task_id=pending_task_id,
+                group_id=group_id,
+                user_id=user_id,
+                message_id=message_id,
+            )
+        attempts.extend(response.attempts)
+        if not response.fallback or not should_try_next_ai_profile(response):
+            if tuple(attempts) != response.attempts:
+                return AiResponse(
+                    response.text,
+                    fallback=response.fallback,
+                    metrics=response.metrics,
+                    attempts=tuple(attempts),
+                    fallback_reason=response.fallback_reason,
+                    profile_name=response.profile_name,
+                )
+            return response
+        last_response = response
+        _mark_profile_fallback_cooldown(response.profile_name)
+        logger.info(
+            "AI profile fallback triggered: profile={}, reason={}, group_id={}, user_id={}, message_id={}",
+            response.profile_name,
+            response.fallback_reason,
+            group_id,
+            user_id,
+            message_id,
+        )
+    if last_response is not None:
+        if tuple(attempts) != last_response.attempts:
+            return AiResponse(
+                last_response.text,
+                fallback=True,
+                metrics=last_response.metrics,
+                attempts=tuple(attempts),
+                fallback_reason=last_response.fallback_reason,
+                profile_name=last_response.profile_name,
+            )
+        return last_response
+    return AiResponse("现在 AI 配置没接上", fallback=True, fallback_reason="not_configured")
+
+
+def should_try_next_ai_profile(response: AiResponse) -> bool:
+    if not response.fallback:
+        return False
+    if response.fallback_reason in {"not_configured", "safety_rejected", "empty"}:
+        return False
+    return True
+
+
+def _profile_is_in_cooldown(profile_name: str) -> bool:
+    if not profile_name:
+        return False
+    return time.monotonic() < _AI_PROFILE_FAILURE_UNTIL.get(profile_name, 0.0)
+
+
+def _mark_profile_fallback_cooldown(profile_name: str) -> None:
+    if not profile_name:
+        return
+    _AI_PROFILE_FAILURE_UNTIL[profile_name] = time.monotonic() + AI_PROFILE_FALLBACK_COOLDOWN_SECONDS
 
 
 def format_ack_task_failure_message(response: AiResponse) -> str:

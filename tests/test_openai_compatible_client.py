@@ -1,6 +1,7 @@
 from pathlib import Path
 import asyncio
 import sys
+from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -64,6 +65,14 @@ class FakeResponse:
 
     def json(self) -> dict[str, object]:
         return self.payload
+
+
+class FakeHttpErrorResponse:
+    def read(self) -> bytes:
+        return b'{"error":{"message":"bad model","code":"invalid_model"}}'
+
+    def close(self) -> None:
+        return None
 
 
 def test_openai_compatible_client_complete_uses_streaming_responses_request() -> None:
@@ -211,3 +220,36 @@ def test_openai_compatible_client_includes_images_when_request_has_images() -> N
         {"type": "input_text", "text": "看看这个是什么"},
         {"type": "input_image", "image_url": "https://example.invalid/a.png"},
     ]
+
+
+def test_openai_compatible_client_reports_http_error_body(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):
+        raise HTTPError(
+            url="https://example.invalid/v1/responses",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=FakeHttpErrorResponse(),
+        )
+
+    monkeypatch.setattr("qqbot.services.openai_compatible_client.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(
+        base_url="https://example.invalid/v1",
+        api_key="secret-key",
+        model="bad-model",
+    )
+
+    try:
+        asyncio.run(
+            client.stream_complete(
+                AiRequest(plugin_id="ai", capability="chat", prompt="你好", user_id="10001")
+            )
+        )
+    except RuntimeError as exc:
+        text = str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert "AI HTTP request failed: 400" in text
+    assert "bad model" in text
+    assert "invalid_model" in text

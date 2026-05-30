@@ -276,6 +276,7 @@ def test_gateway_returns_fallback_on_client_error() -> None:
     assert "boom" not in response.text
     assert "上游" not in response.text
     assert response.metrics is None
+    assert response.attempts[0].error_message == "boom"
 
 
 def test_gateway_returns_cute_fallback_on_high_risk_rejection() -> None:
@@ -370,6 +371,25 @@ def test_gateway_retries_timeout_with_short_first_attempt() -> None:
     assert response.text == "重试成功"
     assert client.calls == 2
     assert [attempt.result for attempt in response.attempts] == ["timeout", "success"]
+
+
+def test_gateway_ignores_short_first_attempt_when_retry_is_disabled() -> None:
+    gateway = AiGateway(
+        client=SlowAiClient(),
+        timeout_seconds=1.0,
+        first_attempt_timeout_seconds=0.01,
+        max_attempts=1,
+    )
+
+    response = asyncio.run(
+        gateway.complete(
+            AiRequest(plugin_id="arc", capability="explain", prompt="你好", user_id="10001")
+        )
+    )
+
+    assert response.fallback is False
+    assert response.text == "late"
+    assert response.attempts[0].timeout_seconds == 1.0
 
 
 def test_gateway_retries_incomplete_stream_before_success() -> None:

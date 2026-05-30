@@ -12,10 +12,12 @@ class AiAttemptDiagnostics:
     timeout_seconds: float
     result: str
     total_seconds: float
+    profile_name: str = ""
     first_token_seconds: float | None = None
     completion_tokens: int | None = None
     output_chars: int = 0
     error_type: str = ""
+    error_message: str = ""
 
     @property
     def tokens_per_second(self) -> float | None:
@@ -29,11 +31,13 @@ class AiAttemptDiagnostics:
             "timeout_seconds": self.timeout_seconds,
             "result": self.result,
             "total_seconds": self.total_seconds,
+            "profile_name": self.profile_name,
             "first_token_seconds": self.first_token_seconds,
             "completion_tokens": self.completion_tokens,
             "output_chars": self.output_chars,
             "tokens_per_second": self.tokens_per_second,
             "error_type": self.error_type,
+            "error_message": self.error_message,
         }
 
 

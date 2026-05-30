@@ -75,6 +75,7 @@ class AiResponse:
     metrics: AiMetrics | None = None
     attempts: tuple[AiAttemptDiagnostics, ...] = ()
     fallback_reason: str = ""
+    profile_name: str = ""
 
 
 class AiClient(Protocol):
@@ -93,11 +94,13 @@ class AiGateway:
         *,
         max_attempts: int = 2,
         first_attempt_timeout_seconds: float | None = None,
+        profile_name: str = "",
     ) -> None:
         self.client = client
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max(1, int(max_attempts))
         self.first_attempt_timeout_seconds = first_attempt_timeout_seconds
+        self.profile_name = profile_name
 
     async def complete(self, request: AiRequest) -> AiResponse:
         spec = get_plugin_spec_by_id(request.plugin_id)
@@ -106,7 +109,7 @@ class AiGateway:
         if request.capability not in spec.ai_capabilities:
             raise AiPermissionError(f"插件 {request.plugin_id} 未声明 AI 能力：{request.capability}")
         if self.client is None:
-            return AiResponse(AI_FALLBACK_NOT_CONFIGURED, fallback=True)
+            return AiResponse(AI_FALLBACK_NOT_CONFIGURED, fallback=True, profile_name=self.profile_name)
 
         last_fallback = AI_FALLBACK_CLIENT_ERROR
         attempts: list[AiAttemptDiagnostics] = []
@@ -127,7 +130,9 @@ class AiGateway:
                             timeout_seconds=timeout,
                             result="timeout",
                             total_seconds=time.perf_counter() - attempt_start,
+                            profile_name=self.profile_name,
                             error_type="TimeoutError",
+                            error_message="",
                         )
                     )
                     continue
@@ -141,7 +146,9 @@ class AiGateway:
                                 timeout_seconds=timeout,
                                 result="safety_rejected",
                                 total_seconds=time.perf_counter() - attempt_start,
+                                profile_name=self.profile_name,
                                 error_type=type(exc).__name__,
+                                error_message=_sanitize_error_message(str(exc)),
                             )
                         )
                         return AiResponse(
@@ -149,6 +156,7 @@ class AiGateway:
                             fallback=True,
                             attempts=tuple(attempts),
                             fallback_reason="safety_rejected",
+                            profile_name=self.profile_name,
                         )
                     attempts.append(
                         AiAttemptDiagnostics(
@@ -156,7 +164,9 @@ class AiGateway:
                             timeout_seconds=timeout,
                             result=result,
                             total_seconds=time.perf_counter() - attempt_start,
+                            profile_name=self.profile_name,
                             error_type=type(exc).__name__,
+                            error_message=_sanitize_error_message(str(exc)),
                         )
                     )
                     continue
@@ -170,6 +180,7 @@ class AiGateway:
                             timeout_seconds=timeout,
                             result="empty",
                             total_seconds=time.perf_counter() - attempt_start,
+                            profile_name=self.profile_name,
                             first_token_seconds=completion.metrics.first_token_seconds,
                             completion_tokens=completion.metrics.completion_tokens,
                             output_chars=completion.metrics.output_chars,
@@ -183,6 +194,7 @@ class AiGateway:
                             timeout_seconds=timeout,
                             result="safety_rejected",
                             total_seconds=time.perf_counter() - attempt_start,
+                            profile_name=self.profile_name,
                             first_token_seconds=completion.metrics.first_token_seconds,
                             completion_tokens=completion.metrics.completion_tokens,
                             output_chars=completion.metrics.output_chars,
@@ -193,6 +205,7 @@ class AiGateway:
                         fallback=True,
                         attempts=tuple(attempts),
                         fallback_reason="safety_rejected",
+                        profile_name=self.profile_name,
                     )
                 attempts.append(
                     AiAttemptDiagnostics(
@@ -200,12 +213,18 @@ class AiGateway:
                         timeout_seconds=timeout,
                         result="success",
                         total_seconds=time.perf_counter() - attempt_start,
+                        profile_name=self.profile_name,
                         first_token_seconds=completion.metrics.first_token_seconds,
                         completion_tokens=completion.metrics.completion_tokens,
                         output_chars=completion.metrics.output_chars,
                     )
                 )
-                return AiResponse(cleaned, metrics=completion.metrics, attempts=tuple(attempts))
+                return AiResponse(
+                    cleaned,
+                    metrics=completion.metrics,
+                    attempts=tuple(attempts),
+                    profile_name=self.profile_name,
+                )
         except Exception as exc:
             fallback = format_ai_exception_fallback(exc)
             return AiResponse(
@@ -213,17 +232,20 @@ class AiGateway:
                 fallback=True,
                 attempts=tuple(attempts),
                 fallback_reason=_fallback_reason(fallback),
+                profile_name=self.profile_name,
             )
         return AiResponse(
             last_fallback,
             fallback=True,
             attempts=tuple(attempts),
             fallback_reason=_fallback_reason(last_fallback),
+            profile_name=self.profile_name,
         )
 
     def _timeout_for_attempt(self, attempt: int) -> float:
         if (
             attempt == 0
+            and self.max_attempts > 1
             and self.first_attempt_timeout_seconds is not None
             and self.first_attempt_timeout_seconds > 0
         ):
@@ -292,3 +314,10 @@ def is_safety_rejection_text(text: str) -> bool:
 
 def is_incomplete_stream_error(exc: Exception) -> bool:
     return "incomplete_ai_stream" in str(exc)
+
+
+def _sanitize_error_message(message: str, *, limit: int = 240) -> str:
+    cleaned = " ".join(str(message).split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"

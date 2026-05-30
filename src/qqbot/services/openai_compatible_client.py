@@ -4,6 +4,7 @@ import asyncio
 import json as json_module
 import time
 from typing import Any, Protocol
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from qqbot.services.ai_gateway import AiClient, AiCompletion, AiMetrics, AiRequest
@@ -327,12 +328,16 @@ def _stream_json_lines(
 ):
     body = json_module.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(url, data=body, headers=headers, method="POST")
-    with urlopen(request, timeout=timeout) as response:
-        status = int(getattr(response, "status", 200))
-        if status >= 400:
-            raise RuntimeError(f"AI HTTP request failed: {status}")
-        for raw_line in response:
-            yield raw_line.decode("utf-8").strip()
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            status = int(getattr(response, "status", 200))
+            if status >= 400:
+                raise RuntimeError(f"AI HTTP request failed: {status}")
+            for raw_line in response:
+                yield raw_line.decode("utf-8").strip()
+    except HTTPError as exc:
+        detail = _read_http_error_detail(exc)
+        raise RuntimeError(f"AI HTTP request failed: {exc.code} {detail}".strip()) from exc
 
 
 def _next_line(iterator) -> str | None:
@@ -347,3 +352,14 @@ def _parse_sse_data(line: str) -> str | None:
     if not normalized or not normalized.startswith("data:"):
         return None
     return normalized.removeprefix("data:").strip()
+
+
+def _read_http_error_detail(exc: HTTPError, *, limit: int = 500) -> str:
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    cleaned = " ".join(raw.split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"

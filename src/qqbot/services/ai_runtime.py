@@ -13,7 +13,6 @@ from qqbot.services.mimo_compatible_client import MimoCompatibleClient
 from qqbot.services.openai_compatible_client import OpenAICompatibleClient
 from qqbot.services.settings_store import SettingsStore
 
-
 def get_default_ai_profile_name(settings: RuntimeSettings) -> str:
     return (
         load_ai_default_profile_name(settings.ai_profile_file)
@@ -38,6 +37,29 @@ def get_current_ai_profile_name(
     if enabled_names:
         return next(profile.name for profile in list_enabled_profiles(profiles))
     return saved_profile
+
+
+def list_ai_profile_fallback_order(
+    settings: RuntimeSettings,
+    store: SettingsStore,
+    profiles: dict[str, AiProfile] | None = None,
+    *,
+    preferred_profile: str | None = None,
+) -> tuple[str, ...]:
+    profiles = profiles if profiles is not None else load_ai_profiles(settings.ai_profile_file)
+    enabled = list_enabled_profiles(profiles)
+    enabled_names = {profile.name for profile in enabled}
+    primary = preferred_profile or get_current_ai_profile_name(settings, store, profiles)
+    ordered: list[str] = []
+    if primary in enabled_names:
+        ordered.append(primary)
+    default_profile = get_default_ai_profile_name(settings)
+    if default_profile in enabled_names and default_profile not in ordered:
+        ordered.append(default_profile)
+    for profile in enabled:
+        if profile.name not in ordered:
+            ordered.append(profile.name)
+    return tuple(ordered)
 
 
 def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
@@ -70,4 +92,5 @@ def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
         timeout_seconds=resolved.timeout_seconds,
         max_attempts=settings.ai_max_attempts,
         first_attempt_timeout_seconds=settings.ai_first_attempt_timeout_seconds,
+        profile_name=resolved.name,
     )
