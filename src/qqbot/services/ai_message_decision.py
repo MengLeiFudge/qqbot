@@ -182,6 +182,8 @@ def get_complex_ack_reason(
         FeFeedbackKind.AMBIGUOUS,
     }:
         return "问题涉及源码、bug 或功能变更，需要代码/规则分析。"
+    if _looks_translation_or_language_help(text):
+        return ""
     if _needs_domain_knowledge(text, domain):
         return "问题涉及领域知识库，需要检索资料后回答。"
     if _looks_not_one_sentence(text):
@@ -313,7 +315,11 @@ def _classify_intent(
         FeFeedbackKind.AMBIGUOUS,
     }:
         return AiMessageIntent.CODE_CHANGE_CANDIDATE
-    if domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING} and _needs_domain_knowledge(text, domain):
+    if (
+        domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING}
+        and not _looks_translation_or_language_help(text)
+        and _needs_domain_knowledge(text, domain)
+    ):
         return AiMessageIntent.DOMAIN_QA
     if _looks_smalltalk(text):
         return AiMessageIntent.SMALLTALK
@@ -336,6 +342,7 @@ def _needs_web_search(text: str) -> bool:
 
 def _needs_code_search(text: str) -> bool:
     normalized = text.lower()
+    normalized = normalized.replace("短代码", "")
     return any(keyword in normalized for keyword in ("源码", "代码", "堆栈", "日志", "exception", "traceback", "bepinex", "编译"))
 
 
@@ -343,23 +350,83 @@ def _needs_domain_knowledge(text: str, domain: AiDomain) -> bool:
     if domain == AiDomain.GENERAL:
         return False
     normalized = text.lower()
+    if domain == AiDomain.SHAPEZ:
+        return _has_shapez_domain_signal(normalized)
+    if domain == AiDomain.FRACTIONATE_EVERYTHING:
+        return _has_fractionate_everything_domain_signal(normalized)
+    return False
+
+
+def _has_shapez_domain_signal(normalized: str) -> bool:
     return any(
         keyword in normalized
         for keyword in (
-            "怎么",
-            "为什么",
-            "如何",
             "机制",
             "速通",
             "萌新",
             "短代码",
-            "配方",
             "建筑",
-            "分馏",
             "shapez",
             "spz",
+            "异形工厂",
+            "/chart",
+            "蓝图",
+            "图形",
+            "形状",
+            "切割",
+            "堆叠",
+            "混色",
+            "混色器",
+            "隧道",
+            "传送带",
+            "工厂",
+            "开局",
         )
     )
+
+
+def _has_fractionate_everything_domain_signal(normalized: str) -> bool:
+    return any(
+        keyword in normalized
+        for keyword in (
+            "分馏",
+            "fractionateeverything",
+            "万物分馏",
+            "分馏塔",
+            "配方",
+            "增产",
+            "戴森球",
+            "dsp",
+            "黑雾",
+        )
+    )
+
+
+def _looks_translation_or_language_help(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.lower())
+    if not compact:
+        return False
+    language_markers = (
+        "粤语",
+        "广东话",
+        "英语",
+        "英文",
+        "日语",
+        "日文",
+        "韩语",
+        "中文",
+        "普通话",
+        "翻译",
+        "怎么说",
+        "咋说",
+        "怎么读",
+        "读作",
+        "发音",
+        "这句",
+        "这句话",
+        "这段话",
+    )
+    return any(marker in compact for marker in language_markers)
 
 
 def _needs_precise_reasoning(text: str) -> bool:

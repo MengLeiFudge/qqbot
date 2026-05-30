@@ -331,6 +331,33 @@ def test_message_decision_marks_domain_knowledge_as_ack_task() -> None:
     assert "萌新必看" in build_decision_context(decision)
 
 
+def test_message_decision_keeps_language_help_immediate_in_shapez_group() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.DIRECT,
+        normalized_message=NormalizedMessage(text="这句用粤语怎么说", outline="这句用粤语怎么说"),
+        group_id=1163635014,
+    )
+
+    assert decision.domain == AiDomain.SHAPEZ
+    assert decision.intent == AiMessageIntent.QUICK_QA
+    assert decision.latency_policy == AiLatencyPolicy.IMMEDIATE
+    assert decision.difficulty == AiMessageDifficulty.QUICK
+    assert "知识库" not in decision.reason
+
+
+def test_message_decision_keeps_shapez_shortcode_question_as_ack_task() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="短代码怎么导入", outline="短代码怎么导入"),
+        group_id=1163635014,
+    )
+
+    assert decision.domain == AiDomain.SHAPEZ
+    assert decision.intent == AiMessageIntent.DOMAIN_QA
+    assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert "知识库" in decision.reason
+
+
 def test_message_decision_marks_math_as_accuracy_first_ack_task() -> None:
     decision = decide_ai_message(
         trigger_kind=AiChatTriggerKind.DIRECT,
