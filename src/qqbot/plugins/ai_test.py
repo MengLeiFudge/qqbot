@@ -91,6 +91,7 @@ AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
 AI_RECENT_GROUP_SUMMARY_MAX_RECORDS = 12
 AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS = 10.0
 AI_ACK_FALLBACK_RETRY_DELAY_SECONDS = 15.0
+AI_ACK_FALLBACK_MAX_ATTEMPTS = 3
 AI_RECENT_ANSWER_LOOKBACK_SECONDS = 180
 AI_RECENT_ANSWER_MAX_RECORDS = 8
 _BOT_LOOP_GUARD = BotLoopGuard()
@@ -345,6 +346,17 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         normalized_message=normalized_message,
         group_id=group_id,
     )
+    quick_reply = build_local_quick_ai_reply(normalized_message, prompt)
+    if quick_reply:
+        await ai_chat_matcher.finish(
+            build_ai_reply_message(
+                quick_reply,
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+            )
+        )
+        return
     queue_wait_started = time.perf_counter()
     queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
     force_text_response = queue_ticket.force_text_response and not voice_singing
@@ -963,11 +975,24 @@ async def complete_ai_request_until_ack_task_done(
     message_id: object,
 ) -> AiResponse:
     attempt = 0
+    retryable_fallback_count = 0
     while True:
         response = await gateway.complete(request)
         if not should_retry_ack_task_fallback(response, pending_task_id=pending_task_id):
             return response
         attempt += 1
+        retryable_fallback_count += 1
+        if retryable_fallback_count >= AI_ACK_FALLBACK_MAX_ATTEMPTS:
+            logger.info(
+                "Stop retrying acked AI task after fallback limit: task_id={}, user_id={}, group_id={}, message_id={}, attempts={}, reason={}",
+                pending_task_id,
+                user_id,
+                group_id,
+                message_id,
+                retryable_fallback_count,
+                response.fallback_reason,
+            )
+            return response
         logger.info(
             "Retry acked AI task after fallback: task_id={}, user_id={}, group_id={}, message_id={}, attempt={}, reason={}",
             pending_task_id,
@@ -1036,6 +1061,19 @@ async def send_ai_processing_ack(
 
 def should_handle_as_rightcodes_draw(prompt: str) -> bool:
     return looks_like_rightcodes_draw_command(prompt) and not looks_like_rightcodes_draw_help_command(prompt)
+
+
+def build_local_quick_ai_reply(normalized_message: NormalizedMessage, prompt: str) -> str:
+    compact = re.sub(r"\s+", "", prompt.strip())
+    if is_pure_direct_at(normalized_message):
+        return "在"
+    if not compact or len(compact) > 16:
+        return ""
+    if compact in {"在吗", "在嘛", "在不在", "睡了吗", "睡了没", "醒着吗", "醒了吗", "棉花糖在吗"}:
+        return "在"
+    if compact in {"棉花糖", "棉花糖棉花糖", "棉花糖棉花糖棉花糖"}:
+        return "在呢"
+    return ""
 
 
 def build_ai_prompt(normalized_message: NormalizedMessage) -> str:

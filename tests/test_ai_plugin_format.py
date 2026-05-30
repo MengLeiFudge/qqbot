@@ -21,6 +21,7 @@ from qqbot.plugins.ai_test import (
     build_ai_output_mode_context,
     build_ai_prompt,
     build_ai_reply_scope,
+    build_local_quick_ai_reply,
     build_recent_group_summary_context,
     build_memory_retrieval_plan_context,
     build_ai_system_context,
@@ -422,6 +423,17 @@ def test_build_ai_reply_scope_isolates_group_user_sessions() -> None:
     assert build_ai_reply_scope(FakePrivateEvent(user_id="20001")) == "private:20001"
 
 
+def test_build_local_quick_ai_reply_handles_pure_at_and_short_greeting() -> None:
+    pure_at = NormalizedMessage(
+        text="",
+        outline="[@1443944862]",
+        at_user_ids=("1443944862",),
+    )
+    assert build_local_quick_ai_reply(pure_at, "找我什么事情？") == "在"
+    assert build_local_quick_ai_reply(NormalizedMessage(text="睡了吗", outline="睡了吗"), "睡了吗") == "在"
+    assert build_local_quick_ai_reply(NormalizedMessage(text="shapez 速通怎么做", outline="shapez 速通怎么做"), "shapez 速通怎么做") == ""
+
+
 def test_should_suppress_all_group_ai_fallbacks() -> None:
     timeout_response = AiResponse("超时", fallback=True, fallback_reason="timeout")
     error_response = AiResponse("失败", fallback=True, fallback_reason="client_error")
@@ -810,6 +822,41 @@ def test_complete_ai_request_keeps_retrying_timeout_after_ack(
     assert response.fallback is False
     assert gateway.calls == 3
     assert sleeps == [10.0, 10.0]
+
+
+def test_complete_ai_request_stops_retrying_after_fallback_limit(
+    monkeypatch,
+) -> None:
+    sleeps: list[float] = []
+
+    class FakeGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, request) -> AiResponse:
+            self.calls += 1
+            return AiResponse("失败", fallback=True, fallback_reason="client_error")
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    gateway = FakeGateway()
+    monkeypatch.setattr("qqbot.plugins.ai_test.asyncio.sleep", fake_sleep)
+    response = asyncio.run(
+        complete_ai_request_until_ack_task_done(
+            gateway,
+            AiRequest(plugin_id="ai", capability="chat", prompt="你好", user_id="10001"),
+            pending_task_id="task-1",
+            group_id=1163635014,
+            user_id="10001",
+            message_id=12345,
+        )
+    )
+
+    assert response.fallback is True
+    assert response.fallback_reason == "client_error"
+    assert gateway.calls == 3
+    assert sleeps == [15.0, 15.0]
 
 
 def test_handle_ai_locked_retries_timeout_after_ack_until_success(
