@@ -36,10 +36,6 @@ def test_ai_conversation_store_builds_group_key(tmp_path: Path) -> None:
         == "group:10000:xiaomi:2026-05-17T04:00"
     )
     assert (
-        store.group_user_key("10000", "605738729", "xiaomi", "2026-05-17T04:00")
-        == "group_user:10000:605738729:xiaomi:2026-05-17T04:00"
-    )
-    assert (
         store.private_key("605738729", "xiaomi", "2026-05-17T04:00")
         == "private:605738729:xiaomi:2026-05-17T04:00"
     )
@@ -47,7 +43,7 @@ def test_ai_conversation_store_builds_group_key(tmp_path: Path) -> None:
 
 def test_ai_conversation_store_filters_high_risk_rejection_text(tmp_path: Path) -> None:
     store = AiConversationStore(tmp_path, max_messages=4)
-    key = store.group_user_key("10000", "605738729", "xiaomi", "2026-05-17T04:00")
+    key = store.group_key("10000", "xiaomi", "2026-05-17T04:00")
     store.append_turn(
         key,
         "风险测试",
@@ -59,7 +55,7 @@ def test_ai_conversation_store_filters_high_risk_rejection_text(tmp_path: Path) 
 
 def test_ai_conversation_store_sanitizes_action_descriptions(tmp_path: Path) -> None:
     store = AiConversationStore(tmp_path, max_messages=4)
-    key = store.group_user_key("10000", "605738729", "xiaomi", "2026-05-17T04:00")
+    key = store.group_key("10000", "xiaomi", "2026-05-17T04:00")
 
     store.append_turn(
         key,

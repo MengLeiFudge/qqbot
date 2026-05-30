@@ -23,15 +23,6 @@ class AiConversationStore:
     ) -> str:
         return ":".join(("group", group_id, profile, scope))
 
-    def group_user_key(
-        self,
-        group_id: str,
-        user_id: str,
-        profile: str,
-        scope: str,
-    ) -> str:
-        return ":".join(("group_user", group_id, user_id, profile, scope))
-
     def load_messages(self, key: str) -> tuple[AiMessage, ...]:
         path = self._path_for_key(key)
         if not path.exists():

@@ -5,7 +5,6 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from contextlib import contextmanager
 
 from nonebot import logger, on_message, on_regex
@@ -623,7 +622,7 @@ async def _handle_ai_locked(
         settings.data_root,
         max_messages=settings.ai_max_context_messages,
     )
-    conversation_scope = AiUserStyleStore.rotation_slot_id(datetime.now())
+    conversation_scope = AiUserStyleStore.conversation_scope_id()
     key = build_ai_conversation_key(conversation_store, event, profile, scope=conversation_scope)
     with prepare_timer.stage("history"):
         if should_use_recent_group_summary_flow(event, normalized_message):

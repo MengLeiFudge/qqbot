@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 
 from nonebot import logger, on_message
 from nonebot.rule import Rule
@@ -170,7 +169,7 @@ async def replay_offline_private_ai_once(bot: Bot, user_id: str) -> None:
         settings.data_root,
         max_messages=settings.ai_max_context_messages,
     )
-    conversation_scope = AiUserStyleStore.rotation_slot_id(datetime.now())
+    conversation_scope = AiUserStyleStore.conversation_scope_id()
     key = conversation_store.private_key(user_id, profile, conversation_scope)
     gateway = build_ai_gateway(settings, profile)
     response = await gateway.complete(
