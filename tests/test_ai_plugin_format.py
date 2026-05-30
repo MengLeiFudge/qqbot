@@ -17,6 +17,7 @@ from qqbot.plugins.ai_test import (
     ai_chat_matcher,
     handle_ai,
     build_ai_context,
+    send_ai_processing_ack,
     build_ai_output_mode_context,
     build_ai_prompt,
     build_ai_reply_scope,
@@ -46,12 +47,21 @@ from qqbot.plugins.ai_test import (
 from qqbot.services.ai_command import AiChatTriggerKind
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore
+from qqbot.services.ai_message_decision import (
+    AiDomain,
+    AiLatencyPolicy,
+    AiMessageIntent,
+    FeFeedbackKind,
+    build_decision_context,
+    decide_ai_message,
+)
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_orchestrator import AiOrchestratorResult
 from qqbot.services.ai_profile_registry import AiProfile
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_message
+from qqbot.services.ai_pending_task_store import AiPendingTaskStore
 from qqbot.services.settings_store import SettingsStore
 
 
@@ -283,6 +293,80 @@ def test_build_ai_reply_message_keeps_private_response_plain() -> None:
     ) == "你好呀"
 
 
+def test_send_ai_processing_ack_quotes_group_message(monkeypatch) -> None:
+    dummy_matcher = DummyMatcher()
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+
+    asyncio.run(
+        send_ai_processing_ack(
+            group_id=516286670,
+            message_id=12345,
+            user_id="605738729",
+        )
+    )
+
+    assert str(dummy_matcher.sent[0]) == "[CQ:reply,id=12345][CQ:at,qq=605738729] 我先看看"
+
+
+def test_message_decision_marks_domain_knowledge_as_ack_task() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.NAMED,
+        normalized_message=NormalizedMessage(text="shapez 速通开局怎么做", outline="shapez 速通开局怎么做"),
+        group_id=1163635014,
+    )
+
+    assert decision.domain == AiDomain.SHAPEZ
+    assert decision.intent == AiMessageIntent.DOMAIN_QA
+    assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert "知识库" in decision.reason
+    assert "萌新必看" in build_decision_context(decision)
+
+
+def test_message_decision_classifies_fe_bug_and_feature_boundaries() -> None:
+    bug = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="分馏塔卡死了 修一下", outline="分馏塔卡死了 修一下"),
+        group_id=319567534,
+    )
+    feature = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="分馏能不能加一个新建筑", outline="分馏能不能加一个新建筑"),
+        group_id=319567534,
+    )
+
+    assert bug.domain == AiDomain.FRACTIONATE_EVERYTHING
+    assert bug.fe_feedback_kind == FeFeedbackKind.BUG
+    assert bug.intent == AiMessageIntent.CODE_CHANGE_CANDIDATE
+    assert bug.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert feature.fe_feedback_kind == FeFeedbackKind.NEW_FEATURE
+    assert "必须 @ 用户确认" in build_decision_context(feature)
+
+
+def test_ai_pending_task_store_records_ack_lifecycle(tmp_path: Path) -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="分馏塔卡死了 修一下", outline="分馏塔卡死了 修一下"),
+        group_id=319567534,
+    )
+    store = AiPendingTaskStore(tmp_path)
+
+    record = store.create_ack_task(
+        group_id=319567534,
+        user_id=605738729,
+        message_id=12345,
+        prompt="分馏塔卡死了 修一下",
+        decision=decision,
+        now=100,
+    )
+    completed = store.complete_task(record.task_id, now=120)
+
+    assert completed is True
+    records = store.list_records()
+    assert records[0].status == "completed"
+    assert records[0].ack_sent is True
+    assert records[0].decision["fe_feedback_kind"] == "bug"
+
+
 def test_build_ai_reply_scope_isolates_group_user_sessions() -> None:
     assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20001")) == "group_user:10001:20001"
     assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20002")) == "group_user:10001:20002"
@@ -428,6 +512,11 @@ def make_queued_request(
         group_id=event.group_id,
         user_id=event.get_user_id(),
         trigger_kind=trigger_kind,
+        decision=decide_ai_message(
+            trigger_kind=trigger_kind,
+            normalized_message=normalize_onebot_message(event.original_message),
+            group_id=event.group_id,
+        ),
         force_voice_response=False,
     )
 

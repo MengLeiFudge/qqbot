@@ -107,6 +107,10 @@ class MemoryFactStatusRequest(BaseModel):
     status: str
 
 
+class KnowledgeStatusRequest(BaseModel):
+    status: str
+
+
 def register_admin_routes(
     app: FastAPI,
     settings: RuntimeSettings,
@@ -197,6 +201,44 @@ def register_admin_routes(
             return admin_service.set_memory_fact_status(fact_id, payload.status)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/admin/api/knowledge")
+    async def admin_domain_knowledge(
+        status: str = "",
+        domain: str = "",
+        limit: int = 100,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.list_domain_knowledge(status=status, domain=domain, limit=limit)
+
+    @app.post("/admin/api/knowledge/scan")
+    async def admin_domain_knowledge_scan(
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.seed_domain_knowledge_candidates()
+
+    @app.put("/admin/api/knowledge/{record_id}")
+    async def admin_domain_knowledge_update(
+        record_id: str,
+        payload: KnowledgeStatusRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.set_domain_knowledge_status(record_id, payload.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/admin/api/ai/pending-tasks")
+    async def admin_ai_pending_tasks(
+        status: str = "",
+        limit: int = 100,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        return admin_service.list_ai_pending_tasks(status=status, limit=limit)
 
     @app.get("/admin/api/plugins")
     async def admin_plugins(
@@ -721,6 +763,8 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           <div class="row">
             <button onclick="debugMemorySearch()">检索调试</button>
             <button onclick="rebuildMemoryFacts()">重建事实</button>
+            <button onclick="scanDomainKnowledge()">扫描知识候选</button>
+            <button onclick="loadPendingAiTasks()">查看待处理 AI 任务</button>
             <span id="memoryStatus" class="muted"></span>
           </div>
           <pre id="memoryDebugOutput">请输入群号和问题。</pre>
@@ -986,6 +1030,30 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         status.textContent = "重建完成。";
       }} catch (error) {{
         status.textContent = `重建失败：${{error.message}}`;
+      }}
+    }}
+
+    async function scanDomainKnowledge() {{
+      const status = document.getElementById("memoryStatus");
+      status.textContent = "正在扫描知识候选...";
+      try {{
+        const payload = await api("/admin/api/knowledge/scan", {{ method: "POST" }});
+        document.getElementById("memoryDebugOutput").textContent = JSON.stringify(payload, null, 2);
+        status.textContent = "知识候选扫描完成。";
+      }} catch (error) {{
+        status.textContent = `扫描失败：${{error.message}}`;
+      }}
+    }}
+
+    async function loadPendingAiTasks() {{
+      const status = document.getElementById("memoryStatus");
+      status.textContent = "正在读取待处理任务...";
+      try {{
+        const payload = await api("/admin/api/ai/pending-tasks");
+        document.getElementById("memoryDebugOutput").textContent = JSON.stringify(payload, null, 2);
+        status.textContent = "待处理任务读取完成。";
+      }} catch (error) {{
+        status.textContent = `读取失败：${{error.message}}`;
       }}
     }}
 

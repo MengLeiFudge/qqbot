@@ -25,7 +25,14 @@ from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.ai_diagnostics import AiDiagnosticsStore, build_ai_diagnostics_record
 from qqbot.services.ai_gateway import AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
+from qqbot.services.ai_message_decision import (
+    AiLatencyPolicy,
+    AiMessageDecision,
+    build_decision_context,
+    decide_ai_message,
+)
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
+from qqbot.services.ai_pending_task_store import AiPendingTaskStore
 from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_profile_registry import (
@@ -120,6 +127,7 @@ class AiQueuedRequest:
     group_id: object | None
     user_id: str
     trigger_kind: AiChatTriggerKind
+    decision: AiMessageDecision
     force_voice_response: bool
 
 
@@ -297,6 +305,11 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
     user_id = event.get_user_id()
     trigger_kind = get_ai_chat_trigger_kind(event)
     if should_handle_as_rightcodes_draw(prompt):
+        decision = decide_ai_message(
+            trigger_kind=AiChatTriggerKind.DRAW,
+            normalized_message=normalized_message,
+            group_id=group_id,
+        )
         async with _AI_DRAW_SEMAPHORE:
             await _handle_ai_locked(
                 bot,
@@ -314,12 +327,18 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 group_id=group_id,
                 user_id=user_id,
                 trigger_kind=AiChatTriggerKind.DRAW,
+                decision=decision,
                 force_text_response=False,
                 force_voice_response=False,
             )
         return
     reply_scope = build_ai_reply_scope(event)
     voice_singing = should_use_tts_singing_mode(prompt)
+    decision = decide_ai_message(
+        trigger_kind=trigger_kind,
+        normalized_message=normalized_message,
+        group_id=group_id,
+    )
     queue_wait_started = time.perf_counter()
     queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
     force_text_response = queue_ticket.force_text_response and not voice_singing
@@ -337,6 +356,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         group_id=group_id,
         user_id=user_id,
         trigger_kind=trigger_kind,
+        decision=decision,
         force_voice_response=voice_singing,
     )
     try:
@@ -416,6 +436,7 @@ async def _process_ai_queue_batch(
         group_id=request.group_id,
         user_id=request.user_id,
         trigger_kind=request.trigger_kind,
+        decision=request.decision,
         force_text_response=force_text_response,
         force_voice_response=request.force_voice_response,
     )
@@ -457,6 +478,7 @@ def merge_ai_queued_batch(batch: AiQueuedBatch) -> AiQueuedBatch:
         group_id=first.group_id,
         user_id=first.user_id,
         trigger_kind=_merge_trigger_kind(item.trigger_kind for item in batch.items),
+        decision=first.decision,
         force_voice_response=any(item.force_voice_response for item in batch.items),
     )
     return AiQueuedBatch(scope=batch.scope, items=(merged_request,))
@@ -502,12 +524,18 @@ async def _handle_ai_locked(
     group_id: object | None,
     user_id: str,
     trigger_kind: AiChatTriggerKind = AiChatTriggerKind.DIRECT,
+    decision: AiMessageDecision | None = None,
     local_prepare_started: float | None = None,
     queue_wait_seconds: float = 0.0,
     force_text_response: bool = False,
     force_voice_response: bool = False,
 ) -> None:
     local_prepare_started = local_prepare_started if local_prepare_started is not None else request_started
+    decision = decision or decide_ai_message(
+        trigger_kind=trigger_kind,
+        normalized_message=normalized_message,
+        group_id=group_id,
+    )
     if group_id is not None and is_before_onebot_connect(event_time):
         logger.info(
             "Skip old group AI message: user_id={}, group_id={}, message_id={}, event_time={}",
@@ -612,6 +640,7 @@ async def _handle_ai_locked(
                     settings_store=store,
                 )
             )
+        context_parts.append(build_decision_context(decision))
     with prepare_timer.stage("output_mode"):
         output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
         voice_singing = should_use_tts_singing_mode(prompt)
@@ -720,6 +749,25 @@ async def _handle_ai_locked(
         return
 
     context_parts.extend(part for part in local_result.extra_context if part.strip())
+    pending_task_id = ""
+    if (
+        decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+        and not should_handle_as_rightcodes_draw(prompt)
+        and not should_use_recent_group_summary_flow(event, normalized_message)
+    ):
+        pending_task = AiPendingTaskStore(settings.data_root).create_ack_task(
+            group_id=group_id,
+            user_id=user_id,
+            message_id=message_id,
+            prompt=prompt,
+            decision=decision,
+        )
+        pending_task_id = pending_task.task_id
+        await send_ai_processing_ack(
+            group_id=group_id,
+            message_id=message_id,
+            user_id=user_id,
+        )
     image_urls = collect_message_image_urls(normalized_message)
     local_prepare_seconds = time.perf_counter() - local_prepare_started
 
@@ -759,6 +807,11 @@ async def _handle_ai_locked(
     )
 
     if should_suppress_group_ai_fallback(group_id, response):
+        if pending_task_id:
+            AiPendingTaskStore(settings.data_root).complete_task(
+                pending_task_id,
+                error=response.fallback_reason or "fallback",
+            )
         return
 
     if not response.fallback:
@@ -816,6 +869,8 @@ async def _handle_ai_locked(
             message_id=message_id,
             user_id=user_id,
         )
+        if pending_task_id:
+            AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
         return
 
     await finish_split_text(
@@ -825,6 +880,8 @@ async def _handle_ai_locked(
         bot=bot,
         title="棉花糖的 AI 回复",
     )
+    if pending_task_id:
+        AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
 
 
 async def try_send_ai_voice_response(
@@ -865,6 +922,22 @@ async def send_recent_group_summary_ack(
     await ai_chat_matcher.send(
         build_ai_reply_message(
             "好的，我来总结一下刚才群友说了什么。消息有点多，我需要一点时间。",
+            group_id=group_id,
+            message_id=message_id,
+            user_id=user_id,
+        )
+    )
+
+
+async def send_ai_processing_ack(
+    *,
+    group_id: int | str | None,
+    message_id: int | str | None,
+    user_id: int | str,
+) -> None:
+    await ai_chat_matcher.send(
+        build_ai_reply_message(
+            "我先看看",
             group_id=group_id,
             message_id=message_id,
             user_id=user_id,

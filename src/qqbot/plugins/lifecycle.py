@@ -16,6 +16,7 @@ from qqbot.services.arc_guess_service import ArcGuessService
 from qqbot.services.codex_self_update_service import publish_pending_codex_self_update_notices
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.services.domain_knowledge_store import DomainKnowledgeStore, build_seed_knowledge_candidates
 from qqbot.services.embedding_vector_store import EmbeddingVectorStore
 from qqbot.services.memory_maintenance_service import MemoryMaintenanceService
 from qqbot.services.memory_vector_store import MemoryVectorStore
@@ -146,7 +147,26 @@ def run_memory_maintenance_once(service: MemoryMaintenanceService) -> None:
     for group_id in group_ids:
         service.summarize_group_topics(group_id, limit=200)
         service.index_recent_messages(group_id, limit=500)
+    seed_domain_knowledge_once()
     logger.info("Memory maintenance finished: group_count={}", len(group_ids))
+
+
+def seed_domain_knowledge_once() -> None:
+    settings = load_settings()
+    store = DomainKnowledgeStore(settings.data_root)
+    for candidate in build_seed_knowledge_candidates():
+        store.upsert_candidate(
+            domain=candidate["domain"],
+            space_id=candidate["space_id"],
+            source_type=candidate["source_type"],
+            source_uri=candidate["source_uri"],
+            title=candidate["title"],
+            summary=candidate["summary"],
+            evidence=candidate["evidence"],
+            trust_level=candidate["trust_level"],
+            risk=candidate["risk"],
+            auto_trust=candidate.get("auto_trust") == "true",
+        )
 
 
 def build_openai_embedding_client() -> OpenAIEmbeddingClient | None:

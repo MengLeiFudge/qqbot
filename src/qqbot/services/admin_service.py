@@ -7,10 +7,15 @@ import subprocess
 
 from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
 from qqbot.services.ai_diagnostics import AiDiagnosticsStore
+from qqbot.services.ai_pending_task_store import AiPendingTaskStore
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
 from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.codex_task_service import load_codex_group_bindings, load_codex_projects
+from qqbot.services.domain_knowledge_store import (
+    DomainKnowledgeStore,
+    build_seed_knowledge_candidates,
+)
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.kun_service import KunService
@@ -211,6 +216,48 @@ class AdminService:
     def set_memory_fact_status(self, fact_id: int, status: str) -> dict[str, object]:
         updated = ChatMemoryStore(self.settings.data_root).set_fact_status(fact_id, status)
         return {"fact_id": fact_id, "status": status, "updated": updated}
+
+    def list_domain_knowledge(
+        self,
+        *,
+        status: str = "",
+        domain: str = "",
+        limit: int = 100,
+    ) -> dict[str, object]:
+        records = DomainKnowledgeStore(self.settings.data_root).list_records(
+            status=status,
+            domain=domain,
+            limit=limit,
+        )
+        return {"records": [self._domain_knowledge_to_payload(record) for record in records]}
+
+    def seed_domain_knowledge_candidates(self) -> dict[str, object]:
+        store = DomainKnowledgeStore(self.settings.data_root)
+        records = []
+        for candidate in build_seed_knowledge_candidates():
+            records.append(
+                store.upsert_candidate(
+                    domain=candidate["domain"],
+                    space_id=candidate["space_id"],
+                    source_type=candidate["source_type"],
+                    source_uri=candidate["source_uri"],
+                    title=candidate["title"],
+                    summary=candidate["summary"],
+                    evidence=candidate["evidence"],
+                    trust_level=candidate["trust_level"],
+                    risk=candidate["risk"],
+                    auto_trust=candidate.get("auto_trust") == "true",
+                )
+            )
+        return {"records": [self._domain_knowledge_to_payload(record) for record in records]}
+
+    def set_domain_knowledge_status(self, record_id: str, status: str) -> dict[str, object]:
+        updated = DomainKnowledgeStore(self.settings.data_root).set_status(record_id, status)
+        return {"id": record_id, "status": status, "updated": updated}
+
+    def list_ai_pending_tasks(self, *, status: str = "", limit: int = 100) -> dict[str, object]:
+        records = AiPendingTaskStore(self.settings.data_root).list_records(status=status, limit=limit)
+        return {"tasks": [self._pending_task_to_payload(record) for record in records]}
 
     def list_ai(self) -> dict[str, object]:
         profiles = load_ai_profiles(self.settings.ai_profile_file)
@@ -548,4 +595,40 @@ class AdminService:
             "source_type": getattr(fact, "source_type"),
             "trust_level": getattr(fact, "trust_level"),
             "status": getattr(fact, "status"),
+        }
+
+    @staticmethod
+    def _domain_knowledge_to_payload(record: object) -> dict[str, object]:
+        return {
+            "id": getattr(record, "id"),
+            "status": getattr(record, "status"),
+            "domain": getattr(record, "domain"),
+            "space_id": getattr(record, "space_id"),
+            "source_type": getattr(record, "source_type"),
+            "source_uri": getattr(record, "source_uri"),
+            "title": getattr(record, "title"),
+            "summary": getattr(record, "summary"),
+            "evidence": getattr(record, "evidence"),
+            "source_hash": getattr(record, "source_hash"),
+            "trust_level": getattr(record, "trust_level"),
+            "risk": getattr(record, "risk"),
+            "updated_at": getattr(record, "updated_at"),
+            "stale_of": getattr(record, "stale_of"),
+        }
+
+    @staticmethod
+    def _pending_task_to_payload(record: object) -> dict[str, object]:
+        return {
+            "task_id": getattr(record, "task_id"),
+            "status": getattr(record, "status"),
+            "group_id": getattr(record, "group_id"),
+            "user_id": getattr(record, "user_id"),
+            "message_id": getattr(record, "message_id"),
+            "prompt": getattr(record, "prompt"),
+            "decision": getattr(record, "decision"),
+            "created_at": getattr(record, "created_at"),
+            "updated_at": getattr(record, "updated_at"),
+            "ack_sent": getattr(record, "ack_sent"),
+            "result_message_id": getattr(record, "result_message_id"),
+            "error": getattr(record, "error"),
         }

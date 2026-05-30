@@ -373,6 +373,47 @@ def test_memory_admin_service_rebuilds_debugs_and_updates_facts(tmp_path: Path) 
     assert disabled["fact_id"] == chat_fact.id
 
 
+def test_domain_knowledge_admin_service_seeds_and_updates_candidates(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+
+    seeded = service.seed_domain_knowledge_candidates()
+    listed = service.list_domain_knowledge(domain="shapez")
+    target_id = listed["records"][0]["id"]
+    updated = service.set_domain_knowledge_status(target_id, "trusted")
+
+    assert len(seeded["records"]) >= 3
+    assert {record["domain"] for record in seeded["records"]} >= {"shapez", "fractionate_everything"}
+    assert any("萌新必看" in record["summary"] for record in listed["records"])
+    assert updated == {"id": target_id, "status": "trusted", "updated": True}
+
+
+def test_ai_pending_tasks_admin_service_lists_records(tmp_path: Path) -> None:
+    from qqbot.services.ai_command import AiChatTriggerKind
+    from qqbot.services.ai_message_decision import decide_ai_message
+    from qqbot.services.ai_pending_task_store import AiPendingTaskStore
+    from qqbot.services.message_normalizer import NormalizedMessage
+
+    service = build_service(tmp_path)
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="分馏塔卡死了 修一下", outline="分馏塔卡死了 修一下"),
+        group_id=319567534,
+    )
+    AiPendingTaskStore(tmp_path / "run").create_ack_task(
+        group_id=319567534,
+        user_id=605738729,
+        message_id=12345,
+        prompt="分馏塔卡死了 修一下",
+        decision=decision,
+        now=100,
+    )
+
+    payload = service.list_ai_pending_tasks(status="ack_sent")
+
+    assert payload["tasks"][0]["status"] == "ack_sent"
+    assert payload["tasks"][0]["decision"]["fe_feedback_kind"] == "bug"
+
+
 def test_log_reading_rejects_unsafe_file_names_and_unknown_runs(tmp_path: Path) -> None:
     service = build_service(tmp_path)
     log_dir = tmp_path / "logs" / "start_all" / "20260425-123456"

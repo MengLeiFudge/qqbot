@@ -52,6 +52,10 @@ def test_memory_maintenance_loop_does_not_block_event_loop(monkeypatch) -> None:
             "qqbot.plugins.lifecycle.MemoryMaintenanceService",
             lambda *args, **kwargs: service,
         )
+        monkeypatch.setattr(
+            "qqbot.plugins.lifecycle.seed_domain_knowledge_once",
+            lambda: None,
+        )
 
         task = asyncio.create_task(run_memory_maintenance_loop())
         await asyncio.wait_for(started.wait(), timeout=1)
