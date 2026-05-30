@@ -15,6 +15,14 @@ class AiConversationStore:
     def private_key(self, user_id: str, profile: str, scope: str) -> str:
         return ":".join(("private", user_id, profile, scope))
 
+    def group_key(
+        self,
+        group_id: str,
+        profile: str,
+        scope: str,
+    ) -> str:
+        return ":".join(("group", group_id, profile, scope))
+
     def group_user_key(
         self,
         group_id: str,

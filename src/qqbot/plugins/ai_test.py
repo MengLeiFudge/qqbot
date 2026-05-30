@@ -957,7 +957,7 @@ async def try_send_ai_voice_response(
 def build_ai_reply_scope(event: MessageEvent) -> str:
     group_id = getattr(event, "group_id", None)
     if group_id is not None:
-        return f"group_user:{group_id}:{event.get_user_id()}"
+        return f"group:{group_id}"
     return f"private:{event.get_user_id()}"
 
 

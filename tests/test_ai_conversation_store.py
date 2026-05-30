@@ -28,9 +28,13 @@ def test_ai_conversation_store_keeps_bounded_private_history(tmp_path: Path) -> 
     ]
 
 
-def test_ai_conversation_store_builds_group_user_key(tmp_path: Path) -> None:
+def test_ai_conversation_store_builds_group_key(tmp_path: Path) -> None:
     store = AiConversationStore(tmp_path, max_messages=4)
 
+    assert (
+        store.group_key("10000", "xiaomi", "2026-05-17T04:00")
+        == "group:10000:xiaomi:2026-05-17T04:00"
+    )
     assert (
         store.group_user_key("10000", "605738729", "xiaomi", "2026-05-17T04:00")
         == "group_user:10000:605738729:xiaomi:2026-05-17T04:00"

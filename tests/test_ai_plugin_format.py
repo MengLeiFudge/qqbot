@@ -417,9 +417,9 @@ def test_ai_pending_task_store_records_ack_lifecycle(tmp_path: Path) -> None:
     assert records[0].decision["fe_feedback_kind"] == "bug"
 
 
-def test_build_ai_reply_scope_isolates_group_user_sessions() -> None:
-    assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20001")) == "group_user:10001:20001"
-    assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20002")) == "group_user:10001:20002"
+def test_build_ai_reply_scope_uses_group_session_for_group_chat() -> None:
+    assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20001")) == "group:10001"
+    assert build_ai_reply_scope(FakeGroupEvent(group_id=10001, user_id="20002")) == "group:10001"
     assert build_ai_reply_scope(FakePrivateEvent(user_id="20001")) == "private:20001"
 
 

@@ -297,7 +297,7 @@ def test_ai_output_mode_command_does_not_enter_ai_chat() -> None:
     assert should_handle_ai_chat(FakeEvent("private", "10001"), "切换语音") is False
 
 
-def test_build_ai_conversation_key_uses_private_or_group_user_scope(tmp_path: Path) -> None:
+def test_build_ai_conversation_key_uses_private_or_group_scope(tmp_path: Path) -> None:
     store = AiConversationStore(tmp_path)
 
     assert build_ai_conversation_key(
@@ -313,4 +313,4 @@ def test_build_ai_conversation_key_uses_private_or_group_user_scope(tmp_path: Pa
         FakeEvent("group", "605738729", group_id="516286670", to_me=True),
         "xiaomi",
         "2026-05-17T04:00",
-    ) == "group_user:516286670:605738729:xiaomi:2026-05-17T04:00"
+    ) == "group:516286670:xiaomi:2026-05-17T04:00"
