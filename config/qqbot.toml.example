@@ -76,6 +76,11 @@ display_name = "MLJ_DSPmods"
 repo_path = "/mnt/d/project/dsp/MLJ_DSPmods"
 aliases = ["分馏", "万物分馏", "FE", "FractionateEverything", "DSP MOD", "MLJ_DSPmods"]
 
+[codex.projects.orbital_ring]
+display_name = "OrbitalRing-MOD"
+repo_path = "/mnt/d/project/dsp/OrbitalRing-MOD"
+aliases = ["星环", "OrbitalRing", "OrbitalRing-MOD", "ProjectOrbitalRing"]
+
 [codex.projects.dsp_calc]
 display_name = "dsp-calc"
 repo_path = "/mnt/d/project/dsp/dsp-calc"
@@ -98,3 +103,6 @@ aliases = ["Factorio", "异星工厂", "异星模组", "MLJ_Factorio_Mods", "sec
 
 [codex.groups."319567534"]
 project = "mlj_dspmods"
+
+[codex.groups."1035445959"]
+project = "orbital_ring"

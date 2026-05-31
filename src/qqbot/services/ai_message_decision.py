@@ -10,6 +10,7 @@ from qqbot.services.message_normalizer import NormalizedMessage
 
 SHAPEZ_GROUP_ID = "1163635014"
 FRACTIONATE_EVERYTHING_GROUP_ID = "319567534"
+ORBITAL_RING_GROUP_ID = "1035445959"
 COMPLEX_INPUT_CHARS = 800
 
 
@@ -46,6 +47,7 @@ class AiDomain(StrEnum):
     GENERAL = "general"
     SHAPEZ = "shapez"
     FRACTIONATE_EVERYTHING = "fractionate_everything"
+    ORBITAL_RING = "orbital_ring"
     UNKNOWN = "unknown"
 
 
@@ -197,10 +199,14 @@ def detect_domain(text: str, *, group_id: int | str | None) -> AiDomain:
         return AiDomain.SHAPEZ
     if str(group_id or "") == FRACTIONATE_EVERYTHING_GROUP_ID:
         return AiDomain.FRACTIONATE_EVERYTHING
+    if str(group_id or "") == ORBITAL_RING_GROUP_ID:
+        return AiDomain.ORBITAL_RING
     if any(keyword in normalized for keyword in ("shapez", "spz", "异形工厂", "/chart", "短代码")):
         return AiDomain.SHAPEZ
     if any(keyword in normalized for keyword in ("分馏", "fractionateeverything", "fe", "万物分馏")):
         return AiDomain.FRACTIONATE_EVERYTHING
+    if any(keyword in normalized for keyword in ("星环", "orbitalring", "orbital ring", "projectorbitalring")):
+        return AiDomain.ORBITAL_RING
     return AiDomain.GENERAL
 
 
@@ -301,6 +307,12 @@ def build_decision_context(decision: AiMessageDecision) -> str:
             "FE 自修权限：bug 可进入 gpt-5.5 high 修复链路；新功能、功能变动或歧义请求必须 @ 用户确认后才能修改。"
         )
         lines.append(f"本轮 FE 反馈类型：{decision.fe_feedback_kind.value}。")
+    if decision.domain == AiDomain.ORBITAL_RING:
+        lines.append(
+            "星环模组边界：普通问题也要优先搜索 D:/project/dsp/OrbitalRing-MOD 源码或 data 资料后回答；"
+            "不得把其他戴森球模组、万物分馏或通用游戏机制当作星环依据。"
+            "涉及三阶、二阶、功率、休谟值、火箭、球、配方、建筑或机制时，必须先查对应代码/资料并给出文件、方法或数据来源。"
+        )
     return "\n".join(lines)
 
 
@@ -318,7 +330,7 @@ def _classify_intent(
     }:
         return AiMessageIntent.CODE_CHANGE_CANDIDATE
     if (
-        domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING}
+        domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING}
         and not _looks_translation_or_language_help(text)
         and _needs_domain_knowledge(text, domain)
     ):
@@ -356,6 +368,8 @@ def _needs_domain_knowledge(text: str, domain: AiDomain) -> bool:
         return _has_shapez_domain_signal(normalized)
     if domain == AiDomain.FRACTIONATE_EVERYTHING:
         return _has_fractionate_everything_domain_signal(normalized)
+    if domain == AiDomain.ORBITAL_RING:
+        return _has_orbital_ring_domain_signal(normalized)
     return False
 
 
@@ -409,6 +423,32 @@ def _has_fractionate_everything_domain_signal(normalized: str) -> bool:
             "升级堆叠",
             "升级",
             "数据中心",
+        )
+    )
+
+
+def _has_orbital_ring_domain_signal(normalized: str) -> bool:
+    return any(
+        keyword in normalized
+        for keyword in (
+            "星环",
+            "orbitalring",
+            "orbital ring",
+            "projectorbitalring",
+            "三阶",
+            "二阶",
+            "功率",
+            "休谟",
+            "火箭",
+            "球",
+            "应达功率",
+            "通关检测",
+            "拆球",
+            "配方",
+            "建筑",
+            "机制",
+            "戴森球",
+            "dsp",
         )
     )
 

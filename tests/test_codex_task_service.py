@@ -34,6 +34,14 @@ def test_codex_project_binding_maps_dsp_group_to_mod_repo() -> None:
     assert project.repo_path == "/mnt/d/project/dsp/MLJ_DSPmods"
 
 
+def test_codex_project_binding_maps_orbital_ring_group_to_mod_repo() -> None:
+    project = get_codex_project_for_group("1035445959")
+
+    assert project is not None
+    assert project.project_id == "orbital_ring"
+    assert project.repo_path == "/mnt/d/project/dsp/OrbitalRing-MOD"
+
+
 def test_codex_session_start_uses_group_binding_without_project_name(tmp_path: Path) -> None:
     match = resolve_codex_project_for_session_start(
         "",

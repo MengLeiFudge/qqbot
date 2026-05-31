@@ -479,6 +479,24 @@ def test_message_decision_treats_fe_item_questions_as_domain_tasks() -> None:
     assert "必须先查源码/资料" in context
 
 
+def test_message_decision_treats_orbital_ring_group_as_source_backed_domain() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(
+            text="三阶怎么算的，为什么拆球以后功率是负的",
+            outline="三阶怎么算的，为什么拆球以后功率是负的",
+        ),
+        group_id=1035445959,
+    )
+    context = build_decision_context(decision)
+
+    assert decision.domain == AiDomain.ORBITAL_RING
+    assert decision.intent == AiMessageIntent.DOMAIN_QA
+    assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert "OrbitalRing-MOD" in context
+    assert "必须先查对应代码/资料" in context
+
+
 def test_ai_pending_task_store_records_ack_lifecycle(tmp_path: Path) -> None:
     decision = decide_ai_message(
         trigger_kind=AiChatTriggerKind.PROACTIVE,
@@ -1786,6 +1804,33 @@ def test_group_output_strategy_marks_shapez_as_accuracy_first() -> None:
     assert "相对时间表达" in context
     assert "不要为了快牺牲准确性" in context
     assert "本群是 shapez/spz 群" in context
+
+
+def test_group_output_strategy_hides_internal_proactive_mode_and_self_reference() -> None:
+    context = build_group_output_strategy_context(516286670, decision=None)
+
+    assert "不要用“它”“这个 bot”称呼自己" in context
+    assert "不要向群友解释内部触发机制" in context
+    assert "我刚刚接话接早了" in context
+
+
+def test_group_output_strategy_marks_orbital_ring_as_source_backed() -> None:
+    decision = AiMessageDecision(
+        should_reply=True,
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        intent=AiMessageIntent.DOMAIN_QA,
+        difficulty=AiMessageDifficulty.COMPLEX,
+        latency_policy=AiLatencyPolicy.ACK_THEN_ASYNC,
+        format_policy=AiFormatPolicy.SINGLE_MESSAGE,
+        domain=AiDomain.ORBITAL_RING,
+        confidence=0.9,
+        reason="星环领域问题",
+    )
+
+    context = build_group_output_strategy_context(1035445959, decision=decision)
+
+    assert "星环/OrbitalRing 模组群" in context
+    assert "OrbitalRing-MOD 源码或 data 资料" in context
 
 
 def test_recent_group_summary_flow_uses_recent_context_without_memory(tmp_path: Path) -> None:

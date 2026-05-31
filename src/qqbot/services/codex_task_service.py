@@ -124,6 +124,12 @@ DEFAULT_CODEX_PROJECTS: dict[str, CodexProjectBinding] = {
         repo_path="/mnt/d/project/dsp/MLJ_DSPmods",
         aliases=("分馏", "万物分馏", "FE", "FractionateEverything", "DSP MOD", "MLJ_DSPmods"),
     ),
+    "orbital_ring": CodexProjectBinding(
+        project_id="orbital_ring",
+        display_name="OrbitalRing-MOD",
+        repo_path="/mnt/d/project/dsp/OrbitalRing-MOD",
+        aliases=("星环", "OrbitalRing", "OrbitalRing-MOD", "ProjectOrbitalRing"),
+    ),
     "dsp_calc": CodexProjectBinding(
         project_id="dsp_calc",
         display_name="dsp-calc",
@@ -151,6 +157,7 @@ DEFAULT_CODEX_PROJECTS: dict[str, CodexProjectBinding] = {
 }
 DEFAULT_CODEX_GROUPS = {
     "319567534": "mlj_dspmods",
+    "1035445959": "orbital_ring",
 }
 
 
