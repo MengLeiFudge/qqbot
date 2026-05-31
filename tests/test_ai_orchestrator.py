@@ -260,6 +260,96 @@ def test_orchestrator_lists_enabled_group_plugins_locally(tmp_path: Path) -> Non
     assert "智能问答" not in result.text
 
 
+def test_orchestrator_routes_orbital_ring_domain_question_to_readonly_codex(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    requests = []
+    project = CodexProjectBinding(
+        project_id="orbital_ring",
+        display_name="OrbitalRing-MOD",
+        repo_path=str(tmp_path / "OrbitalRing-MOD"),
+    )
+
+    def fake_resolve(*_args, **_kwargs):
+        return type("Match", (), {"project": project})()
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "DOMAIN-QA Codex：\n隐藏科技要按 data/techs.json 里的 IsHiddenTech 字段查喵"})()
+
+    monkeypatch.setattr(ai_orchestrator_module, "resolve_codex_project_for_text", fake_resolve)
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "隐藏科技都有什么",
+            AiOrchestratorContext(actor_user_id="10001", group_id="1035445959"),
+            NormalizedMessage(text="隐藏科技都有什么", outline="隐藏科技都有什么"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "隐藏科技要按 data/techs.json 里的 IsHiddenTech 字段查喵"
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.project.project_id == "orbital_ring"
+    assert request.group_id == "1035445959"
+    assert request.mode == "discuss"
+    assert request.timeout_seconds == 180
+    assert request.progress_callback is None
+    assert "只读资料查询" in request.prompt
+    assert "当前项目目录" in request.prompt
+    assert "源码" in request.prompt
+    assert "data" in request.prompt
+    assert "最终只输出可以直接发到 QQ 群里的答案" in request.prompt
+    assert "隐藏科技都有什么" in request.prompt
+
+
+def test_orchestrator_routes_fe_domain_question_to_readonly_codex(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    requests = []
+    project = CodexProjectBinding(
+        project_id="mlj_dspmods",
+        display_name="MLJ_DSPmods",
+        repo_path=str(tmp_path / "MLJ_DSPmods"),
+    )
+
+    def fake_resolve(*_args, **_kwargs):
+        return type("Match", (), {"project": project})()
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "物品堆叠升级要查 MLJ_DSPmods 源码里的堆叠科技逻辑喵"})()
+
+    monkeypatch.setattr(ai_orchestrator_module, "resolve_codex_project_for_text", fake_resolve)
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "物品堆叠怎么升级",
+            AiOrchestratorContext(actor_user_id="10001", group_id="319567534"),
+            NormalizedMessage(text="物品堆叠怎么升级", outline="物品堆叠怎么升级"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "物品堆叠升级要查 MLJ_DSPmods 源码里的堆叠科技逻辑喵"
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.project.project_id == "mlj_dspmods"
+    assert request.group_id == "319567534"
+    assert request.mode == "discuss"
+    assert request.timeout_seconds == 180
+    assert request.progress_callback is None
+    assert "只读资料查询" in request.prompt
+    assert "当前项目目录" in request.prompt
+    assert "最终只输出可以直接发到 QQ 群里的答案" in request.prompt
+    assert "物品堆叠怎么升级" in request.prompt
+
+
 def test_orchestrator_uploads_latest_project_zip_for_admin_group(
     tmp_path: Path,
     monkeypatch,

@@ -9,7 +9,9 @@ import re
 import time
 
 from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
+from qqbot.services.ai_command import AiChatTriggerKind
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
+from qqbot.services.ai_message_decision import AiDomain, AiMessageIntent, decide_ai_message
 from qqbot.services.ai_requirement_store import AiRequirementStore
 from qqbot.services.ai_tool_registry import AiToolContext, build_default_ai_tool_registry
 from qqbot.services.ai_user_style_store import AiUserStyleStore
@@ -65,6 +67,7 @@ class StylePresetCommand:
 
 
 STYLE_CHANGE_UNAWARE_MESSAGE = "切换？我不知道你在说什么。你看到的就是现在的我呀。"
+_LOCAL_DOMAIN_TRIGGER_KIND = AiChatTriggerKind.DIRECT
 
 
 def _find_group_message_index(records: tuple[AiGroupMessageRecord, ...], message_id: str) -> int | None:
@@ -120,6 +123,25 @@ def summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 1].rstrip() + "…"
+
+
+def build_domain_codex_prompt(user_text: str, project_name: str) -> str:
+    return (
+        "这是一次群聊领域问答，只做只读资料查询，不修改文件、不提交、不启动构建、不执行破坏性操作。\n"
+        f"目标项目：{project_name}\n"
+        "请在当前项目目录内查 README、源码、data、配置和测试等本地证据后回答。\n"
+        "最终只输出可以直接发到 QQ 群里的答案，不要输出 Codex 会话前缀、内部路由、工具过程或让我提供源码/data/截图。\n"
+        "回答要短，但必须说明关键依据；能给出文件名、字段名、方法名或数据来源时要给。\n"
+        "如果证据不足，明确说查到哪里、缺什么证据，不要按通用游戏经验编答案。\n"
+        "用户问题：\n"
+        f"{user_text.strip()}"
+    )
+
+
+def strip_codex_session_prefix(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"(?im)^\s*(?:DOMAIN-QA|CODEX-S\d+)\s+Codex[：:]\s*", "", cleaned).strip()
+    return cleaned or "我没查到足够证据，先不乱答喵。"
 
 
 class AiOrchestrator:
@@ -196,6 +218,10 @@ class AiOrchestrator:
         requirement_list_result = self._try_list_requirements(text, context)
         if requirement_list_result.handled:
             return requirement_list_result
+
+        domain_codex_result = await self._try_answer_domain_question_with_codex(text, context, normalized_message)
+        if domain_codex_result.handled:
+            return domain_codex_result
 
         shapez_result = self._try_render_shapez(text, context)
         if shapez_result.handled:
@@ -454,6 +480,53 @@ class AiOrchestrator:
             str(result.message),
             image_path=str(result.payload.get("image_path", "")) or None,
         )
+
+    async def _try_answer_domain_question_with_codex(
+        self,
+        text: str,
+        context: AiOrchestratorContext,
+        normalized_message: NormalizedMessage,
+    ) -> AiOrchestratorResult:
+        decision = decide_ai_message(
+            trigger_kind=_LOCAL_DOMAIN_TRIGGER_KIND,
+            normalized_message=normalized_message,
+            group_id=context.group_id,
+        )
+        if decision.intent != AiMessageIntent.DOMAIN_QA:
+            return AiOrchestratorResult(False)
+        if decision.domain not in {AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING}:
+            return AiOrchestratorResult(False)
+        project_match = resolve_codex_project_for_text(
+            text,
+            group_id=context.group_id,
+            data_root=self.data_root,
+        )
+        if project_match is None:
+            return AiOrchestratorResult(False)
+        if decision.domain == AiDomain.FRACTIONATE_EVERYTHING and project_match.project.project_id != "mlj_dspmods":
+            return AiOrchestratorResult(False)
+        if decision.domain == AiDomain.ORBITAL_RING and project_match.project.project_id != "orbital_ring":
+            return AiOrchestratorResult(False)
+        result = await self.codex_session_runner(
+            CodexSessionRequest(
+                project=project_match.project,
+                actor_user_id=context.actor_user_id,
+                group_id=context.group_id,
+                session_id="DOMAIN-QA",
+                prompt=build_domain_codex_prompt(text, project_match.project.display_name),
+                transcript=(),
+                source_context=self._build_codex_source_context(
+                    group_id=context.group_id,
+                    reply=normalized_message.reply,
+                ),
+                mode="discuss",
+                timeout_seconds=180,
+                progress_callback=None,
+            )
+        )
+        if not result.ok:
+            return AiOrchestratorResult(False)
+        return AiOrchestratorResult(True, strip_codex_session_prefix(result.message))
 
     async def _try_schedule_private_message(
         self,
