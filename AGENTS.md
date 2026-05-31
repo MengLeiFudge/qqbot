@@ -151,6 +151,7 @@
 - 非 Bot 管理员不能进入、继续、执行或退出 Codex 会话；群聊中存在 active Codex 会话时，非管理员 @ Bot 也不能接管该会话。
 - 执行阶段按项目加锁：同一个项目同时只能有一个 running Codex 会话，不同群可以同时讨论不同项目。
 - Codex 会话讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
+- Codex 启动参数按读写模式区分服务层级：只读讨论和领域资料查询显式使用 `service_tier=fast`；执行/可写模式显式使用非 fast 的默认层级，不能继承全局 `~/.codex/config.toml` 的 fast 设置。
 - Codex 输出的 `.zip` 产物路径可由 qqbot 解析并上传回来源群，但只能上传目标仓库内真实存在的 zip 文件。
 - 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报。
 - 直接在本地 Codex 终端执行的任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only `/admin/api/artifacts/publish-local`，用 JSON 直接提交发布事件。请求体必须包含 `timestamp`、`project_id`、当前 `branch`、当前 `commit_hash`、`commit_subject`、`commit_detail` 和 `files` 数组；每个文件项包含 `path`、可选 `name`、可选 `sha256`、`targets` 群号数组和可选 `message`。qqbot 只校验并上传请求中明确列出的文件，不扫描构建目录，不读取发布方仓库里的结果 JSON，不硬编码 MLJ_DSPmods 的模组取舍。

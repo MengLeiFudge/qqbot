@@ -19,6 +19,8 @@ from qqbot.services.settings_store import SettingsStore
 DEFAULT_CODEX_MODEL = "gpt-5.5"
 DEFAULT_CODEX_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_CODEX_SESSION_IDLE_TTL_SECONDS = 20 * 60
+CODEX_READONLY_SERVICE_TIER = "fast"
+CODEX_WRITABLE_SERVICE_TIER = "default"
 PROJECT_INDEX_FILE_NAMES = {"README.md", "AGENTS.md", "info.json", "locale.cfg", "changelog.txt"}
 PROJECT_INDEX_EXTENSIONS = {".md", ".json", ".cfg", ".txt"}
 
@@ -763,6 +765,7 @@ def build_codex_session_prompt(request: CodexSessionRequest) -> str:
 
 def build_codex_exec_command(repo_path: str, model: str, *, sandbox: str = "workspace-write") -> list[str]:
     wsl_repo = to_wsl_path(repo_path)
+    service_tier = CODEX_READONLY_SERVICE_TIER if sandbox == "read-only" else CODEX_WRITABLE_SERVICE_TIER
     codex_prelude = (
         'codex_bin="codex"; '
         'if ! command -v codex >/dev/null 2>&1; then '
@@ -782,7 +785,7 @@ def build_codex_exec_command(repo_path: str, model: str, *, sandbox: str = "work
         f"cd {shlex.quote(wsl_repo)} && "
         f"{codex_prelude} && "
         f'"$codex_bin" -a never exec -C {shlex.quote(wsl_repo)} -m {shlex.quote(model)} '
-        f"-c model_provider=custom -s {shlex.quote(sandbox)} -"
+        f"-c model_provider=custom -c service_tier={shlex.quote(service_tier)} -s {shlex.quote(sandbox)} -"
     )
     return ["wsl.exe", "-e", "bash", "-lc", script]
 

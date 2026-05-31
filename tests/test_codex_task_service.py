@@ -140,10 +140,11 @@ def test_codex_command_uses_workspace_write_and_model() -> None:
     assert '"$codex_bin" -a never exec' in command[4]
     assert "-m gpt-5.5" in command[4]
     assert "-c model_provider=custom" in command[4]
+    assert "-c service_tier=default" in command[4]
     assert "-s workspace-write" in command[4]
 
 
-def test_codex_command_can_use_read_only_sandbox() -> None:
+def test_codex_command_can_use_read_only_sandbox_with_fast_service_tier() -> None:
     command = build_codex_exec_command(
         "/mnt/d/project/qqbot",
         "gpt-5.5",
@@ -151,6 +152,7 @@ def test_codex_command_can_use_read_only_sandbox() -> None:
     )
 
     assert "-s read-only" in command[4]
+    assert "-c service_tier=fast" in command[4]
 
 
 def test_codex_command_loads_nvm_before_running_codex() -> None:
