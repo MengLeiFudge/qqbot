@@ -34,8 +34,8 @@ Describe "Get-DotEnvValue" {
 
 Describe "Test-ProjectBotProcessCommandLine" {
     It "recognizes the project bot when Windows resolves the venv shim to the real Python executable" {
-        $root = "D:\project\python\qqbot"
-        $commandLine = '"D:\project\python\qqbot\.venv\Scripts\python.exe" bot.py'
+        $root = "D:\project\qqbot"
+        $commandLine = '"D:\project\qqbot\.venv\Scripts\python.exe" bot.py'
         $executablePath = "C:\Users\MLJ\AppData\Local\Python\pythoncore-3.14-64\python.exe"
 
         Test-ProjectBotProcessCommandLine `
@@ -45,8 +45,8 @@ Describe "Test-ProjectBotProcessCommandLine" {
     }
 
     It "recognizes the project bot when the full bot.py path is in the command line" {
-        $root = "D:\project\python\qqbot"
-        $commandLine = 'python.exe "D:\project\python\qqbot\bot.py"'
+        $root = "D:\project\qqbot"
+        $commandLine = 'python.exe "D:\project\qqbot\bot.py"'
 
         Test-ProjectBotProcessCommandLine `
             -Root $root `
@@ -55,7 +55,7 @@ Describe "Test-ProjectBotProcessCommandLine" {
     }
 
     It "does not treat another project's bot.py as this project's process" {
-        $root = "D:\project\python\qqbot"
+        $root = "D:\project\qqbot"
         $commandLine = '"D:\other\qqbot\.venv\Scripts\python.exe" bot.py'
 
         Test-ProjectBotProcessCommandLine `

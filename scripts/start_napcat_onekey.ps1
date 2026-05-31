@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$NapcatRoot = "D:\project\python\qqbot\tools\napcat\onekey\NapCat.44498.Shell"
+$NapcatRoot = "D:\project\qqbot\tools\napcat\onekey\NapCat.44498.Shell"
 
 if (-not (Test-Path "$NapcatRoot\NapCatWinBootMain.exe")) {
     Write-Host "NapCat package not found: $NapcatRoot"

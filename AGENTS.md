@@ -162,7 +162,7 @@
 日常启动入口：
 
 ```powershell
-Set-Location D:\project\python\qqbot
+Set-Location D:\project\qqbot
 .\scripts\start_all.bat
 ```
 

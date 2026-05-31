@@ -82,7 +82,7 @@ max_output_tokens = 4096
 日常启动：
 
 ```powershell
-Set-Location D:\project\python\qqbot
+Set-Location D:\project\qqbot
 .\scripts\start_all.bat
 ```
 
@@ -91,14 +91,14 @@ Set-Location D:\project\python\qqbot
 单独启动 qqbot：
 
 ```powershell
-Set-Location D:\project\python\qqbot
+Set-Location D:\project\qqbot
 .\scripts\start_bot.ps1
 ```
 
 单独启动 NapCat：
 
 ```bat
-cd /d D:\project\python\qqbot
+cd /d D:\project\qqbot
 scripts\start_napcat_onekey.bat
 ```
 

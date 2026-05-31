@@ -54,7 +54,7 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
             "QQBOT_ONEBOT_ACCESS_TOKEN": "secret-token",
             "QQBOT_SUPERUSERS": "10001, 10002 ,,10003",
             "QQBOT_AUTHOR_QQ": "123456789",
-            "QQBOT_DATA_ROOT": "D:/project/python/qqbot/custom-run",
+            "QQBOT_DATA_ROOT": "D:/project/qqbot/custom-run",
             "QQBOT_ARC_ASSETS_ROOT": "D:/games/arcaea-custom",
             "QQBOT_TIMEZONE": "UTC",
             "QQBOT_AI_PROVIDER": "openai_compatible",
@@ -66,7 +66,7 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
             "QQBOT_AI_MAX_ATTEMPTS": "3",
             "QQBOT_AI_ENABLED": "true",
             "QQBOT_AI_DEFAULT_PROFILE": "xiaomi",
-            "QQBOT_AI_PROFILE_FILE": "D:/project/python/qqbot/config/ai_providers.toml",
+            "QQBOT_AI_PROFILE_FILE": "D:/project/qqbot/config/ai_providers.toml",
             "QQBOT_AI_MAX_CONTEXT_MESSAGES": "8",
             "QQBOT_AI_SHOW_METRICS": "true",
             "QQBOT_AI_BOT_NAME": "测试棉花糖",
@@ -100,7 +100,7 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
     assert settings.ai_max_attempts == 3
     assert settings.ai_enabled is True
     assert settings.ai_default_profile == "xiaomi"
-    assert settings.ai_profile_file.as_posix() == "D:/project/python/qqbot/config/ai_providers.toml"
+    assert settings.ai_profile_file.as_posix() == "D:/project/qqbot/config/ai_providers.toml"
     assert settings.ai_max_context_messages == 8
     assert settings.ai_show_metrics is True
     assert settings.ai_bot_name == "测试棉花糖"

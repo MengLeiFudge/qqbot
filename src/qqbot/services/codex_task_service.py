@@ -121,19 +121,19 @@ DEFAULT_CODEX_PROJECTS: dict[str, CodexProjectBinding] = {
     "mlj_dspmods": CodexProjectBinding(
         project_id="mlj_dspmods",
         display_name="MLJ_DSPmods",
-        repo_path="/mnt/d/project/csharp/DSP MOD/MLJ_DSPmods",
+        repo_path="/mnt/d/project/DSP/MLJ_DSPmods",
         aliases=("分馏", "万物分馏", "FE", "FractionateEverything", "DSP MOD", "MLJ_DSPmods"),
     ),
     "dsp_calc": CodexProjectBinding(
         project_id="dsp_calc",
         display_name="dsp-calc",
-        repo_path="/mnt/d/project/js/dsp-calc",
+        repo_path="/mnt/d/project/DSP/dsp-calc",
         aliases=("dsp-calc", "DSP 计算器", "计算器"),
     ),
     "qqbot": CodexProjectBinding(
         project_id="qqbot",
         display_name="qqbot",
-        repo_path="/mnt/d/project/python/qqbot",
+        repo_path="/mnt/d/project/qqbot",
         aliases=("机器人", "bot", "qqbot", "棉花糖"),
     ),
     "tfwr_simulator": CodexProjectBinding(
@@ -145,7 +145,7 @@ DEFAULT_CODEX_PROJECTS: dict[str, CodexProjectBinding] = {
     "factorio_mods": CodexProjectBinding(
         project_id="factorio_mods",
         display_name="MLJ_Factorio_Mods",
-        repo_path="/mnt/d/project/lua/factorio/MLJ_Factorio_Mods",
+        repo_path="/mnt/d/project/factorio/MLJ_Factorio_Mods",
         aliases=("Factorio", "异星工厂", "异星模组", "MLJ_Factorio_Mods", "section autocraft", "section-autocraft"),
     ),
 }
