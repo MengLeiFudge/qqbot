@@ -31,7 +31,7 @@ def test_codex_project_binding_maps_dsp_group_to_mod_repo() -> None:
 
     assert project is not None
     assert project.project_id == "mlj_dspmods"
-    assert project.repo_path == "/mnt/d/project/DSP/MLJ_DSPmods"
+    assert project.repo_path == "/mnt/d/project/dsp/MLJ_DSPmods"
 
 
 def test_codex_session_start_uses_group_binding_without_project_name(tmp_path: Path) -> None:
@@ -101,8 +101,8 @@ def test_codex_project_resolver_uses_learned_alias(tmp_path: Path) -> None:
 
 
 def test_to_wsl_path_converts_windows_drive_path() -> None:
-    assert to_wsl_path(r"D:\project\DSP\MLJ_DSPmods") == (
-        "/mnt/d/project/DSP/MLJ_DSPmods"
+    assert to_wsl_path(r"D:\project\dsp\MLJ_DSPmods") == (
+        "/mnt/d/project/dsp/MLJ_DSPmods"
     )
 
 
@@ -124,7 +124,7 @@ def test_extract_codex_zip_artifacts_keeps_only_repo_zip_files(tmp_path: Path) -
 
 def test_codex_command_uses_workspace_write_and_model() -> None:
     command = build_codex_exec_command(
-        "/mnt/d/project/DSP/MLJ_DSPmods",
+        "/mnt/d/project/dsp/MLJ_DSPmods",
         "gpt-5.5",
     )
 

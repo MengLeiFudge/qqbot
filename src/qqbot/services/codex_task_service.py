@@ -121,13 +121,13 @@ DEFAULT_CODEX_PROJECTS: dict[str, CodexProjectBinding] = {
     "mlj_dspmods": CodexProjectBinding(
         project_id="mlj_dspmods",
         display_name="MLJ_DSPmods",
-        repo_path="/mnt/d/project/DSP/MLJ_DSPmods",
+        repo_path="/mnt/d/project/dsp/MLJ_DSPmods",
         aliases=("分馏", "万物分馏", "FE", "FractionateEverything", "DSP MOD", "MLJ_DSPmods"),
     ),
     "dsp_calc": CodexProjectBinding(
         project_id="dsp_calc",
         display_name="dsp-calc",
-        repo_path="/mnt/d/project/DSP/dsp-calc",
+        repo_path="/mnt/d/project/dsp/dsp-calc",
         aliases=("dsp-calc", "DSP 计算器", "计算器"),
     ),
     "qqbot": CodexProjectBinding(
