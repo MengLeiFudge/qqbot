@@ -294,6 +294,8 @@ def build_decision_context(decision: AiMessageDecision) -> str:
     if decision.domain == AiDomain.FRACTIONATE_EVERYTHING:
         lines.append(
             "万物分馏边界：普通问题可按已有记忆回答；复杂问题应搜索 MLJ_DSPmods 源码并给出文件/方法/行号证据。"
+            "不得把 Minecraft/JEI、其他游戏或通用物品过滤逻辑当作戴森球计划/万物分馏依据；"
+            "不知道来源、配方、升级材料或界面行为时，必须先查源码/资料，不能编通用答案。"
         )
         lines.append(
             "FE 自修权限：bug 可进入 gpt-5.5 high 修复链路；新功能、功能变动或歧义请求必须 @ 用户确认后才能修改。"
@@ -398,6 +400,15 @@ def _has_fractionate_everything_domain_signal(normalized: str) -> bool:
             "戴森球",
             "dsp",
             "黑雾",
+            "记忆源点",
+            "记忆原点",
+            "记忆",
+            "源点",
+            "堆叠",
+            "物品堆叠",
+            "升级堆叠",
+            "升级",
+            "数据中心",
         )
     )
 

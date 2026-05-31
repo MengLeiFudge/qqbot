@@ -73,7 +73,7 @@
 - 新入群默认启用所有未被全局禁用的插件，不再维护每群功能开关。
 - `群管助手` 只覆盖 QQ/群行为能力，不包含菜单、全局插件开关或 Bot 管理员维护入口；其相关指令和功能只允许 Bot 管理员或机器人自身触发。
 - 新增插件时，先补服务层，再补 matcher；不要把复杂业务逻辑堆在 matcher 里。
-- 群聊显式命令默认需要 direct-at，避免普通聊天误触发；RightCodes 生图关键词命令和按群开启的 AI 主动介入是明确例外，可在群聊中不带 @ 触发。
+- 群聊显式命令默认需要 direct-at，避免普通聊天误触发；RightCodes 生图关键词命令和全群保守 AI 主动介入是明确例外，可在群聊中不带 @ 触发。
 
 ### 群聊与私聊对话处理架构
 
@@ -81,8 +81,8 @@
 
 - `message_normalizer.py` 是 OneBot 消息段到内部消息模型的唯一规范化入口；文本、@、图片、语音、视频、文件和引用消息先统一成 `NormalizedMessage` / `NormalizedReply`，后续 AI、记忆、日志和上下文逻辑不直接解析 CQ 码或 raw segment。
 - AI 触发链路需要读取引用消息或聚合聊天记录时，也必须通过 `message_normalizer.py` 的异步规范化能力调用 OneBot API 递归展开；插件层不要自行解析 `forward` / `node` 消息段。
-- 群聊普通消息默认只做旁路记录：`group_nick_cache.py` 负责记录群名片、最近群上下文、管理端消息日志和长期群聊记忆。只有 Bot 管理员按群开启 AI 主动介入后，普通群聊才允许经保守触发判定进入 AI 回复。
-- 群聊显式命令和普通 AI 对话默认必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。RightCodes 生图通过 `ai_command.py` 的关键词白名单进入 AI 链路；AI 主动介入通过按群开关加保守启发式进入 AI 链路，不扩大到其他群聊命令。
+- 群聊普通消息会先做旁路记录：`group_nick_cache.py` 负责记录群名片、最近群上下文、管理端消息日志和长期群聊记忆。AI 主动介入不再按群开关控制，所有群聊普通消息都经保守触发判定；不符合求助、点名、领域问题或上下文追问的普通闲聊不进入 AI 回复。
+- 群聊显式命令和普通 AI 对话默认必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。RightCodes 生图通过 `ai_command.py` 的关键词白名单进入 AI 链路；AI 主动介入通过全群保守启发式进入 AI 链路，不扩大到其他群聊命令。
 - AI 入口先生成 `MessageDecision`，区分是否回复、领域、难度、延迟策略和输出格式。需要知识库、联网、代码分析、图片生成、数学/严密推理、超过 800 字输入，或判定为不能一句话回答的问题，先引用原消息回复“我先看看”，并在 `run/ai/pending_tasks.json` 记录处理状态。速度优先，但复杂问题、数学题和强领域关联问题不能为了快牺牲准确性。
 - 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。
 - AI 短期会话按会话隔离：私聊使用 `private:<user_id>:<profile>:stable`，群聊使用 `group:<group_id>:<profile>:stable`。群聊是一个整体会话，发言者身份通过消息记录、sender/user_id、长期记忆 actor_id 和群上下文体现，不再用 `group_user:<group_id>:<user_id>` 拆开同一群的短期上下文。

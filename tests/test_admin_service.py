@@ -141,15 +141,12 @@ def test_ai_output_mode_management_lists_and_updates_groups(tmp_path: Path) -> N
         timestamp=1,
     )
     service.store.set_group_ai_output_mode(10002, "voice")
-    service.store.set_group_ai_proactive_enabled(10002, True)
 
     initial = service.list_ai_output_modes({10001: "甲群", 10002: "乙群"})
     updated = service.set_group_ai_output_mode(10001, "voice", {10001: "甲群", 10002: "乙群"})
     bulk = service.set_all_group_ai_output_modes("text", {10001: "甲群", 10002: "乙群"})
-    proactive = service.set_group_ai_proactive_enabled(10001, True, {10001: "甲群", 10002: "乙群"})
 
     assert initial["default_mode"] == "text"
-    assert initial["default_proactive_enabled"] is False
     assert initial["modes"] == ["text", "voice"]
     assert initial["groups"] == [
         {
@@ -158,8 +155,6 @@ def test_ai_output_mode_management_lists_and_updates_groups(tmp_path: Path) -> N
             "display_name": "甲群（10001）",
             "mode": "text",
             "source": "default",
-            "proactive_enabled": False,
-            "proactive_source": "default",
         },
         {
             "group_id": 10002,
@@ -167,16 +162,12 @@ def test_ai_output_mode_management_lists_and_updates_groups(tmp_path: Path) -> N
             "display_name": "乙群（10002）",
             "mode": "voice",
             "source": "group",
-            "proactive_enabled": True,
-            "proactive_source": "group",
         },
     ]
     assert all(group["mode"] == "voice" for group in updated["groups"])
     assert all(group["mode"] == "text" for group in bulk["groups"])
-    assert all(group["proactive_enabled"] is True for group in proactive["groups"])
     assert service.store.get_ai_output_mode(group_id=10001, user_id="605738729") == "text"
     assert service.store.get_ai_output_mode(group_id=10002, user_id="605738729") == "text"
-    assert service.store.get_group_ai_proactive_enabled(10001) is True
 
 
 def test_ai_output_mode_management_rejects_invalid_mode_and_group(tmp_path: Path) -> None:
@@ -188,8 +179,6 @@ def test_ai_output_mode_management_rejects_invalid_mode_and_group(tmp_path: Path
         service.set_group_ai_output_mode(0, "voice")
     with pytest.raises(ValueError):
         service.set_all_group_ai_output_modes("bad")
-    with pytest.raises(ValueError):
-        service.set_group_ai_proactive_enabled(0, True)
 
 
 def test_group_control_config_describes_current_policy(tmp_path: Path) -> None:

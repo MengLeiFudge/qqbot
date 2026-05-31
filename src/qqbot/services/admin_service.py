@@ -292,16 +292,13 @@ class AdminService:
     ) -> dict[str, object]:
         group_names = group_names or {}
         group_modes = self.store.list_group_ai_output_modes()
-        proactive_modes = self.store.list_group_ai_proactive_modes()
         group_ids = sorted(
             set(self._list_known_group_ids())
             | set(group_names)
             | {int(group_id) for group_id in group_modes if str(group_id).isdigit()}
-            | {int(group_id) for group_id in proactive_modes if str(group_id).isdigit()}
         )
         return {
             "default_mode": AI_OUTPUT_TEXT_MODE,
-            "default_proactive_enabled": False,
             "modes": ["text", "voice"],
             "groups": [
                 {
@@ -313,10 +310,6 @@ class AdminService:
                     ),
                     "mode": group_modes.get(str(group_id), AI_OUTPUT_TEXT_MODE),
                     "source": "group" if str(group_id) in group_modes else "default",
-                    "proactive_enabled": bool(proactive_modes.get(str(group_id), False)),
-                    "proactive_source": "group"
-                    if str(group_id) in proactive_modes
-                    else "default",
                 }
                 for group_id in group_ids
             ],
@@ -334,25 +327,17 @@ class AdminService:
         self.store.set_group_ai_output_mode(group_id, normalized_mode)
         return self.list_ai_output_modes(group_names)
 
-    def set_group_ai_proactive_enabled(
-        self,
-        group_id: int,
-        enabled: bool,
-        group_names: dict[int, str] | None = None,
-    ) -> dict[str, object]:
-        if group_id <= 0:
-            raise ValueError("Invalid group id.")
-        self.store.set_group_ai_proactive_enabled(group_id, enabled)
-        return self.list_ai_output_modes(group_names)
-
     def set_all_group_ai_output_modes(
         self,
         mode: str,
         group_names: dict[int, str] | None = None,
     ) -> dict[str, object]:
         normalized_mode = self._normalize_ai_output_mode_for_admin(mode)
-        for group in self.list_ai_output_modes(group_names)["groups"]:
-            self.store.set_group_ai_output_mode(group["group_id"], normalized_mode)
+        group_ids = [
+            group["group_id"]
+            for group in self.list_ai_output_modes(group_names)["groups"]
+        ]
+        self.store.set_group_ai_output_modes(group_ids, normalized_mode)
         return self.list_ai_output_modes(group_names)
 
     def list_ai_diagnostics(self, limit: int = 100) -> dict[str, object]:

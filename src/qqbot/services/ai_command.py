@@ -41,13 +41,11 @@ def should_handle_ai_chat(
     event,
     text: str,
     *,
-    proactive_enabled: bool = False,
     bot_names: tuple[str, ...] = (),
 ) -> bool:
     return classify_ai_chat_trigger(
         event,
         text,
-        proactive_enabled=proactive_enabled,
         bot_names=bot_names,
     ) != AiChatTriggerKind.IGNORE
 
@@ -56,7 +54,6 @@ def classify_ai_chat_trigger(
     event,
     text: str,
     *,
-    proactive_enabled: bool = False,
     bot_names: tuple[str, ...] = (),
 ) -> AiChatTriggerKind:
     prompt = text.strip()
@@ -91,7 +88,7 @@ def classify_ai_chat_trigger(
         return AiChatTriggerKind.DIRECT
     if looks_like_ai_named_trigger(prompt, bot_names=bot_names):
         return AiChatTriggerKind.NAMED
-    if proactive_enabled and looks_like_ai_proactive_trigger(prompt, bot_names=bot_names):
+    if looks_like_ai_proactive_trigger(prompt, bot_names=bot_names):
         return AiChatTriggerKind.PROACTIVE
     return AiChatTriggerKind.IGNORE
 

@@ -288,16 +288,8 @@ def get_ai_chat_trigger_kind(event: MessageEvent) -> AiChatTriggerKind:
     return classify_ai_chat_trigger(
         event,
         event.get_plaintext(),
-        proactive_enabled=_is_group_ai_proactive_enabled(event),
         bot_names=(settings.ai_bot_name,),
     )
-
-
-def _is_group_ai_proactive_enabled(event: MessageEvent) -> bool:
-    group_id = getattr(event, "group_id", None)
-    if group_id is None:
-        return False
-    return get_settings_store().get_group_ai_proactive_enabled(group_id)
 
 
 @ai_chat_matcher.handle()
@@ -1622,7 +1614,7 @@ def build_ai_context(
         context.append("当前对话场景：QQ群聊。用户是在群里 @ 你。")
     else:
         context.append(
-            "当前对话场景：QQ群聊。你是按本群主动介入开关参与对话；"
+            "当前对话场景：QQ群聊。你是按全群保守主动触发模式参与对话；"
             "不要表现得像用户已经 @ 你，回复要短，先接住当前话题。"
         )
     context.append(f"当前群号：{group_id}")

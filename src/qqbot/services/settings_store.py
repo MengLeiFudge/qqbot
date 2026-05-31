@@ -106,6 +106,17 @@ class SettingsStore:
         settings["groups"] = groups
         self._write_json(self.settings_root / "ai_output_mode.json", settings)
 
+    def set_group_ai_output_modes(self, group_ids: list[int | str], mode: str) -> None:
+        settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
+        groups = settings.get("groups", {})
+        if not isinstance(groups, dict):
+            groups = {}
+        normalized_mode = _normalize_ai_output_mode(mode)
+        for group_id in group_ids:
+            groups[str(group_id)] = normalized_mode
+        settings["groups"] = groups
+        self._write_json(self.settings_root / "ai_output_mode.json", settings)
+
     def list_group_ai_output_modes(self) -> dict[str, str]:
         settings = self._read_json(self.settings_root / "ai_output_mode.json", {})
         groups = settings.get("groups", {})
@@ -114,33 +125,6 @@ class SettingsStore:
         return {
             str(group_id): _normalize_ai_output_mode(mode)
             for group_id, mode in groups.items()
-            if str(group_id).strip().isdigit()
-        }
-
-    def get_group_ai_proactive_enabled(self, group_id: int | str) -> bool:
-        settings = self._read_json(self.settings_root / "ai_proactive.json", {})
-        groups = settings.get("groups", {})
-        if not isinstance(groups, dict):
-            return False
-        return bool(groups.get(str(group_id), False))
-
-    def set_group_ai_proactive_enabled(self, group_id: int | str, enabled: bool) -> None:
-        settings = self._read_json(self.settings_root / "ai_proactive.json", {})
-        groups = settings.get("groups", {})
-        if not isinstance(groups, dict):
-            groups = {}
-        groups[str(group_id)] = bool(enabled)
-        settings["groups"] = groups
-        self._write_json(self.settings_root / "ai_proactive.json", settings)
-
-    def list_group_ai_proactive_modes(self) -> dict[str, bool]:
-        settings = self._read_json(self.settings_root / "ai_proactive.json", {})
-        groups = settings.get("groups", {})
-        if not isinstance(groups, dict):
-            return {}
-        return {
-            str(group_id): bool(enabled)
-            for group_id, enabled in groups.items()
             if str(group_id).strip().isdigit()
         }
 

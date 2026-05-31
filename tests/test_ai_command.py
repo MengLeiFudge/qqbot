@@ -51,7 +51,7 @@ def test_private_plain_message_enters_ai_chat() -> None:
     assert should_handle_ai_chat(FakeEvent("private", "10001"), "") is False
 
 
-def test_group_message_requires_direct_at_for_ai_chat() -> None:
+def test_group_plain_chat_uses_conservative_proactive_trigger() -> None:
     assert (
         should_handle_ai_chat(
             FakeEvent("group", "10001", group_id="20001", to_me=True),
@@ -68,6 +68,13 @@ def test_group_message_requires_direct_at_for_ai_chat() -> None:
     )
     assert (
         should_handle_ai_chat(
+            FakeEvent("group", "10001", group_id="20001", to_me=False),
+            "请问这个怎么修？",
+        )
+        is True
+    )
+    assert (
+        should_handle_ai_chat(
             FakeEvent("group", "10001", group_id="20001", to_me=True),
             "菜单",
         )
@@ -75,16 +82,14 @@ def test_group_message_requires_direct_at_for_ai_chat() -> None:
     )
 
 
-def test_group_proactive_ai_chat_requires_enabled_trigger() -> None:
+def test_group_proactive_ai_chat_uses_global_trigger() -> None:
     event = FakeEvent("group", "10001", group_id="20001", to_me=False)
 
     assert classify_ai_chat_trigger(event, "棉花糖在吗") == AiChatTriggerKind.NAMED
-    assert should_handle_ai_chat(event, "请问这个怎么修？") is False
     assert (
         classify_ai_chat_trigger(
             event,
             "请问这个怎么修？",
-            proactive_enabled=True,
             bot_names=("萌萌棉花糖♪",),
         )
         == AiChatTriggerKind.PROACTIVE
@@ -93,26 +98,23 @@ def test_group_proactive_ai_chat_requires_enabled_trigger() -> None:
         should_handle_ai_chat(
             event,
             "今天天气不错",
-            proactive_enabled=True,
             bot_names=("萌萌棉花糖♪",),
         )
         is False
     )
 
 
-def test_group_named_trigger_enters_even_when_proactive_disabled() -> None:
+def test_group_named_trigger_enters_ai_chat() -> None:
     event = FakeEvent("group", "10001", group_id="20001", to_me=False)
 
     assert classify_ai_chat_trigger(
         event,
         "呼叫棉花糖",
-        proactive_enabled=False,
         bot_names=("萌萌棉花糖♪",),
     ) == AiChatTriggerKind.NAMED
     assert should_handle_ai_chat(
         event,
         "棉花糖帮我看下这个",
-        proactive_enabled=False,
         bot_names=("萌萌棉花糖♪",),
     ) is True
 

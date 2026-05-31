@@ -49,7 +49,10 @@ class FakeSlowGroupListBot:
         return [{"group_id": 516286670, "group_name": "测试群"}]
 
 
-def build_app(tmp_path: Path) -> FastAPI:
+def build_app(
+    tmp_path: Path,
+    group_name_resolver=None,
+) -> FastAPI:
     profile_file = tmp_path / "config" / "ai_providers.toml"
     profile_file.parent.mkdir(parents=True)
     profile_file.write_text(
@@ -86,7 +89,7 @@ enabled = true
         app,
         settings,
         service_factory=lambda: service,
-        group_name_resolver=resolve_group_names,
+        group_name_resolver=group_name_resolver or resolve_group_names,
     )
     return app
 
@@ -167,9 +170,9 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "全局插件" in body
     assert "AI 模型" in body
     assert "AI 回复模式" in body
-    assert "AI 主动介入" in body
     assert "AI 诊断" in body
-    assert "/admin/api/ai/proactive-modes" in body
+    assert "AI 主动介入" not in body
+    assert "/admin/api/ai/proactive-modes" not in body
     assert "Codex 群绑定项目" in body
     assert "/admin/api/codex/group-bindings" in body
     assert "renderCodexProjectOption" in body
@@ -198,7 +201,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "loadAiDiagnostics" in body
     assert "loadAiOutputModes" in body
     assert "saveAllAiOutputModes" in body
-    assert "saveGroupAiProactiveMode" in body
+    assert "saveGroupAiProactiveMode" not in body
     assert "message-row" in body
     assert ".message-row.incoming" in body
     assert ".message-row.bot" in body
@@ -222,7 +225,7 @@ def test_groups_api_returns_configured_groups(tmp_path: Path) -> None:
     assert payload["display_name"] == "测试群（516286670）"
 
 
-def test_ai_proactive_mode_api_updates_group_setting(tmp_path: Path) -> None:
+def test_ai_proactive_mode_api_is_removed(tmp_path: Path) -> None:
     app = build_app(tmp_path)
 
     status_code, body = asgi_request(
@@ -232,20 +235,7 @@ def test_ai_proactive_mode_api_updates_group_setting(tmp_path: Path) -> None:
         {"enabled": True},
     )
 
-    assert status_code == 200, body
-    payload = json.loads(body)
-    assert payload["default_proactive_enabled"] is False
-    assert payload["groups"] == [
-        {
-            "group_id": 516286670,
-            "group_name": "测试群",
-            "display_name": "测试群（516286670）",
-            "mode": "text",
-            "source": "default",
-            "proactive_enabled": True,
-            "proactive_source": "group",
-        }
-    ]
+    assert status_code == 404, body
 
 
 def test_get_connected_group_names_skips_slow_onebot_api(monkeypatch) -> None:
@@ -1053,19 +1043,10 @@ def test_ai_output_mode_api_lists_and_updates_group_modes(tmp_path: Path) -> Non
 
     assert list_status == 200
     list_payload = json.loads(list_body)
-    assert list_payload["groups"] == [
-        {
-            "group_id": 516286670,
-            "group_name": "测试群",
-            "display_name": "测试群（516286670）",
-            "mode": "text",
-            "source": "default",
-            "proactive_enabled": False,
-            "proactive_source": "default",
-        }
-    ]
+    assert list_payload["groups"] == []
     assert update_status == 200
     updated_group = json.loads(update_body)["groups"][0]
+    assert updated_group["display_name"] == "516286670"
     assert updated_group["mode"] == "voice"
     assert updated_group["source"] == "group"
     assert bulk_status == 200
@@ -1084,6 +1065,32 @@ def test_ai_output_mode_api_rejects_invalid_mode(tmp_path: Path) -> None:
 
     assert status_code == 400
     assert "AI output mode must be text or voice" in body
+
+
+def test_ai_output_mode_update_api_does_not_wait_for_group_names(tmp_path: Path) -> None:
+    async def slow_group_names() -> dict[int, str]:
+        await asyncio.sleep(0.1)
+        raise AssertionError("update routes must not refresh connected group names")
+
+    app = build_app(tmp_path, group_name_resolver=slow_group_names)
+
+    group_status, group_body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/ai/output-modes/516286670",
+        json_body={"mode": "voice"},
+    )
+    bulk_status, bulk_body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/ai/output-modes/all",
+        json_body={"mode": "text"},
+    )
+
+    assert group_status == 200, group_body
+    assert json.loads(group_body)["groups"][0]["display_name"] == "516286670"
+    assert bulk_status == 200, bulk_body
+    assert json.loads(bulk_body)["groups"][0]["mode"] == "text"
 
 
 def test_ai_diagnostics_api_returns_summary(tmp_path: Path) -> None:

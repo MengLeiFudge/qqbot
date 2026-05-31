@@ -395,6 +395,28 @@ def test_message_decision_classifies_fe_bug_and_feature_boundaries() -> None:
     assert "必须 @ 用户确认" in build_decision_context(feature)
 
 
+def test_message_decision_treats_fe_item_questions_as_domain_tasks() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="记忆源点哪里出", outline="记忆源点哪里出"),
+        group_id=319567534,
+    )
+    stack_decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="物品堆叠怎么升级", outline="物品堆叠怎么升级"),
+        group_id=319567534,
+    )
+    context = build_decision_context(decision)
+
+    assert decision.domain == AiDomain.FRACTIONATE_EVERYTHING
+    assert decision.intent == AiMessageIntent.DOMAIN_QA
+    assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert stack_decision.intent == AiMessageIntent.DOMAIN_QA
+    assert stack_decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert "Minecraft/JEI" in context
+    assert "必须先查源码/资料" in context
+
+
 def test_ai_pending_task_store_records_ack_lifecycle(tmp_path: Path) -> None:
     decision = decide_ai_message(
         trigger_kind=AiChatTriggerKind.PROACTIVE,
@@ -1405,10 +1427,10 @@ def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> Non
 def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> None:
     parts = split_continuous_ai_reply_text(
         "先看现象，这里确实像配置没有生效。"
-        "然后看日志，模型返回是正常的。"
-        "再看开关，本群主动介入默认关闭。"
-        "最后把主动介入开关打开就可以测试了。"
-        "如果还没有回复，再检查当前群号是否写入运行时配置。"
+        "然后看日志，模型请求已经返回正常内容。"
+        "再看触发条件，这句已经符合全群保守主动触发。"
+        "最后直接等回复链路发送出去就可以测试了。"
+        "如果还没有回复，再检查模型请求、发送日志和最近群消息记录。"
     )
 
     assert 1 < len(parts) <= 3

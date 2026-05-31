@@ -114,16 +114,28 @@ def test_ai_output_mode_defaults_to_text_and_saves_group_private_preferences(tmp
     assert store.list_group_ai_output_modes() == {"516286670": "text"}
 
 
-def test_ai_proactive_mode_defaults_off_and_saves_group_preferences(tmp_path: Path) -> None:
+def test_set_group_ai_output_modes_writes_groups_in_one_file_update(tmp_path: Path, monkeypatch) -> None:
     store = SettingsStore(tmp_path, author_qq=605738729)
+    store.set_group_ai_output_mode(10001, "voice")
+    store.set_user_ai_output_mode("605738729", "voice")
+    write_paths: list[Path] = []
+    original_write_json = store._write_json
 
-    assert store.get_group_ai_proactive_enabled(516286670) is False
+    def capture_write(path: Path, payload: dict[str, object]) -> None:
+        write_paths.append(path)
+        original_write_json(path, payload)
 
-    store.set_group_ai_proactive_enabled(516286670, True)
+    monkeypatch.setattr(store, "_write_json", capture_write)
 
-    assert store.get_group_ai_proactive_enabled(516286670) is True
-    assert store.get_group_ai_proactive_enabled(10001) is False
-    assert store.list_group_ai_proactive_modes() == {"516286670": True}
+    store.set_group_ai_output_modes([10001, 10002, "10003"], "text")
+
+    assert write_paths == [tmp_path / "settings" / "ai_output_mode.json"]
+    assert store.list_group_ai_output_modes() == {
+        "10001": "text",
+        "10002": "text",
+        "10003": "text",
+    }
+    assert store.get_ai_output_mode(group_id=None, user_id="605738729") == "voice"
 
 
 def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: Path) -> None:
@@ -133,7 +145,8 @@ def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: P
     func_state.write_text('{"Arc": true}', encoding="utf-8")
     store.set_lolicon_config(10001, True, False)
     store.set_codex_group_binding(10001, "qqbot")
-    store.set_group_ai_proactive_enabled(10001, True)
+    proactive = tmp_path / "settings" / "ai_proactive.json"
+    proactive.write_text('{"groups": {"10001": true, "10002": true}}', encoding="utf-8")
 
     removed = store.remove_group_scoped_settings(10001)
 
@@ -141,4 +154,6 @@ def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: P
     assert not func_state.exists()
     assert store.get_lolicon_config(10001) == (False, False)
     assert store.list_codex_group_bindings() == {}
-    assert store.get_group_ai_proactive_enabled(10001) is False
+    proactive_text = proactive.read_text(encoding="utf-8")
+    assert '"10001"' not in proactive_text
+    assert '"10002"' in proactive_text
