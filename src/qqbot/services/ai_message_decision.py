@@ -341,6 +341,12 @@ def _classify_intent(
     }:
         return AiMessageIntent.CODE_CHANGE_CANDIDATE
     if (
+        domain in {AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING, AiDomain.PROJECT_GENESIS}
+        and not _looks_translation_or_language_help(text)
+        and _looks_domain_group_question(text)
+    ):
+        return AiMessageIntent.DOMAIN_QA
+    if (
         domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING, AiDomain.PROJECT_GENESIS}
         and not _looks_translation_or_language_help(text)
         and _needs_domain_knowledge(text, domain)
@@ -384,6 +390,58 @@ def _needs_domain_knowledge(text: str, domain: AiDomain) -> bool:
     if domain == AiDomain.PROJECT_GENESIS:
         return _has_project_genesis_domain_signal(normalized)
     return False
+
+
+def _looks_domain_group_question(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.lower())
+    if not compact:
+        return False
+    question_markers = (
+        "？",
+        "?",
+        "怎么",
+        "为什么",
+        "咋",
+        "如何",
+        "哪些",
+        "多少",
+        "是啥",
+        "是什么",
+        "有什么",
+        "哪里",
+        "在哪",
+        "能不能",
+        "要不要",
+        "需不需要",
+        "解锁",
+        "效果",
+        "功能",
+    )
+    domain_object_markers = (
+        "配方",
+        "建筑",
+        "科技",
+        "隐藏",
+        "机制",
+        "功率",
+        "产物",
+        "原料",
+        "生产",
+        "堵",
+        "解锁",
+        "效果",
+        "功能",
+        "物品",
+        "矩阵",
+        "塔",
+        "工厂",
+        "火箭",
+        "星球",
+        "戴森球",
+    )
+    return any(marker in compact for marker in question_markers) or any(
+        marker in compact for marker in domain_object_markers
+    )
 
 
 def _has_shapez_domain_signal(normalized: str) -> bool:
@@ -477,6 +535,9 @@ def _has_project_genesis_domain_signal(normalized: str) -> bool:
             "projectgenesis",
             "project genesis",
             "genesis",
+            "氯化钠",
+            "钠盐",
+            "盐酸",
             "配方",
             "建筑",
             "科技",

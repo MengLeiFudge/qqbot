@@ -155,6 +155,7 @@ def test_example_openrouter_uses_codex_service_tier_field() -> None:
     profiles = load_ai_profiles(profile_file)
     extra_body = profiles["openrouter"].extra_body
 
+    assert load_ai_default_profile_name(profile_file) == "openrouter"
     assert extra_body is not None
     assert extra_body["service_tier"] == "fast"
     assert "fast" not in extra_body

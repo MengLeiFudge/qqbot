@@ -40,6 +40,10 @@ class AiProviderUpdateRequest(BaseModel):
     profile: str
 
 
+class AiProfilePriorityUpdateRequest(BaseModel):
+    profiles: list[str]
+
+
 class AiOutputModeUpdateRequest(BaseModel):
     mode: str
 
@@ -311,6 +315,17 @@ def register_admin_routes(
             return admin_service.set_ai_provider(payload.profile)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.put("/admin/api/ai/profile-priority")
+    async def admin_update_ai_profile_priority(
+        payload: AiProfilePriorityUpdateRequest,
+        _: None = Depends(require_local_request),
+        admin_service: AdminService = Depends(service),
+    ) -> dict[str, object]:
+        try:
+            return admin_service.set_ai_profile_priority(payload.profiles)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/admin/api/ai/output-modes")
     async def admin_ai_output_modes(
@@ -780,6 +795,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
             <button onclick="saveAiProvider()">保存</button>
             <span id="aiProviderStatus" class="muted"></span>
           </div>
+          <div id="aiProfilePriorityList" class="binding-list"></div>
         </div>
         <div class="panel-block">
           <h3>AI 回复模式</h3>
@@ -1110,7 +1126,8 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       }}).join("");
       select.value = payload.current_profile;
       document.getElementById("aiProviderStatus").textContent =
-        `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}`;
+        `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}，调用顺序：${{(payload.fallback_order || []).join(" → ")}}`;
+      renderAiProfilePriority(payload);
     }}
 
     async function saveAiProvider() {{
@@ -1122,7 +1139,54 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         method: "PUT",
         body: JSON.stringify({{ profile }}),
       }});
-      status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}`;
+      status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}，调用顺序：${{(payload.fallback_order || []).join(" → ")}}`;
+      renderAiProfilePriority(payload);
+    }}
+
+    function renderAiProfilePriority(payload) {{
+      const list = document.getElementById("aiProfilePriorityList");
+      const profiles = payload.profiles || [];
+      const byName = new Map(profiles.map(profile => [profile.name, profile]));
+      const orderedNames = [...(payload.fallback_order || []), ...profiles.map(profile => profile.name)]
+        .filter((name, index, names) => name && names.indexOf(name) === index && byName.has(name));
+      if (!orderedNames.length) {{
+        list.innerHTML = `<div class="muted">暂无可用 AI profile。</div>`;
+        return;
+      }}
+      list.innerHTML = orderedNames.map((name, index) => {{
+        const profile = byName.get(name) || {{}};
+        return `
+          <div class="binding-row" data-ai-profile="${{escapeHtml(name)}}">
+            <div>
+              <div class="binding-title">${{index + 1}}. ${{escapeHtml(name)}} / ${{escapeHtml(profile.model || "")}}</div>
+              <div class="binding-meta">${{escapeHtml(profile.provider || "")}}${{profile.note ? ` / ${{escapeHtml(profile.note)}}` : ""}}</div>
+            </div>
+            <button onclick="moveAiProfile(${{index}}, -1)">上移</button>
+            <button onclick="moveAiProfile(${{index}}, 1)">下移</button>
+          </div>
+        `;
+      }}).join("");
+    }}
+
+    async function moveAiProfile(index, delta) {{
+      const rows = [...document.querySelectorAll("[data-ai-profile]")];
+      const order = rows.map(row => row.dataset.aiProfile).filter(Boolean);
+      const target = index + delta;
+      if (index < 0 || target < 0 || target >= order.length) return;
+      [order[index], order[target]] = [order[target], order[index]];
+      const status = document.getElementById("aiProviderStatus");
+      status.textContent = "正在保存调用顺序...";
+      try {{
+        const payload = await api("/admin/api/ai/profile-priority", {{
+          method: "PUT",
+          body: JSON.stringify({{ profiles: order }}),
+        }});
+        status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}，调用顺序：${{(payload.fallback_order || []).join(" → ")}}`;
+        document.getElementById("aiProviderSelect").value = payload.current_profile;
+        renderAiProfilePriority(payload);
+      }} catch (error) {{
+        status.textContent = `保存失败：${{error.message}}`;
+      }}
     }}
 
     let aiOutputModePayload = {{ groups: [], modes: [] }};

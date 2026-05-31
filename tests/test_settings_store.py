@@ -93,6 +93,24 @@ def test_ai_provider_defaults_and_can_be_saved(tmp_path: Path) -> None:
     store.set_ai_provider("hicode")
 
     assert store.get_ai_provider("xiaomi") == "hicode"
+    assert store.get_ai_profile_priority(["openrouter", "rightcodes"]) == (
+        "hicode",
+        "openrouter",
+        "rightcodes",
+    )
+
+
+def test_ai_profile_priority_can_be_saved_and_deduped(tmp_path: Path) -> None:
+    store = SettingsStore(tmp_path, author_qq=605738729)
+
+    store.set_ai_profile_priority(["rightcodes", "openrouter", "rightcodes", ""])
+
+    assert store.get_ai_provider("xiaomi") == "rightcodes"
+    assert store.get_ai_profile_priority(["openrouter", "hicode"]) == (
+        "rightcodes",
+        "openrouter",
+        "hicode",
+    )
 
 
 def test_ai_output_mode_defaults_to_text_and_saves_group_private_preferences(tmp_path: Path) -> None:

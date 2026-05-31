@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
 import re
@@ -68,6 +69,8 @@ class StylePresetCommand:
 
 STYLE_CHANGE_UNAWARE_MESSAGE = "切换？我不知道你在说什么。你看到的就是现在的我呀。"
 _LOCAL_DOMAIN_TRIGGER_KIND = AiChatTriggerKind.DIRECT
+DOMAIN_CODEX_TIMEOUT_SECONDS = 120
+logger = logging.getLogger(__name__)
 
 
 def _find_group_message_index(records: tuple[AiGroupMessageRecord, ...], message_id: str) -> int | None:
@@ -142,6 +145,15 @@ def strip_codex_session_prefix(text: str) -> str:
     cleaned = text.strip()
     cleaned = re.sub(r"(?im)^\s*(?:DOMAIN-QA|CODEX-S\d+)\s+Codex[：:]\s*", "", cleaned).strip()
     return cleaned or "我没查到足够证据，先不乱答喵。"
+
+
+def build_domain_codex_failure_reply(message: str, project_name: str) -> str:
+    cleaned = " ".join(message.strip().split())
+    if not cleaned:
+        cleaned = "没有返回错误详情"
+    if len(cleaned) > 80:
+        cleaned = cleaned[:79].rstrip() + "…"
+    return f"这题要查 {project_name} 源码/data 才能答准，但本轮只读查询失败了：{cleaned}。我先不按通用机制乱猜喵。"
 
 
 class AiOrchestrator:
@@ -522,12 +534,22 @@ class AiOrchestrator:
                     reply=normalized_message.reply,
                 ),
                 mode="discuss",
-                timeout_seconds=180,
+                timeout_seconds=DOMAIN_CODEX_TIMEOUT_SECONDS,
                 progress_callback=None,
             )
         )
+        logger.info(
+            "Domain Codex QA finished: group_id=%s project=%s ok=%s exit_code=%s",
+            context.group_id,
+            project_match.project.project_id,
+            result.ok,
+            getattr(result, "exit_code", None),
+        )
         if not result.ok:
-            return AiOrchestratorResult(False)
+            return AiOrchestratorResult(
+                True,
+                build_domain_codex_failure_reply(result.message, project_match.project.display_name),
+            )
         return AiOrchestratorResult(True, strip_codex_session_prefix(result.message))
 
     async def _try_schedule_private_message(

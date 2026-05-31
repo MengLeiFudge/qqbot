@@ -75,6 +75,7 @@ from qqbot.services.ai_message_decision import (
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.services.ai_orchestrator import AiOrchestratorResult
 from qqbot.services.ai_profile_registry import AiProfile
+from qqbot.services.ai_runtime import list_ai_profile_fallback_order
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.group_nick_store import GroupNickStore
 from qqbot.services.message_normalizer import NormalizedMessage, normalize_onebot_message
@@ -474,6 +475,21 @@ def test_message_decision_treats_project_genesis_group_as_source_backed_domain()
     assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
     assert "ProjectGenesis" in context
     assert "D:/project/dsp/ProjectGenesis" in context
+
+
+def test_message_decision_routes_project_genesis_mechanism_question_to_domain_codex() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(
+            text="氯化钠堵了怎么还在生产？",
+            outline="氯化钠堵了怎么还在生产？",
+        ),
+        group_id=991895539,
+    )
+
+    assert decision.domain == AiDomain.PROJECT_GENESIS
+    assert decision.intent == AiMessageIntent.DOMAIN_QA
+    assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
 
 
 def test_ai_pending_task_store_records_ack_lifecycle(tmp_path: Path) -> None:
@@ -1107,6 +1123,36 @@ def test_complete_ai_request_tries_next_profile_after_retryable_fallback(
     assert response.profile_name == "routin"
     assert calls == ["openrouter", "routin"]
     assert [attempt.profile_name for attempt in response.attempts] == ["openrouter", "routin"]
+
+
+def test_ai_profile_order_defaults_to_openrouter_before_rightcodes(tmp_path: Path) -> None:
+    profiles = {
+        "rightcodes": AiProfile(
+            name="rightcodes",
+            provider="openai_compatible",
+            base_url="https://right.codes/codex/v1",
+            model="gpt-5.5",
+            vision_model="gpt-5.5",
+            api_key_env="QQBOT_AI_KEY_RIGHTCODES",
+        ),
+        "openrouter": AiProfile(
+            name="openrouter",
+            provider="openai_compatible",
+            base_url="https://rehdasu.cn/v1",
+            model="gpt-5.4-mini",
+            vision_model="gpt-5.4-mini",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+        ),
+    }
+
+    order = list_ai_profile_fallback_order(
+        RuntimeSettings(data_root=tmp_path, ai_default_profile="rightcodes"),
+        SettingsStore(tmp_path, author_qq=605738729),
+        profiles,
+        preferred_profile="rightcodes",
+    )
+
+    assert order == ("openrouter", "rightcodes")
 
 
 def test_build_ai_gateway_chain_skips_failed_profile_cooldown(tmp_path: Path, monkeypatch) -> None:

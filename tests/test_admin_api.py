@@ -169,6 +169,7 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "重启 Bot" in body
     assert "全局插件" in body
     assert "AI 模型" in body
+    assert "/admin/api/ai/profile-priority" in body
     assert "AI 回复模式" in body
     assert "AI 诊断" in body
     assert "AI 主动介入" not in body
@@ -1005,9 +1006,27 @@ def test_ai_api_lists_and_updates_current_provider(tmp_path: Path) -> None:
     payload = json.loads(list_body)
     assert payload["current_profile"] == "xiaomi"
     assert [profile["name"] for profile in payload["profiles"]] == ["xiaomi", "hicode"]
+    assert payload["fallback_order"] == ["hicode", "xiaomi"]
     assert "supports_vision" not in payload["profiles"][0]
     assert update_status == 200
     assert json.loads(update_body)["current_profile"] == "hicode"
+    assert json.loads(update_body)["fallback_order"][0] == "hicode"
+
+
+def test_ai_api_updates_profile_priority(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "PUT",
+        "/admin/api/ai/profile-priority",
+        json_body={"profiles": ["xiaomi", "hicode"]},
+    )
+
+    assert status_code == 200
+    payload = json.loads(body)
+    assert payload["current_profile"] == "xiaomi"
+    assert payload["fallback_order"] == ["xiaomi", "hicode"]
 
 
 def test_ai_api_rejects_unknown_provider(tmp_path: Path) -> None:

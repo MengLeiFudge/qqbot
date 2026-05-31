@@ -77,7 +77,24 @@ class SettingsStore:
 
     def set_ai_provider(self, profile: str) -> None:
         settings = self._read_json(self.settings_root / "ai.json", {})
-        settings["provider"] = profile.strip()
+        cleaned = profile.strip()
+        settings["provider"] = cleaned
+        priority = _normalize_string_list(settings.get("profile_priority"))
+        if cleaned:
+            settings["profile_priority"] = [cleaned, *[item for item in priority if item != cleaned]]
+        self._write_json(self.settings_root / "ai.json", settings)
+
+    def get_ai_profile_priority(self, default_order: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+        settings = self._read_json(self.settings_root / "ai.json", {})
+        saved_order = _normalize_string_list(settings.get("profile_priority"))
+        return tuple(_dedupe_strings([*saved_order, *default_order]))
+
+    def set_ai_profile_priority(self, profiles: list[str] | tuple[str, ...]) -> None:
+        settings = self._read_json(self.settings_root / "ai.json", {})
+        priority = _dedupe_strings(str(profile).strip() for profile in profiles)
+        settings["profile_priority"] = priority
+        if priority:
+            settings["provider"] = priority[0]
         self._write_json(self.settings_root / "ai.json", settings)
 
     def get_ai_output_mode(
@@ -266,3 +283,21 @@ def _normalize_ai_output_mode(value: object) -> str:
     if normalized in {"文字", "文本", "text", AI_OUTPUT_TEXT_MODE}:
         return AI_OUTPUT_TEXT_MODE
     return AI_OUTPUT_TEXT_MODE
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return _dedupe_strings(str(item).strip() for item in value)
+
+
+def _dedupe_strings(values) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result

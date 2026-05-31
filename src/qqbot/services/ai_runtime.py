@@ -13,6 +13,11 @@ from qqbot.services.mimo_compatible_client import MimoCompatibleClient
 from qqbot.services.openai_compatible_client import OpenAICompatibleClient
 from qqbot.services.settings_store import SettingsStore
 
+
+OPENROUTER_PROFILE_HINTS = ("openrouter", "rehdasu")
+RIGHTCODES_PROFILE_HINTS = ("rightcodes", "right.codes")
+
+
 def get_default_ai_profile_name(settings: RuntimeSettings) -> str:
     return (
         load_ai_default_profile_name(settings.ai_profile_file)
@@ -49,9 +54,10 @@ def list_ai_profile_fallback_order(
     profiles = profiles if profiles is not None else load_ai_profiles(settings.ai_profile_file)
     enabled = list_enabled_profiles(profiles)
     enabled_names = {profile.name for profile in enabled}
+    configured_order = store.get_ai_profile_priority(_default_ai_profile_priority(enabled))
+    ordered: list[str] = [profile_name for profile_name in configured_order if profile_name in enabled_names]
     primary = preferred_profile or get_current_ai_profile_name(settings, store, profiles)
-    ordered: list[str] = []
-    if primary in enabled_names:
+    if primary in enabled_names and not ordered:
         ordered.append(primary)
     default_profile = get_default_ai_profile_name(settings)
     if default_profile in enabled_names and default_profile not in ordered:
@@ -60,6 +66,25 @@ def list_ai_profile_fallback_order(
         if profile.name not in ordered:
             ordered.append(profile.name)
     return tuple(ordered)
+
+
+def _default_ai_profile_priority(enabled: list[AiProfile]) -> tuple[str, ...]:
+    return tuple(profile.name for profile in sorted(enabled, key=_profile_priority_key))
+
+
+def _profile_priority_key(profile: AiProfile) -> tuple[int, str]:
+    haystack = f"{profile.name} {profile.base_url}".lower()
+    if _contains_any(haystack, OPENROUTER_PROFILE_HINTS):
+        return (0, profile.name)
+    if _contains_any(haystack, RIGHTCODES_PROFILE_HINTS):
+        return (1, profile.name)
+    if profile.model.lower().startswith("gpt-"):
+        return (2, profile.name)
+    return (3, profile.name)
+
+
+def _contains_any(text: str, hints: tuple[str, ...]) -> bool:
+    return any(hint in text for hint in hints)
 
 
 def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:

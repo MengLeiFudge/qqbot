@@ -9,7 +9,11 @@ from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
 from qqbot.services.ai_diagnostics import AiDiagnosticsStore
 from qqbot.services.ai_pending_task_store import AiPendingTaskStore
 from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
-from qqbot.services.ai_runtime import get_current_ai_profile_name, get_default_ai_profile_name
+from qqbot.services.ai_runtime import (
+    get_current_ai_profile_name,
+    get_default_ai_profile_name,
+    list_ai_profile_fallback_order,
+)
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.codex_task_service import load_codex_group_bindings, load_codex_projects
 from qqbot.services.domain_knowledge_store import (
@@ -263,20 +267,23 @@ class AdminService:
         profiles = load_ai_profiles(self.settings.ai_profile_file)
         enabled_profiles = list_enabled_profiles(profiles)
         current_profile = get_current_ai_profile_name(self.settings, self.store, profiles)
+        fallback_order = list_ai_profile_fallback_order(self.settings, self.store, profiles)
+        profile_payloads = [
+            {
+                "name": profile.name,
+                "provider": profile.provider,
+                "model": profile.model,
+                "note": profile.note,
+                "enabled": profile.enabled,
+            }
+            for profile in enabled_profiles
+        ]
         return {
             "enabled": self.settings.ai_enabled,
             "current_profile": current_profile,
             "default_profile": get_default_ai_profile_name(self.settings),
-            "profiles": [
-                {
-                    "name": profile.name,
-                    "provider": profile.provider,
-                    "model": profile.model,
-                    "note": profile.note,
-                    "enabled": profile.enabled,
-                }
-                for profile in enabled_profiles
-            ],
+            "fallback_order": list(fallback_order),
+            "profiles": profile_payloads,
         }
 
     def set_ai_provider(self, profile: str) -> dict[str, object]:
@@ -284,6 +291,24 @@ class AdminService:
         if profile not in {item.name for item in list_enabled_profiles(profiles)}:
             raise ValueError(f"Unknown AI profile: {profile}")
         self.store.set_ai_provider(profile)
+        return self.list_ai()
+
+    def set_ai_profile_priority(self, profiles: list[str]) -> dict[str, object]:
+        configured_profiles = load_ai_profiles(self.settings.ai_profile_file)
+        enabled_names = {item.name for item in list_enabled_profiles(configured_profiles)}
+        cleaned = []
+        seen: set[str] = set()
+        for profile in profiles:
+            name = str(profile).strip()
+            if not name or name in seen:
+                continue
+            if name not in enabled_names:
+                raise ValueError(f"Unknown AI profile: {name}")
+            cleaned.append(name)
+            seen.add(name)
+        if not cleaned:
+            raise ValueError("AI profile priority cannot be empty.")
+        self.store.set_ai_profile_priority(cleaned)
         return self.list_ai()
 
     def list_ai_output_modes(

@@ -17,6 +17,7 @@ from qqbot.services.ai_orchestrator import STYLE_CHANGE_UNAWARE_MESSAGE
 from qqbot.services.codex_task_service import (
     CodexProgressEvent,
     CodexProjectBinding,
+    CodexTaskResult,
     get_codex_project_by_id,
 )
 from qqbot.services.feature_catalog import get_feature_by_menu_key
@@ -296,7 +297,7 @@ def test_orchestrator_routes_orbital_ring_domain_question_to_readonly_codex(
     assert request.project.project_id == "orbital_ring"
     assert request.group_id == "1035445959"
     assert request.mode == "discuss"
-    assert request.timeout_seconds == 180
+    assert request.timeout_seconds == 120
     assert request.progress_callback is None
     assert "只读资料查询" in request.prompt
     assert "当前项目目录" in request.prompt
@@ -342,12 +343,44 @@ def test_orchestrator_routes_fe_domain_question_to_readonly_codex(
     assert request.project.project_id == "mlj_dspmods"
     assert request.group_id == "319567534"
     assert request.mode == "discuss"
-    assert request.timeout_seconds == 180
+    assert request.timeout_seconds == 120
     assert request.progress_callback is None
     assert "只读资料查询" in request.prompt
     assert "当前项目目录" in request.prompt
     assert "最终只输出可以直接发到 QQ 群里的答案" in request.prompt
     assert "物品堆叠怎么升级" in request.prompt
+
+
+def test_orchestrator_domain_codex_failure_does_not_fall_back_to_plain_llm(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project = CodexProjectBinding(
+        project_id="orbital_ring",
+        display_name="OrbitalRing-MOD",
+        repo_path=str(tmp_path / "OrbitalRing-MOD"),
+    )
+
+    def fake_resolve(*_args, **_kwargs):
+        return type("Match", (), {"project": project})()
+
+    async def fake_codex_runner(request):
+        return CodexTaskResult(False, "Codex 会话超时。", exit_code=None)
+
+    monkeypatch.setattr(ai_orchestrator_module, "resolve_codex_project_for_text", fake_resolve)
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "星环隐藏科技有哪些",
+            AiOrchestratorContext(actor_user_id="10001", group_id="1035445959"),
+            NormalizedMessage(text="星环隐藏科技有哪些", outline="星环隐藏科技有哪些"),
+        )
+    )
+
+    assert result.handled is True
+    assert "只读查询失败" in result.text
+    assert "我先不按通用机制乱猜" in result.text
 
 
 def test_orchestrator_routes_project_genesis_domain_question_to_readonly_codex(
@@ -373,9 +406,9 @@ def test_orchestrator_routes_project_genesis_domain_question_to_readonly_codex(
 
     result = asyncio.run(
         orchestrator.handle(
-            "这个配方在哪里解锁",
+            "氯化钠堵了怎么还在生产？",
             AiOrchestratorContext(actor_user_id="10001", group_id="991895539"),
-            NormalizedMessage(text="这个配方在哪里解锁", outline="这个配方在哪里解锁"),
+            NormalizedMessage(text="氯化钠堵了怎么还在生产？", outline="氯化钠堵了怎么还在生产？"),
         )
     )
 
@@ -386,11 +419,11 @@ def test_orchestrator_routes_project_genesis_domain_question_to_readonly_codex(
     assert request.project.project_id == "project_genesis"
     assert request.group_id == "991895539"
     assert request.mode == "discuss"
-    assert request.timeout_seconds == 180
+    assert request.timeout_seconds == 120
     assert request.progress_callback is None
     assert "只读资料查询" in request.prompt
     assert "ProjectGenesis" in request.prompt
-    assert "这个配方在哪里解锁" in request.prompt
+    assert "氯化钠堵了怎么还在生产？" in request.prompt
 
 
 def test_orchestrator_uploads_latest_project_zip_for_admin_group(

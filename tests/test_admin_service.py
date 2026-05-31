@@ -130,6 +130,41 @@ def test_set_plugin_enabled_rejects_unknown_plugin(tmp_path: Path) -> None:
         service.set_plugin_enabled("missing", False)
 
 
+def test_ai_profile_priority_lists_openrouter_before_rightcodes(tmp_path: Path) -> None:
+    profile_file = tmp_path / "config" / "qqbot.toml"
+    profile_file.parent.mkdir(parents=True)
+    profile_file.write_text(
+        """
+[ai]
+default_profile = "rightcodes"
+
+[ai.providers.rightcodes]
+provider = "openai_compatible"
+base_url = "https://right.codes/codex/v1"
+model = "gpt-5.5"
+api_key_env = "QQBOT_AI_KEY_RIGHTCODES"
+
+[ai.providers.openrouter]
+provider = "openai_compatible"
+base_url = "https://rehdasu.cn/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_OPENROUTER"
+""".strip(),
+        encoding="utf-8",
+    )
+    settings = RuntimeSettings(data_root=tmp_path / "run", ai_profile_file=profile_file, ai_default_profile="rightcodes")
+    service = AdminService(settings=settings, store=SettingsStore(settings.data_root, settings.author_qq), project_root=tmp_path)
+
+    payload = service.list_ai()
+    updated = service.set_ai_profile_priority(["rightcodes", "openrouter"])
+
+    assert payload["fallback_order"] == ["openrouter", "rightcodes"]
+    assert updated["fallback_order"] == ["rightcodes", "openrouter"]
+    assert updated["current_profile"] == "rightcodes"
+    with pytest.raises(ValueError):
+        service.set_ai_profile_priority(["missing"])
+
+
 def test_ai_output_mode_management_lists_and_updates_groups(tmp_path: Path) -> None:
     service = build_service(tmp_path)
     GroupMessageLogStore(tmp_path / "run").append_message(
