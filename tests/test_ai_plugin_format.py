@@ -19,7 +19,6 @@ from qqbot.plugins.ai_test import (
     ai_chat_matcher,
     handle_ai,
     build_ai_context,
-    send_ai_processing_ack,
     build_ai_output_mode_context,
     build_ai_prompt,
     build_ai_reply_scope,
@@ -44,7 +43,6 @@ from qqbot.plugins.ai_test import (
     should_suppress_group_ai_fallback,
     should_retry_ack_task_fallback,
     should_drop_queued_ai_request,
-    should_send_ai_processing_ack,
     should_use_recent_group_summary_flow,
     format_ai_response,
     format_draw_quota_exceeded_message,
@@ -326,22 +324,7 @@ def test_build_ai_reply_message_keeps_private_response_plain() -> None:
     ) == "你好呀"
 
 
-def test_send_ai_processing_ack_quotes_group_message(monkeypatch) -> None:
-    dummy_matcher = DummyMatcher()
-    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
-
-    asyncio.run(
-        send_ai_processing_ack(
-            group_id=516286670,
-            message_id=12345,
-            user_id="605738729",
-        )
-    )
-
-    assert str(dummy_matcher.sent[0]) == "[CQ:reply,id=12345][CQ:at,qq=605738729] 我先看看"
-
-
-def test_should_send_ai_processing_ack_only_for_explicit_triggers() -> None:
+def test_ack_then_async_decision_does_not_create_user_visible_ack() -> None:
     proactive_decision = decide_ai_message(
         trigger_kind=AiChatTriggerKind.PROACTIVE,
         normalized_message=NormalizedMessage(text="shapez 速通开局怎么做", outline="shapez 速通开局怎么做"),
@@ -357,31 +340,9 @@ def test_should_send_ai_processing_ack_only_for_explicit_triggers() -> None:
         normalized_message=NormalizedMessage(text="shapez 速通开局怎么做", outline="shapez 速通开局怎么做"),
         group_id=1163635014,
     )
-    event = FakeGroupEvent(text="shapez 速通开局怎么做", group_id=1163635014)
-    normalized = normalize_onebot_message(event.original_message)
-
     assert proactive_decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
-    assert should_send_ai_processing_ack(
-        trigger_kind=AiChatTriggerKind.PROACTIVE,
-        decision=proactive_decision,
-        prompt=event.text,
-        event=event,
-        normalized_message=normalized,
-    ) is False
-    assert should_send_ai_processing_ack(
-        trigger_kind=AiChatTriggerKind.NAMED,
-        decision=named_decision,
-        prompt=event.text,
-        event=event,
-        normalized_message=normalized,
-    ) is False
-    assert should_send_ai_processing_ack(
-        trigger_kind=AiChatTriggerKind.DIRECT,
-        decision=direct_decision,
-        prompt=event.text,
-        event=event,
-        normalized_message=normalized,
-    ) is True
+    assert named_decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert direct_decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
 
 
 def test_message_decision_marks_domain_knowledge_as_ack_task() -> None:
@@ -1152,27 +1113,17 @@ def test_build_ai_gateway_chain_skips_failed_profile_cooldown(tmp_path: Path, mo
     assert built == ["routin"]
 
 
-def test_handle_ai_locked_retries_timeout_after_ack_until_success(
+def test_handle_ai_locked_complex_direct_reply_does_not_send_processing_ack(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     dummy_matcher = DummyMatcher()
 
     class FakeGateway:
-        def __init__(self) -> None:
-            self.calls = 0
-
         async def complete(self, request) -> AiResponse:
-            self.calls += 1
-            if self.calls == 1:
-                return AiResponse("超时", fallback=True, fallback_reason="timeout")
             return AiResponse("shapez 速通开局先把基础图形线跑稳")
 
-    async def fake_sleep(seconds: float) -> None:
-        return None
-
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
-    monkeypatch.setattr("qqbot.plugins.ai_test.asyncio.sleep", fake_sleep)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
         "openrouter": AiProfile(
@@ -1222,35 +1173,23 @@ def test_handle_ai_locked_retries_timeout_after_ack_until_success(
         dummy_matcher.sent.append(exc.message)
 
     assert [str(message) for message in dummy_matcher.sent] == [
-        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] 我先看看",
         "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] shapez 速通开局先把基础图形线跑稳",
     ]
     records = AiPendingTaskStore(tmp_path).list_records()
-    assert records[0].status == "completed"
-    assert records[0].error == ""
+    assert records == ()
 
 
-def test_handle_ai_locked_retries_client_error_after_ack_until_success(
+def test_handle_ai_locked_complex_direct_fallback_stays_silent_without_ack(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     dummy_matcher = DummyMatcher()
 
     class FakeGateway:
-        def __init__(self) -> None:
-            self.calls = 0
-
         async def complete(self, request) -> AiResponse:
-            self.calls += 1
-            if self.calls == 1:
-                return AiResponse("失败", fallback=True, fallback_reason="client_error")
-            return AiResponse("shapez 速通开局先把基础图形线跑稳")
-
-    async def fake_sleep(seconds: float) -> None:
-        return None
+            return AiResponse("失败", fallback=True, fallback_reason="client_error")
 
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
-    monkeypatch.setattr("qqbot.plugins.ai_test.asyncio.sleep", fake_sleep)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
         "openrouter": AiProfile(
@@ -1299,13 +1238,9 @@ def test_handle_ai_locked_retries_client_error_after_ack_until_success(
     except FinishException as exc:
         dummy_matcher.sent.append(exc.message)
 
-    assert [str(message) for message in dummy_matcher.sent] == [
-        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] 我先看看",
-        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] shapez 速通开局先把基础图形线跑稳",
-    ]
+    assert dummy_matcher.sent == []
     records = AiPendingTaskStore(tmp_path).list_records()
-    assert records[0].status == "completed"
-    assert records[0].error == ""
+    assert records == ()
 
 
 def test_recent_answer_followup_quotes_consistent_group_answer() -> None:

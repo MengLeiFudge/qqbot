@@ -101,10 +101,6 @@ AI_RECENT_ANSWER_MAX_RECORDS = 8
 AI_PROFILE_FALLBACK_COOLDOWN_SECONDS = 120.0
 _BOT_LOOP_GUARD = BotLoopGuard()
 _AI_PROFILE_FAILURE_UNTIL: dict[str, float] = {}
-EXPLICIT_ACK_TRIGGER_KINDS = {
-    AiChatTriggerKind.DIRECT,
-    AiChatTriggerKind.PRIVATE,
-}
 
 
 @dataclass
@@ -981,26 +977,6 @@ async def _handle_ai_locked(
 
     context_parts.extend(part for part in local_result.extra_context if part.strip())
     pending_task_id = ""
-    if should_send_ai_processing_ack(
-        trigger_kind=trigger_kind,
-        decision=decision,
-        prompt=prompt,
-        event=event,
-        normalized_message=normalized_message,
-    ):
-        pending_task = AiPendingTaskStore(settings.data_root).create_ack_task(
-            group_id=group_id,
-            user_id=user_id,
-            message_id=message_id,
-            prompt=prompt,
-            decision=decision,
-        )
-        pending_task_id = pending_task.task_id
-        await send_ai_processing_ack(
-            group_id=group_id,
-            message_id=message_id,
-            user_id=user_id,
-        )
     image_urls = collect_message_image_urls(normalized_message)
     local_prepare_seconds = time.perf_counter() - local_prepare_started
 
@@ -1346,41 +1322,6 @@ async def send_recent_group_summary_ack(
             user_id=user_id,
         )
     )
-
-
-async def send_ai_processing_ack(
-    *,
-    group_id: int | str | None,
-    message_id: int | str | None,
-    user_id: int | str,
-) -> None:
-    await ai_chat_matcher.send(
-        build_ai_reply_message(
-            "我先看看",
-            group_id=group_id,
-            message_id=message_id,
-            user_id=user_id,
-        )
-    )
-
-
-def should_send_ai_processing_ack(
-    *,
-    trigger_kind: AiChatTriggerKind,
-    decision: AiMessageDecision,
-    prompt: str,
-    event: MessageEvent,
-    normalized_message: NormalizedMessage,
-) -> bool:
-    if decision.latency_policy != AiLatencyPolicy.ACK_THEN_ASYNC:
-        return False
-    if trigger_kind not in EXPLICIT_ACK_TRIGGER_KINDS:
-        return False
-    if should_handle_as_rightcodes_draw(prompt):
-        return False
-    if should_use_recent_group_summary_flow(event, normalized_message):
-        return False
-    return True
 
 
 def should_handle_as_rightcodes_draw(prompt: str) -> bool:
