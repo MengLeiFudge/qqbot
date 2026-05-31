@@ -62,7 +62,7 @@ def sanitize_ai_output_text(text: str) -> str:
             line = _strip_parenthesized_action_descriptions(line)
         if line:
             lines.append(line)
-    return "\n".join(lines).strip()
+    return _strip_repeated_short_tail("\n".join(lines).strip())
 
 
 def _strip_block_markdown(line: str) -> str:
@@ -102,3 +102,24 @@ def _replace_action_description(match: re.Match[str]) -> str:
     if any(keyword in body for keyword in _ACTION_KEYWORDS):
         return ""
     return match.group(0)
+
+
+def _strip_repeated_short_tail(text: str) -> str:
+    current = text.strip()
+    if not current:
+        return ""
+    punctuation = "。！？!?；;，,"
+    for size in range(3, 0, -1):
+        pattern = re.compile(
+            rf"(?P<body>.+?)(?P<punct>[{re.escape(punctuation)}])(?P<tail>[\u4e00-\u9fffA-Za-z0-9]{{{size}}})(?P=punct)$",
+            re.S,
+        )
+        match = pattern.fullmatch(current)
+        if match is None:
+            continue
+        body = match.group("body")
+        tail = match.group("tail")
+        if not body.endswith(tail):
+            continue
+        return f"{body}{match.group('punct')}".strip()
+    return current

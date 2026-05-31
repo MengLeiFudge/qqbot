@@ -12,6 +12,8 @@ from qqbot.config import RuntimeSettings
 from qqbot.plugins.ai_test import (
     AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS,
     AiQueuedBatch,
+    AiProactiveBufferItem,
+    AiProactiveBufferManager,
     AiQueuedRequest,
     AiReplyQueueManager,
     ai_chat_matcher,
@@ -23,6 +25,7 @@ from qqbot.plugins.ai_test import (
     build_ai_reply_scope,
     build_local_quick_ai_reply,
     build_recent_group_summary_context,
+    build_current_message_time_context,
     build_memory_retrieval_plan_context,
     build_ai_system_context,
     ack_task_retry_delay_seconds,
@@ -34,12 +37,14 @@ from qqbot.plugins.ai_test import (
     complete_ai_request_with_profile_fallbacks,
     complete_ai_request_until_ack_task_done,
     find_recent_group_answers_after_request,
+    build_proactive_buffer_queued_request,
     merge_ai_queued_batch,
     should_include_long_term_memory_context,
     should_include_nickname_usage_context,
     should_suppress_group_ai_fallback,
     should_retry_ack_task_fallback,
     should_drop_queued_ai_request,
+    should_send_ai_processing_ack,
     should_use_recent_group_summary_flow,
     format_ai_response,
     format_draw_quota_exceeded_message,
@@ -96,21 +101,27 @@ class FakeGroupEvent:
         message_id: int = 12345,
         group_id: int = 516286670,
         self_id: int = 1443944862,
+        event_time: int | None = None,
     ) -> None:
         self.group_id = group_id
         self.user_id = user_id
         self.self_id = self_id
         self.message_id = message_id
+        self.time = 0 if event_time is None else event_time
         self.text = text
         self.reply = reply
         self.sender = sender or FakeSender(user_id=int(user_id), card="萌泪", nickname="MLJ")
         self._message = message
+        self._to_me = False
 
     def get_user_id(self) -> str:
         return self.user_id
 
     def get_plaintext(self) -> str:
         return self.text
+
+    def is_tome(self) -> bool:
+        return self._to_me
 
     @property
     def original_message(self):
@@ -268,6 +279,14 @@ def test_format_ai_response_hides_metrics_by_default() -> None:
     assert format_ai_response("xiaomi", response) == "我是萌萌棉花糖♪。"
 
 
+def test_format_ai_response_removes_repeated_short_tail() -> None:
+    response = AiResponse(text="如果只是个梗，可以说大学生更敢看百合，但不能当成普遍规律。律。")
+
+    assert format_ai_response("openrouter", response) == (
+        "如果只是个梗，可以说大学生更敢看百合，但不能当成普遍规律。"
+    )
+
+
 def test_format_ai_response_can_show_metrics_for_debug() -> None:
     response = AiResponse(
         text="我是萌萌棉花糖♪。",
@@ -320,6 +339,49 @@ def test_send_ai_processing_ack_quotes_group_message(monkeypatch) -> None:
     )
 
     assert str(dummy_matcher.sent[0]) == "[CQ:reply,id=12345][CQ:at,qq=605738729] 我先看看"
+
+
+def test_should_send_ai_processing_ack_only_for_explicit_triggers() -> None:
+    proactive_decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(text="shapez 速通开局怎么做", outline="shapez 速通开局怎么做"),
+        group_id=1163635014,
+    )
+    named_decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.NAMED,
+        normalized_message=NormalizedMessage(text="shapez 速通开局怎么做", outline="shapez 速通开局怎么做"),
+        group_id=1163635014,
+    )
+    direct_decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.DIRECT,
+        normalized_message=NormalizedMessage(text="shapez 速通开局怎么做", outline="shapez 速通开局怎么做"),
+        group_id=1163635014,
+    )
+    event = FakeGroupEvent(text="shapez 速通开局怎么做", group_id=1163635014)
+    normalized = normalize_onebot_message(event.original_message)
+
+    assert proactive_decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert should_send_ai_processing_ack(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        decision=proactive_decision,
+        prompt=event.text,
+        event=event,
+        normalized_message=normalized,
+    ) is False
+    assert should_send_ai_processing_ack(
+        trigger_kind=AiChatTriggerKind.NAMED,
+        decision=named_decision,
+        prompt=event.text,
+        event=event,
+        normalized_message=normalized,
+    ) is False
+    assert should_send_ai_processing_ack(
+        trigger_kind=AiChatTriggerKind.DIRECT,
+        decision=direct_decision,
+        prompt=event.text,
+        event=event,
+        normalized_message=normalized,
+    ) is True
 
 
 def test_message_decision_marks_domain_knowledge_as_ack_task() -> None:
@@ -661,6 +723,48 @@ def test_ai_queue_manager_collects_pending_batch() -> None:
     assert manager.pop_pending_batch("group_user:1:2") is None
 
 
+def make_proactive_buffer_item(prompt: str, *, message_id: int = 1) -> AiProactiveBufferItem:
+    event = FakeGroupEvent(text=prompt, message_id=message_id)
+    return AiProactiveBufferItem(
+        bot=FakeVoiceBot(),
+        event=event,
+        settings=RuntimeSettings(ai_enabled=True),
+        store=SettingsStore(Path("/tmp/qqbot-test-store"), author_qq=605738729),
+        normalized_message=normalize_onebot_message(event.original_message),
+        prompt=prompt,
+        request_started=1.0,
+        request_wall_started=1.0,
+        event_time=None,
+        message_id=message_id,
+        group_id=event.group_id,
+        user_id=event.get_user_id(),
+    )
+
+
+def test_proactive_buffer_manager_pops_group_batch() -> None:
+    manager = AiProactiveBufferManager(quiet_seconds=10.0, max_seconds=30.0)
+    first = make_proactive_buffer_item("请问这个怎么修？", message_id=11)
+    second = make_proactive_buffer_item("补充一下，日志里有 timeout", message_id=12)
+
+    manager._buffers["group:516286670"] = [first, second]
+    batch = manager.pop("group:516286670")
+
+    assert batch is not None
+    assert [item.prompt for item in batch.items] == ["请问这个怎么修？", "补充一下，日志里有 timeout"]
+    assert all(item.trigger_kind == AiChatTriggerKind.PROACTIVE for item in batch.items)
+    assert manager.pop("group:516286670") is None
+
+
+def test_build_proactive_buffer_request_keeps_original_anchor() -> None:
+    item = make_proactive_buffer_item("请问这个怎么修？", message_id=23)
+
+    request = build_proactive_buffer_queued_request(item)
+
+    assert request.prompt == "请问这个怎么修？"
+    assert request.message_id == 23
+    assert request.trigger_kind == AiChatTriggerKind.PROACTIVE
+
+
 def test_merge_ai_queued_batch_combines_prompts_and_keeps_first_anchor() -> None:
     batch = AiQueuedBatch(
         scope="group_user:1:2",
@@ -720,6 +824,59 @@ def test_handle_ai_routes_rightcodes_draw_outside_reply_queue(monkeypatch, tmp_p
     assert semaphore.entered == 1
     assert handled_prompts == ["棉花生图一只猫"]
     assert queue_calls == []
+
+
+def test_handle_ai_buffers_proactive_messages_without_calling_gateway(monkeypatch, tmp_path: Path) -> None:
+    buffered: list[tuple[str, str]] = []
+
+    class FakeProactiveBuffer:
+        def add(self, scope: str, item: AiProactiveBufferItem) -> None:
+            buffered.append((scope, item.prompt))
+
+        def discard(self, scope: str) -> int:
+            raise AssertionError("proactive 消息不应清理自身 buffer")
+
+    class FailingQueue:
+        def join(self, scope: str):
+            raise AssertionError("proactive 首条消息应先进 buffer")
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
+    monkeypatch.setattr("qqbot.plugins.ai_test._AI_PROACTIVE_BUFFER", FakeProactiveBuffer())
+    monkeypatch.setattr("qqbot.plugins.ai_test._AI_REPLY_QUEUE", FailingQueue())
+
+    event = FakeGroupEvent(text="请问这个怎么修？")
+    asyncio.run(handle_ai(FakeVoiceBot(), event))
+
+    assert buffered == [("group:516286670", "请问这个怎么修？")]
+
+
+def test_handle_ai_discards_proactive_buffer_before_direct_message(monkeypatch, tmp_path: Path) -> None:
+    discarded_scopes: list[str] = []
+    handled_prompts: list[str] = []
+
+    class FakeProactiveBuffer:
+        def add(self, scope: str, item: AiProactiveBufferItem) -> None:
+            raise AssertionError("direct-at 不应进入 proactive buffer")
+
+        def discard(self, scope: str) -> int:
+            discarded_scopes.append(scope)
+            return 2
+
+    async def fake_handle_ai_locked(*args, **kwargs) -> None:
+        handled_prompts.append(kwargs["prompt"])
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
+    monkeypatch.setattr("qqbot.plugins.ai_test._AI_PROACTIVE_BUFFER", FakeProactiveBuffer())
+    monkeypatch.setattr("qqbot.plugins.ai_test._handle_ai_locked", fake_handle_ai_locked)
+
+    event = FakeGroupEvent(text="帮我看一下", message_id=200)
+    event._to_me = True
+    asyncio.run(handle_ai(FakeVoiceBot(), event))
+
+    assert discarded_scopes == ["group:516286670"]
+    assert handled_prompts == ["帮我看一下"]
 
 
 def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
@@ -1040,7 +1197,7 @@ def test_handle_ai_locked_retries_timeout_after_ack_until_success(
                 message_id=event.message_id,
                 group_id=event.group_id,
                 user_id=event.get_user_id(),
-                trigger_kind=AiChatTriggerKind.NAMED,
+                trigger_kind=AiChatTriggerKind.DIRECT,
             )
         )
     except FinishException as exc:
@@ -1118,7 +1275,7 @@ def test_handle_ai_locked_retries_client_error_after_ack_until_success(
                 message_id=event.message_id,
                 group_id=event.group_id,
                 user_id=event.get_user_id(),
-                trigger_kind=AiChatTriggerKind.NAMED,
+                trigger_kind=AiChatTriggerKind.DIRECT,
             )
         )
     except FinishException as exc:
@@ -1262,6 +1419,71 @@ def test_handle_ai_locked_keeps_group_fallback_silent_without_ack(
     )
 
     assert dummy_matcher.sent == []
+
+
+def test_handle_ai_locked_proactive_complex_task_does_not_send_processing_ack(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dummy_matcher = DummyMatcher()
+
+    class FakeGateway:
+        async def complete(self, request) -> AiResponse:
+            return AiResponse("shapez 速通开局先把基础图形线跑稳")
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
+    monkeypatch.setattr("qqbot.plugins.ai_test._BOT_LOOP_GUARD.record_trigger", lambda *args: "ok")
+    monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
+        "openrouter": AiProfile(
+            name="openrouter",
+            provider="openai_compatible",
+            base_url="https://example.com/v1",
+            model="gpt-5.4-mini",
+            vision_model="gpt-5.4-mini",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+        )
+    })
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
+
+    event = FakeGroupEvent(
+        text="shapez 速通开局怎么做",
+        message_id=1398753261,
+        group_id=1163635014,
+        user_id="3120618805",
+    )
+    settings = RuntimeSettings(
+        data_root=tmp_path,
+        ai_enabled=True,
+        ai_default_profile="openrouter",
+        ai_profile_file=tmp_path / "qqbot.toml",
+    )
+
+    try:
+        asyncio.run(
+            _handle_ai_locked(
+                FakeVoiceBot(),
+                event,
+                settings=settings,
+                store=SettingsStore(tmp_path, author_qq=605738729),
+                normalized_message=normalize_onebot_message(event.original_message),
+                prompt=event.text,
+                request_started=time.perf_counter(),
+                request_wall_started=time.time(),
+                event_time=None,
+                message_id=event.message_id,
+                group_id=event.group_id,
+                user_id=event.get_user_id(),
+                trigger_kind=AiChatTriggerKind.PROACTIVE,
+            )
+        )
+    except FinishException as exc:
+        dummy_matcher.sent.append(exc.message)
+
+    assert [str(message) for message in dummy_matcher.sent] == [
+        "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] shapez 速通开局先把基础图形线跑稳",
+    ]
     assert AiPendingTaskStore(tmp_path).list_records() == ()
 
 
@@ -1290,6 +1512,7 @@ def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
         force_voice=False,
     ) -> bool:
         return False
+    bot = FakeVoiceBot()
 
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
@@ -1310,11 +1533,12 @@ def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
     event = FakeGroupEvent(text="唱一下小星星")
     store = SettingsStore(tmp_path, author_qq=605738729)
     settings = RuntimeSettings(data_root=tmp_path, ai_enabled=True, ai_show_metrics=False)
+    finish_message = object()
 
     try:
         asyncio.run(
             _handle_ai_locked(
-                FakeVoiceBot(),
+                bot,
                 event,
                 settings=settings,
                 store=store,
@@ -1330,13 +1554,14 @@ def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
                 force_voice_response=True,
             )
         )
-    except FinishException:
-        pass
+    except FinishException as exc:
+        finish_message = exc.message
 
     assert any("语音输出暂时不可用" in part for part in contexts[0])
     assert any("当前没有可用 TTS" in part for part in contexts[0])
-    assert len(dummy_matcher.sent) == 1
-    assert "语音输出暂时不可用" in str(dummy_matcher.sent[0])
+    assert dummy_matcher.sent == []
+    assert "语音输出暂时不可用" in str(finish_message)
+    assert bot.calls == []
 
 
 def test_ai_output_mode_context_declares_voice_mode() -> None:
@@ -1433,9 +1658,32 @@ def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> Non
         "如果还没有回复，再检查模型请求、发送日志和最近群消息记录。"
     )
 
-    assert 1 < len(parts) <= 3
+    assert 1 < len(parts)
     assert parts[0].startswith("先看现象")
     assert "最后" in "".join(parts)
+
+
+def test_split_continuous_ai_reply_text_splits_on_period_or_semicolon_and_drops_delimiter() -> None:
+    parts = split_continuous_ai_reply_text(
+        "这段核心其实是在说“想要无条件的接纳和温柔”，这个情绪我能理解。"
+        "不过“萝莉妈妈”这个意象很容易让人误解或不适；尤其涉及未成年人外观时不太适合拿来当宣言中心。"
+        "可以改成更安全也更有表达力的说法，比如“棉花糖妈妈”“童心妈妈”“温柔同伴”“无条件接纳的港湾”。"
+        "这样保留反内卷、反规训、追求纯粹温柔的主题，也不会把重点带偏。"
+    )
+
+    assert parts == [
+        "这段核心其实是在说“想要无条件的接纳和温柔”，这个情绪我能理解",
+        "不过“萝莉妈妈”这个意象很容易让人误解或不适",
+        "尤其涉及未成年人外观时不太适合拿来当宣言中心",
+        "可以改成更安全也更有表达力的说法，比如“棉花糖妈妈”“童心妈妈”“温柔同伴”“无条件接纳的港湾”",
+        "这样保留反内卷、反规训、追求纯粹温柔的主题，也不会把重点带偏",
+    ]
+
+
+def test_split_continuous_ai_reply_text_keeps_more_than_five_sentences_together() -> None:
+    text = "一。二；三;四。五。六。"
+
+    assert split_continuous_ai_reply_text(text) == [text]
 
 
 def test_ai_system_context_declares_bot_identity() -> None:
@@ -1444,6 +1692,8 @@ def test_ai_system_context_declares_bot_identity() -> None:
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in context
     assert "必须明确回答你是“萌萌棉花糖♪”" in context
     assert "用户问“我是谁”" in context
+    assert "猫娘棉花糖是你的稳定主人格" in context
+    assert "短、活泼" in context
     assert "不要使用 Markdown" in context
     assert "段落之间不要留空行" in context
 
@@ -1500,12 +1750,20 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     joined = "\n".join(context)
     assert "当前对话场景：QQ群聊" in joined
     assert "当前群号：516286670" in joined
+    assert "当前消息时间：1970-01-01 08:00:00 Asia/Shanghai（timestamp=0）" in joined
     assert "当前发言者：萌泪(605738729)" in joined
     assert "用户A(10001): 今天讨论了机器人接入 AI。" in joined
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
     assert "群聊输出策略" in joined
     assert "是否引用消息要视情况决定" in joined
     assert "如果最近群友已经给出一致且完整的答案" in joined
+
+
+def test_current_message_time_context_uses_configured_timezone() -> None:
+    event = FakeGroupEvent(event_time=1780245243)
+    context = build_current_message_time_context(RuntimeSettings(timezone="Asia/Shanghai"), event)
+
+    assert context == "当前消息时间：2026-06-01 00:34:03 Asia/Shanghai（timestamp=1780245243）"
 
 
 def test_group_output_strategy_marks_shapez_as_accuracy_first() -> None:
@@ -1523,7 +1781,9 @@ def test_group_output_strategy_marks_shapez_as_accuracy_first() -> None:
 
     context = build_group_output_strategy_context(1163635014, decision=decision)
 
-    assert "速度优先" in context
+    assert "简短但活泼" in context
+    assert "发送层处理" in context
+    assert "相对时间表达" in context
     assert "不要为了快牺牲准确性" in context
     assert "本群是 shapez/spz 群" in context
 
