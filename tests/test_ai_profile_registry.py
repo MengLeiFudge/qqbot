@@ -149,6 +149,17 @@ supports_vision = true
     assert profiles["main"].supports_vision is True
 
 
+def test_example_openrouter_uses_codex_service_tier_field() -> None:
+    profile_file = ROOT / "config" / "qqbot.toml.example"
+
+    profiles = load_ai_profiles(profile_file)
+    extra_body = profiles["openrouter"].extra_body
+
+    assert extra_body is not None
+    assert extra_body["service_tier"] == "fast"
+    assert "fast" not in extra_body
+
+
 def test_resolve_ai_profile_accepts_direct_key_in_api_key_env_field(
     tmp_path: Path,
 ) -> None:
