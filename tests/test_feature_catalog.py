@@ -37,6 +37,11 @@ def test_get_feature_by_menu_key_returns_arc_aliases() -> None:
     assert get_feature_by_menu_key("不存在") is None
 
 
+def test_get_feature_by_menu_key_returns_factorio_aliases() -> None:
+    assert get_feature_by_menu_key("factorio").name == "Factorio"
+    assert get_feature_by_menu_key("太空时代").name == "Factorio"
+
+
 def test_build_group_menu_text_contains_status_lines() -> None:
     menu_text = build_group_menu_text(
         {
@@ -65,6 +70,14 @@ def test_build_feature_menu_text_returns_arc_commands() -> None:
     assert "开*" in menu_text
     assert "archd" in menu_text
     assert "xz / arcxz" in menu_text
+
+
+def test_build_feature_menu_text_returns_factorio_commands() -> None:
+    menu_text = build_feature_menu_text("Factorio")
+
+    assert menu_text is not None
+    assert "Factorio 功能菜单" in menu_text
+    assert "Factorio: Space Age Windows" in menu_text
 
 
 def test_build_feature_menu_text_returns_kun_commands() -> None:

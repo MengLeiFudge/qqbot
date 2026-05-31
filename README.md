@@ -13,7 +13,7 @@
 - 基础管理：菜单、帮助、管理员维护
 - 群管助手：连续相同消息复读一次、群管、自动同意管理员邀请入群、戳一戳响应
 - 群功能：捐献、Lolicon 美图
-- 游戏/工具插件：异形工厂、养鲲、Arc、落樱之都
+- 游戏/工具插件：异形工厂、Factorio 下载链接、养鲲、Arc、落樱之都
 - 社交事件：自动同意好友申请、自动同意邀请入群、戳一戳响应
 - AI 接入：OpenAI-compatible 多 provider 配置、流式响应、群上下文、全群保守主动介入、显式求助复杂问题占位回复、领域知识候选、连续短回复、个人回复风格、RightCodes 生图、需求提案、Codex 会话中转
 
@@ -48,6 +48,8 @@ QQBOT_ONEBOT_ACCESS_TOKEN=你的 OneBot token
 QQBOT_NAPCAT_QQ=你的机器人 QQ
 QQBOT_AI_KEY_OPENROUTER=你的 OpenAI-compatible API Key
 QQBOT_AI_KEY_RIGHTCODES=你的 RightCodes API Key
+FACTORIO_USERNAME=你的 Factorio 用户名
+FACTORIO_TOKEN=你的 Factorio 官网 token
 ```
 
 AI provider 示例：
@@ -137,6 +139,7 @@ http://127.0.0.1:8080/admin
 - `开群色图` / `关群色图` / `开图片显示` / `关图片显示`
 - `来点色图` / `美图 凯露 10`
 - `arctj10.5` / `zm` / `开*` / `10骨折光` / `猜 骨折光` / `arcqh` / `jx` / `archd` / `xz`
+- `Factorio下载链接` / `异星下载链接`：获取 Factorio: Space Age Windows 安装包临时链接
 - `i CrRgSbWy` / `view CrRgSbWy` / `chart CrRgSbWy`
 - `养鲲` / `属性` / `等级排行` / `财富排行` / `背包` / `商城` / `签到` / `boss` / `挑战`
 - `注册樱花勇者` / `个人信息` / `加经验500` / `加5力量` / `恢复`

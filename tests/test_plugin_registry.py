@@ -24,6 +24,8 @@ def test_visible_plugin_specs_are_sorted_by_name_and_unique() -> None:
 def test_plugin_lookup_supports_name_alias_and_rejects_index() -> None:
     assert get_plugin_spec_by_id("arc").name == "Arc"
     assert get_plugin_spec_by_menu_key("arcaea").id == "arc"
+    assert get_plugin_spec_by_menu_key("factorio").id == "factorio"
+    assert get_plugin_spec_by_menu_key("太空时代").id == "factorio"
     assert get_plugin_spec_by_menu_key("群管").id == "group_assistant"
     assert get_plugin_spec_by_menu_key("11") is None
     assert get_plugin_spec_by_menu_key("不存在") is None

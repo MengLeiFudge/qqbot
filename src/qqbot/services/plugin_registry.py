@@ -118,6 +118,17 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
         ai_capabilities=("explain",),
     ),
     PluginSpec(
+        id="factorio",
+        name="Factorio",
+        aliases=("异星工厂", "太空时代", "Space Age", "spaceage"),
+        menu_lines=(
+            "Factorio下载链接 / 异星下载链接：获取 Factorio: Space Age Windows 安装包临时下载链接",
+        ),
+        menu_keys=("factorio", "spaceage"),
+        commands=("Factorio下载链接", "异星下载链接", "太空时代下载链接"),
+        scopes=("group", "private"),
+    ),
+    PluginSpec(
         id="shapez",
         name="异形工厂",
         aliases=("shapez",),
