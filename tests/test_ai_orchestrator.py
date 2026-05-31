@@ -350,6 +350,49 @@ def test_orchestrator_routes_fe_domain_question_to_readonly_codex(
     assert "物品堆叠怎么升级" in request.prompt
 
 
+def test_orchestrator_routes_project_genesis_domain_question_to_readonly_codex(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    requests = []
+    project = CodexProjectBinding(
+        project_id="project_genesis",
+        display_name="ProjectGenesis",
+        repo_path=str(tmp_path / "ProjectGenesis"),
+    )
+
+    def fake_resolve(*_args, **_kwargs):
+        return type("Match", (), {"project": project})()
+
+    async def fake_codex_runner(request):
+        requests.append(request)
+        return type("Result", (), {"ok": True, "message": "这个配方要按 ProjectGenesis data 里的科技解锁关系查喵"})()
+
+    monkeypatch.setattr(ai_orchestrator_module, "resolve_codex_project_for_text", fake_resolve)
+    orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "这个配方在哪里解锁",
+            AiOrchestratorContext(actor_user_id="10001", group_id="991895539"),
+            NormalizedMessage(text="这个配方在哪里解锁", outline="这个配方在哪里解锁"),
+        )
+    )
+
+    assert result.handled is True
+    assert result.text == "这个配方要按 ProjectGenesis data 里的科技解锁关系查喵"
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.project.project_id == "project_genesis"
+    assert request.group_id == "991895539"
+    assert request.mode == "discuss"
+    assert request.timeout_seconds == 180
+    assert request.progress_callback is None
+    assert "只读资料查询" in request.prompt
+    assert "ProjectGenesis" in request.prompt
+    assert "这个配方在哪里解锁" in request.prompt
+
+
 def test_orchestrator_uploads_latest_project_zip_for_admin_group(
     tmp_path: Path,
     monkeypatch,

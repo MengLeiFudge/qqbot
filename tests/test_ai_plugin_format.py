@@ -458,6 +458,24 @@ def test_message_decision_treats_orbital_ring_group_as_source_backed_domain() ->
     assert "必须先查对应代码/资料" in context
 
 
+def test_message_decision_treats_project_genesis_group_as_source_backed_domain() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(
+            text="这个配方在哪里解锁",
+            outline="这个配方在哪里解锁",
+        ),
+        group_id=991895539,
+    )
+    context = build_decision_context(decision)
+
+    assert decision.domain == AiDomain.PROJECT_GENESIS
+    assert decision.intent == AiMessageIntent.DOMAIN_QA
+    assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+    assert "ProjectGenesis" in context
+    assert "D:/project/dsp/ProjectGenesis" in context
+
+
 def test_ai_pending_task_store_records_ack_lifecycle(tmp_path: Path) -> None:
     decision = decide_ai_message(
         trigger_kind=AiChatTriggerKind.PROACTIVE,
@@ -1616,25 +1634,26 @@ def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> Non
     assert "最后" in "".join(parts)
 
 
-def test_split_continuous_ai_reply_text_splits_on_period_or_semicolon_and_drops_delimiter() -> None:
+def test_split_continuous_ai_reply_text_splits_on_sentence_punctuation() -> None:
     parts = split_continuous_ai_reply_text(
         "这段核心其实是在说“想要无条件的接纳和温柔”，这个情绪我能理解。"
-        "不过“萝莉妈妈”这个意象很容易让人误解或不适；尤其涉及未成年人外观时不太适合拿来当宣言中心。"
+        "不过“萝莉妈妈”这个意象很容易让人误解或不适；尤其涉及未成年人外观时不太适合拿来当宣言中心！"
         "可以改成更安全也更有表达力的说法，比如“棉花糖妈妈”“童心妈妈”“温柔同伴”“无条件接纳的港湾”。"
-        "这样保留反内卷、反规训、追求纯粹温柔的主题，也不会把重点带偏。"
+        "这样保留反内卷、反规训、追求纯粹温柔的主题，也不会把重点带偏？"
+        "棉花糖会慢慢改……"
     )
 
     assert parts == [
         "这段核心其实是在说“想要无条件的接纳和温柔”，这个情绪我能理解",
-        "不过“萝莉妈妈”这个意象很容易让人误解或不适",
-        "尤其涉及未成年人外观时不太适合拿来当宣言中心",
+        "不过“萝莉妈妈”这个意象很容易让人误解或不适；尤其涉及未成年人外观时不太适合拿来当宣言中心！",
         "可以改成更安全也更有表达力的说法，比如“棉花糖妈妈”“童心妈妈”“温柔同伴”“无条件接纳的港湾”",
-        "这样保留反内卷、反规训、追求纯粹温柔的主题，也不会把重点带偏",
+        "这样保留反内卷、反规训、追求纯粹温柔的主题，也不会把重点带偏？",
+        "棉花糖会慢慢改……",
     ]
 
 
 def test_split_continuous_ai_reply_text_keeps_more_than_five_sentences_together() -> None:
-    text = "一。二；三;四。五。六。"
+    text = "一。二？三!四！五……六。"
 
     assert split_continuous_ai_reply_text(text) == [text]
 

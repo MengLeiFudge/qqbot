@@ -11,6 +11,7 @@ from qqbot.services.message_normalizer import NormalizedMessage
 SHAPEZ_GROUP_ID = "1163635014"
 FRACTIONATE_EVERYTHING_GROUP_ID = "319567534"
 ORBITAL_RING_GROUP_ID = "1035445959"
+PROJECT_GENESIS_GROUP_ID = "991895539"
 COMPLEX_INPUT_CHARS = 800
 
 
@@ -48,6 +49,7 @@ class AiDomain(StrEnum):
     SHAPEZ = "shapez"
     FRACTIONATE_EVERYTHING = "fractionate_everything"
     ORBITAL_RING = "orbital_ring"
+    PROJECT_GENESIS = "project_genesis"
     UNKNOWN = "unknown"
 
 
@@ -201,12 +203,16 @@ def detect_domain(text: str, *, group_id: int | str | None) -> AiDomain:
         return AiDomain.FRACTIONATE_EVERYTHING
     if str(group_id or "") == ORBITAL_RING_GROUP_ID:
         return AiDomain.ORBITAL_RING
+    if str(group_id or "") == PROJECT_GENESIS_GROUP_ID:
+        return AiDomain.PROJECT_GENESIS
     if any(keyword in normalized for keyword in ("shapez", "spz", "异形工厂", "/chart", "短代码")):
         return AiDomain.SHAPEZ
     if any(keyword in normalized for keyword in ("分馏", "fractionateeverything", "fe", "万物分馏")):
         return AiDomain.FRACTIONATE_EVERYTHING
     if any(keyword in normalized for keyword in ("星环", "orbitalring", "orbital ring", "projectorbitalring")):
         return AiDomain.ORBITAL_RING
+    if any(keyword in normalized for keyword in ("创世", "projectgenesis", "project genesis", "genesis")):
+        return AiDomain.PROJECT_GENESIS
     return AiDomain.GENERAL
 
 
@@ -313,6 +319,11 @@ def build_decision_context(decision: AiMessageDecision) -> str:
             "不得把其他戴森球模组、万物分馏或通用游戏机制当作星环依据。"
             "涉及三阶、二阶、功率、休谟值、火箭、球、配方、建筑或机制时，必须先查对应代码/资料并给出文件、方法或数据来源。"
         )
+    if decision.domain == AiDomain.PROJECT_GENESIS:
+        lines.append(
+            "ProjectGenesis 模组边界：普通问题也要优先搜索 D:/project/dsp/ProjectGenesis 源码或 data 资料后回答；"
+            "不得把其他戴森球模组、万物分馏或通用游戏机制当作 ProjectGenesis 依据。"
+        )
     return "\n".join(lines)
 
 
@@ -330,7 +341,7 @@ def _classify_intent(
     }:
         return AiMessageIntent.CODE_CHANGE_CANDIDATE
     if (
-        domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING}
+        domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING, AiDomain.PROJECT_GENESIS}
         and not _looks_translation_or_language_help(text)
         and _needs_domain_knowledge(text, domain)
     ):
@@ -370,6 +381,8 @@ def _needs_domain_knowledge(text: str, domain: AiDomain) -> bool:
         return _has_fractionate_everything_domain_signal(normalized)
     if domain == AiDomain.ORBITAL_RING:
         return _has_orbital_ring_domain_signal(normalized)
+    if domain == AiDomain.PROJECT_GENESIS:
+        return _has_project_genesis_domain_signal(normalized)
     return False
 
 
@@ -452,6 +465,29 @@ def _has_orbital_ring_domain_signal(normalized: str) -> bool:
             "机制",
             "戴森球",
             "dsp",
+        )
+    )
+
+
+def _has_project_genesis_domain_signal(normalized: str) -> bool:
+    return any(
+        keyword in normalized
+        for keyword in (
+            "创世",
+            "projectgenesis",
+            "project genesis",
+            "genesis",
+            "配方",
+            "建筑",
+            "科技",
+            "隐藏",
+            "机制",
+            "戴森球",
+            "dsp",
+            "增产",
+            "产线",
+            "矩阵",
+            "黑雾",
         )
     )
 

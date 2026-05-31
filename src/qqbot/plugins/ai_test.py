@@ -1692,10 +1692,40 @@ async def finish_continuous_group_ai_reply(
 
 def split_continuous_ai_reply_text(text: str) -> list[str]:
     normalized = "\n".join(part.strip() for part in str(text).splitlines() if part.strip())
-    parts = [part.strip() for part in re.split(r"[。；;]", normalized) if part.strip()]
+    parts = _split_chatty_reply_sentences(normalized)
     if len(parts) > 5:
         return [normalized]
     return parts or [normalized]
+
+
+def _split_chatty_reply_sentences(text: str) -> list[str]:
+    parts: list[str] = []
+    buffer: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("……", index):
+            buffer.append("……")
+            _append_chatty_part(parts, buffer)
+            index += 2
+            continue
+        char = text[index]
+        if char == "。":
+            _append_chatty_part(parts, buffer)
+        elif char in {"？", "?", "！", "!"}:
+            buffer.append(char)
+            _append_chatty_part(parts, buffer)
+        else:
+            buffer.append(char)
+        index += 1
+    _append_chatty_part(parts, buffer)
+    return parts
+
+
+def _append_chatty_part(parts: list[str], buffer: list[str]) -> None:
+    part = "".join(buffer).strip()
+    if part:
+        parts.append(part)
+    buffer.clear()
 
 
 def build_ai_system_context(settings: RuntimeSettings) -> str:
@@ -1878,7 +1908,7 @@ def build_group_output_strategy_context(
     ]
     if decision is not None and (
         decision.difficulty in {AiMessageDifficulty.COMPLEX, AiMessageDifficulty.LONG_RUNNING}
-        or decision.domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING}
+        or decision.domain in {AiDomain.SHAPEZ, AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING, AiDomain.PROJECT_GENESIS}
     ):
         parts.append(
             "本轮属于复杂问题或强领域关联问题：不要为了快牺牲准确性。"
@@ -1899,6 +1929,11 @@ def build_group_output_strategy_context(
         parts.append(
             "本群是星环/OrbitalRing 模组群；机制、功率、休谟值、二阶、三阶、火箭、球、配方和建筑问题默认强关联，"
             "回答时必须优先查 D:/project/dsp/OrbitalRing-MOD 源码或 data 资料，不确定就说需要查代码，不能用通用机制硬答。"
+        )
+    elif str(group_id) == "991895539":
+        parts.append(
+            "本群是 ProjectGenesis/创世工程模组群；配方、科技、建筑、机制和产线问题默认强关联，"
+            "回答时必须优先查 D:/project/dsp/ProjectGenesis 源码或 data 资料，不确定就说需要查代码，不能用通用机制硬答。"
         )
     return "".join(parts)
 

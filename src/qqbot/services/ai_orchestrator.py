@@ -494,7 +494,7 @@ class AiOrchestrator:
         )
         if decision.intent != AiMessageIntent.DOMAIN_QA:
             return AiOrchestratorResult(False)
-        if decision.domain not in {AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING}:
+        if decision.domain not in {AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING, AiDomain.PROJECT_GENESIS}:
             return AiOrchestratorResult(False)
         project_match = resolve_codex_project_for_text(
             text,
@@ -506,6 +506,8 @@ class AiOrchestrator:
         if decision.domain == AiDomain.FRACTIONATE_EVERYTHING and project_match.project.project_id != "mlj_dspmods":
             return AiOrchestratorResult(False)
         if decision.domain == AiDomain.ORBITAL_RING and project_match.project.project_id != "orbital_ring":
+            return AiOrchestratorResult(False)
+        if decision.domain == AiDomain.PROJECT_GENESIS and project_match.project.project_id != "project_genesis":
             return AiOrchestratorResult(False)
         result = await self.codex_session_runner(
             CodexSessionRequest(

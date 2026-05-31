@@ -115,7 +115,7 @@ def test_group_direct_at_allows_leading_blank_text_segment() -> None:
     assert is_direct_command_event(event) is True
 
 
-def test_group_direct_at_rejects_nonblank_text_before_at() -> None:
+def test_group_direct_at_allows_text_before_at() -> None:
     event = FakeEvent(
         "group",
         to_me=False,
@@ -126,7 +126,7 @@ def test_group_direct_at_rejects_nonblank_text_before_at() -> None:
         ],
     )
 
-    assert is_direct_command_event(event) is False
+    assert is_direct_command_event(event) is True
 
 
 def test_old_group_direct_command_is_rejected(monkeypatch) -> None:

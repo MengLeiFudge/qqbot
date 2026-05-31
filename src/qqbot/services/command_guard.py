@@ -48,10 +48,10 @@ def is_direct_command_event(event) -> bool:
         return True
     if bool(getattr(event, "to_me", False)):
         return True
-    return _message_starts_with_bot_at(event)
+    return _message_contains_bot_at(event)
 
 
-def _message_starts_with_bot_at(event) -> bool:
+def _message_contains_bot_at(event) -> bool:
     self_id = str(getattr(event, "self_id", "") or "").strip()
     if not self_id:
         return False
@@ -66,13 +66,9 @@ def _message_starts_with_bot_at(event) -> bool:
     for segment in message:
         segment_type = getattr(segment, "type", "")
         data = getattr(segment, "data", {}) or {}
-        if segment_type == "text":
-            if str(data.get("text", "")).strip():
-                return False
-            continue
         if segment_type == "at":
-            return str(data.get("qq", "")).strip() == self_id
-        return False
+            if str(data.get("qq", "")).strip() == self_id:
+                return True
     return False
 
 

@@ -132,6 +132,12 @@ DEFAULT_CODEX_PROJECTS: dict[str, CodexProjectBinding] = {
         repo_path="/mnt/d/project/dsp/OrbitalRing-MOD",
         aliases=("星环", "OrbitalRing", "OrbitalRing-MOD", "ProjectOrbitalRing"),
     ),
+    "project_genesis": CodexProjectBinding(
+        project_id="project_genesis",
+        display_name="ProjectGenesis",
+        repo_path="/mnt/d/project/dsp/ProjectGenesis",
+        aliases=("创世", "创世工程", "ProjectGenesis", "Project Genesis", "Genesis"),
+    ),
     "dsp_calc": CodexProjectBinding(
         project_id="dsp_calc",
         display_name="dsp-calc",
@@ -160,6 +166,7 @@ DEFAULT_CODEX_PROJECTS: dict[str, CodexProjectBinding] = {
 DEFAULT_CODEX_GROUPS = {
     "319567534": "mlj_dspmods",
     "1035445959": "orbital_ring",
+    "991895539": "project_genesis",
 }
 
 

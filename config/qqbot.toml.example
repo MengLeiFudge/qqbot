@@ -81,6 +81,11 @@ display_name = "OrbitalRing-MOD"
 repo_path = "/mnt/d/project/dsp/OrbitalRing-MOD"
 aliases = ["星环", "OrbitalRing", "OrbitalRing-MOD", "ProjectOrbitalRing"]
 
+[codex.projects.project_genesis]
+display_name = "ProjectGenesis"
+repo_path = "/mnt/d/project/dsp/ProjectGenesis"
+aliases = ["创世", "创世工程", "ProjectGenesis", "Project Genesis", "Genesis"]
+
 [codex.projects.dsp_calc]
 display_name = "dsp-calc"
 repo_path = "/mnt/d/project/dsp/dsp-calc"
@@ -106,3 +111,6 @@ project = "mlj_dspmods"
 
 [codex.groups."1035445959"]
 project = "orbital_ring"
+
+[codex.groups."991895539"]
+project = "project_genesis"
