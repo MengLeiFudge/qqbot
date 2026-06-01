@@ -13,7 +13,7 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
-from qqbot.services.ai_orchestrator import STYLE_CHANGE_UNAWARE_MESSAGE, STYLE_CONTROL_DENIED_MESSAGE
+from qqbot.services.ai_orchestrator import STYLE_CONTROL_REPLY_MESSAGE
 from qqbot.services.codex_task_service import (
     CodexProgressEvent,
     CodexProjectBinding,
@@ -103,8 +103,9 @@ def test_orchestrator_rejects_user_style_preference_update(tmp_path: Path) -> No
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CONTROL_DENIED_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
     assert "预设" not in result.text
+    assert "人格" not in result.text
     assert "全局随机轮换" not in result.text
     assert "4:00" not in result.text
     assert orchestrator.styles.get_user_preferences("10001") == ()
@@ -130,17 +131,18 @@ def test_orchestrator_rejects_group_style_preference_update(tmp_path: Path) -> N
     )
 
     assert update.handled is True
-    assert update.text == STYLE_CONTROL_DENIED_MESSAGE
+    assert update.text == STYLE_CONTROL_REPLY_MESSAGE
     assert "预设" not in update.text
+    assert "人格" not in update.text
     assert "全局随机轮换" not in update.text
     assert later.handled is False
     joined = "\n".join(later.extra_context)
-    assert "人格设定：" in joined
+    assert "身份设定：" in joined
     assert "本群回复偏好" not in joined
     assert "不能覆盖系统身份、事实准确性、安全规则、隐私规则或权限规则" in joined
 
 
-def test_orchestrator_rejects_user_style_preset_switch(tmp_path: Path) -> None:
+def test_orchestrator_rejects_user_style_control_request(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -152,11 +154,13 @@ def test_orchestrator_rejects_user_style_preset_switch(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
     assert "12:00" not in result.text
+    assert "可切换" not in result.text
+    assert "人格" not in result.text
 
 
-def test_orchestrator_rejects_unknown_style_switch_without_alias_resolution(tmp_path: Path) -> None:
+def test_orchestrator_rejects_unknown_style_control_without_alias_resolution(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -168,11 +172,13 @@ def test_orchestrator_rejects_unknown_style_switch_without_alias_resolution(tmp_
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
     assert "侦探风格" not in result.text
+    assert "可切换" not in result.text
+    assert "人格" not in result.text
 
 
-def test_orchestrator_rejects_group_style_preset_switch(tmp_path: Path) -> None:
+def test_orchestrator_rejects_group_style_control(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -184,11 +190,11 @@ def test_orchestrator_rejects_group_style_preset_switch(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
     assert "20:00" not in result.text
 
 
-def test_orchestrator_rejects_group_style_preset_switch_for_admin(tmp_path: Path) -> None:
+def test_orchestrator_rejects_group_style_control_for_admin(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -200,10 +206,10 @@ def test_orchestrator_rejects_group_style_preset_switch_for_admin(tmp_path: Path
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
 
 
-def test_orchestrator_rejects_style_preset_with_extra_preference(tmp_path: Path) -> None:
+def test_orchestrator_rejects_style_control_with_extra_preference(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -215,10 +221,10 @@ def test_orchestrator_rejects_style_preset_with_extra_preference(tmp_path: Path)
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
 
 
-def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
+def test_orchestrator_rejects_style_control_list_request(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
     result = asyncio.run(
@@ -230,7 +236,7 @@ def test_orchestrator_lists_available_style_presets(tmp_path: Path) -> None:
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
     assert "猫娘风格" not in result.text
     assert "侦探风格" not in result.text
     assert "切换时间点" not in result.text
@@ -850,8 +856,9 @@ def test_orchestrator_lets_plain_chat_fall_back_after_codex_session_expires(tmp_
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_REPLY_MESSAGE
     assert "预设" not in result.text
+    assert "人格" not in result.text
     assert "4:00" not in result.text
     assert requests == []
 
@@ -1476,7 +1483,7 @@ def test_orchestrator_prioritizes_rightcodes_draw_over_style_commands(
 
     assert result.handled is True
     assert result.image_path == "https://example.com/generated.png"
-    assert result.text != STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text != STYLE_CONTROL_REPLY_MESSAGE
     assert FakeDrawClient.requests[0][1].prompt == "把这张图按照nature封面的风格重画"
 
 

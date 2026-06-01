@@ -210,9 +210,12 @@ class FakeVoiceBot:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.next_message_id = 1000
 
-    async def call_api(self, api: str, **data: object) -> None:
+    async def call_api(self, api: str, **data: object) -> dict[str, int]:
         self.calls.append((api, data))
+        self.next_message_id += 1
+        return {"message_id": self.next_message_id}
 
 
 class FakeSummaryBot(FakeVoiceBot):
@@ -234,7 +237,7 @@ class FakeSummaryBot(FakeVoiceBot):
                         "nickname": record.sender_name,
                     },
                 }
-        await super().call_api(api, **data)
+        return await super().call_api(api, **data)
 
 
 class FinishException(Exception):
@@ -966,11 +969,10 @@ def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
-    finish_message = None
     try:
         asyncio.run(
             _handle_ai_locked(
-                FakeSummaryBot(context_store),
+                bot := FakeSummaryBot(context_store),
                 event,
                 settings=settings,
                 store=SettingsStore(tmp_path, author_qq=605738729),
@@ -985,11 +987,11 @@ def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
             )
         )
     except FinishException as exc:
-        finish_message = exc.message
+        assert exc.message is None
 
     assert len(dummy_matcher.sent) == 1
     assert "我来总结一下刚才群友说了什么" in str(dummy_matcher.sent[0])
-    assert "回复延迟" in str(finish_message)
+    assert any("回复延迟" in str(data.get("message", "")) for api, data in bot.calls if api == "send_group_msg")
     assert histories == [()]
     joined = "\n".join(contexts[0])
     assert "快速总结本群近期聊天" in joined
@@ -1231,10 +1233,11 @@ def test_handle_ai_locked_complex_direct_reply_does_not_send_processing_ack(
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
+    bot = FakeVoiceBot()
     try:
         asyncio.run(
             _handle_ai_locked(
-                FakeVoiceBot(),
+                bot,
                 event,
                 settings=settings,
                 store=SettingsStore(tmp_path, author_qq=605738729),
@@ -1250,9 +1253,9 @@ def test_handle_ai_locked_complex_direct_reply_does_not_send_processing_ack(
             )
         )
     except FinishException as exc:
-        dummy_matcher.sent.append(exc.message)
+        assert exc.message is None
 
-    assert [str(message) for message in dummy_matcher.sent] == [
+    assert [str(data["message"]) for api, data in bot.calls if api == "send_group_msg"] == [
         "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] shapez 速通开局先把基础图形线跑稳",
     ]
     records = AiPendingTaskStore(tmp_path).list_records()
@@ -1297,10 +1300,11 @@ def test_handle_ai_locked_complex_direct_fallback_stays_silent_without_ack(
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
+    bot = FakeVoiceBot()
     try:
         asyncio.run(
             _handle_ai_locked(
-                FakeVoiceBot(),
+                bot,
                 event,
                 settings=settings,
                 store=SettingsStore(tmp_path, author_qq=605738729),
@@ -1493,10 +1497,11 @@ def test_handle_ai_locked_proactive_complex_task_does_not_send_processing_ack(
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
+    bot = FakeVoiceBot()
     try:
         asyncio.run(
             _handle_ai_locked(
-                FakeVoiceBot(),
+                bot,
                 event,
                 settings=settings,
                 store=SettingsStore(tmp_path, author_qq=605738729),
@@ -1512,9 +1517,9 @@ def test_handle_ai_locked_proactive_complex_task_does_not_send_processing_ack(
             )
         )
     except FinishException as exc:
-        dummy_matcher.sent.append(exc.message)
+        assert exc.message is None
 
-    assert [str(message) for message in dummy_matcher.sent] == [
+    assert [str(data["message"]) for api, data in bot.calls if api == "send_group_msg"] == [
         "[CQ:reply,id=1398753261][CQ:at,qq=3120618805] shapez 速通开局先把基础图形线跑稳",
     ]
     assert AiPendingTaskStore(tmp_path).list_records() == ()
@@ -1592,10 +1597,9 @@ def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
 
     assert any("语音输出暂时不可用" in part for part in contexts[0])
     assert any("当前没有可用 TTS" in part for part in contexts[0])
-    assert len(dummy_matcher.sent) == 1
-    assert "语音输出暂时不可用" in str(dummy_matcher.sent[0])
-    assert str(finish_message)
-    assert bot.calls == []
+    assert dummy_matcher.sent == []
+    assert any("语音输出暂时不可用" in str(data.get("message", "")) for api, data in bot.calls if api == "send_group_msg")
+    assert finish_message is None
 
 
 def test_ai_output_mode_context_declares_voice_mode() -> None:
@@ -1761,7 +1765,7 @@ def test_ai_system_context_declares_bot_identity() -> None:
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in context
     assert "必须明确回答你是“萌萌棉花糖♪”" in context
     assert "用户问“我是谁”" in context
-    assert "猫娘棉花糖是你的稳定主人格" in context
+    assert "你是猫娘棉花糖" in context
     assert "短、活泼" in context
     assert "不要使用 Markdown" in context
     assert "不要代替对方认错" in context
@@ -1784,10 +1788,10 @@ def test_ai_style_context_uses_single_catgirl_persona_without_overriding_identit
     assert result.handled is False
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in system_context
     assert "用户问“我是谁”" in system_context
-    assert "人格设定：" in style_context
+    assert "身份设定：" in style_context
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in style_context
-    assert "人格设定：猫娘棉花糖" in style_context
-    assert "人格结构：这是一个稳定人格" in style_context
+    assert "身份设定：猫娘棉花糖" in style_context
+    assert "表达特质：" in style_context
     assert "中二爆发" in style_context
     assert "回复风格轮换层" not in style_context
     assert "轮换" not in style_context

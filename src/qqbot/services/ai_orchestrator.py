@@ -62,13 +62,12 @@ class AiOrchestratorResult:
 
 
 @dataclass(frozen=True, slots=True)
-class StylePresetCommand:
+class StyleControlCommand:
     scope: str
     extra_preference: str = ""
 
 
-STYLE_CHANGE_UNAWARE_MESSAGE = "我没有可切换的人格啦，就是现在这个棉花糖喵。"
-STYLE_CONTROL_DENIED_MESSAGE = "人格和固定风格不能在群里改哦，棉花糖会按现在的样子正常说话喵。"
+STYLE_CONTROL_REPLY_MESSAGE = "棉花糖就是棉花糖啦，继续正常聊就好喵。"
 _LOCAL_DOMAIN_TRIGGER_KIND = AiChatTriggerKind.DIRECT
 DOMAIN_CODEX_TIMEOUT_SECONDS = 120
 logger = logging.getLogger(__name__)
@@ -102,7 +101,7 @@ def extract_style_preference(text: str) -> str:
     return preference.strip(" ：:，,。")
 
 
-def parse_style_preset_command(text: str) -> StylePresetCommand | None:
+def parse_style_control_command(text: str) -> StyleControlCommand | None:
     normalized = text.strip()
     if not normalized:
         return None
@@ -119,7 +118,7 @@ def parse_style_preset_command(text: str) -> StylePresetCommand | None:
     extra_preference = parts[1].strip(" ：:，,。") if len(parts) > 1 else ""
     if not style_part:
         return None
-    return StylePresetCommand(scope=scope, extra_preference=extra_preference)
+    return StyleControlCommand(scope=scope, extra_preference=extra_preference)
 
 
 def summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
@@ -276,15 +275,15 @@ class AiOrchestrator:
         if looks_like_style_preference_update(text):
             return AiOrchestratorResult(
                 True,
-                STYLE_CONTROL_DENIED_MESSAGE,
+                STYLE_CONTROL_REPLY_MESSAGE,
                 extra_context=(
                     self.styles.build_context(context.actor_user_id, group_id=context.group_id),
                 ),
             )
-        if parse_style_preset_command(text) is not None:
+        if parse_style_control_command(text) is not None:
             return AiOrchestratorResult(
                 True,
-                STYLE_CHANGE_UNAWARE_MESSAGE,
+                STYLE_CONTROL_REPLY_MESSAGE,
                 extra_context=(
                     self.styles.build_context(context.actor_user_id, group_id=context.group_id),
                 ),
@@ -295,7 +294,7 @@ class AiOrchestrator:
         ):
             return AiOrchestratorResult(
                 True,
-                STYLE_CHANGE_UNAWARE_MESSAGE,
+                STYLE_CONTROL_REPLY_MESSAGE,
                 extra_context=(
                     self.styles.build_context(context.actor_user_id, group_id=context.group_id),
                 ),

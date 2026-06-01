@@ -8,8 +8,11 @@ from qqbot.services.message_delivery import (
     call_collapsible_text_api,
     call_split_text_api,
     finish_split_text,
+    handle_group_message_recall,
     has_waited_group_message_interval,
+    reset_recall_fallback_state,
     reset_group_message_interval_state,
+    split_sentence_message,
     split_text_message,
     wait_for_group_message_interval,
 )
@@ -46,6 +49,17 @@ class FailingForwardBot(FakeBot):
         await super().call_api(api, **data)
 
 
+class TrackingBot(FakeBot):
+    def __init__(self) -> None:
+        super().__init__()
+        self.next_message_id = 1000
+
+    async def call_api(self, api: str, **data: object) -> dict[str, int]:
+        await super().call_api(api, **data)
+        self.next_message_id += 1
+        return {"message_id": self.next_message_id}
+
+
 def test_split_text_message_keeps_short_text_unchanged() -> None:
     assert split_text_message("短消息") == ["短消息"]
 
@@ -59,6 +73,16 @@ def test_split_text_message_splits_long_text_with_part_markers() -> None:
     assert chunks[0].startswith("（1/2）\n")
     assert chunks[1].startswith("（2/2）\n")
     assert all(len(chunk) <= MAX_TEXT_MESSAGE_CHARS for chunk in chunks)
+
+
+def test_split_sentence_message_uses_sentence_boundaries() -> None:
+    assert split_sentence_message("第一句。第二句？第三句！第四句\n第五句") == [
+        "第一句。",
+        "第二句？",
+        "第三句！",
+        "第四句",
+        "第五句",
+    ]
 
 
 def test_finish_split_text_sends_prefix_chunks_before_finish() -> None:
@@ -106,8 +130,8 @@ def test_finish_split_text_keeps_200_chars_as_normal_message() -> None:
 
     asyncio.run(finish_split_text(matcher, message, group_id=10001, bot=bot))
 
-    assert bot.calls == []
-    assert matcher.finished == [message]
+    assert bot.calls == [("send_group_msg", {"group_id": 10001, "message": message})]
+    assert matcher.finished == []
 
 
 def test_call_split_text_api_sends_each_chunk() -> None:
@@ -236,6 +260,123 @@ def test_call_collapsible_text_api_falls_back_to_split_when_forward_fails() -> N
     assert len(bot.calls) >= 2
     assert {api for api, _data in bot.calls} == {"send_group_msg"}
     assert bot.calls[0][1]["message"].startswith("（1/")
+
+
+def test_recalled_collapsible_message_falls_back_to_direct_text() -> None:
+    reset_group_message_interval_state()
+    reset_recall_fallback_state()
+    bot = TrackingBot()
+    message = "长消息。" * 80
+
+    async def run() -> None:
+        await call_collapsible_text_api(
+            bot,
+            "send_group_msg",
+            group_id=10001,
+            message=message,
+        )
+        handled = await handle_group_message_recall(
+            bot,
+            group_id=10001,
+            message_id=1001,
+            user_id=1443944862,
+            self_id=1443944862,
+        )
+        await asyncio.sleep(0.6)
+        assert handled is True
+
+    asyncio.run(run())
+
+    assert bot.calls[0][0] == "send_group_forward_msg"
+    assert bot.calls[1][0] == "send_group_msg"
+    assert "长消息" in bot.calls[1][1]["message"]
+
+
+def test_recalled_direct_message_falls_back_to_sentences() -> None:
+    reset_group_message_interval_state()
+    reset_recall_fallback_state()
+    bot = TrackingBot()
+
+    async def run() -> None:
+        await call_split_text_api(
+            bot,
+            "send_group_msg",
+            group_id=10001,
+            message="第一句。第二句？第三句！",
+        )
+        handled = await handle_group_message_recall(
+            bot,
+            group_id=10001,
+            message_id=1001,
+            user_id=1443944862,
+            self_id=1443944862,
+        )
+        await asyncio.sleep(2)
+        assert handled is True
+
+    asyncio.run(run())
+
+    assert [call[1]["message"] for call in bot.calls[1:]] == [
+        "第一句。",
+        "第二句？",
+        "第三句！",
+    ]
+
+
+def test_recalled_sentence_message_keeps_degrading_when_recalled_again() -> None:
+    reset_group_message_interval_state()
+    reset_recall_fallback_state()
+    bot = TrackingBot()
+    text = "这是一段会被再次撤回的句子，需要继续拆得更碎一点。"
+
+    async def run() -> None:
+        await call_split_text_api(bot, "send_group_msg", group_id=10001, message=text)
+        first = await handle_group_message_recall(
+            bot,
+            group_id=10001,
+            message_id=1001,
+            user_id=1443944862,
+            self_id=1443944862,
+        )
+        await asyncio.sleep(0.6)
+        second = await handle_group_message_recall(
+            bot,
+            group_id=10001,
+            message_id=1002,
+            user_id=1443944862,
+            self_id=1443944862,
+        )
+        await asyncio.sleep(0.6)
+        assert first is True
+        assert second is True
+
+    asyncio.run(run())
+
+    assert bot.calls[0][1]["message"] == text
+    assert bot.calls[1][1]["message"] == text
+    assert len(bot.calls) >= 3
+
+
+def test_recall_after_three_seconds_does_not_fallback() -> None:
+    reset_group_message_interval_state()
+    reset_recall_fallback_state()
+    bot = TrackingBot()
+    async def run() -> None:
+        await call_split_text_api(bot, "send_group_msg", group_id=10001, message="短消息")
+        await asyncio.sleep(3.1)
+        handled = await handle_group_message_recall(
+            bot,
+            group_id=10001,
+            message_id=1001,
+            user_id=1443944862,
+            self_id=1443944862,
+        )
+        await asyncio.sleep(0)
+        assert handled is False
+
+    asyncio.run(run())
+
+    assert len(bot.calls) == 1
 
 
 def test_call_record_api_sends_group_record(tmp_path: Path, monkeypatch) -> None:

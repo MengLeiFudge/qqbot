@@ -23,9 +23,9 @@ def test_user_style_store_ignores_preferences_and_does_not_apply_them_to_persona
 
     assert store.get_preferences("10001") == ()
     context = store.build_context("10001")
-    assert "人格设定：猫娘棉花糖" in context
+    assert "身份设定：猫娘棉花糖" in context
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in context
-    assert "稳定人格是猫娘棉花糖" in context
+    assert "你是猫娘棉花糖" in context
     assert "当前用户回复偏好" not in context
     assert "不要使用 markdown" not in context
     assert "回复短一点" not in context
@@ -37,8 +37,7 @@ def test_style_context_uses_single_catgirl_persona_with_traits(tmp_path: Path) -
     context = store.build_context("10001")
 
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in context
-    assert "人格结构：这是一个稳定人格" in context
-    assert "保留特质：" in context
+    assert "表达特质：" in context
     assert "认真帮忙" in context
     assert "轻量吐槽" in context
     assert "中二爆发" in context
@@ -61,10 +60,10 @@ def test_style_store_ignores_group_and_user_preferences(tmp_path: Path) -> None:
     assert store.get_group_preferences("516286670") == ()
     group_context = store.build_context("10002", group_id="516286670")
     user_context = store.build_context("10001", group_id="516286670")
-    assert "人格设定：猫娘棉花糖" in group_context
+    assert "身份设定：猫娘棉花糖" in group_context
     assert "本群回复偏好" not in group_context
     assert "说话结尾带一个喵" not in group_context
-    assert "人格设定：猫娘棉花糖" in user_context
+    assert "身份设定：猫娘棉花糖" in user_context
     assert "当前用户回复偏好" not in user_context
     assert "回复短一点" not in user_context
 
@@ -84,12 +83,14 @@ def test_style_store_uses_stable_conversation_scope() -> None:
     assert CONVERSATION_SCOPE_ID == "stable"
 
 
-def test_style_store_lists_no_switchable_presets(tmp_path: Path) -> None:
+def test_style_store_returns_neutral_control_reply(tmp_path: Path) -> None:
     store = AiUserStyleStore(tmp_path)
 
     text = store.build_preset_help("10001", group_id="516286670")
 
-    assert text == "我没有可切换的人格啦，就是现在这个棉花糖喵。"
+    assert text == "棉花糖就是棉花糖啦，继续正常聊就好喵。"
+    assert "人格" not in text
+    assert "可切换" not in text
     assert "轮换" not in text
     assert "4:00" not in text
     assert "猫娘风格" not in text
@@ -104,7 +105,7 @@ def test_persona_traits_are_trait_layer_not_independent_roles() -> None:
     assert "喵呜" not in joined_prompts
     assert "橘雪莉" not in joined_prompts
     assert "谜语人风格" not in joined_prompts
-    assert "这是分析习惯，不是侦探人格" in joined_prompts
+    assert "这是分析习惯，不是独立身份" in joined_prompts
     assert "不能称呼用户为固定身份" in joined_prompts
 
 

@@ -1136,6 +1136,7 @@ async def _handle_ai_locked(
             message_id=message_id,
             user_id=user_id,
             quote=quote_first_reply,
+            bot=bot,
         )
         return
 
@@ -1730,6 +1731,7 @@ async def finish_continuous_group_ai_reply(
     message_id: int | str | None,
     user_id: int | str,
     quote: bool = True,
+    bot: Bot | None = None,
 ) -> None:
     parts = split_continuous_ai_reply_text(text)
     messages: list[str | Message] = []
@@ -1748,8 +1750,8 @@ async def finish_continuous_group_ai_reply(
         messages.append(part)
 
     for message in messages[:-1]:
-        await send_split_text(ai_chat_matcher, message, group_id=group_id)
-    await finish_split_text(ai_chat_matcher, messages[-1], group_id=group_id)
+        await send_split_text(ai_chat_matcher, message, group_id=group_id, bot=bot)
+    await finish_split_text(ai_chat_matcher, messages[-1], group_id=group_id, bot=bot)
 
 
 def split_continuous_ai_reply_text(text: str) -> list[str]:
@@ -1800,7 +1802,7 @@ def build_ai_system_context(settings: RuntimeSettings) -> str:
         "只有被评价对象明确是你或萌萌棉花糖时，才用第一人称回应。"
         "用户问“我是谁”、问“你认识我吗”或询问自己的身份时，问题中的“我”指当前发言者，"
         "必须优先根据当前发言者信息和记忆证据回答，不要回答成机器人身份。"
-        "猫娘棉花糖是你的稳定主人格；回复要短、活泼、像群聊里自然接话，合适时句末自然带“喵”，不要每句话都加口癖。"
+        "你是猫娘棉花糖；回复要短、活泼、像群聊里自然接话，合适时句末自然带“喵”，不要每句话都加口癖。"
         "不要使用 Markdown 格式，不要使用标题、列表、加粗、引用、代码块或链接语法。"
         "段落之间不要留空行，需要分段时只使用单个换行。"
         "不要声称自己只是一个通用 AI 助手，也不要编造不能确认的身份信息。"
@@ -1958,7 +1960,7 @@ def build_group_output_strategy_context(
     if group_id is None:
         return ""
     parts = [
-        "群聊输出策略：按猫娘棉花糖主人格自然短答，简短但活泼；不要写宣言式长段，不要为了显得正式而失去语气。"
+        "群聊输出策略：按猫娘棉花糖的当前身份自然短答，简短但活泼；不要写宣言式长段，不要为了显得正式而失去语气。"
         "不要用“它”“这个 bot”称呼自己；需要提到自己时用“我”或“棉花糖”。"
         "不能把其他机器人、其他账号或群友刚发的内容当成自己的输出；"
         "群友追问“怎么还是 markdown 格式”“为什么这么快”“这条信息笨笨的”时，先判断被说的是谁，不是你就不要替对方道歉。"
