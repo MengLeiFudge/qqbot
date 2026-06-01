@@ -9,7 +9,7 @@ import pytest
 
 nonebot.init()
 
-from qqbot.plugins.lifecycle import run_memory_maintenance_loop
+from qqbot.plugins.lifecycle import run_memory_maintenance_loop, run_shapez_file_cleanup_loop
 
 
 class BlockingMemoryMaintenanceService:
@@ -68,4 +68,45 @@ def test_memory_maintenance_loop_does_not_block_event_loop(monkeypatch) -> None:
         with pytest.raises(asyncio.CancelledError):
             await task
 
+    asyncio.run(run())
+
+
+def test_shapez_file_cleanup_loop_runs_daily_scan(monkeypatch) -> None:
+    class FakeShapezCleanupService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_daily_scan(self, bot):
+            self.calls += 1
+            started.set()
+            return {"ran": True}
+
+    async def run() -> None:
+        service = FakeShapezCleanupService()
+        monkeypatch.setattr(
+            "qqbot.plugins.lifecycle.ShapezGroupFileCleanupService",
+            lambda *args, **kwargs: service,
+        )
+        monkeypatch.setattr(
+            "qqbot.plugins.lifecycle.ShapezGroupFileCleanupStore",
+            lambda path: object(),
+        )
+
+        async def fake_sleep(_seconds):
+            await release.wait()
+
+        monkeypatch.setattr("qqbot.plugins.lifecycle.asyncio.sleep", fake_sleep)
+
+        task = asyncio.create_task(run_shapez_file_cleanup_loop(object()))
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        assert service.calls == 1
+
+        release.set()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    started = asyncio.Event()
+    release = asyncio.Event()
     asyncio.run(run())

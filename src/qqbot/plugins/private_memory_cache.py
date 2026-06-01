@@ -21,6 +21,10 @@ from qqbot.services.chat_memory_store import ChatMemoryStore, build_user_actor_i
 from qqbot.services.message_delivery import call_split_text_api
 from qqbot.services.message_normalizer import normalize_onebot_event
 from qqbot.services.offline_message_gate import is_before_onebot_connect
+from qqbot.services.group_file_cleanup_service import (
+    ShapezGroupFileCleanupService,
+    ShapezGroupFileCleanupStore,
+)
 from qqbot.services.settings_store import get_settings_store
 
 OFFLINE_PRIVATE_REPLAY_DELAY_SECONDS = 3.0
@@ -33,6 +37,11 @@ private_memory_cache_matcher = on_message(
     priority=1,
     block=False,
     rule=Rule(lambda event: isinstance(event, PrivateMessageEvent)),
+)
+shapez_file_cleanup_confirmation_matcher = on_message(
+    priority=0,
+    block=True,
+    rule=Rule(lambda event: isinstance(event, PrivateMessageEvent) and is_shapez_file_cleanup_confirmation_event(event)),
 )
 
 
@@ -92,6 +101,33 @@ async def handle_private_memory_cache(bot: Bot, event: PrivateMessageEvent) -> N
     if not isinstance(event, PrivateMessageEvent):
         return
     await handle_private_memory_cache_event(event, bot=bot)
+
+
+@shapez_file_cleanup_confirmation_matcher.handle()
+async def handle_shapez_file_cleanup_confirmation_message(bot: Bot, event: PrivateMessageEvent) -> None:
+    await handle_shapez_file_cleanup_confirmation(event, bot)
+
+
+def is_shapez_file_cleanup_confirmation_event(event: PrivateMessageEvent) -> bool:
+    text = event.get_plaintext().strip()
+    if text not in {"1", "已处理", "处理好了", "清理好了", "确认"}:
+        return False
+    settings = load_settings()
+    state = ShapezGroupFileCleanupStore(settings.data_root / "data" / "shapez_file_cleanup_state.json").load()
+    pending = state.pending.get(event.get_user_id())
+    return pending is not None and pending.status == "pending"
+
+
+async def handle_shapez_file_cleanup_confirmation(event: PrivateMessageEvent, bot: Bot) -> bool:
+    text = event.get_plaintext().strip()
+    if text not in {"1", "已处理", "处理好了", "清理好了", "确认"}:
+        return False
+    settings = load_settings()
+    service = ShapezGroupFileCleanupService(
+        store=ShapezGroupFileCleanupStore(settings.data_root / "data" / "shapez_file_cleanup_state.json"),
+        timezone_name=settings.timezone,
+    )
+    return await service.handle_private_confirmation(bot, user_id=event.get_user_id(), text=text)
 
 
 def schedule_offline_private_ai_replay(
