@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+from subprocess import run as subprocess_run
 import time
 import tomllib
 
@@ -72,6 +73,11 @@ class CodexTaskResult:
     ok: bool
     message: str
     exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    commit_hash: str = ""
+    commit_subject: str = ""
+    commit_body: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -834,6 +840,50 @@ def normalize_local_path(path: str | Path) -> Path:
     return Path(raw)
 
 
+def _read_git_head(repo_path: str | Path) -> str:
+    local_repo = normalize_local_path(repo_path)
+    git_dir = local_repo / ".git"
+    if not git_dir.exists():
+        return ""
+    try:
+        process = subprocess_run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(local_repo),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ""
+    if process.returncode != 0:
+        return ""
+    return process.stdout.strip()
+
+
+def _read_new_git_commit(repo_path: str | Path, *, before_head: str) -> tuple[str, str, str]:
+    local_repo = normalize_local_path(repo_path)
+    current_head = _read_git_head(repo_path)
+    if not current_head or current_head == before_head:
+        return ("", "", "")
+    try:
+        process = subprocess_run(
+            ["git", "show", "-s", "--format=%H%n%s%n%b", "HEAD"],
+            cwd=str(local_repo),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return (current_head, "", "")
+    if process.returncode != 0:
+        return (current_head, "", "")
+    lines = process.stdout.splitlines()
+    commit_hash = lines[0].strip() if lines else current_head
+    subject = lines[1].strip() if len(lines) >= 2 else ""
+    body = "\n".join(lines[2:]).strip() if len(lines) >= 3 else ""
+    return (commit_hash, subject, body)
+
+
 def extract_codex_zip_artifacts(text: str, repo_path: str | Path) -> tuple[Path, ...]:
     repo_wsl = _normalize_wsl_path_for_compare(repo_path)
     artifacts: list[Path] = []
@@ -857,6 +907,7 @@ async def run_codex_task(request: CodexTaskRequest) -> CodexTaskResult:
     if shutil.which("wsl.exe") is None:
         return CodexTaskResult(False, "没有找到 wsl.exe，无法启动本地 Codex。")
 
+    before_head = _read_git_head(request.project.repo_path)
     command = build_codex_exec_command(request.project.repo_path, request.model)
     prompt = build_codex_fix_prompt(request)
     try:
@@ -881,12 +932,31 @@ async def run_codex_task(request: CodexTaskRequest) -> CodexTaskResult:
         await process.wait()
         return CodexTaskResult(False, "Codex 修复任务超时。", exit_code=None)
 
-    stdout = _tail_text(output.stdout)
-    stderr = _tail_text(output.stderr)
+    stdout = output.stdout.strip()
+    stderr = output.stderr.strip()
+    commit = _read_new_git_commit(request.project.repo_path, before_head=before_head)
     if output.returncode == 0:
-        return CodexTaskResult(True, stdout or "Codex 修复任务已结束。", exit_code=0)
-    message = stderr or stdout or "Codex 修复任务失败，但没有输出错误详情。"
-    return CodexTaskResult(False, message, exit_code=output.returncode)
+        return CodexTaskResult(
+            True,
+            _tail_text(stdout) or "Codex 修复任务已结束。",
+            exit_code=0,
+            stdout=stdout,
+            stderr=stderr,
+            commit_hash=commit[0],
+            commit_subject=commit[1],
+            commit_body=commit[2],
+        )
+    message = _tail_text(stderr or stdout) or "Codex 修复任务失败，但没有输出错误详情。"
+    return CodexTaskResult(
+        False,
+        message,
+        exit_code=output.returncode,
+        stdout=stdout,
+        stderr=stderr,
+        commit_hash=commit[0],
+        commit_subject=commit[1],
+        commit_body=commit[2],
+    )
 
 
 async def run_codex_session_turn(request: CodexSessionRequest) -> CodexTaskResult:
@@ -918,12 +988,24 @@ async def run_codex_session_turn(request: CodexSessionRequest) -> CodexTaskResul
         await process.wait()
         return CodexTaskResult(False, "Codex 会话超时。", exit_code=None)
 
-    stdout = _tail_text(output.stdout)
-    stderr = _tail_text(output.stderr)
+    stdout = output.stdout.strip()
+    stderr = output.stderr.strip()
     if output.returncode == 0:
-        return CodexTaskResult(True, stdout or "Codex 已回复。", exit_code=0)
-    message = stderr or stdout or "Codex 会话失败，但没有输出错误详情。"
-    return CodexTaskResult(False, message, exit_code=output.returncode)
+        return CodexTaskResult(
+            True,
+            _tail_text(stdout) or "Codex 已回复。",
+            exit_code=0,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    message = _tail_text(stderr or stdout) or "Codex 会话失败，但没有输出错误详情。"
+    return CodexTaskResult(
+        False,
+        message,
+        exit_code=output.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
 
 
 async def _communicate_with_codex_process(
