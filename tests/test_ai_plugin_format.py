@@ -2008,6 +2008,14 @@ def test_ai_system_context_declares_bot_identity() -> None:
     assert "段落之间不要留空行" in context
 
 
+def test_group_output_strategy_preserves_protocol_context_for_technical_debugging() -> None:
+    context = build_group_output_strategy_context(437320340, decision=None)
+
+    assert "当前消息、引用消息和最近群聊主题" in context
+    assert "NapCat、OneBot、合并消息、forward/node" in context
+    assert "不要只泛泛回答版本低、参数不支持或环境问题" in context
+
+
 def test_ai_style_context_uses_single_catgirl_persona_without_overriding_identity(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path, bot_name="萌萌棉花糖♪")
 
@@ -2729,11 +2737,13 @@ def test_ai_context_includes_author_and_admin_identity_facts(tmp_path: Path) -> 
     )
 
     joined = "\n".join(context)
-    assert "Bot 作者/主人：萌泪酱(605738729)" in joined
+    assert "Bot 作者：萌泪酱(605738729)" in joined
     assert "Bot 管理员列表：萌泪酱(605738729)、棉花糖管理员(10001)" in joined
-    assert "当前发言者身份：Bot 作者/主人" in joined
+    assert "当前发言者身份：Bot 作者" in joined
+    assert "这些信息只用于权限、项目归属和管理边界判断" in joined
+    assert "不要使用或确认“主人”这类归属说法" in joined
     assert "10002" not in joined
-    assert "别人问“萌泪酱是你的什么人”" in joined
+    assert "别人问“萌泪酱是你的什么人”" not in joined
 
 
 def test_ai_context_marks_current_sender_as_bot_admin(tmp_path: Path) -> None:

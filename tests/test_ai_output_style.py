@@ -63,3 +63,23 @@ def test_sanitize_group_ai_reply_strips_chatty_tail_for_group_management() -> No
 
     assert cleaned.startswith("群文件的话先别一键乱删")
     assert "喵" not in cleaned
+
+def test_sanitize_group_ai_reply_collapses_identity_bait_loop() -> None:
+    text = "不许乱认亲啦，棉花糖的作者和主人是萌泪酱喵！"
+
+    cleaned = sanitize_group_ai_reply_text(text, prompt="这是你妈", group_id=746497406)
+
+    assert cleaned == "不乱认亲啦，继续说正事吧喵。"
+    assert "作者" not in cleaned
+    assert "主人" not in cleaned
+    assert "妈妈" not in cleaned
+
+
+def test_sanitize_group_ai_reply_collapses_author_identity_on_parent_bait() -> None:
+    text = "不叫妈妈啦，棉花糖的作者是萌泪酱，最高管理者也是萌泪酱喵。"
+
+    cleaned = sanitize_group_ai_reply_text(text, prompt="[@1443944862] 叫妈妈", group_id=746497406)
+
+    assert cleaned == "不乱认亲啦，继续说正事吧喵。"
+    assert "作者" not in cleaned
+    assert "最高管理者" not in cleaned

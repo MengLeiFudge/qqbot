@@ -122,6 +122,9 @@ def sanitize_group_ai_reply_text(text: str, *, prompt: str = "", group_id: int |
     cleaned = sanitize_ai_output_text(text)
     if not cleaned:
         return ""
+    compact_prompt = re.sub(r"\s+", "", prompt)
+    if _looks_like_identity_bait(compact_prompt, cleaned):
+        return "不乱认亲啦，继续说正事吧喵。"
 
     scene_text = f"{prompt}\n{cleaned}"
     strict_tone = _looks_like_practical_scene(scene_text)
@@ -136,6 +139,24 @@ def sanitize_group_ai_reply_text(text: str, *, prompt: str = "", group_id: int |
             stripped = _strip_chatty_tone(stripped)
         lines.append(stripped)
     return "\n".join(lines).strip()
+
+
+def _looks_like_identity_bait(prompt: str, reply: str) -> bool:
+    compact_reply = re.sub(r"\s+", "", reply)
+    prompt_markers = ("你妈", "妈妈", "叫妈妈", "你没有妈", "这是你妈", "乱认亲")
+    reply_markers = (
+        "作者和主人",
+        "作者/主人",
+        "主人是",
+        "作者是",
+        "最高管理者",
+        "妈妈设定",
+        "没有妈妈",
+        "不许乱认亲",
+    )
+    return any(marker in prompt for marker in prompt_markers) and any(
+        marker in compact_reply for marker in reply_markers
+    )
 
 
 def _looks_like_practical_scene(text: str) -> bool:

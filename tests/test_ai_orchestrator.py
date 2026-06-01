@@ -371,7 +371,7 @@ def test_orchestrator_domain_codex_failure_does_not_fall_back_to_plain_llm(
         return type("Match", (), {"project": project})()
 
     async def fake_codex_runner(request):
-        return CodexTaskResult(False, "Codex 会话超时。", exit_code=None)
+        return CodexTaskResult(False, "never sandbox: read-only reasoning effort: high", exit_code=None)
 
     monkeypatch.setattr(ai_orchestrator_module, "resolve_codex_project_for_text", fake_resolve)
     orchestrator = AiOrchestrator(data_root=tmp_path, codex_session_runner=fake_codex_runner)
@@ -387,6 +387,8 @@ def test_orchestrator_domain_codex_failure_does_not_fall_back_to_plain_llm(
     assert result.handled is True
     assert "只读查询失败" in result.text
     assert "我先不按通用机制乱猜" in result.text
+    assert "never sandbox" not in result.text
+    assert "read-only" not in result.text
 
 
 def test_orchestrator_routes_project_genesis_domain_question_to_readonly_codex(

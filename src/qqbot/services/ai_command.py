@@ -176,6 +176,10 @@ def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = (
         return True
     if looks_like_sensitive_credential_request(compact):
         return True
+    if looks_like_ai_meta_conversation(compact):
+        return False
+    if looks_like_ambiguous_chat_evaluation(compact):
+        return False
 
     question_markers = ("?", "？", "吗", "么", "呢")
     explicit_help_markers = (
@@ -231,11 +235,118 @@ def looks_like_sensitive_credential_request(text: str) -> bool:
     )
     if sum(1 for marker in secret_file_markers if marker in compact) >= 2:
         return True
-    credential_markers = ("credentials", "credential", "auth.json", "token", "apikey", "api_key", "secret")
-    file_request_markers = ("发我", "给我", "要", "看看", "分享", "上传", "贴一下", "内容")
+    if _looks_like_token_usage_context(compact):
+        return False
+    credential_markers = ("credentials", "credential", "auth.json", "apikey", "api_key", "api-key", "secret")
+    token_markers = ("token", "access_token", "refresh_token", "bearertoken")
+    file_request_markers = (
+        "发我",
+        "发一下",
+        "发出来",
+        "给我",
+        "给一下",
+        "分享",
+        "上传",
+        "贴一下",
+        "贴出来",
+        "内容",
+        "配置",
+        "文件",
+    )
+    if any(marker in compact for marker in credential_markers) and any(
+        marker in compact for marker in file_request_markers
+    ):
+        return True
+    token_request_markers = file_request_markers + ("轮换", "泄露", "公开", "撤回")
     return any(marker in compact for marker in credential_markers) and any(
         marker in compact for marker in file_request_markers
+    ) or any(marker in compact for marker in token_markers) and any(
+        marker in compact for marker in token_request_markers
     )
+
+
+def _looks_like_token_usage_context(compact: str) -> bool:
+    if "token" not in compact:
+        return False
+    usage_markers = (
+        "用了",
+        "用掉",
+        "消耗",
+        "额度",
+        "计费",
+        "价格",
+        "够用",
+        "不够",
+        "上下文",
+        "输出",
+        "输入",
+        "模型",
+        "国产模型",
+        "deepseek",
+        "sonnet",
+        "claude",
+        "haiku",
+        "flash",
+        "gpt",
+    )
+    amount_pattern = re.search(r"\d+(?:\.\d+)?(?:亿|万|k|m|千|百)?(?:左右|多)?(?:个)?token", compact)
+    return bool(amount_pattern) or any(marker in compact for marker in usage_markers)
+
+
+def looks_like_ambiguous_chat_evaluation(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.strip())
+    if not compact:
+        return False
+    if len(compact) > 16:
+        return False
+    fuzzy_markers = (
+        "感觉有点怪",
+        "这感觉怪",
+        "有点怪",
+        "有点奇怪",
+        "怪啊",
+        "怪怪的",
+        "不太对劲",
+    )
+    return any(marker in compact for marker in fuzzy_markers)
+
+
+def looks_like_ai_meta_conversation(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.strip().lower())
+    if not compact:
+        return False
+    standalone_meta_markers = (
+        "我问为什么报错",
+        "我问为啥报错",
+        "我问怎么报错",
+        "说不支持",
+        "直接给我降级",
+        "自己改到支持",
+    )
+    if any(marker in compact for marker in standalone_meta_markers):
+        return True
+    ai_markers = ("ai", "gpt", "chatgpt", "claude", "gemini", "deepseek", "豆包", "模型")
+    if not any(marker in compact for marker in ai_markers):
+        return False
+    technical_markers = ("接口", "api", "报错", "错误", "异常", "怎么修", "怎么解决", "修复", "日志")
+    if any(marker in compact for marker in technical_markers):
+        return False
+    ai_meta_markers = (
+        "问ai",
+        "让ai",
+        "ai写",
+        "ai自己",
+        "让gpt",
+        "gpt自己",
+        "问gpt",
+        "模型说",
+        "他说不支持",
+        "说不支持",
+        "直接给我降级",
+        "自己改到支持",
+        "代码是ai",
+    )
+    return any(marker in compact for marker in ai_meta_markers)
 
 
 def looks_like_ai_named_trigger(text: str, *, bot_names: tuple[str, ...] = ()) -> bool:

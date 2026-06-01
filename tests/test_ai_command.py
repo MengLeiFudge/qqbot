@@ -10,6 +10,7 @@ from qqbot.services.ai_command import (
     AiChatTriggerKind,
     build_ai_conversation_key,
     classify_ai_chat_trigger,
+    looks_like_ai_meta_conversation,
     looks_like_ai_proactive_trigger,
     looks_like_ai_named_trigger,
     parse_ai_output_mode_command,
@@ -277,6 +278,41 @@ def test_ai_proactive_trigger_matches_bot_name_or_direct_help() -> None:
     assert looks_like_ai_proactive_trigger("萌萌棉花糖在吗", bot_names=("萌萌棉花糖♪",))
     assert looks_like_ai_proactive_trigger("请问这个怎么修？", bot_names=())
     assert not looks_like_ai_proactive_trigger("我只是普通闲聊", bot_names=())
+
+
+def test_ai_proactive_trigger_ignores_self_review_false_positive_samples() -> None:
+    event = FakeEvent("group", "10001", group_id="20001", to_me=False)
+
+    for prompt in (
+        "怎么分配啊",
+        "怎么儿童节不叫人打游戏",
+        "当儿童去了？",
+        "群文件好像快要爆了",
+        "怎么清理一下",
+    ):
+        assert looks_like_ai_proactive_trigger(prompt, bot_names=()) is False
+        assert classify_ai_chat_trigger(event, prompt) == AiChatTriggerKind.IGNORE
+
+    assert classify_ai_chat_trigger(event, "请问这个怎么修？") == AiChatTriggerKind.PROACTIVE
+    assert classify_ai_chat_trigger(event, "一进沙盒组件都没了怎么办") == AiChatTriggerKind.PROACTIVE
+
+
+def test_ai_proactive_trigger_ignores_third_party_ai_meta_discussion() -> None:
+    event = FakeEvent("group", "10001", group_id="20001", to_me=False)
+
+    for prompt in (
+        "ai写的",
+        "我问为什么报错，说不支持",
+        "那就让ai查呗",
+        "让他自己改到支持",
+        "反正我让gpt自己改的",
+        "直接给我降级",
+    ):
+        assert looks_like_ai_meta_conversation(prompt) is True
+        assert looks_like_ai_proactive_trigger(prompt, bot_names=()) is False
+        assert classify_ai_chat_trigger(event, prompt) == AiChatTriggerKind.IGNORE
+
+    assert classify_ai_chat_trigger(event, "请问 NapCat 合并消息报错怎么修？") == AiChatTriggerKind.PROACTIVE
 
 
 def test_ai_named_trigger_requires_calling_bot() -> None:

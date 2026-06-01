@@ -148,12 +148,7 @@ def strip_codex_session_prefix(text: str) -> str:
 
 
 def build_domain_codex_failure_reply(message: str, project_name: str) -> str:
-    cleaned = " ".join(message.strip().split())
-    if not cleaned:
-        cleaned = "没有返回错误详情"
-    if len(cleaned) > 80:
-        cleaned = cleaned[:79].rstrip() + "…"
-    return f"这题要查 {project_name} 源码/data 才能答准，但本轮只读查询失败了：{cleaned}。我先不按通用机制乱猜喵。"
+    return f"这题要查 {project_name} 源码/data 才能答准，但本轮只读查询失败了。我先不按通用机制乱猜喵。"
 
 
 class AiOrchestrator:
