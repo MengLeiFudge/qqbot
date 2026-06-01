@@ -171,11 +171,15 @@ class AiActionExecutor:
         await self.execute(nested_action)
 
     async def _run_codex_task(self, request: AiActionRequest, project) -> None:
-        await self._send_codex_progress(
-            request,
-            f"已交给本地 Codex：{project.display_name}\n正在启动并读取项目上下文。",
-        )
-        progress_callback = self._build_codex_progress_callback(request, project.display_name)
+        quiet_review_task = request.source == "ai_reply_review"
+        if quiet_review_task:
+            progress_callback = None
+        else:
+            await self._send_codex_progress(
+                request,
+                f"已交给本地 Codex：{project.display_name}\n正在启动并读取项目上下文。",
+            )
+            progress_callback = self._build_codex_progress_callback(request, project.display_name)
         result = await self.codex_runner(
             CodexTaskRequest(
                 project=project,
@@ -189,12 +193,18 @@ class AiActionExecutor:
         if request.codex_task_id.strip():
             CodexTaskStore(self.data_root).record_result(request.codex_task_id, result)
         status = "成功" if result.ok else "失败"
-        message = f"Codex 修复任务{status}：{project.display_name}\n{result.message}"
+        if quiet_review_task:
+            message = _format_ai_reply_review_codex_result(project.display_name, result)
+        else:
+            message = f"Codex 修复任务{status}：{project.display_name}\n{result.message}"
         restart_message = ""
         if result.ok:
             restart_message = self._prepare_self_update_restart(project, request)
             if restart_message:
-                message = f"{message}\n{restart_message}"
+                if quiet_review_task:
+                    message = f"{message}\n已安排 Bot 重启，重连后会回报状态。"
+                else:
+                    message = f"{message}\n{restart_message}"
         if request.target_group_id and request.target_group_id.isdigit():
             await call_collapsible_text_api(
                 self.bot,
@@ -315,3 +325,9 @@ def _summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 1].rstrip() + "…"
+
+
+def _format_ai_reply_review_codex_result(project_name: str, result: CodexTaskResult) -> str:
+    if result.ok:
+        return f"AI 回复自审已自动修复：{project_name}\n{_summarize_codex_progress_message(result.message, limit=120)}"
+    return f"AI 回复自审自动修复失败：{project_name}\n{_summarize_codex_progress_message(result.message, limit=120)}"

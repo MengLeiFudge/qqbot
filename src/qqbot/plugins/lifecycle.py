@@ -7,12 +7,15 @@ from nonebot import get_driver, logger
 from nonebot.adapters.onebot.v11 import Bot
 
 from qqbot.config import load_settings
+from qqbot.services.admin_service import AdminService
 from qqbot.services.arc_alias_service import ArcAliasService
 from qqbot.services.arc_alias_service import load_song_titles
 from qqbot.services.arc_background_service import ArcBackgroundService
 from qqbot.services.arc_constant_service import ArcConstantService
 from qqbot.services.arc_event_service import ArcEventService, _fetch_latest_arc_version
 from qqbot.services.arc_guess_service import ArcGuessService
+from qqbot.services.ai_actions import AiActionExecutor
+from qqbot.services.ai_reply_review_service import run_ai_reply_review_loop
 from qqbot.services.codex_self_update_service import publish_pending_codex_self_update_notices
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.chat_memory_store import ChatMemoryStore
@@ -28,6 +31,7 @@ from qqbot.plugins.private_memory_cache import reset_offline_private_ai_replay_s
 driver = get_driver()
 _ARC_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
 _MEMORY_MAINTENANCE_TASKS: dict[str, asyncio.Task] = {}
+_AI_REPLY_REVIEW_TASKS: dict[str, asyncio.Task] = {}
 
 
 def get_arc_alias_service() -> ArcAliasService:
@@ -91,6 +95,8 @@ async def log_bot_connect(bot: Bot) -> None:
         _ARC_BACKGROUND_TASKS[bot.self_id] = asyncio.create_task(run_arc_background_loop(bot))
     if bot.self_id not in _MEMORY_MAINTENANCE_TASKS:
         _MEMORY_MAINTENANCE_TASKS[bot.self_id] = asyncio.create_task(run_memory_maintenance_loop())
+    if bot.self_id not in _AI_REPLY_REVIEW_TASKS:
+        _AI_REPLY_REVIEW_TASKS[bot.self_id] = asyncio.create_task(run_ai_reply_review_background_loop(bot))
 
 
 @driver.on_bot_disconnect
@@ -102,6 +108,9 @@ async def log_bot_disconnect(bot: Bot) -> None:
     memory_task = _MEMORY_MAINTENANCE_TASKS.pop(bot.self_id, None)
     if memory_task is not None:
         memory_task.cancel()
+    review_task = _AI_REPLY_REVIEW_TASKS.pop(bot.self_id, None)
+    if review_task is not None:
+        review_task.cancel()
 
 
 async def run_arc_background_loop(bot: Bot) -> None:
@@ -139,6 +148,25 @@ async def run_memory_maintenance_loop() -> None:
         raise
     except Exception as exc:
         logger.exception("Memory maintenance loop crashed: {}", exc)
+
+
+async def run_ai_reply_review_background_loop(bot: Bot) -> None:
+    settings = load_settings()
+    executor = AiActionExecutor(
+        bot=bot,
+        data_root=settings.data_root,
+        self_restart_scheduler=lambda: AdminService.from_settings(settings).schedule_restart(),
+    )
+    try:
+        await run_ai_reply_review_loop(
+            settings=settings,
+            action_executor=executor,
+            sleep=asyncio.sleep,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("AI reply review loop crashed: {}", exc)
 
 
 def run_memory_maintenance_once(service: MemoryMaintenanceService) -> None:

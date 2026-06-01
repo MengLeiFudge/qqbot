@@ -70,14 +70,16 @@ def test_group_message_log_store_lists_groups_with_display_names(tmp_path: Path)
                 "group_name": "测试群",
                 "display_name": "测试群（10001）",
                 "messages": [
-                    {
-                        "direction": "incoming",
-                        "user_id": "20001",
-                        "sender_name": "甲",
-                        "text": "你好",
-                        "timestamp": 1,
-                        "message_id": "",
-                    }
+        {
+            "direction": "incoming",
+            "user_id": "20001",
+            "sender_name": "甲",
+            "text": "你好",
+            "timestamp": 1,
+            "message_id": "",
+            "quote_message_id": "",
+            "delivery_mode": "",
+        }
                 ],
             },
             {
@@ -85,14 +87,16 @@ def test_group_message_log_store_lists_groups_with_display_names(tmp_path: Path)
                 "group_name": "",
                 "display_name": "10002",
                 "messages": [
-                    {
-                        "direction": "bot",
-                        "user_id": "30001",
-                        "sender_name": "Bot",
-                        "text": "收到",
-                        "timestamp": 2,
-                        "message_id": "",
-                    }
+        {
+            "direction": "bot",
+            "user_id": "30001",
+            "sender_name": "Bot",
+            "text": "收到",
+            "timestamp": 2,
+            "message_id": "",
+            "quote_message_id": "",
+            "delivery_mode": "",
+        }
                 ],
             },
         ],
@@ -164,6 +168,8 @@ def test_group_message_log_store_recovers_trailing_corrupt_data(tmp_path: Path) 
             "text": "旧消息",
             "timestamp": 1,
             "message_id": "11",
+            "quote_message_id": "",
+            "delivery_mode": "",
         },
         {
             "direction": "incoming",
@@ -172,8 +178,31 @@ def test_group_message_log_store_recovers_trailing_corrupt_data(tmp_path: Path) 
             "text": "新消息",
             "timestamp": 2,
             "message_id": "12",
+            "quote_message_id": "",
+            "delivery_mode": "",
         },
     ]
+
+
+def test_group_message_log_store_records_bot_quote_and_delivery_mode(tmp_path: Path) -> None:
+    store = GroupMessageLogStore(tmp_path / "run")
+
+    store.append_message(
+        group_id=10001,
+        direction="bot",
+        user_id=30001,
+        sender_name="Bot",
+        text="回复",
+        timestamp=1,
+        message_id=12,
+        quote_message_id=11,
+        delivery_mode="direct",
+    )
+
+    record = store.load_messages(10001)[0]
+
+    assert record.quote_message_id == "11"
+    assert record.delivery_mode == "direct"
 
 
 def test_group_message_log_store_removes_group_file(tmp_path: Path) -> None:

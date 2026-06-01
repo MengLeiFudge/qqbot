@@ -14,6 +14,7 @@ from qqbot.plugins.private_memory_cache import handle_private_memory_cache_event
 from qqbot.plugins import private_memory_cache
 from qqbot.config import RuntimeSettings
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
+from qqbot.services.ai_profile_registry import AiProfile
 from qqbot.services.chat_memory_store import ChatMemoryStore
 
 
@@ -290,9 +291,32 @@ def test_offline_private_replay_uses_only_pending_message_ids(tmp_path: Path, mo
         "load_settings",
         lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True, ai_default_profile="default"),
     )
-    monkeypatch.setattr(private_memory_cache, "load_ai_profiles", lambda path: {})
-    monkeypatch.setattr(private_memory_cache, "get_current_ai_profile_name", lambda settings, store, profiles: "default")
-    monkeypatch.setattr(private_memory_cache, "build_ai_gateway", lambda settings, profile: FakeGateway())
+    profiles = {
+        "openrouter-icu": AiProfile(
+            name="openrouter-icu",
+            provider="openai_compatible",
+            base_url="https://openrouter.icu/api/v1",
+            model="gpt-5.5",
+            vision_model="gpt-5.5",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",
+        ),
+        "rightcodes": AiProfile(
+            name="rightcodes",
+            provider="openai_compatible",
+            base_url="https://right.codes/v1",
+            model="gpt-5.5",
+            vision_model="gpt-5.5",
+            api_key_env="QQBOT_AI_KEY_RIGHTCODES",
+        ),
+    }
+    built_profiles: list[str] = []
+    monkeypatch.setattr(private_memory_cache, "load_ai_profiles", lambda path: profiles)
+    monkeypatch.setattr(private_memory_cache, "get_current_ai_profile_name", lambda settings, store, profiles: "rightcodes")
+    monkeypatch.setattr(
+        private_memory_cache,
+        "build_ai_gateway",
+        lambda settings, profile: built_profiles.append(profile) or FakeGateway(),
+    )
 
     bot = FakeBot()
     asyncio.run(private_memory_cache.replay_offline_private_ai_once(bot, "605738729"))
@@ -302,4 +326,5 @@ def test_offline_private_replay_uses_only_pending_message_ids(tmp_path: Path, mo
     assert "本批第二条" in prompts[0]
     assert "更早的历史" not in prompts[0]
     assert "上线后的新消息" not in prompts[0]
+    assert built_profiles == ["openrouter-icu", "rightcodes"]
     assert bot.calls == [("send_private_msg", {"user_id": 605738729, "message": "合并回复"})]

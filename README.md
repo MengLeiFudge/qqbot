@@ -46,7 +46,7 @@
 QQBOT_CONFIG_FILE=./config/qqbot.toml
 QQBOT_ONEBOT_ACCESS_TOKEN=你的 OneBot token
 QQBOT_NAPCAT_QQ=你的机器人 QQ
-QQBOT_AI_KEY_OPENROUTER=你的 OpenAI-compatible API Key
+QQBOT_AI_KEY_OPENROUTER_ICU=你的 OpenRouter ICU API Key
 QQBOT_AI_KEY_RIGHTCODES=你的 RightCodes API Key
 FACTORIO_USERNAME=你的 Factorio 用户名
 FACTORIO_TOKEN=你的 Factorio 官网 token
@@ -57,27 +57,30 @@ AI provider 示例：
 ```toml
 [ai]
 enabled = true
-default_profile = "openrouter"
+default_profile = "openrouter-icu"
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
 bot_name = "QQBot"
 
-[ai.providers.openrouter]
+[ai.providers.openrouter-icu]
 enabled = true
 provider = "openai_compatible"
-base_url = "https://example.com/v1"
-model = "gpt-5.4-mini"
-api_key_env = "QQBOT_AI_KEY_OPENROUTER"
+base_url = "https://openrouter.icu/api/v1"
+model = "gpt-5.5"
+api_key_env = "QQBOT_AI_KEY_OPENROUTER_ICU"
 timeout_seconds = 45
 max_output_tokens = 4096
+
 ```
 
-普通 GPT 文本调用按管理端“AI 模型”里的调用顺序依次尝试。默认顺序推荐 OpenRouter 在前、RightCodes 在后；OpenRouter 无应答、超时或接口错误时，才会继续尝试后面的 provider。只读 Codex 领域查询走本机 Codex CLI 配置，不走普通 AI profile，但同样只返回最终可发群聊的答案。
+普通 GPT 文本调用按管理端“AI 模型”里的调用顺序依次尝试。默认顺序固定为 OpenRouter ICU 优先、RightCodes 第二层、其他 GPT provider 在后；OpenRouter ICU 无应答、超时或接口错误时，才会继续尝试后面的 provider。只读 Codex 领域查询走本机 Codex CLI 配置，不走普通 AI profile，但同样只返回最终可发群聊的答案。
 
 群聊普通 AI 对话不需要每群开关；所有群都会使用保守主动触发判定，只有明确求助、提到机器人、领域问题或上下文适合介入时才进入 AI 回复。普通非 @ 主动介入会先按群缓冲一小段会话，再统一判断是否回复；@ 机器人、点名机器人和生图命令仍会即时处理。主动介入可以回复最近一段群聊整体，并按场景决定是否引用最关键的触发消息；同一轮等待期间积压的后续回复不再继续引用同一条旧消息。复杂问题、数学/推理问题和强领域关联问题会优先保证准确性，但不会先发“我先看看”这类占位消息；如果等待期间群友已经给出一致答案，机器人会引用该答案并短确认，避免重复刷屏。
 
 如果群内机制在机器人发送后 3 秒内撤回了机器人消息，发送层会自动换一种方式重发：折叠消息改为直接文本，直接文本改为分句发送，后续再次被撤回会继续降级处理，直到消息可见或达到保护上限。这个过程不需要 AI 重新生成内容。
+
+机器人会每小时自审最近群聊里的 AI 回复质量，使用 gpt-5.5 high 判断是否存在误介入、错误自我归因、重复引用、领域漏查或回答质量问题。自审认为有问题时，会自动启动 qqbot 自身项目的 Codex 修复任务；修复会产生 Git commit、运行验证并安排 Bot 重启。每次自动修复完成后，会向 Bot 作者私聊一条简短改动摘要。
 
 领域群会优先按对应项目资料和源码回答：`319567534` 对应 MLJ_DSPmods / 万物分馏，`1035445959` 对应 OrbitalRing-MOD / 星环，`991895539` 对应 ProjectGenesis / 创世工程。相关机制、配方、功率、建筑或代码问题不会用通用游戏经验直接回答；命中领域资料问题时会让只读 Codex 在对应项目目录查 README、源码、data、配置和测试等证据，再只把最终答案发回群聊。如果只读查询超时或失败，机器人会说明本轮查询失败，不再落回普通 LLM 按通用经验猜答案。绑定领域群里的普通闲聊不会只因为“怎么、原理、为什么”这类泛疑问词进入源码查询，必须同时命中对应模组术语、领域对象或明确项目别名。
 

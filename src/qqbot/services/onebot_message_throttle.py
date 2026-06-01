@@ -57,6 +57,36 @@ def render_outgoing_group_message(message: object) -> str:
     return "[语音]" if _looks_like_record_cq(text) else text
 
 
+def extract_quote_message_id(message: object) -> str:
+    try:
+        for segment in message:
+            if getattr(segment, "type", "") == "reply":
+                raw_id = getattr(segment, "data", {}).get("id", "")
+                return str(raw_id or "")
+    except TypeError:
+        pass
+    try:
+        normalized = normalize_onebot_message(message)
+    except TypeError:
+        return ""
+    if normalized.reply is None:
+        return ""
+    return str(normalized.reply.message_id or "")
+
+
+def infer_delivery_mode(api: str, message: object) -> str:
+    if api == "send_group_forward_msg":
+        return "collapsible"
+    if getattr(message, "type", "") == "record":
+        return "record"
+    text = render_outgoing_group_message(message)
+    if text == "[语音]" or _looks_like_record_cq(text):
+        return "record"
+    if text.startswith("（") and "）\n" in text[:16]:
+        return "split"
+    return "direct"
+
+
 def record_bot_group_message(
     *,
     store: GroupMessageLogStore,
@@ -67,6 +97,7 @@ def record_bot_group_message(
     message: object,
     timestamp: float,
     result: object,
+    api: str = "send_group_msg",
 ) -> None:
     text = render_outgoing_group_message(message)
     if not text:
@@ -83,6 +114,8 @@ def record_bot_group_message(
         text=text,
         timestamp=timestamp,
         message_id=message_id,
+        quote_message_id=extract_quote_message_id(message),
+        delivery_mode=infer_delivery_mode(api, message),
     )
     if memory_store is not None:
         memory_store.append_message(
@@ -130,6 +163,7 @@ def install_onebot_group_message_throttle() -> None:
                     message=data.get("message", ""),
                     timestamp=time.time(),
                     result=result,
+                    api=api,
                 )
             except Exception:
                 pass

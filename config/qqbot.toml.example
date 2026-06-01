@@ -19,7 +19,7 @@ arcaea_record_java_home = "C:/path/to/jdk"
 
 [ai]
 enabled = false
-default_profile = "openrouter"
+default_profile = "openrouter-icu"
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
@@ -35,6 +35,17 @@ embedding_model = "text-embedding-3-small"
 embedding_api_key_env = "QQBOT_OPENAI_API_KEY"
 embedding_timeout_seconds = 45
 
+[ai.providers.openrouter-icu]
+provider = "openai_compatible"
+base_url = "https://openrouter.icu/api/v1"
+model = "gpt-5.5"
+api_key_env = "QQBOT_AI_KEY_OPENROUTER_ICU"
+timeout_seconds = 45
+max_output_tokens = 4096
+
+[ai.providers.openrouter-icu.extra_body]
+reasoning = { effort = "high" }
+
 [ai.providers.rightcodes-high]
 provider = "openai_compatible"
 base_url = "https://example.com/v1"
@@ -45,18 +56,6 @@ max_output_tokens = 4096
 
 [ai.providers.rightcodes-high.extra_body]
 reasoning = { effort = "high" }
-
-[ai.providers.openrouter]
-provider = "openai_compatible"
-base_url = "https://example.com/v1"
-model = "gpt-5.4-mini"
-api_key_env = "QQBOT_AI_KEY_OPENROUTER"
-timeout_seconds = 25
-max_output_tokens = 768
-
-[ai.providers.openrouter.extra_body]
-reasoning = { effort = "low" }
-service_tier = "fast"
 
 [ai.providers.tokenflux]
 provider = "openai_compatible"

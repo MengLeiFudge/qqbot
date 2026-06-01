@@ -84,7 +84,7 @@
 - 群聊普通消息会先做旁路记录：`group_nick_cache.py` 负责记录群名片、最近群上下文、管理端消息日志和长期群聊记忆。AI 主动介入不再按群开关控制，所有群聊普通消息都经保守触发判定；不符合求助、点名、领域问题或上下文追问的普通闲聊不进入 AI 回复。普通非 @ 主动介入不逐条即时请求 AI，而是按群进入短暂缓冲，安静窗口后批量处理上次处理位置之后的新消息。
 - 群聊显式命令和普通 AI 对话默认必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。RightCodes 生图通过 `ai_command.py` 的关键词白名单进入 AI 链路；AI 主动介入通过全群保守启发式进入 AI 链路，不扩大到其他群聊命令。@ 机器人、点名机器人和生图命令保持即时处理；即时触发会清理同群尚未发送的主动介入缓冲，避免过时回复。
 - AI 入口先生成 `MessageDecision`，区分是否回复、领域、难度、延迟策略和输出格式。需要知识库、联网、代码分析、图片生成、数学/严密推理、超过 800 字输入，或判定为不能一句话回答的问题，可以使用 `ACK_THEN_ASYNC` 作为内部复杂度/延迟策略，但普通 LLM 回复不再先发送“我先看看”这类用户可见占位消息，也不为占位创建 pending task。速度优先，但复杂问题、数学题和强领域关联问题不能为了快牺牲准确性。绑定领域群里的普通闲聊不能只因“怎么/原理/为什么”等泛疑问词进入只读 Codex，必须同时命中对应模组术语、领域对象或明确项目别名。
-- 普通 GPT 文本调用按 `SettingsStore.get_ai_profile_priority()` 返回的顺序构建 fallback 链；默认顺序必须让 OpenRouter 类 profile 在 RightCodes 类 profile 前面。管理端“AI 模型”可以调整并保存该顺序。只要使用普通 GPT profile，应先走 OpenRouter，OpenRouter 超时、无应答或接口错误后才考虑 RightCodes 等后续 provider；不要让单个 current profile 绕过排序。
+- 普通 GPT 文本调用按 `list_ai_profile_fallback_order()` 返回的顺序构建 fallback 链；顺序必须是 OpenRouter ICU profile 优先，RightCodes 类 profile 第二层，其他 GPT provider 在后。不要再配置独立的 `openrouter` profile；OpenRouter ICU 就是 OpenRouter 入口。管理端“AI 模型”可以调整后续 provider 顺序，但不能把 RightCodes 排到 OpenRouter ICU 前面。只要使用普通 GPT profile，应先走 OpenRouter ICU，OpenRouter ICU 超时、无应答或接口错误后才考虑 RightCodes 等后续 provider；不要让单个 current profile 绕过排序。
 - 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。
 - AI 短期会话按会话隔离：私聊使用 `private:<user_id>:<profile>:stable`，群聊使用 `group:<group_id>:<profile>:stable`。群聊是一个整体会话，发言者身份通过消息记录、sender/user_id、长期记忆 actor_id 和群上下文体现，不再用 `group_user:<group_id>:<user_id>` 拆开同一群的短期上下文。
 - 长期记忆检索先生成 `RetrievalPlan`，再按 `space_id`、`actor_id`、`visibility` 和 `forbidden` 边界取证；群聊查询私聊内容时只返回拒绝披露约束，跨群查询只允许当前发言者的公开群聊记忆。
@@ -95,6 +95,7 @@
 - 创世工程群 `991895539` / ProjectGenesis 问题优先让只读 Codex 查 `D:\project\dsp\ProjectGenesis` 源码、README、data、配置和测试等证据后只回最终答案；配方、科技、建筑、机制和产线类问题不能用通用游戏机制或其他模组经验直接回答。该群内“堵了还在生产”这类机制问题也应查源码/data，而不是按通用建筑缓存猜测。
 - AI 回复在群聊中按场景决定是否引用并 @：ack、隔了较久、多人同时聊、回答图片/日志/报错或需要精确指向某个问题时应引用；紧接上一句闲聊或连续补充时不必每条引用。主动介入批处理允许回复最近一段群聊整体，但首条回复优先引用本批中最强触发消息；只是轻量参与或总结时可以不引用。连续短回复通常只在第一条引用，后续不重复引用；如果上一轮 AI 回复等待期间已积压同群后续消息，处理这些后续消息时不要继续引用同一个旧触发消息。长文本走折叠消息。等待期间如果群友已给出一致且完整的答案，机器人应引用该答案短确认；如果答案不全或错误，只补充缺口或纠正错误点，不重复已说过的内容。私聊回复保持普通文本，避免把群聊交互形态带入私聊。
 - 群聊消息发送由 `message_delivery.py` 统一处理撤回降级：机器人消息发送后 3 秒内如果收到自身消息撤回 notice，发送层自动把折叠消息降级为直接文本、直接文本降级为分句发送，后续再次撤回继续递归降级。该机制不让 AI 重新生成内容，不改 prompt，也不暴露给群聊。
+- AI 回复质量由 `ai_reply_review_service.py` 定时自审：每小时读取最近群聊中机器人发送内容和上下文，用 `gpt-5.5 high` 判断是否存在误介入、错误自我归因、重复引用、领域漏查、内部机制泄露或低质量回答。若自审判定有问题，服务可自动启动 qqbot 项目的可写 Codex 修复任务；Codex 必须补测试、验证、提交，并按自我更新流程重启。每次自动修复完成后必须私聊 Bot 作者，简短说明改了什么。
 - 群友质疑机器人为什么插话时，不要解释“主动介入”“全群主动接话”“触发模式”等内部机制；用当前身份第一人称短答并收住，例如承认刚才接话早了。
 - 群友质疑 Markdown、回复风格、模型速度或“为什么这么快”时，必须先判断被质疑对象是谁；如果被质疑的是其他机器人、其他账号或群友刚发的内容，不要替对方道歉、解释或承诺修改。
 - 固定命令、白名单本地动作和普通 LLM 回复分层处理；AI 不直接获得 shell、文件系统、群管、重启、上传文件等自由权限。

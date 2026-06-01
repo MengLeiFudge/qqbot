@@ -1272,10 +1272,19 @@ def build_ai_gateway_chain(settings: RuntimeSettings, profile_order: tuple[str, 
     for profile_name in profile_order:
         if _profile_is_in_cooldown(profile_name):
             continue
-        gateways.append(build_ai_gateway(settings, profile_name))
+        try:
+            gateways.append(build_ai_gateway(settings, profile_name))
+        except ValueError as exc:
+            logger.info("AI profile skipped: profile={}, reason={}", profile_name, exc)
+            continue
     if gateways:
         return tuple(gateways)
-    return tuple(build_ai_gateway(settings, profile_name) for profile_name in profile_order[:1])
+    for profile_name in profile_order[:1]:
+        try:
+            return (build_ai_gateway(settings, profile_name),)
+        except ValueError:
+            return ()
+    return ()
 
 
 async def complete_ai_request_with_profile_fallbacks(

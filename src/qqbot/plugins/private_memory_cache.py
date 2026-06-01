@@ -11,7 +11,11 @@ from qqbot.services.ai_conversation_store import AiConversationStore
 from qqbot.services.ai_gateway import AiRequest
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.ai_profile_registry import load_ai_profiles
-from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
+from qqbot.services.ai_runtime import (
+    build_ai_gateway,
+    get_current_ai_profile_name,
+    list_ai_profile_fallback_order,
+)
 from qqbot.services.ai_user_style_store import AiUserStyleStore
 from qqbot.services.chat_memory_store import ChatMemoryStore, build_user_actor_id
 from qqbot.services.message_delivery import call_split_text_api
@@ -142,6 +146,12 @@ async def replay_offline_private_ai_once(bot: Bot, user_id: str) -> None:
     store = get_settings_store()
     profiles = load_ai_profiles(settings.ai_profile_file)
     profile = get_current_ai_profile_name(settings, store, profiles)
+    profile_order = list_ai_profile_fallback_order(
+        settings,
+        store,
+        profiles,
+        preferred_profile=profile,
+    )
     memory_store = ChatMemoryStore(settings.data_root)
     message_ids = tuple(_OFFLINE_PRIVATE_PENDING_MESSAGE_IDS.pop(user_id, ()))
     if not message_ids:
@@ -171,22 +181,30 @@ async def replay_offline_private_ai_once(bot: Bot, user_id: str) -> None:
     )
     conversation_scope = AiUserStyleStore.conversation_scope_id()
     key = conversation_store.private_key(user_id, profile, conversation_scope)
-    gateway = build_ai_gateway(settings, profile)
-    response = await gateway.complete(
-        AiRequest(
-            plugin_id="ai",
-            capability="chat",
-            prompt=prompt,
-            user_id=user_id,
-            context=build_ai_context(
-                settings,
-                fake_event,
-                AiGroupContextStore(settings.data_root),
-                normalized,
-                settings_store=store,
-            ),
-            history=conversation_store.load_messages(key),
-        )
+    from qqbot.plugins.ai_test import complete_ai_request_with_profile_fallbacks
+
+    request = AiRequest(
+        plugin_id="ai",
+        capability="chat",
+        prompt=prompt,
+        user_id=user_id,
+        context=build_ai_context(
+            settings,
+            fake_event,
+            AiGroupContextStore(settings.data_root),
+            normalized,
+            settings_store=store,
+        ),
+        history=conversation_store.load_messages(key),
+    )
+    gateways = _build_offline_private_gateway_chain(settings, profile_order)
+    response = await complete_ai_request_with_profile_fallbacks(
+        gateways,
+        request,
+        pending_task_id="offline_private_replay",
+        group_id=None,
+        user_id=user_id,
+        message_id=message_ids[-1] if message_ids else "",
     )
     if not response.fallback:
         conversation_store.append_turn(key, prompt, response.text)
@@ -194,8 +212,22 @@ async def replay_offline_private_ai_once(bot: Bot, user_id: str) -> None:
         bot,
         "send_private_msg",
         user_id=int(user_id) if str(user_id).isdigit() else user_id,
-        message=format_ai_response(profile, response, show_metrics=settings.ai_show_metrics),
+        message=format_ai_response(response.profile_name or profile, response, show_metrics=settings.ai_show_metrics),
     )
+
+
+def _build_offline_private_gateway_chain(
+    settings,
+    profile_order: tuple[str, ...],
+) -> tuple[object, ...]:
+    gateways: list[object] = []
+    for profile_name in profile_order:
+        try:
+            gateways.append(build_ai_gateway(settings, profile_name))
+        except ValueError as exc:
+            logger.info("Offline private AI profile skipped: profile={}, reason={}", profile_name, exc)
+            continue
+    return tuple(gateways)
 
 
 def build_offline_private_replay_prompt(records) -> str:

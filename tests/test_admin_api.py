@@ -1026,7 +1026,7 @@ def test_ai_api_updates_profile_priority(tmp_path: Path) -> None:
     assert status_code == 200
     payload = json.loads(body)
     assert payload["current_profile"] == "xiaomi"
-    assert payload["fallback_order"] == ["xiaomi", "hicode"]
+    assert payload["fallback_order"] == ["hicode", "xiaomi"]
 
 
 def test_ai_api_rejects_unknown_provider(tmp_path: Path) -> None:

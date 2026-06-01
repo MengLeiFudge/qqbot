@@ -285,7 +285,7 @@ def test_format_ai_response_hides_metrics_by_default() -> None:
 def test_format_ai_response_removes_repeated_short_tail() -> None:
     response = AiResponse(text="如果只是个梗，可以说大学生更敢看百合，但不能当成普遍规律。律。")
 
-    assert format_ai_response("openrouter", response) == (
+    assert format_ai_response("openrouter-icu", response) == (
         "如果只是个梗，可以说大学生更敢看百合，但不能当成普遍规律。"
     )
 
@@ -945,16 +945,16 @@ def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
-        "openrouter": AiProfile(
-            name="openrouter",
+        "openrouter-icu": AiProfile(
+            name="openrouter-icu",
             provider="openai_compatible",
             base_url="https://example.com/v1",
             model="gpt-5.4-mini",
             vision_model="gpt-5.4-mini",
-            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",
         )
     })
-    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter-icu")
     monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
     monkeypatch.setattr(
         "qqbot.plugins.ai_test.build_long_term_memory_context",
@@ -965,7 +965,7 @@ def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
     settings = RuntimeSettings(
         data_root=tmp_path,
         ai_enabled=True,
-        ai_default_profile="openrouter",
+        ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
@@ -1094,7 +1094,7 @@ def test_complete_ai_request_tries_next_profile_after_retryable_fallback(
         complete_ai_request_with_profile_fallbacks(
             (
                 FakeGateway(
-                    "openrouter",
+                    "openrouter-icu",
                     AiResponse(
                         "坏了",
                         fallback=True,
@@ -1105,10 +1105,10 @@ def test_complete_ai_request_tries_next_profile_after_retryable_fallback(
                                 timeout_seconds=12.0,
                                 result="client_error",
                                 total_seconds=1.0,
-                                profile_name="openrouter",
+                                profile_name="openrouter-icu",
                             ),
                         ),
-                        profile_name="openrouter",
+                        profile_name="openrouter-icu",
                     ),
                 ),
                 FakeGateway(
@@ -1139,11 +1139,11 @@ def test_complete_ai_request_tries_next_profile_after_retryable_fallback(
     assert response.fallback is False
     assert response.text == "好了"
     assert response.profile_name == "routin"
-    assert calls == ["openrouter", "routin"]
-    assert [attempt.profile_name for attempt in response.attempts] == ["openrouter", "routin"]
+    assert calls == ["openrouter-icu", "routin"]
+    assert [attempt.profile_name for attempt in response.attempts] == ["openrouter-icu", "routin"]
 
 
-def test_ai_profile_order_defaults_to_openrouter_before_rightcodes(tmp_path: Path) -> None:
+def test_ai_profile_order_defaults_to_openrouter_icu_before_rightcodes(tmp_path: Path) -> None:
     profiles = {
         "rightcodes": AiProfile(
             name="rightcodes",
@@ -1153,13 +1153,13 @@ def test_ai_profile_order_defaults_to_openrouter_before_rightcodes(tmp_path: Pat
             vision_model="gpt-5.5",
             api_key_env="QQBOT_AI_KEY_RIGHTCODES",
         ),
-        "openrouter": AiProfile(
-            name="openrouter",
+        "openrouter-icu": AiProfile(
+            name="openrouter-icu",
             provider="openai_compatible",
-            base_url="https://rehdasu.cn/v1",
-            model="gpt-5.4-mini",
-            vision_model="gpt-5.4-mini",
-            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+            base_url="https://openrouter.icu/api/v1",
+            model="gpt-5.5",
+            vision_model="gpt-5.5",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",
         ),
     }
 
@@ -1170,7 +1170,7 @@ def test_ai_profile_order_defaults_to_openrouter_before_rightcodes(tmp_path: Pat
         preferred_profile="rightcodes",
     )
 
-    assert order == ("openrouter", "rightcodes")
+    assert order == ("openrouter-icu", "rightcodes")
 
 
 def test_build_ai_gateway_chain_skips_failed_profile_cooldown(tmp_path: Path, monkeypatch) -> None:
@@ -1185,14 +1185,37 @@ def test_build_ai_gateway_chain_skips_failed_profile_cooldown(tmp_path: Path, mo
     monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", fake_build_gateway)
     monkeypatch.setitem(
         ai_test_module._AI_PROFILE_FAILURE_UNTIL,
-        "openrouter",
+        "openrouter-icu",
         time.monotonic() + 60,
     )
 
-    chain = build_ai_gateway_chain(RuntimeSettings(data_root=tmp_path), ("openrouter", "routin"))
+    chain = build_ai_gateway_chain(RuntimeSettings(data_root=tmp_path), ("openrouter-icu", "routin"))
 
     assert len(chain) == 1
     assert built == ["routin"]
+
+
+def test_build_ai_gateway_chain_skips_unconfigured_profile(tmp_path: Path, monkeypatch) -> None:
+    built: list[str] = []
+    import qqbot.plugins.ai_test as ai_test_module
+
+    ai_test_module._AI_PROFILE_FAILURE_UNTIL.clear()
+
+    def fake_build_gateway(settings, profile_name):
+        built.append(profile_name)
+        if profile_name == "openrouter-icu":
+            raise ValueError("缺少 AI profile 密钥环境变量：QQBOT_AI_KEY_OPENROUTER_ICU")
+        return object()
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", fake_build_gateway)
+
+    chain = build_ai_gateway_chain(
+        RuntimeSettings(data_root=tmp_path),
+        ("openrouter-icu", "rightcodes"),
+    )
+
+    assert len(chain) == 1
+    assert built == ["openrouter-icu", "rightcodes"]
 
 
 def test_handle_ai_locked_complex_direct_reply_does_not_send_processing_ack(
@@ -1208,16 +1231,16 @@ def test_handle_ai_locked_complex_direct_reply_does_not_send_processing_ack(
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
-        "openrouter": AiProfile(
-            name="openrouter",
+        "openrouter-icu": AiProfile(
+            name="openrouter-icu",
             provider="openai_compatible",
             base_url="https://example.com/v1",
             model="gpt-5.4-mini",
             vision_model="gpt-5.4-mini",
-            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",
         )
     })
-    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter-icu")
     monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
 
     event = FakeGroupEvent(
@@ -1229,7 +1252,7 @@ def test_handle_ai_locked_complex_direct_reply_does_not_send_processing_ack(
     settings = RuntimeSettings(
         data_root=tmp_path,
         ai_enabled=True,
-        ai_default_profile="openrouter",
+        ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
@@ -1275,16 +1298,16 @@ def test_handle_ai_locked_complex_direct_fallback_stays_silent_without_ack(
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
-        "openrouter": AiProfile(
-            name="openrouter",
+        "openrouter-icu": AiProfile(
+            name="openrouter-icu",
             provider="openai_compatible",
             base_url="https://example.com/v1",
             model="gpt-5.4-mini",
             vision_model="gpt-5.4-mini",
-            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",
         )
     })
-    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter-icu")
     monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
 
     event = FakeGroupEvent(
@@ -1296,7 +1319,7 @@ def test_handle_ai_locked_complex_direct_fallback_stays_silent_without_ack(
     settings = RuntimeSettings(
         data_root=tmp_path,
         ai_enabled=True,
-        ai_default_profile="openrouter",
+        ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
@@ -1417,23 +1440,23 @@ def test_handle_ai_locked_keeps_group_fallback_silent_without_ack(
     monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher", dummy_matcher)
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
-        "openrouter": AiProfile(
-            name="openrouter",
+        "openrouter-icu": AiProfile(
+            name="openrouter-icu",
             provider="openai_compatible",
             base_url="https://example.com/v1",
             model="gpt-5.4-mini",
             vision_model="gpt-5.4-mini",
-            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",
         )
     })
-    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter-icu")
     monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
 
     event = FakeGroupEvent(text="你好", message_id=23456, group_id=516286670, user_id="605738729")
     settings = RuntimeSettings(
         data_root=tmp_path,
         ai_enabled=True,
-        ai_default_profile="openrouter",
+        ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 
@@ -1472,16 +1495,16 @@ def test_handle_ai_locked_proactive_complex_task_does_not_send_processing_ack(
     monkeypatch.setattr("qqbot.plugins.ai_test._BOT_LOOP_GUARD.record_trigger", lambda *args: "ok")
     monkeypatch.setattr("qqbot.plugins.ai_test.record_private_chat_memory", lambda *args: None)
     monkeypatch.setattr("qqbot.plugins.ai_test.load_ai_profiles", lambda path: {
-        "openrouter": AiProfile(
-            name="openrouter",
+        "openrouter-icu": AiProfile(
+            name="openrouter-icu",
             provider="openai_compatible",
             base_url="https://example.com/v1",
             model="gpt-5.4-mini",
             vision_model="gpt-5.4-mini",
-            api_key_env="QQBOT_AI_KEY_OPENROUTER",
+            api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",
         )
     })
-    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter")
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_current_ai_profile_name", lambda *args: "openrouter-icu")
     monkeypatch.setattr("qqbot.plugins.ai_test.build_ai_gateway", lambda settings, profile: FakeGateway())
 
     event = FakeGroupEvent(
@@ -1493,7 +1516,7 @@ def test_handle_ai_locked_proactive_complex_task_does_not_send_processing_ack(
     settings = RuntimeSettings(
         data_root=tmp_path,
         ai_enabled=True,
-        ai_default_profile="openrouter",
+        ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
 

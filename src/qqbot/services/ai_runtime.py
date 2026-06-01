@@ -14,7 +14,7 @@ from qqbot.services.openai_compatible_client import OpenAICompatibleClient
 from qqbot.services.settings_store import SettingsStore
 
 
-OPENROUTER_PROFILE_HINTS = ("openrouter", "rehdasu")
+OPENROUTER_ICU_PROFILE_HINTS = ("openrouter-icu", "openrouter_icu", "openrouter icu", "icu")
 RIGHTCODES_PROFILE_HINTS = ("rightcodes", "right.codes")
 
 
@@ -65,22 +65,41 @@ def list_ai_profile_fallback_order(
     for profile in enabled:
         if profile.name not in ordered:
             ordered.append(profile.name)
-    return tuple(ordered)
+    return _sort_profile_names_by_provider_priority(ordered, profiles)
 
 
 def _default_ai_profile_priority(enabled: list[AiProfile]) -> tuple[str, ...]:
     return tuple(profile.name for profile in sorted(enabled, key=_profile_priority_key))
 
 
-def _profile_priority_key(profile: AiProfile) -> tuple[int, str]:
+def _profile_priority_key(profile: AiProfile) -> tuple[int, int, str]:
+    provider_key = _profile_provider_priority_key(profile)
+    return (provider_key[0], provider_key[1], profile.name)
+
+
+def _sort_profile_names_by_provider_priority(
+    names: list[str],
+    profiles: dict[str, AiProfile],
+) -> tuple[str, ...]:
+    indexed_names = list(enumerate(dict.fromkeys(names)))
+    return tuple(
+        name
+        for _index, name in sorted(
+            indexed_names,
+            key=lambda item: (*_profile_provider_priority_key(profiles[item[1]]), item[0]),
+        )
+    )
+
+
+def _profile_provider_priority_key(profile: AiProfile) -> tuple[int, int]:
     haystack = f"{profile.name} {profile.base_url}".lower()
-    if _contains_any(haystack, OPENROUTER_PROFILE_HINTS):
-        return (0, profile.name)
+    if _contains_any(haystack, OPENROUTER_ICU_PROFILE_HINTS):
+        return (0, 0)
     if _contains_any(haystack, RIGHTCODES_PROFILE_HINTS):
-        return (1, profile.name)
+        return (1, 0)
     if profile.model.lower().startswith("gpt-"):
-        return (2, profile.name)
-    return (3, profile.name)
+        return (2, 0)
+    return (3, 0)
 
 
 def _contains_any(text: str, hints: tuple[str, ...]) -> bool:

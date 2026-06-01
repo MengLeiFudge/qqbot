@@ -15,6 +15,8 @@ from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.onebot_message_throttle import (
     extract_group_message_group_id,
+    extract_quote_message_id,
+    infer_delivery_mode,
     record_bot_group_message,
     render_outgoing_group_message,
 )
@@ -59,6 +61,14 @@ def test_record_bot_group_message_persists_successful_group_send(tmp_path: Path)
 def test_render_outgoing_group_message_normalizes_record_segment() -> None:
     assert render_outgoing_group_message(MessageSegment.record("file:///D:/x.wav")) == "[语音]"
     assert render_outgoing_group_message("[CQ:record,file=file:///D:/x.wav]") == "[语音]"
+
+
+def test_extract_quote_and_delivery_mode_from_outgoing_message() -> None:
+    message = MessageSegment.reply(1234) + MessageSegment.at(5678) + MessageSegment.text(" 回复")
+
+    assert extract_quote_message_id(message) == "1234"
+    assert infer_delivery_mode("send_group_msg", message) == "direct"
+    assert infer_delivery_mode("send_group_forward_msg", "") == "collapsible"
 
 
 def test_record_bot_group_message_persists_ai_context(tmp_path: Path) -> None:

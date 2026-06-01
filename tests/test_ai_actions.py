@@ -335,6 +335,60 @@ def test_qqbot_codex_task_schedules_self_restart_after_group_report(tmp_path: Pa
     assert "1163635014" in notices.read_text(encoding="utf-8")
 
 
+def test_ai_reply_review_codex_task_sends_only_short_private_result(tmp_path: Path) -> None:
+    bot = FakeBot()
+    tasks = []
+    restart_calls = []
+
+    def task_factory(coro):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
+
+    async def fake_runner(request):
+        assert request.progress_callback is None
+        return CodexTaskResult(True, "修复：收紧主动介入；验证：pytest 已通过。", exit_code=0)
+
+    async def run() -> None:
+        executor = AiActionExecutor(
+            bot=bot,
+            data_root=tmp_path,
+            sleep=lambda _seconds: asyncio.sleep(0),
+            task_factory=task_factory,
+            codex_runner=fake_runner,
+            self_restart_scheduler=lambda: restart_calls.append("restart"),
+        )
+        result = await executor.execute(
+            AiActionRequest(
+                action_type="run_codex_task",
+                actor_user_id="605738729",
+                codex_project_id="qqbot",
+                codex_prompt="修一下机器人",
+                is_admin=True,
+                source="ai_reply_review",
+            )
+        )
+        assert result.ok is True
+        await asyncio.gather(*tasks)
+
+    asyncio.run(run())
+
+    assert restart_calls == ["restart"]
+    assert bot.calls == [
+        (
+            "send_private_msg",
+            {
+                "user_id": 605738729,
+                "message": (
+                    "AI 回复自审已自动修复：qqbot\n"
+                    "修复：收紧主动介入；验证：pytest 已通过。\n"
+                    "已安排 Bot 重启，重连后会回报状态。"
+                ),
+            },
+        )
+    ]
+
+
 def test_send_group_file_uploads_existing_file_for_admin(tmp_path: Path) -> None:
     bot = FakeBot()
     package = tmp_path / "ModZips" / "FractionateEverything_2.3.0.zip"

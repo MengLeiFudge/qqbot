@@ -19,6 +19,8 @@ class GroupMessageLogRecord:
     text: str
     timestamp: int
     message_id: str = ""
+    quote_message_id: str = ""
+    delivery_mode: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -28,6 +30,8 @@ class GroupMessageLogRecord:
             "text": self.text,
             "timestamp": self.timestamp,
             "message_id": self.message_id,
+            "quote_message_id": self.quote_message_id,
+            "delivery_mode": self.delivery_mode,
         }
 
 
@@ -48,6 +52,8 @@ class GroupMessageLogStore:
         text: str,
         timestamp: int | float,
         message_id: int | str | None = None,
+        quote_message_id: int | str | None = None,
+        delivery_mode: str = "",
     ) -> None:
         normalized_text = sanitize_ai_output_text(text) if direction == "bot" else text.strip()
         if not normalized_text:
@@ -65,6 +71,8 @@ class GroupMessageLogStore:
                     text=normalized_text,
                     timestamp=int(timestamp),
                     message_id=str(message_id or ""),
+                    quote_message_id=str(quote_message_id or ""),
+                    delivery_mode=str(delivery_mode or "").strip(),
                 )
             )
             self._write_messages(group_id, records[-self.max_messages :])
@@ -98,6 +106,8 @@ class GroupMessageLogStore:
                     text=text,
                     timestamp=int(raw.get("timestamp", 0)),
                     message_id=str(raw.get("message_id", "") or ""),
+                    quote_message_id=str(raw.get("quote_message_id", "") or ""),
+                    delivery_mode=str(raw.get("delivery_mode", "") or ""),
                 )
             )
 
