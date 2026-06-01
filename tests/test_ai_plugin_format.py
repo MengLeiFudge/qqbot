@@ -1231,7 +1231,7 @@ def test_complete_ai_request_tries_next_profile_after_retryable_fallback(
     assert [attempt.profile_name for attempt in response.attempts] == ["openrouter-icu", "routin"]
 
 
-def test_ai_profile_order_defaults_to_openrouter_icu_before_rightcodes(tmp_path: Path) -> None:
+def test_ai_profile_order_defaults_to_openrouter_icu_then_codex_everywhere_then_rightcodes(tmp_path: Path) -> None:
     profiles = {
         "rightcodes": AiProfile(
             name="rightcodes",
@@ -1240,6 +1240,14 @@ def test_ai_profile_order_defaults_to_openrouter_icu_before_rightcodes(tmp_path:
             model="gpt-5.5",
             vision_model="gpt-5.5",
             api_key_env="QQBOT_AI_KEY_RIGHTCODES",
+        ),
+        "codex-everywhere": AiProfile(
+            name="codex-everywhere",
+            provider="openai_compatible",
+            base_url="https://codex-everywhere.com/v1",
+            model="gpt-5.5",
+            vision_model="gpt-5.5",
+            api_key_env="QQBOT_AI_KEY_CODEX_EVERYWHERE",
         ),
         "openrouter-icu": AiProfile(
             name="openrouter-icu",
@@ -1258,7 +1266,7 @@ def test_ai_profile_order_defaults_to_openrouter_icu_before_rightcodes(tmp_path:
         preferred_profile="rightcodes",
     )
 
-    assert order == ("openrouter-icu", "rightcodes")
+    assert order == ("openrouter-icu", "codex-everywhere", "rightcodes")
 
 
 def test_build_ai_gateway_chain_skips_failed_profile_cooldown(tmp_path: Path, monkeypatch) -> None:

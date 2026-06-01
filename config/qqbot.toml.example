@@ -46,6 +46,17 @@ max_output_tokens = 4096
 [ai.providers.openrouter-icu.extra_body]
 reasoning = { effort = "high" }
 
+[ai.providers.codex-everywhere]
+provider = "openai_compatible"
+base_url = "https://codex-everywhere.com/v1"
+model = "gpt-5.5"
+api_key_env = "QQBOT_AI_KEY_CODEX_EVERYWHERE"
+timeout_seconds = 45
+max_output_tokens = 4096
+
+[ai.providers.codex-everywhere.extra_body]
+reasoning = { effort = "high" }
+
 [ai.providers.rightcodes-high]
 provider = "openai_compatible"
 base_url = "https://example.com/v1"

@@ -158,6 +158,8 @@ def test_example_uses_openrouter_icu_as_default_profile() -> None:
     assert load_ai_default_profile_name(profile_file) == "openrouter-icu"
     assert extra_body is not None
     assert extra_body["reasoning"] == {"effort": "high"}
+    assert profiles["codex-everywhere"].base_url == "https://codex-everywhere.com/v1"
+    assert profiles["codex-everywhere"].api_key_env == "QQBOT_AI_KEY_CODEX_EVERYWHERE"
     assert "openrouter" not in profiles
 
 

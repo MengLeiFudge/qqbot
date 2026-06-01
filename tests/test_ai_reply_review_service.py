@@ -238,7 +238,7 @@ enabled = true
     assert "把别人机器人输出当成自己" in codex_request.codex_prompt
 
 
-def test_reply_review_service_falls_back_from_openrouter_icu_to_rightcodes(tmp_path: Path) -> None:
+def test_reply_review_service_falls_back_from_openrouter_icu_to_codex_everywhere_then_rightcodes(tmp_path: Path) -> None:
     store = GroupMessageLogStore(tmp_path / "run")
     store.append_message(
         group_id=10001,
@@ -259,6 +259,13 @@ model = "gpt-5.5"
 api_key_env = "sk-dummy"
 enabled = true
 
+[ai.providers.codex-everywhere]
+provider = "openai_compatible"
+base_url = "https://codex-everywhere.com/v1"
+model = "gpt-5.5"
+api_key_env = "sk-dummy"
+enabled = true
+
 [ai.providers.rightcodes]
 provider = "openai_compatible"
 base_url = "https://right.codes/v1"
@@ -268,14 +275,17 @@ enabled = true
 """.strip(),
         encoding="utf-8",
     )
-    fallback_gateway = FallbackGateway()
+    openrouter_gateway = FallbackGateway()
+    codex_everywhere_gateway = FallbackGateway()
     success_gateway = FakeGateway('{"has_issue":false,"summary":"无问题","issues":[]}')
     built_profiles = []
 
     def gateway_factory(settings, profile):
         built_profiles.append(profile)
         if profile == "openrouter-icu":
-            return fallback_gateway
+            return openrouter_gateway
+        if profile == "codex-everywhere":
+            return codex_everywhere_gateway
         return success_gateway
 
     service = AiReplyReviewService(
@@ -287,8 +297,9 @@ enabled = true
 
     assert asyncio.run(service.run_once()) is False
 
-    assert built_profiles == ["openrouter-icu", "rightcodes"]
-    assert fallback_gateway.requests
+    assert built_profiles == ["openrouter-icu", "codex-everywhere", "rightcodes"]
+    assert openrouter_gateway.requests
+    assert codex_everywhere_gateway.requests
     assert success_gateway.requests
 
 

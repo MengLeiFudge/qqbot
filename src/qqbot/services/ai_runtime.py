@@ -15,6 +15,12 @@ from qqbot.services.settings_store import SettingsStore
 
 
 OPENROUTER_ICU_PROFILE_HINTS = ("openrouter-icu", "openrouter_icu", "openrouter icu", "icu")
+CODEX_EVERYWHERE_PROFILE_HINTS = (
+    "codex-everywhere",
+    "codex_everywhere",
+    "codex everywhere",
+    "codex-everywhere.com",
+)
 RIGHTCODES_PROFILE_HINTS = ("rightcodes", "right.codes")
 
 
@@ -95,11 +101,13 @@ def _profile_provider_priority_key(profile: AiProfile) -> tuple[int, int]:
     haystack = f"{profile.name} {profile.base_url}".lower()
     if _contains_any(haystack, OPENROUTER_ICU_PROFILE_HINTS):
         return (0, 0)
-    if _contains_any(haystack, RIGHTCODES_PROFILE_HINTS):
+    if _contains_any(haystack, CODEX_EVERYWHERE_PROFILE_HINTS):
         return (1, 0)
-    if profile.model.lower().startswith("gpt-"):
+    if _contains_any(haystack, RIGHTCODES_PROFILE_HINTS):
         return (2, 0)
-    return (3, 0)
+    if profile.model.lower().startswith("gpt-"):
+        return (3, 0)
+    return (4, 0)
 
 
 def _contains_any(text: str, hints: tuple[str, ...]) -> bool:
