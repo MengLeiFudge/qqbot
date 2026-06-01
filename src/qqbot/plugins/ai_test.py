@@ -18,6 +18,7 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_command import (
     AiChatTriggerKind,
     classify_ai_chat_trigger,
+    looks_like_ai_meta_conversation,
     looks_like_sensitive_credential_request,
     parse_ai_output_mode_command,
     build_ai_conversation_key,
@@ -102,6 +103,15 @@ AI_ACK_FALLBACK_MAX_ATTEMPTS = 3
 AI_RECENT_ANSWER_LOOKBACK_SECONDS = 180
 AI_RECENT_ANSWER_MAX_RECORDS = 8
 AI_PROFILE_FALLBACK_COOLDOWN_SECONDS = 120.0
+LOW_INFORMATION_REPLY_OPENERS = {
+    "哦哦",
+    "哦哦原来是这样",
+    "哦哦原来是这个",
+    "原来是这样",
+    "原来是这个",
+    "明白了",
+    "懂了",
+}
 _BOT_LOOP_GUARD = BotLoopGuard()
 _AI_PROFILE_FAILURE_UNTIL: dict[str, float] = {}
 
@@ -203,6 +213,15 @@ class AiProactiveBufferManager:
         items = self._buffers.pop(scope, [])
         self._tasks.pop(scope, None)
         if not items:
+            return None
+        if should_silence_proactive_batch(items):
+            logger.info(
+                "Silence proactive AI batch: scope={}, count={}, group_id={}, first_message_id={}",
+                scope,
+                len(items),
+                items[0].group_id,
+                items[0].message_id,
+            )
             return None
         requests = tuple(build_proactive_buffer_queued_request(item) for item in items)
         return AiQueuedBatch(scope=scope, items=requests)
@@ -733,6 +752,40 @@ def build_proactive_buffer_queued_request(item: AiProactiveBufferItem) -> AiQueu
         force_voice_response=False,
         quote_first_reply=True,
     )
+
+
+def should_silence_proactive_batch(items: tuple[AiProactiveBufferItem, ...] | list[AiProactiveBufferItem]) -> bool:
+    if not items:
+        return False
+    if any(looks_like_sensitive_credential_request(item.prompt) for item in items):
+        return False
+    prompts = [item.prompt.strip() for item in items if item.prompt.strip()]
+    if not prompts:
+        return False
+    if len(prompts) == 1 and not looks_like_ai_meta_conversation(prompts[0]):
+        return False
+
+    user_ids = {str(item.user_id) for item in items if str(item.user_id)}
+    combined = "\n".join(prompts)
+    if _looks_like_human_handled_ai_debug_thread(combined, user_count=len(user_ids)):
+        return True
+    return False
+
+
+def _looks_like_human_handled_ai_debug_thread(text: str, *, user_count: int) -> bool:
+    compact = re.sub(r"\s+", "", text.strip().lower())
+    if not compact:
+        return False
+    ai_markers = ("ai", "gpt", "chatgpt", "claude", "gemini", "deepseek", "模型")
+    debug_markers = ("报错", "错误", "异常", "不支持", "降级", "接口", "代码", "实现")
+    handoff_markers = ("让ai", "让gpt", "ai写", "gpt自己", "自己改", "我问", "他说", "直接给我降级")
+    if not any(marker in compact for marker in ai_markers):
+        return False
+    if not any(marker in compact for marker in debug_markers):
+        return False
+    if any(marker in compact for marker in handoff_markers):
+        return True
+    return user_count >= 2 and any(looks_like_ai_meta_conversation(prompt) for prompt in text.splitlines())
 
 
 def _merge_trigger_kind(kinds) -> AiChatTriggerKind:
@@ -1866,6 +1919,7 @@ def calculate_continuous_reply_delay_seconds(text: str) -> float:
 def split_continuous_ai_reply_text(text: str) -> list[str]:
     normalized = "\n".join(part.strip() for part in str(text).splitlines() if part.strip())
     parts = _split_chatty_reply_sentences(normalized)
+    parts = _drop_low_information_reply_opener(parts)
     if len(parts) > 5:
         return [normalized]
     return parts or [normalized]
@@ -1926,6 +1980,15 @@ def _append_chatty_part(parts: list[str], buffer: list[str]) -> None:
     if part:
         parts.append(part)
     buffer.clear()
+
+
+def _drop_low_information_reply_opener(parts: list[str]) -> list[str]:
+    if len(parts) <= 1:
+        return parts
+    first = re.sub(r"[，,。.!！?？~～\s]+", "", parts[0]).strip()
+    if first in LOW_INFORMATION_REPLY_OPENERS:
+        return parts[1:]
+    return parts
 
 
 def build_ai_system_context(settings: RuntimeSettings) -> str:

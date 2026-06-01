@@ -44,6 +44,7 @@ from qqbot.plugins.ai_test import (
     should_include_nickname_usage_context,
     should_suppress_group_ai_fallback,
     should_retry_ack_task_fallback,
+    should_silence_proactive_batch,
     should_drop_queued_ai_request,
     should_use_recent_group_summary_flow,
     format_ai_response,
@@ -791,6 +792,25 @@ def test_proactive_buffer_manager_pops_group_batch() -> None:
     assert [item.prompt for item in batch.items] == ["请问这个怎么修？", "补充一下，日志里有 timeout"]
     assert all(item.trigger_kind == AiChatTriggerKind.PROACTIVE for item in batch.items)
     assert manager.pop("group:516286670") is None
+
+
+def test_proactive_buffer_manager_silences_human_handled_ai_debug_thread() -> None:
+    manager = AiProactiveBufferManager(quiet_seconds=10.0, max_seconds=30.0)
+    items = [
+        make_proactive_buffer_item("我问为什么报错，说不支持", message_id=31),
+        make_proactive_buffer_item("让他自己改到支持", message_id=32),
+        make_proactive_buffer_item("反正我让gpt自己改的", message_id=33),
+        make_proactive_buffer_item("直接给我降级", message_id=34),
+    ]
+    manager._buffers["group:437320340"] = items
+
+    assert manager.pop("group:437320340") is None
+
+
+def test_should_silence_proactive_batch_keeps_single_unanswered_help() -> None:
+    items = [make_proactive_buffer_item("请问 OneBot 卡片消息报错怎么修？", message_id=41)]
+
+    assert should_silence_proactive_batch(items) is False
 
 
 def test_build_proactive_buffer_request_keeps_original_anchor() -> None:
@@ -1891,6 +1911,19 @@ def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> Non
     assert 1 < len(parts)
     assert parts[0].startswith("先看现象")
     assert "最后" in "".join(parts)
+
+
+def test_split_continuous_ai_reply_text_drops_low_information_opener() -> None:
+    parts = split_continuous_ai_reply_text(
+        "哦哦，原来是这个。"
+        "只说报错和不支持还判断不了具体原因。"
+        "你把完整报错文字、相关代码片段和库版本发出来。"
+    )
+
+    assert parts == [
+        "只说报错和不支持还判断不了具体原因",
+        "你把完整报错文字、相关代码片段和库版本发出来",
+    ]
 
 
 def test_calculate_continuous_reply_delay_uses_six_chars_per_second() -> None:

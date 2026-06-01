@@ -303,16 +303,40 @@ def test_ai_proactive_trigger_ignores_third_party_ai_meta_discussion() -> None:
     for prompt in (
         "ai写的",
         "我问为什么报错，说不支持",
+        "对啊",
         "那就让ai查呗",
         "让他自己改到支持",
+        "实现我也没问",
         "反正我让gpt自己改的",
         "直接给我降级",
+        "这些接口肯定都有",
     ):
-        assert looks_like_ai_meta_conversation(prompt) is True
         assert looks_like_ai_proactive_trigger(prompt, bot_names=()) is False
         assert classify_ai_chat_trigger(event, prompt) == AiChatTriggerKind.IGNORE
 
     assert classify_ai_chat_trigger(event, "请问 NapCat 合并消息报错怎么修？") == AiChatTriggerKind.PROACTIVE
+
+
+def test_ai_proactive_trigger_ignores_self_review_evidence_sequence() -> None:
+    event = FakeEvent("group", "10001", group_id="437320340", to_me=False)
+
+    prompts = (
+        "ai写的",
+        "但是报错",
+        "我问为什么报错，说不支持",
+        "让他自己改到支持",
+        "实现我也没问",
+        "反正我让gpt自己改的",
+        "直接给我降级",
+        "这些接口肯定都有",
+    )
+
+    assert looks_like_ai_meta_conversation("我问为什么报错，说不支持") is True
+    for prompt in prompts:
+        assert looks_like_ai_proactive_trigger(prompt, bot_names=()) is False
+        assert classify_ai_chat_trigger(event, prompt) == AiChatTriggerKind.IGNORE
+
+    assert classify_ai_chat_trigger(event, "请问 OneBot 卡片消息报错怎么修？") == AiChatTriggerKind.PROACTIVE
 
 
 def test_ai_named_trigger_requires_calling_bot() -> None:
