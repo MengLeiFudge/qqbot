@@ -2,6 +2,7 @@ from pathlib import Path
 import asyncio
 import json
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -15,6 +16,7 @@ from qqbot.services.ai_reply_review_service import (
     AiReplyReviewService,
     build_auto_fix_prompt,
     parse_review_result,
+    run_ai_reply_review_loop,
 )
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 
@@ -36,6 +38,15 @@ class FallbackGateway:
     async def complete(self, request):
         self.requests.append(request)
         return AiResponse("timeout", fallback=True, fallback_reason="timeout")
+
+
+class ClientErrorGateway:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def complete(self, request):
+        self.requests.append(request)
+        return AiResponse("失败", fallback=True, fallback_reason="client_error")
 
 
 class FakeExecutor:
@@ -195,14 +206,14 @@ def test_reply_review_service_starts_codex_and_private_notice_on_issue(tmp_path:
 provider = "openai_compatible"
 base_url = "https://rehdasu.cn/v1"
 model = "gpt-5.5"
-api_key_env = "dummy"
+api_key_env = "sk-dummy"
 enabled = true
 
 [ai.providers.rightcodes]
 provider = "openai_compatible"
 base_url = "https://right.codes/v1"
 model = "gpt-5.5"
-api_key_env = "dummy"
+api_key_env = "sk-dummy"
 enabled = true
 """.strip(),
         encoding="utf-8",
@@ -245,14 +256,14 @@ def test_reply_review_service_falls_back_from_openrouter_icu_to_rightcodes(tmp_p
 provider = "openai_compatible"
 base_url = "https://rehdasu.cn/v1"
 model = "gpt-5.5"
-api_key_env = "dummy"
+api_key_env = "sk-dummy"
 enabled = true
 
 [ai.providers.rightcodes]
 provider = "openai_compatible"
 base_url = "https://right.codes/v1"
 model = "gpt-5.5"
-api_key_env = "dummy"
+api_key_env = "sk-dummy"
 enabled = true
 """.strip(),
         encoding="utf-8",
@@ -279,3 +290,115 @@ enabled = true
     assert built_profiles == ["openrouter-icu", "rightcodes"]
     assert fallback_gateway.requests
     assert success_gateway.requests
+
+
+def test_reply_review_service_retries_all_profiles_after_client_error(tmp_path: Path) -> None:
+    store = GroupMessageLogStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        direction="bot",
+        user_id=30001,
+        sender_name="Bot",
+        text="正常回复",
+        timestamp=1900,
+        message_id=12,
+    )
+    profile_file = tmp_path / "profiles.toml"
+    profile_file.write_text(
+        """
+[ai.providers.openrouter-icu]
+provider = "openai_compatible"
+base_url = "https://rehdasu.cn/v1"
+model = "gpt-5.5"
+api_key_env = "sk-dummy"
+enabled = true
+
+[ai.providers.rightcodes]
+provider = "openai_compatible"
+base_url = "https://right.codes/v1"
+model = "gpt-5.5"
+api_key_env = "sk-dummy"
+enabled = true
+""".strip(),
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+    sleeps: list[float] = []
+    success_gateway = FakeGateway('{"has_issue":false,"summary":"重试成功","issues":[]}')
+
+    def gateway_factory(settings, profile):
+        calls.append(profile)
+        if len(calls) <= 2:
+            return ClientErrorGateway()
+        return success_gateway
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    service = AiReplyReviewService(
+        settings=RuntimeSettings(data_root=tmp_path / "run", ai_profile_file=profile_file),
+        action_executor=FakeExecutor(),  # type: ignore[arg-type]
+        gateway_factory=gateway_factory,
+        now=lambda: 2000,
+        sleep=sleep,
+        review_attempt_rounds=2,
+        review_attempt_retry_seconds=3,
+    )
+
+    assert asyncio.run(service.run_once()) is False
+
+    assert calls == ["openrouter-icu", "rightcodes", "openrouter-icu"]
+    assert sleeps == [3]
+    assert service.last_run_failed is False
+    review_records = (tmp_path / "run" / "ai" / "review_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+    assert '"summary": "重试成功"' in review_records[-1]
+
+
+def test_reply_review_loop_uses_short_delay_after_review_failure(tmp_path: Path) -> None:
+    store = GroupMessageLogStore(tmp_path / "run")
+    store.append_message(
+        group_id=10001,
+        direction="bot",
+        user_id=30001,
+        sender_name="Bot",
+        text="正常回复",
+        timestamp=int(time.time()),
+        message_id=12,
+    )
+    profile_file = tmp_path / "profiles.toml"
+    profile_file.write_text(
+        """
+[ai.providers.openrouter-icu]
+provider = "openai_compatible"
+base_url = "https://rehdasu.cn/v1"
+model = "gpt-5.5"
+api_key_env = "sk-dummy"
+enabled = true
+""".strip(),
+        encoding="utf-8",
+    )
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+        if len(sleeps) >= 3:
+            raise asyncio.CancelledError
+
+    async def run_loop() -> None:
+        await run_ai_reply_review_loop(
+            settings=RuntimeSettings(data_root=tmp_path / "run", ai_profile_file=profile_file),
+            action_executor=FakeExecutor(),  # type: ignore[arg-type]
+            interval_seconds=60,
+            failure_retry_interval_seconds=7,
+            sleep=sleep,
+            gateway_factory=lambda settings, profile: ClientErrorGateway(),
+        )
+
+    try:
+        asyncio.run(run_loop())
+    except asyncio.CancelledError:
+        pass
+
+    assert sleeps == [15, 15, 7]
+    state = json.loads((tmp_path / "run" / "ai" / "reply_review_state.json").read_text(encoding="utf-8"))[-1]
+    assert state["last_summary"] == "自审失败：client_error，已重试 3 轮"

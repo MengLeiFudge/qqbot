@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import json
@@ -22,6 +23,9 @@ from qqbot.services.settings_store import SettingsStore
 
 DEFAULT_REVIEW_INTERVAL_SECONDS = 60 * 60
 DEFAULT_REVIEW_WINDOW_SECONDS = 60 * 60
+DEFAULT_REVIEW_FAILURE_RETRY_SECONDS = 5 * 60
+DEFAULT_REVIEW_ATTEMPT_ROUNDS = 3
+DEFAULT_REVIEW_ATTEMPT_RETRY_SECONDS = 15
 REVIEW_STATE_FILE = "ai/reply_review_state.json"
 REVIEW_CANDIDATES_FILE = "ai/review_candidates.jsonl"
 
@@ -41,6 +45,7 @@ class AiReplyReviewResult:
     has_issue: bool
     summary: str
     issues: tuple[AiReplyReviewIssue, ...] = ()
+    review_failed: bool = False
 
 
 class AiReplyReviewService:
@@ -53,6 +58,9 @@ class AiReplyReviewService:
         actor_user_id: str = "",
         now: Callable[[], float] = time.time,
         gateway_factory: Callable[[RuntimeSettings, str], Any] = build_ai_gateway,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        review_attempt_rounds: int = DEFAULT_REVIEW_ATTEMPT_ROUNDS,
+        review_attempt_retry_seconds: float = DEFAULT_REVIEW_ATTEMPT_RETRY_SECONDS,
     ) -> None:
         self.settings = settings
         self.action_executor = action_executor
@@ -60,9 +68,14 @@ class AiReplyReviewService:
         self.actor_user_id = actor_user_id.strip() or str(settings.author_qq)
         self.now = now
         self.gateway_factory = gateway_factory
+        self.sleep = sleep
+        self.review_attempt_rounds = max(1, int(review_attempt_rounds))
+        self.review_attempt_retry_seconds = max(0.0, float(review_attempt_retry_seconds))
         self.data_root = Path(settings.data_root)
+        self.last_run_failed = False
 
     async def run_once(self, *, window_seconds: int = DEFAULT_REVIEW_WINDOW_SECONDS) -> bool:
+        self.last_run_failed = False
         state = self._load_state()
         if bool(state.get("running", False)):
             return False
@@ -80,11 +93,13 @@ class AiReplyReviewService:
             state["last_checked_at"] = int(self.now())
             state["last_summary"] = result.summary
             self._write_state({**state, "running": False})
+            self.last_run_failed = result.review_failed
             if not result.has_issue:
                 return False
             await self._start_auto_fix(result, groups=groups, since=since)
             return True
         except Exception as exc:
+            self.last_run_failed = True
             self._write_state(
                 {
                     **state,
@@ -117,26 +132,35 @@ class AiReplyReviewService:
         since: int,
     ) -> AiReplyReviewResult:
         last_response: AiResponse | None = None
-        for profile_name in self._resolve_review_profiles():
-            try:
-                gateway = self.gateway_factory(self.settings, profile_name)
-            except ValueError:
-                continue
-            response: AiResponse = await gateway.complete(
-                AiRequest(
-                    plugin_id="ai",
-                    capability="chat",
-                    prompt="请审查最近 QQ 群里机器人回复是否存在介入、引用、身份判断或回答质量问题。",
-                    user_id=self.actor_user_id,
-                    context=(build_review_prompt(groups, since=since),),
+        profile_names = self._resolve_review_profiles()
+        for round_index in range(self.review_attempt_rounds):
+            for profile_name in profile_names:
+                try:
+                    gateway = self.gateway_factory(self.settings, profile_name)
+                except ValueError:
+                    continue
+                response: AiResponse = await gateway.complete(
+                    AiRequest(
+                        plugin_id="ai",
+                        capability="chat",
+                        prompt="请审查最近 QQ 群里机器人回复是否存在介入、引用、身份判断或回答质量问题。",
+                        user_id=self.actor_user_id,
+                        context=(build_review_prompt(groups, since=since),),
+                    )
                 )
-            )
-            if not response.fallback:
-                return parse_review_result(response.text)
-            last_response = response
+                if not response.fallback:
+                    return parse_review_result(response.text)
+                last_response = response
+            if round_index + 1 < self.review_attempt_rounds and self.review_attempt_retry_seconds > 0:
+                await self.sleep(self.review_attempt_retry_seconds)
         return AiReplyReviewResult(
             False,
-            f"自审失败：{last_response.fallback_reason or last_response.text if last_response else 'no_profile'}",
+            (
+                "自审失败："
+                f"{last_response.fallback_reason or last_response.text if last_response else 'no_profile'}"
+                f"，已重试 {self.review_attempt_rounds} 轮"
+            ),
+            review_failed=True,
         )
 
     async def _start_auto_fix(
@@ -215,12 +239,20 @@ async def run_ai_reply_review_loop(
     settings: RuntimeSettings,
     action_executor: AiActionExecutor,
     interval_seconds: int = DEFAULT_REVIEW_INTERVAL_SECONDS,
+    failure_retry_interval_seconds: int = DEFAULT_REVIEW_FAILURE_RETRY_SECONDS,
     sleep: Callable[[float], Awaitable[None]],
+    gateway_factory: Callable[[RuntimeSettings, str], Any] = build_ai_gateway,
 ) -> None:
-    service = AiReplyReviewService(settings=settings, action_executor=action_executor)
+    service = AiReplyReviewService(
+        settings=settings,
+        action_executor=action_executor,
+        sleep=sleep,
+        gateway_factory=gateway_factory,
+    )
     while True:
         await service.run_once()
-        await sleep(interval_seconds)
+        delay = failure_retry_interval_seconds if service.last_run_failed else interval_seconds
+        await sleep(delay)
 
 
 def build_review_prompt(groups: list[dict[str, object]], *, since: int) -> str:
@@ -312,6 +344,7 @@ def _review_result_payload(result: AiReplyReviewResult) -> dict[str, object]:
     return {
         "has_issue": result.has_issue,
         "summary": result.summary,
+        "review_failed": result.review_failed,
         "issues": [
             {
                 "issue_type": issue.issue_type,
