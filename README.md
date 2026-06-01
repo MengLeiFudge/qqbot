@@ -162,7 +162,7 @@ http://127.0.0.1:8080/admin
 - `开群色图` / `关群色图` / `开图片显示` / `关图片显示`
 - `来点色图` / `美图 凯露 10`
 - `arctj10.5` / `zm` / `开*` / `10骨折光` / `猜 骨折光` / `arcqh` / `jx` / `archd` / `xz`
-- `Factorio下载链接` / `异星下载链接`：获取 Factorio: Space Age Windows 安装包临时链接
+- `Factorio下载链接` / `异星下载链接`：提示从 Factorio 官网账号下载页获取 Space Age Windows 安装包，不在群里转发带时效签名的直链
 - `i CrRgSbWy` / `view CrRgSbWy` / `chart CrRgSbWy`
 - `养鲲` / `属性` / `等级排行` / `财富排行` / `背包` / `商城` / `签到` / `boss` / `挑战`
 - `注册樱花勇者` / `个人信息` / `加经验500` / `加5力量` / `恢复`

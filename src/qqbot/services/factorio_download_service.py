@@ -133,10 +133,15 @@ def build_factorio_download_url(version: str, credentials: FactorioCredentials) 
 
 
 def render_factorio_download_link_message(link: FactorioDownloadLink) -> str:
+    return render_factorio_download_safety_message(link.version)
+
+
+def render_factorio_download_safety_message(version: str | None = None) -> str:
+    version_text = f"当前稳定版是 {version}。" if version else ""
     return (
-        f"Factorio: Space Age Windows 安装包下载链接（{link.version}）：\n"
-        f"{link.url}\n"
-        "链接有时效性，失效后请重新发送下载链接指令。"
+        "Factorio: Space Age Windows 安装包请从 Factorio 官网账号下载页获取。"
+        f"{version_text}"
+        "棉花糖不在群里转发带时效签名的安装包直链。"
     )
 
 

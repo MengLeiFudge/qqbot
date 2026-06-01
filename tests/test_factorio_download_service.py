@@ -106,12 +106,13 @@ def test_fetch_space_age_windows_link_requires_stable_expansion_version() -> Non
         service.fetch_space_age_windows_link()
 
 
-def test_render_factorio_download_link_message_mentions_temporary_link() -> None:
+def test_render_factorio_download_link_message_avoids_group_direct_link() -> None:
     message = render_factorio_download_link_message(
         FactorioDownloadLink(version="2.0.76", url="https://cdn.example/f.exe")
     )
 
     assert "Factorio: Space Age Windows" in message
     assert "2.0.76" in message
-    assert "https://cdn.example/f.exe" in message
-    assert "失效后请重新发送" in message
+    assert "官网账号下载页" in message
+    assert "https://cdn.example/f.exe" not in message
+    assert "失效后请重新发送" not in message

@@ -77,7 +77,7 @@ def test_build_feature_menu_text_returns_factorio_commands() -> None:
 
     assert menu_text is not None
     assert "Factorio 功能菜单" in menu_text
-    assert "Factorio: Space Age Windows" in menu_text
+    assert "官网账号下载页" in menu_text
 
 
 def test_build_feature_menu_text_returns_kun_commands() -> None:
