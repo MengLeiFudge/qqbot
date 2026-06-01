@@ -171,7 +171,7 @@ def test_reply_review_service_starts_codex_and_private_notice_on_issue(tmp_path:
         """
 [ai.providers.openrouter-icu]
 provider = "openai_compatible"
-base_url = "https://openrouter.icu/api/v1"
+base_url = "https://rehdasu.cn/v1"
 model = "gpt-5.5"
 api_key_env = "dummy"
 enabled = true
@@ -221,7 +221,7 @@ def test_reply_review_service_falls_back_from_openrouter_icu_to_rightcodes(tmp_p
         """
 [ai.providers.openrouter-icu]
 provider = "openai_compatible"
-base_url = "https://openrouter.icu/api/v1"
+base_url = "https://rehdasu.cn/v1"
 model = "gpt-5.5"
 api_key_env = "dummy"
 enabled = true

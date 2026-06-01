@@ -1156,7 +1156,7 @@ def test_ai_profile_order_defaults_to_openrouter_icu_before_rightcodes(tmp_path:
         "openrouter-icu": AiProfile(
             name="openrouter-icu",
             provider="openai_compatible",
-            base_url="https://openrouter.icu/api/v1",
+            base_url="https://rehdasu.cn/v1",
             model="gpt-5.5",
             vision_model="gpt-5.5",
             api_key_env="QQBOT_AI_KEY_OPENROUTER_ICU",

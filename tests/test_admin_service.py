@@ -146,7 +146,7 @@ api_key_env = "QQBOT_AI_KEY_RIGHTCODES"
 
 [ai.providers.openrouter-icu]
 provider = "openai_compatible"
-base_url = "https://openrouter.icu/api/v1"
+base_url = "https://rehdasu.cn/v1"
 model = "gpt-5.5"
 api_key_env = "QQBOT_AI_KEY_OPENROUTER_ICU"
 """.strip(),
