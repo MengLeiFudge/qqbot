@@ -174,9 +174,11 @@ def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = (
     compact = re.sub(r"\s+", "", normalized)
     if looks_like_ai_named_trigger(compact, bot_names=bot_names):
         return True
+    if looks_like_sensitive_credential_request(compact):
+        return True
 
     question_markers = ("?", "？", "吗", "么", "呢")
-    help_markers = (
+    explicit_help_markers = (
         "有人知道",
         "有谁知道",
         "谁知道",
@@ -185,16 +187,55 @@ def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = (
         "问一下",
         "能不能帮",
         "帮我看",
-        "怎么",
-        "为什么",
-        "咋",
     )
-    if any(marker in compact for marker in help_markers) and (
+    diagnostic_markers = (
+        "怎么修",
+        "怎么解决",
+        "怎么处理",
+        "怎么排查",
+        "怎么弄",
+        "怎么搞",
+        "怎么办",
+        "为啥报错",
+        "为什么报错",
+        "咋修",
+        "咋解决",
+        "咋处理",
+        "咋排查",
+        "咋办",
+    )
+    if any(marker in compact for marker in explicit_help_markers) and (
         any(marker in compact for marker in question_markers)
         or len(compact) >= 8
     ):
         return True
+    if any(marker in compact for marker in diagnostic_markers):
+        return True
     return False
+
+
+def looks_like_sensitive_credential_request(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.strip().lower())
+    if not compact:
+        return False
+    secret_file_markers = (
+        ".claude/.credentials.json",
+        ".claude.json",
+        ".codex/auth.json",
+        ".codex/settings.toml",
+        ".openclaw/openclaw.json",
+        ".hermes/config.yaml",
+        ".kube/config",
+        ".config/opencode/opencode.json",
+        "kubeconfig",
+    )
+    if sum(1 for marker in secret_file_markers if marker in compact) >= 2:
+        return True
+    credential_markers = ("credentials", "credential", "auth.json", "token", "apikey", "api_key", "secret")
+    file_request_markers = ("发我", "给我", "要", "看看", "分享", "上传", "贴一下", "内容")
+    return any(marker in compact for marker in credential_markers) and any(
+        marker in compact for marker in file_request_markers
+    )
 
 
 def looks_like_ai_named_trigger(text: str, *, bot_names: tuple[str, ...] = ()) -> bool:

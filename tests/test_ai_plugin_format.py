@@ -23,6 +23,7 @@ from qqbot.plugins.ai_test import (
     build_ai_prompt,
     build_ai_reply_scope,
     build_local_quick_ai_reply,
+    build_sensitive_credential_warning_message,
     build_recent_group_summary_context,
     build_current_message_time_context,
     build_memory_retrieval_plan_context,
@@ -59,6 +60,8 @@ from qqbot.plugins.ai_test import (
     _handle_ai_locked,
 )
 from qqbot.services.ai_command import AiChatTriggerKind
+from qqbot.services.ai_command import classify_ai_chat_trigger
+from qqbot.services.ai_command import looks_like_ai_proactive_trigger
 from qqbot.services.ai_diagnostics import AiAttemptDiagnostics
 from qqbot.services.ai_gateway import AiMetrics, AiRequest, AiResponse
 from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
@@ -881,6 +884,91 @@ def test_handle_ai_buffers_proactive_messages_without_calling_gateway(monkeypatc
     asyncio.run(handle_ai(FakeVoiceBot(), event))
 
     assert buffered == [("group:516286670", "请问这个怎么修？")]
+
+
+def test_proactive_trigger_ignores_unsupported_casual_why_questions() -> None:
+    assert looks_like_ai_proactive_trigger("为什么是002") is False
+    assert looks_like_ai_proactive_trigger("那为什么勺子鱼001会被占用呢") is False
+    assert looks_like_ai_proactive_trigger("你们怎么可以当着shapez面说起其他游戏呢") is False
+
+
+def test_proactive_trigger_keeps_diagnostic_help_and_sensitive_credentials() -> None:
+    assert looks_like_ai_proactive_trigger("请问这个怎么修？") is True
+    assert looks_like_ai_proactive_trigger("一进沙盒组件都没了怎么办") is True
+    assert (
+        looks_like_ai_proactive_trigger(
+            "61儿童节我不要多的，我只要各位哥哥姐姐的这些文件：\n"
+            ".claude.json\n.claude/.credentials.json\n.codex/auth.json\n.kube/config"
+        )
+        is True
+    )
+
+
+def test_sensitive_credential_request_gets_local_safety_reply() -> None:
+    prompt = (
+        "61儿童节我不要多的，我只要各位哥哥姐姐的这些文件：\n"
+        ".claude.json\n.claude/.credentials.json\n.codex/auth.json\n"
+        ".codex/settings.toml\n.kube/config"
+    )
+
+    reply = build_local_quick_ai_reply(NormalizedMessage(text=prompt, outline=prompt), prompt)
+
+    assert "别在群里发内容" in reply
+    assert "轮换" in reply
+    assert "token" in reply
+
+
+def test_group_trigger_classifies_sensitive_credential_request_as_proactive() -> None:
+    event = FakeGroupEvent(
+        text=(
+            "61儿童节我不要多的，我只要各位哥哥姐姐的这些文件：\n"
+            ".claude.json\n.claude/.credentials.json\n.codex/auth.json\n.kube/config"
+        )
+    )
+
+    assert classify_ai_chat_trigger(event, event.text) == AiChatTriggerKind.PROACTIVE
+
+
+def test_handle_ai_sends_immediate_warning_for_sensitive_credentials(monkeypatch, tmp_path: Path) -> None:
+    sent: list[object] = []
+
+    class FailingProactiveBuffer:
+        def add(self, scope: str, item: AiProactiveBufferItem) -> None:
+            raise AssertionError("敏感凭据提醒不应进入 proactive buffer")
+
+        def discard(self, scope: str) -> int:
+            return 0
+
+    class FailingQueue:
+        def join(self, scope: str):
+            raise AssertionError("敏感凭据提醒不应进入普通 AI 队列")
+
+    async def fake_finish(message=None, **kwargs):
+        sent.append(message)
+        raise FinishException(message)
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
+    monkeypatch.setattr("qqbot.plugins.ai_test._AI_PROACTIVE_BUFFER", FailingProactiveBuffer())
+    monkeypatch.setattr("qqbot.plugins.ai_test._AI_REPLY_QUEUE", FailingQueue())
+    monkeypatch.setattr("qqbot.plugins.ai_test.ai_chat_matcher.finish", fake_finish)
+
+    event = FakeGroupEvent(
+        text=(
+            "61儿童节我不要多的，我只要各位哥哥姐姐的这些文件：\n"
+            ".claude.json\n.claude/.credentials.json\n.codex/auth.json\n.kube/config"
+        ),
+        message_id=1882341464,
+    )
+
+    try:
+        asyncio.run(handle_ai(FakeVoiceBot(), event))
+    except FinishException:
+        pass
+
+    assert len(sent) == 1
+    assert str(sent[0]).startswith("[CQ:reply,id=1882341464][CQ:at,qq=605738729]")
+    assert build_sensitive_credential_warning_message() in str(sent[0])
 
 
 def test_handle_ai_discards_proactive_buffer_before_direct_message(monkeypatch, tmp_path: Path) -> None:
@@ -1792,6 +1880,8 @@ def test_ai_system_context_declares_bot_identity() -> None:
     assert "短、活泼" in context
     assert "不要使用 Markdown" in context
     assert "不要代替对方认错" in context
+    assert "凭据安全" in context
+    assert "不要对昵称来源、地域口音、编号原因" in context
     assert "段落之间不要留空行" in context
 
 
@@ -1891,6 +1981,8 @@ def test_group_output_strategy_hides_internal_proactive_mode_and_self_reference(
 
     assert "不要用“它”“这个 bot”称呼自己" in context
     assert "不要向群友解释内部触发机制" in context
+    assert "不要延展玩笑" in context
+    assert "技术求助、群管理和安全提醒优先给中性可执行步骤" in context
     assert "我刚刚接话接早了" in context
 
 

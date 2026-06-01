@@ -18,6 +18,7 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_command import (
     AiChatTriggerKind,
     classify_ai_chat_trigger,
+    looks_like_sensitive_credential_request,
     parse_ai_output_mode_command,
     build_ai_conversation_key,
     parse_ai_model_command,
@@ -427,6 +428,16 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         normalized_message=normalized_message,
         group_id=group_id,
     )
+    if looks_like_sensitive_credential_request(prompt):
+        await ai_chat_matcher.finish(
+            build_ai_reply_message(
+                build_sensitive_credential_warning_message(),
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+            )
+        )
+        return
     if trigger_kind == AiChatTriggerKind.PROACTIVE and group_id is not None:
         _AI_PROACTIVE_BUFFER.add(
             reply_scope,
@@ -1399,6 +1410,8 @@ def should_handle_as_rightcodes_draw(prompt: str) -> bool:
 
 def build_local_quick_ai_reply(normalized_message: NormalizedMessage, prompt: str) -> str:
     compact = re.sub(r"\s+", "", prompt.strip())
+    if looks_like_sensitive_credential_request(compact):
+        return build_sensitive_credential_warning_message()
     if is_pure_direct_at(normalized_message):
         return "在"
     if not compact or len(compact) > 16:
@@ -1408,6 +1421,10 @@ def build_local_quick_ai_reply(normalized_message: NormalizedMessage, prompt: st
     if compact in {"棉花糖", "棉花糖棉花糖", "棉花糖棉花糖棉花糖"}:
         return "在呢"
     return ""
+
+
+def build_sensitive_credential_warning_message() -> str:
+    return "这些是登录凭据或工具认证配置，别在群里发内容，也不要转给别人。已经发过的建议尽快撤回，并轮换相关 token、API key 或 kubeconfig。"
 
 
 def build_ai_prompt(normalized_message: NormalizedMessage) -> str:
@@ -1812,6 +1829,9 @@ def build_ai_system_context(settings: RuntimeSettings) -> str:
         "用户问“我是谁”、问“你认识我吗”或询问自己的身份时，问题中的“我”指当前发言者，"
         "必须优先根据当前发言者信息和记忆证据回答，不要回答成机器人身份。"
         "你是猫娘棉花糖；回复要短、活泼、像群聊里自然接话，合适时句末自然带“喵”，不要每句话都加口癖。"
+        "技术排查、群管理、凭据安全、代码、报错和配置问题要改用中性务实语气，不要卖萌、拟人化玩笑或用口癖收尾。"
+        "不要对昵称来源、地域口音、编号原因、个人动机或聊天梗做无证据猜测；只能复述可见聊天证据，证据不足就说看不出来。"
+        "看到索要或分享 .kube/config、auth.json、credentials、token、API key、secret 等敏感凭据时，必须先短句提醒不要公开发送，并建议撤回与轮换。"
         "不要使用 Markdown 格式，不要使用标题、列表、加粗、引用、代码块或链接语法。"
         "段落之间不要留空行，需要分段时只使用单个换行。"
         "不要声称自己只是一个通用 AI 助手，也不要编造不能确认的身份信息。"
@@ -1970,6 +1990,7 @@ def build_group_output_strategy_context(
         return ""
     parts = [
         "群聊输出策略：按猫娘棉花糖的当前身份自然短答，简短但活泼；不要写宣言式长段，不要为了显得正式而失去语气。"
+        "普通主动触发时只解决明确问题或安全风险；不要延展玩笑、不要替群友续梗、不要把 shapez 或其他游戏拟人化成会吃醋、正宫这类关系梗。"
         "不要用“它”“这个 bot”称呼自己；需要提到自己时用“我”或“棉花糖”。"
         "不能把其他机器人、其他账号或群友刚发的内容当成自己的输出；"
         "群友追问“怎么还是 markdown 格式”“为什么这么快”“这条信息笨笨的”时，先判断被说的是谁，不是你就不要替对方道歉。"
@@ -1978,6 +1999,7 @@ def build_group_output_strategy_context(
         "拆成多条消息由发送层处理，你只需要正常写短句，不需要设计分段格式。"
         "是否引用消息要视情况决定：ack、隔了较久、多人同时聊、回答图片/日志/报错、需要精确指向某个问题时引用；"
         "紧接上一句闲聊或连续补充时不必每条引用。"
+        "技术求助、群管理和安全提醒优先给中性可执行步骤，少用口癖，不用“抽风”“硬上”“肝冒烟”等戏谑说法。"
         "如果最近群友已经给出一致且完整的答案，只需认可，例如“是这样”；"
         "如果群友答案不全，只补充缺口；如果明显错误，只纠正错误点，不重复已说过的内容。"
         "遇到“今天、这个月、到现在、以来、刚开始”等相对时间表达，必须结合当前消息时间判断，可能是在玩时间梗；"
