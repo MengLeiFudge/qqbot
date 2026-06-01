@@ -30,6 +30,7 @@ def _service(tmp_path: Path) -> ShapezGroupFileCleanupService:
     return ShapezGroupFileCleanupService(
         store=ShapezGroupFileCleanupStore(tmp_path / "state.json"),
         timezone_name="Asia/Shanghai",
+        private_notice_interval_seconds=0,
     )
 
 
@@ -94,7 +95,14 @@ def test_scan_mutes_and_notifies_only_root_old_file_uploaders(tmp_path: Path) ->
             {
                 "file_id": "root-old",
                 "file_name": "外层旧文件.zip",
-                "file_size": 1024,
+                "file_size": 1024 * 1024,
+                "upload_time": _ts(8),
+                "uploader_id": "10001",
+            },
+            {
+                "file_id": "root-old-large",
+                "file_name": "更大的外层旧文件.zip",
+                "file_size": 3 * 1024 * 1024,
                 "upload_time": _ts(8),
                 "uploader_id": "10001",
             },
@@ -130,18 +138,21 @@ def test_scan_mutes_and_notifies_only_root_old_file_uploaders(tmp_path: Path) ->
         )
     )
 
-    assert result["root_file_count"] == 2
+    assert result["root_file_count"] == 3
     assert result["inner_file_count"] == 1
     assert result["violating_user_count"] == 1
     assert (
         "set_group_ban",
-        {"group_id": int(SHAPEZ_GROUP_ID), "user_id": 10001, "duration": 24 * 60 * 60},
+        {"group_id": int(SHAPEZ_GROUP_ID), "user_id": 10001, "duration": 3 * 24 * 60 * 60},
     ) in bot.calls
     private_calls = [call for call in bot.calls if call[0] == "send_private_msg"]
     assert len(private_calls) == 1
     assert private_calls[0][1]["user_id"] == 10001
-    assert "外层旧文件.zip" in str(private_calls[0][1]["message"])
-    assert "内层旧文件.zip" not in str(private_calls[0][1]["message"])
+    message = str(private_calls[0][1]["message"])
+    assert "检测到你上传到shapez群的文件已经超过一周未归类或删除" in message
+    assert "共 2 个文件，总大小 4.0 MB。" in message
+    assert message.index("- 更大的外层旧文件.zip（3.0 MB）") < message.index("- 外层旧文件.zip（1.0 MB）")
+    assert "内层旧文件.zip" not in message
 
 
 def test_private_confirmation_unmutes_after_root_files_are_cleaned(tmp_path: Path) -> None:
@@ -181,6 +192,128 @@ def test_private_confirmation_unmutes_after_root_files_are_cleaned(tmp_path: Pat
             {"user_id": 10001, "message": "复核通过，已解除禁言。"},
         ),
     ]
+
+
+def test_scan_does_not_repeat_private_notice_for_pending_user(tmp_path: Path) -> None:
+    bot = FakeGroupFileBot()
+    bot.root_payload = {
+        "files": [
+            {
+                "file_id": "root-old",
+                "file_name": "外层旧文件.zip",
+                "file_size": 1024,
+                "upload_time": _ts(8),
+                "uploader_id": "10001",
+            }
+        ],
+        "folders": [],
+    }
+    service = _service(tmp_path)
+    first = datetime(2026, 6, 2, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+    second = datetime(2026, 6, 3, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+
+    asyncio.run(service.scan_and_enforce(bot, now=first))
+    bot.calls.clear()
+    result = asyncio.run(service.scan_and_enforce(bot, now=second))
+
+    assert result["muted_user_count"] == 0
+    assert result["notified_user_count"] == 0
+    assert not [call for call in bot.calls if call[0] in {"set_group_ban", "send_private_msg"}]
+
+
+def test_scan_deletes_stale_root_files_after_three_days_without_repeating_notice(tmp_path: Path) -> None:
+    bot = FakeGroupFileBot()
+    bot.root_payload = {
+        "files": [
+            {
+                "file_id": "root-old",
+                "file_name": "外层旧文件.zip",
+                "file_size": 1024,
+                "upload_time": _ts(8),
+                "uploader_id": "10001",
+                "busid": 7,
+            }
+        ],
+        "folders": [
+            {
+                "folder_id": "folder-a",
+                "folder_name": "教程",
+            }
+        ],
+    }
+    bot.folder_payloads = {
+        "folder-a": {
+            "files": [
+                {
+                    "file_id": "inner-old",
+                    "file_name": "内层旧文件.zip",
+                    "file_size": 1024,
+                    "upload_time": _ts(30),
+                    "uploader_id": "10001",
+                    "busid": 8,
+                }
+            ]
+        }
+    }
+    service = _service(tmp_path)
+    first = datetime(2026, 6, 2, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+    expired = datetime(2026, 6, 5, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+
+    asyncio.run(service.scan_and_enforce(bot, now=first))
+    bot.calls.clear()
+    result = asyncio.run(service.scan_and_enforce(bot, now=expired))
+
+    assert result["deleted_file_count"] == 1
+    assert (
+        "delete_group_file",
+        {"group_id": int(SHAPEZ_GROUP_ID), "file_id": "root-old", "busid": 7},
+    ) in bot.calls
+    assert not any(call[0] == "delete_group_file" and call[1].get("file_id") == "inner-old" for call in bot.calls)
+    assert not [call for call in bot.calls if call[0] == "send_private_msg"]
+
+
+def test_scan_throttles_private_notices_between_users(tmp_path: Path) -> None:
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    bot = FakeGroupFileBot()
+    bot.root_payload = {
+        "files": [
+            {
+                "file_id": "root-old-1",
+                "file_name": "外层旧文件1.zip",
+                "file_size": 1024,
+                "upload_time": _ts(8),
+                "uploader_id": "10001",
+            },
+            {
+                "file_id": "root-old-2",
+                "file_name": "外层旧文件2.zip",
+                "file_size": 1024,
+                "upload_time": _ts(8),
+                "uploader_id": "10002",
+            },
+        ],
+        "folders": [],
+    }
+    service = ShapezGroupFileCleanupService(
+        store=ShapezGroupFileCleanupStore(tmp_path / "state.json"),
+        timezone_name="Asia/Shanghai",
+        private_notice_interval_seconds=3,
+        sleep=fake_sleep,
+    )
+
+    result = asyncio.run(
+        service.scan_and_enforce(
+            bot,
+            now=datetime(2026, 6, 2, 8, 0, tzinfo=timezone(timedelta(hours=8))),
+        )
+    )
+
+    assert result["notified_user_count"] == 2
+    assert sleep_calls == [3, 3]
 
 
 def test_daily_scan_runs_after_8_once_per_day(tmp_path: Path) -> None:
