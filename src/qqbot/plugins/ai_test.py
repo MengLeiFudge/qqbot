@@ -93,6 +93,8 @@ AI_PROACTIVE_BUFFER_QUIET_SECONDS = 10.0
 AI_PROACTIVE_BUFFER_MAX_SECONDS = 30.0
 AI_DRAW_CONCURRENCY_LIMIT = 2
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
+AI_CONTINUOUS_REPLY_CHARS_PER_SECOND = 6.0
+AI_RECENT_REPLY_NO_QUOTE_MESSAGES = 5
 AI_RECENT_GROUP_SUMMARY_MAX_RECORDS = 12
 AI_ACK_TIMEOUT_RETRY_DELAY_SECONDS = 10.0
 AI_ACK_FALLBACK_RETRY_DELAY_SECONDS = 15.0
@@ -435,6 +437,12 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 group_id=group_id,
                 message_id=message_id,
                 user_id=user_id,
+                quote=should_quote_group_ai_reply(
+                    settings,
+                    group_id=group_id,
+                    message_id=message_id,
+                    event_time=event_time,
+                ),
             )
         )
         return
@@ -481,6 +489,12 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 group_id=group_id,
                 message_id=message_id,
                 user_id=user_id,
+                quote=should_quote_group_ai_reply(
+                    settings,
+                    group_id=group_id,
+                    message_id=message_id,
+                    event_time=event_time,
+                ),
             )
         )
         return
@@ -821,6 +835,12 @@ async def _handle_ai_locked(
                     group_id=group_id,
                     message_id=message_id,
                     user_id=user_id,
+                    quote=should_quote_group_ai_reply(
+                        settings,
+                        group_id=group_id,
+                        message_id=message_id,
+                        event_time=event_time,
+                    ),
                 )
             )
             return
@@ -937,6 +957,12 @@ async def _handle_ai_locked(
                     group_id=group_id,
                     message_id=message_id,
                     user_id=user_id,
+                    quote=should_quote_group_ai_reply(
+                        settings,
+                        group_id=group_id,
+                        message_id=message_id,
+                        event_time=event_time,
+                    ),
                 )
             )
         draw_quota_user_id = user_id
@@ -947,6 +973,12 @@ async def _handle_ai_locked(
                 group_id=group_id,
                 message_id=message_id,
                 user_id=user_id,
+                quote=should_quote_group_ai_reply(
+                    settings,
+                    group_id=group_id,
+                    message_id=message_id,
+                    event_time=event_time,
+                ),
             )
         draw_start_send_started = time.perf_counter()
         logger.info(
@@ -993,6 +1025,12 @@ async def _handle_ai_locked(
                     group_id=group_id,
                     message_id=message_id,
                     user_id=user_id,
+                    quote=should_quote_group_ai_reply(
+                        settings,
+                        group_id=group_id,
+                        message_id=message_id,
+                        event_time=event_time,
+                    ),
                 )
             )
         elif isinstance(local_message, str):
@@ -1001,6 +1039,12 @@ async def _handle_ai_locked(
                 group_id=group_id,
                 message_id=message_id,
                 user_id=user_id,
+                quote=should_quote_group_ai_reply(
+                    settings,
+                    group_id=group_id,
+                    message_id=message_id,
+                    event_time=event_time,
+                ),
             )
         await finish_split_text(
             ai_chat_matcher,
@@ -1124,20 +1168,34 @@ async def _handle_ai_locked(
     if response_followup is not None:
         response_message = response_followup
     elif group_id is not None and len(response_text) > COLLAPSIBLE_TEXT_THRESHOLD_CHARS:
+        quote_reply = should_quote_group_ai_reply(
+            settings,
+            group_id=group_id,
+            message_id=message_id,
+            event_time=event_time,
+        )
         await ai_chat_matcher.send(
             build_ai_reply_notice_message(
                 group_id=group_id,
                 message_id=message_id,
                 user_id=user_id,
+                quote=quote_reply,
             )
         )
         response_message = response_text
     else:
+        quote_reply = should_quote_group_ai_reply(
+            settings,
+            group_id=group_id,
+            message_id=message_id,
+            event_time=event_time,
+        )
         response_message = build_ai_reply_message(
             response_text,
             group_id=group_id,
             message_id=message_id,
             user_id=user_id,
+            quote=quote_reply,
         )
 
     if response_followup is not None:
@@ -1154,7 +1212,13 @@ async def _handle_ai_locked(
             group_id=group_id,
             message_id=message_id,
             user_id=user_id,
-            quote=quote_first_reply,
+            quote=quote_first_reply
+            and should_quote_group_ai_reply(
+                settings,
+                group_id=group_id,
+                message_id=message_id,
+                event_time=event_time,
+            ),
             bot=bot,
         )
         return
@@ -1614,12 +1678,14 @@ def build_ai_reply_notice_message(
     group_id: int | str | None,
     message_id: int | str | None,
     user_id: int | str,
+    quote: bool = True,
 ) -> str | Message:
     return build_ai_reply_message(
         "棉花糖整理了一段较长回复，稍后直接发出。",
         group_id=group_id,
         message_id=message_id,
         user_id=user_id,
+        quote=quote,
     )
 
 
@@ -1766,6 +1832,7 @@ async def finish_continuous_group_ai_reply(
     user_id: int | str,
     quote: bool = True,
     bot: Bot | None = None,
+    sleep=asyncio.sleep,
 ) -> None:
     parts = split_continuous_ai_reply_text(text)
     messages: list[str | Message] = []
@@ -1783,9 +1850,17 @@ async def finish_continuous_group_ai_reply(
             continue
         messages.append(part)
 
-    for message in messages[:-1]:
+    for index, message in enumerate(messages[:-1]):
+        if index > 0:
+            await sleep(calculate_continuous_reply_delay_seconds(parts[index]))
         await send_split_text(ai_chat_matcher, message, group_id=group_id, bot=bot)
+    if len(messages) > 1:
+        await sleep(calculate_continuous_reply_delay_seconds(parts[-1]))
     await finish_split_text(ai_chat_matcher, messages[-1], group_id=group_id, bot=bot)
+
+
+def calculate_continuous_reply_delay_seconds(text: str) -> float:
+    return max(0.0, len(str(text)) / AI_CONTINUOUS_REPLY_CHARS_PER_SECOND)
 
 
 def split_continuous_ai_reply_text(text: str) -> list[str]:
@@ -1817,6 +1892,33 @@ def _split_chatty_reply_sentences(text: str) -> list[str]:
         index += 1
     _append_chatty_part(parts, buffer)
     return parts
+
+
+def should_quote_group_ai_reply(
+    settings: RuntimeSettings,
+    *,
+    group_id: int | str | None,
+    message_id: int | str | None,
+    event_time: object | None = None,
+    recent_limit: int = AI_RECENT_REPLY_NO_QUOTE_MESSAGES,
+    context_store: AiGroupContextStore | None = None,
+) -> bool:
+    if group_id is None:
+        return False
+    target_message_id = str(message_id or "").strip()
+    if not target_message_id:
+        return False
+    store = context_store or AiGroupContextStore(settings.data_root)
+    recent_records = store.load_messages(group_id, limit=max(1, recent_limit))
+    if any(record.message_id == target_message_id for record in recent_records):
+        return False
+    if event_time is not None and recent_records:
+        try:
+            if max(record.timestamp for record in recent_records) <= int(float(event_time)):
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
 
 
 def _append_chatty_part(parts: list[str], buffer: list[str]) -> None:

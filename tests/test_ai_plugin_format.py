@@ -31,6 +31,7 @@ from qqbot.plugins.ai_test import (
     ack_task_retry_delay_seconds,
     build_ai_reply_message,
     build_ai_reply_notice_message,
+    calculate_continuous_reply_delay_seconds,
     build_group_output_strategy_context,
     build_recent_answer_followup_message,
     build_ai_gateway_chain,
@@ -52,10 +53,12 @@ from qqbot.plugins.ai_test import (
     format_local_ai_result,
     format_memory_context,
     should_skip_ai_reply_for_other_bot_output,
+    should_quote_group_ai_reply,
     should_omit_ai_history_for_scope_query,
     should_attempt_ai_voice_response,
     should_use_tts_singing_mode,
     split_continuous_ai_reply_text,
+    finish_continuous_group_ai_reply,
     try_send_ai_voice_response,
     _handle_ai_locked,
 )
@@ -1807,6 +1810,75 @@ def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> Non
     assert "折叠消息" not in str(message)
 
 
+def test_should_quote_group_ai_reply_skips_recent_target_message(tmp_path: Path) -> None:
+    store = AiGroupContextStore(tmp_path)
+    for index in range(1, 7):
+        store.append_message(
+            group_id=516286670,
+            user_id=10000 + index,
+            sender_name=f"用户{index}",
+            text=f"第{index}条消息",
+            timestamp=index,
+            message_id=index,
+        )
+
+    assert (
+        should_quote_group_ai_reply(
+            RuntimeSettings(data_root=tmp_path),
+            group_id=516286670,
+            message_id=3,
+            context_store=store,
+        )
+        is False
+    )
+
+
+def test_should_quote_group_ai_reply_keeps_old_target_message(tmp_path: Path) -> None:
+    store = AiGroupContextStore(tmp_path)
+    for index in range(1, 8):
+        store.append_message(
+            group_id=516286670,
+            user_id=10000 + index,
+            sender_name=f"用户{index}",
+            text=f"第{index}条消息",
+            timestamp=index,
+            message_id=index,
+        )
+
+    assert (
+        should_quote_group_ai_reply(
+            RuntimeSettings(data_root=tmp_path),
+            group_id=516286670,
+            message_id=1,
+            context_store=store,
+        )
+        is True
+    )
+
+
+def test_should_quote_group_ai_reply_skips_current_event_before_cache_write(tmp_path: Path) -> None:
+    store = AiGroupContextStore(tmp_path)
+    store.append_message(
+        group_id=516286670,
+        user_id=10001,
+        sender_name="用户1",
+        text="上一条消息",
+        timestamp=10,
+        message_id=1,
+    )
+
+    assert (
+        should_quote_group_ai_reply(
+            RuntimeSettings(data_root=tmp_path),
+            group_id=516286670,
+            message_id=2,
+            event_time=11,
+            context_store=store,
+        )
+        is False
+    )
+
+
 def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> None:
     parts = split_continuous_ai_reply_text(
         "先看现象，这里确实像配置没有生效。"
@@ -1819,6 +1891,48 @@ def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> Non
     assert 1 < len(parts)
     assert parts[0].startswith("先看现象")
     assert "最后" in "".join(parts)
+
+
+def test_calculate_continuous_reply_delay_uses_six_chars_per_second() -> None:
+    assert calculate_continuous_reply_delay_seconds("123456789012") == 2.0
+
+
+def test_finish_continuous_group_ai_reply_delays_followup_parts(monkeypatch) -> None:
+    sent_messages: list[str] = []
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    async def fake_send_split_text(_matcher, message, **_kwargs) -> None:
+        sent_messages.append(str(message))
+
+    async def fake_finish_split_text(_matcher, message, **_kwargs) -> None:
+        sent_messages.append(str(message))
+
+    monkeypatch.setattr("qqbot.plugins.ai_test.send_split_text", fake_send_split_text)
+    monkeypatch.setattr("qqbot.plugins.ai_test.finish_split_text", fake_finish_split_text)
+
+    asyncio.run(
+        finish_continuous_group_ai_reply(
+            "第一句。第二句话。第三句？",
+            group_id=516286670,
+            message_id=12345,
+            user_id="605738729",
+            quote=False,
+            sleep=fake_sleep,
+        )
+    )
+
+    assert sent_messages == [
+        "[CQ:at,qq=605738729] 第一句",
+        "第二句话",
+        "第三句？",
+    ]
+    assert sleep_calls == [
+        len("第二句话") / 6,
+        len("第三句？") / 6,
+    ]
 
 
 def test_split_continuous_ai_reply_text_splits_on_sentence_punctuation() -> None:
