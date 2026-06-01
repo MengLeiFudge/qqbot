@@ -1795,7 +1795,8 @@ def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> Non
         user_id="605738729",
     )
 
-    assert str(message) == "[CQ:reply,id=12345][CQ:at,qq=605738729] 棉花糖写得有点长，正文放在折叠消息里啦。"
+    assert str(message) == "[CQ:reply,id=12345][CQ:at,qq=605738729] 棉花糖整理了一段较长回复，稍后直接发出。"
+    assert "折叠消息" not in str(message)
 
 
 def test_split_continuous_ai_reply_text_prefers_short_multiple_messages() -> None:

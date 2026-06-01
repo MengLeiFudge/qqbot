@@ -6,7 +6,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from qqbot.services.ai_output_style import sanitize_ai_output_text
+from qqbot.services.ai_output_style import sanitize_ai_output_text, sanitize_group_ai_reply_text
 
 
 def test_sanitize_ai_output_removes_parenthesized_action_descriptions() -> None:
@@ -30,3 +30,36 @@ def test_sanitize_ai_output_keeps_non_action_parentheses() -> None:
     text = "可以调用 foo(bar)；选项 (1) 表示启用，版本是 Python (3.12)。"
 
     assert sanitize_ai_output_text(text) == text
+
+
+def test_sanitize_group_ai_reply_drops_shapez_personification() -> None:
+    text = (
+        "小声点小声点，shapez 会吃醋的！\n"
+        "逛别的游戏算外出取材，最后还是要回来切圆圈喵\n"
+        "推荐 Factorio、戴森球计划、Mindustry。"
+    )
+
+    cleaned = sanitize_group_ai_reply_text(text, prompt="给推荐下几个游戏吧", group_id=1163635014)
+
+    assert "吃醋" not in cleaned
+    assert "外出取材" not in cleaned
+    assert "回来切" not in cleaned
+    assert "喵" not in cleaned
+    assert cleaned == "推荐 Factorio、戴森球计划、Mindustry。"
+
+
+def test_sanitize_group_ai_reply_uses_practical_tone_for_diagnostics() -> None:
+    text = "这版抽风/存档兼容问题；先观望比硬上省心喵"
+
+    cleaned = sanitize_group_ai_reply_text(text, prompt="一进沙盒组件都没了怎么办", group_id=746497406)
+
+    assert cleaned == "这版异常/存档兼容问题；先观望比继续尝试省心"
+
+
+def test_sanitize_group_ai_reply_strips_chatty_tail_for_group_management() -> None:
+    text = "群文件的话先别一键乱删喵\n教程/存档/工具这种先确认有人备份再动"
+
+    cleaned = sanitize_group_ai_reply_text(text, prompt="群文件快爆了怎么清理一下", group_id=1163635014)
+
+    assert cleaned.startswith("群文件的话先别一键乱删")
+    assert "喵" not in cleaned

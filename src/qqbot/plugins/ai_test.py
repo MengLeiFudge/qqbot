@@ -75,7 +75,7 @@ from qqbot.services.offline_message_gate import (
     is_before_onebot_connect,
     is_within_onebot_connect_grace,
 )
-from qqbot.services.ai_output_style import sanitize_ai_output_text
+from qqbot.services.ai_output_style import sanitize_ai_output_text, sanitize_group_ai_reply_text
 from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
@@ -979,6 +979,10 @@ async def _handle_ai_locked(
         RightCodesDrawQuotaStore(settings.data_root).refund(draw_quota_user_id)
     if local_result.handled:
         local_message = format_local_ai_result(local_result)
+        if isinstance(local_message, str) and group_id is not None:
+            local_message = sanitize_group_ai_reply_text(local_message, prompt=prompt, group_id=group_id)
+            if not local_message:
+                return
         if (
             isinstance(local_message, str)
             and group_id is not None
@@ -1076,6 +1080,10 @@ async def _handle_ai_locked(
         response,
         show_metrics=settings.ai_show_metrics,
     )
+    if group_id is not None:
+        response_text = sanitize_group_ai_reply_text(response_text, prompt=prompt, group_id=group_id)
+        if not response_text:
+            return
     if not response.fallback:
         conversation_store.append_turn(key, prompt, response_text)
 
@@ -1608,7 +1616,7 @@ def build_ai_reply_notice_message(
     user_id: int | str,
 ) -> str | Message:
     return build_ai_reply_message(
-        "棉花糖写得有点长，正文放在折叠消息里啦。",
+        "棉花糖整理了一段较长回复，稍后直接发出。",
         group_id=group_id,
         message_id=message_id,
         user_id=user_id,
