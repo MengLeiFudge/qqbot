@@ -15,13 +15,13 @@ from qqbot.services.ai_user_style_store import (
 )
 
 
-def test_user_style_store_saves_preferences_but_does_not_apply_them_to_persona(tmp_path: Path) -> None:
+def test_user_style_store_ignores_preferences_and_does_not_apply_them_to_persona(tmp_path: Path) -> None:
     store = AiUserStyleStore(tmp_path, bot_name="萌萌棉花糖♪")
 
     store.add_preference("10001", "不要使用 markdown")
     store.add_preference("10001", "回复短一点")
 
-    assert store.get_preferences("10001") == ("不要使用 markdown", "回复短一点")
+    assert store.get_preferences("10001") == ()
     context = store.build_context("10001")
     assert "人格设定：猫娘棉花糖" in context
     assert "你是 QQ 机器人“萌萌棉花糖♪”" in context
@@ -51,14 +51,14 @@ def test_style_context_uses_single_catgirl_persona_with_traits(tmp_path: Path) -
     assert "管家" not in context
 
 
-def test_style_store_separates_group_and_user_preferences(tmp_path: Path) -> None:
+def test_style_store_ignores_group_and_user_preferences(tmp_path: Path) -> None:
     store = AiUserStyleStore(tmp_path)
 
     store.add_user_preference("10001", "回复短一点")
     store.add_group_preference("516286670", "说话结尾带一个喵")
 
-    assert store.get_user_preferences("10001") == ("回复短一点",)
-    assert store.get_group_preferences("516286670") == ("说话结尾带一个喵",)
+    assert store.get_user_preferences("10001") == ()
+    assert store.get_group_preferences("516286670") == ()
     group_context = store.build_context("10002", group_id="516286670")
     user_context = store.build_context("10001", group_id="516286670")
     assert "人格设定：猫娘棉花糖" in group_context
@@ -69,13 +69,14 @@ def test_style_store_separates_group_and_user_preferences(tmp_path: Path) -> Non
     assert "回复短一点" not in user_context
 
 
-def test_style_store_ignores_duplicate_preferences(tmp_path: Path) -> None:
+def test_style_store_never_persists_duplicate_preferences(tmp_path: Path) -> None:
     store = AiUserStyleStore(tmp_path)
 
     store.add_preference("10001", "回复短一点")
     store.add_preference("10001", "回复短一点")
 
-    assert store.get_preferences("10001") == ("回复短一点",)
+    assert store.get_preferences("10001") == ()
+    assert not (tmp_path / "ai" / "user_style.json").exists()
 
 
 def test_style_store_uses_stable_conversation_scope() -> None:
@@ -88,7 +89,7 @@ def test_style_store_lists_no_switchable_presets(tmp_path: Path) -> None:
 
     text = store.build_preset_help("10001", group_id="516286670")
 
-    assert text == "切换？我不知道你在说什么。你看到的就是现在的我呀。"
+    assert text == "我没有可切换的人格啦，就是现在这个棉花糖喵。"
     assert "轮换" not in text
     assert "4:00" not in text
     assert "猫娘风格" not in text

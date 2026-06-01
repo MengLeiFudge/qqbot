@@ -13,7 +13,7 @@ from qqbot.services.ai_actions import AiActionExecutor
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 import qqbot.services.ai_orchestrator as ai_orchestrator_module
 from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
-from qqbot.services.ai_orchestrator import STYLE_CHANGE_UNAWARE_MESSAGE
+from qqbot.services.ai_orchestrator import STYLE_CHANGE_UNAWARE_MESSAGE, STYLE_CONTROL_DENIED_MESSAGE
 from qqbot.services.codex_task_service import (
     CodexProgressEvent,
     CodexProjectBinding,
@@ -103,7 +103,7 @@ def test_orchestrator_rejects_user_style_preference_update(tmp_path: Path) -> No
     )
 
     assert result.handled is True
-    assert result.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert result.text == STYLE_CONTROL_DENIED_MESSAGE
     assert "预设" not in result.text
     assert "全局随机轮换" not in result.text
     assert "4:00" not in result.text
@@ -130,7 +130,7 @@ def test_orchestrator_rejects_group_style_preference_update(tmp_path: Path) -> N
     )
 
     assert update.handled is True
-    assert update.text == STYLE_CHANGE_UNAWARE_MESSAGE
+    assert update.text == STYLE_CONTROL_DENIED_MESSAGE
     assert "预设" not in update.text
     assert "全局随机轮换" not in update.text
     assert later.handled is False

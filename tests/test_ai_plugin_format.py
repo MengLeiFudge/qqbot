@@ -50,6 +50,7 @@ from qqbot.plugins.ai_test import (
     format_ack_task_failure_message,
     format_local_ai_result,
     format_memory_context,
+    should_skip_ai_reply_for_other_bot_output,
     should_omit_ai_history_for_scope_query,
     should_attempt_ai_voice_response,
     should_use_tts_singing_mode,
@@ -490,6 +491,21 @@ def test_message_decision_routes_project_genesis_mechanism_question_to_domain_co
     assert decision.domain == AiDomain.PROJECT_GENESIS
     assert decision.intent == AiMessageIntent.DOMAIN_QA
     assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
+
+
+def test_message_decision_does_not_route_unrelated_project_genesis_group_chat_to_codex() -> None:
+    decision = decide_ai_message(
+        trigger_kind=AiChatTriggerKind.PROACTIVE,
+        normalized_message=NormalizedMessage(
+            text="原理估计还是悬浮框加识别，但是怎么塞进去的就不知道了",
+            outline="原理估计还是悬浮框加识别，但是怎么塞进去的就不知道了",
+        ),
+        group_id=991895539,
+    )
+
+    assert decision.domain == AiDomain.PROJECT_GENESIS
+    assert decision.intent != AiMessageIntent.DOMAIN_QA
+    assert decision.latency_policy == AiLatencyPolicy.IMMEDIATE
 
 
 def test_ai_pending_task_store_records_ack_lifecycle(tmp_path: Path) -> None:
@@ -1576,8 +1592,9 @@ def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
 
     assert any("语音输出暂时不可用" in part for part in contexts[0])
     assert any("当前没有可用 TTS" in part for part in contexts[0])
-    assert dummy_matcher.sent == []
-    assert "语音输出暂时不可用" in str(finish_message)
+    assert len(dummy_matcher.sent) == 1
+    assert "语音输出暂时不可用" in str(dummy_matcher.sent[0])
+    assert str(finish_message)
     assert bot.calls == []
 
 
@@ -1698,10 +1715,44 @@ def test_split_continuous_ai_reply_text_splits_on_sentence_punctuation() -> None
     ]
 
 
+def test_split_continuous_ai_reply_text_splits_on_newline() -> None:
+    assert split_continuous_ai_reply_text("第一句\n第二句\n第三句？") == [
+        "第一句",
+        "第二句",
+        "第三句？",
+    ]
+
+
 def test_split_continuous_ai_reply_text_keeps_more_than_five_sentences_together() -> None:
     text = "一。二？三!四！五……六。"
 
     assert split_continuous_ai_reply_text(text) == [text]
+
+
+def test_skip_ai_reply_for_markdown_complaint_about_other_bot_output() -> None:
+    normalized = NormalizedMessage(
+        text="怎么还是markdown格式",
+        outline="怎么还是markdown格式",
+    )
+
+    assert should_skip_ai_reply_for_other_bot_output(
+        "怎么还是markdown格式",
+        normalized,
+        bot_name="萌萌棉花糖♪",
+    ) is True
+
+
+def test_do_not_skip_ai_reply_when_complaint_names_self() -> None:
+    normalized = NormalizedMessage(
+        text="棉花糖怎么还是markdown格式",
+        outline="棉花糖怎么还是markdown格式",
+    )
+
+    assert should_skip_ai_reply_for_other_bot_output(
+        "棉花糖怎么还是markdown格式",
+        normalized,
+        bot_name="萌萌棉花糖♪",
+    ) is False
 
 
 def test_ai_system_context_declares_bot_identity() -> None:
@@ -1713,6 +1764,7 @@ def test_ai_system_context_declares_bot_identity() -> None:
     assert "猫娘棉花糖是你的稳定主人格" in context
     assert "短、活泼" in context
     assert "不要使用 Markdown" in context
+    assert "不要代替对方认错" in context
     assert "段落之间不要留空行" in context
 
 
@@ -1774,6 +1826,7 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
     assert "群聊输出策略" in joined
     assert "是否引用消息要视情况决定" in joined
+    assert "不是你就不要替对方道歉" in joined
     assert "如果最近群友已经给出一致且完整的答案" in joined
 
 

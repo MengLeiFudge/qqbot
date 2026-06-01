@@ -343,7 +343,7 @@ def _classify_intent(
     if (
         domain in {AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING, AiDomain.PROJECT_GENESIS}
         and not _looks_translation_or_language_help(text)
-        and _looks_domain_group_question(text)
+        and _looks_domain_group_question(text, domain)
     ):
         return AiMessageIntent.DOMAIN_QA
     if (
@@ -392,7 +392,7 @@ def _needs_domain_knowledge(text: str, domain: AiDomain) -> bool:
     return False
 
 
-def _looks_domain_group_question(text: str) -> bool:
+def _looks_domain_group_question(text: str, domain: AiDomain) -> bool:
     compact = re.sub(r"\s+", "", text.lower())
     if not compact:
         return False
@@ -417,6 +417,8 @@ def _looks_domain_group_question(text: str) -> bool:
         "效果",
         "功能",
     )
+    if not any(marker in compact for marker in question_markers):
+        return False
     domain_object_markers = (
         "配方",
         "建筑",
@@ -439,9 +441,9 @@ def _looks_domain_group_question(text: str) -> bool:
         "星球",
         "戴森球",
     )
-    return any(marker in compact for marker in question_markers) or any(
-        marker in compact for marker in domain_object_markers
-    )
+    if any(marker in compact for marker in domain_object_markers):
+        return True
+    return _needs_domain_knowledge(compact, domain)
 
 
 def _has_shapez_domain_signal(normalized: str) -> bool:

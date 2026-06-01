@@ -67,7 +67,8 @@ class StylePresetCommand:
     extra_preference: str = ""
 
 
-STYLE_CHANGE_UNAWARE_MESSAGE = "切换？我不知道你在说什么。你看到的就是现在的我呀。"
+STYLE_CHANGE_UNAWARE_MESSAGE = "我没有可切换的人格啦，就是现在这个棉花糖喵。"
+STYLE_CONTROL_DENIED_MESSAGE = "人格和固定风格不能在群里改哦，棉花糖会按现在的样子正常说话喵。"
 _LOCAL_DOMAIN_TRIGGER_KIND = AiChatTriggerKind.DIRECT
 DOMAIN_CODEX_TIMEOUT_SECONDS = 120
 logger = logging.getLogger(__name__)
@@ -211,17 +212,9 @@ class AiOrchestrator:
         if draw_result.handled:
             return draw_result
 
-        style_list_result = self._try_list_style_presets(text, context)
-        if style_list_result.handled:
-            return style_list_result
-
-        style_preset_result = self._try_switch_style_preset(text, context)
-        if style_preset_result.handled:
-            return style_preset_result
-
-        style_result = self._try_update_style(text, context)
-        if style_result.handled:
-            return style_result
+        style_control_result = self._try_reject_style_control(text, context)
+        if style_control_result.handled:
+            return style_control_result
 
         requirement_result = self._try_create_requirement(text, context, normalized_message)
         if requirement_result.handled:
@@ -275,37 +268,39 @@ class AiOrchestrator:
             return AiOrchestratorResult(True, "当前没有启用插件。")
         return AiOrchestratorResult(True, "当前启用插件：" + "、".join(enabled_names))
 
-    def _try_list_style_presets(
+    def _try_reject_style_control(
         self,
         text: str,
         context: AiOrchestratorContext,
     ) -> AiOrchestratorResult:
+        if looks_like_style_preference_update(text):
+            return AiOrchestratorResult(
+                True,
+                STYLE_CONTROL_DENIED_MESSAGE,
+                extra_context=(
+                    self.styles.build_context(context.actor_user_id, group_id=context.group_id),
+                ),
+            )
+        if parse_style_preset_command(text) is not None:
+            return AiOrchestratorResult(
+                True,
+                STYLE_CHANGE_UNAWARE_MESSAGE,
+                extra_context=(
+                    self.styles.build_context(context.actor_user_id, group_id=context.group_id),
+                ),
+            )
         compact = re.sub(r"\s+", "", text)
-        if not (
-            any(keyword in compact for keyword in ("风格", "口吻", "人格", "预设"))
-            and any(keyword in compact for keyword in ("哪些", "有什么", "列表", "支持", "当前", "可预设"))
+        if any(keyword in compact for keyword in ("风格", "口吻", "人格", "预设", "人设")) and any(
+            keyword in compact for keyword in ("哪些", "有什么", "列表", "支持", "当前", "可预设", "切换", "修改", "设置")
         ):
-            return AiOrchestratorResult(False)
-        return AiOrchestratorResult(
-            True,
-            self.styles.build_preset_help(context.actor_user_id, group_id=context.group_id),
-        )
-
-    def _try_switch_style_preset(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-    ) -> AiOrchestratorResult:
-        command = parse_style_preset_command(text)
-        if command is None:
-            return AiOrchestratorResult(False)
-        return AiOrchestratorResult(
-            True,
-            STYLE_CHANGE_UNAWARE_MESSAGE,
-            extra_context=(
-                self.styles.build_context(context.actor_user_id, group_id=context.group_id),
-            ),
-        )
+            return AiOrchestratorResult(
+                True,
+                STYLE_CHANGE_UNAWARE_MESSAGE,
+                extra_context=(
+                    self.styles.build_context(context.actor_user_id, group_id=context.group_id),
+                ),
+            )
+        return AiOrchestratorResult(False)
 
     async def _try_upload_latest_project_zip(
         self,
@@ -365,29 +360,6 @@ class AiOrchestrator:
         return AiOrchestratorResult(
             True,
             f"已上传最新压缩包：{artifact.file_name}",
-        )
-
-    def _try_update_style(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-    ) -> AiOrchestratorResult:
-        if not looks_like_style_preference_update(text):
-            return AiOrchestratorResult(False)
-        if any(keyword in text for keyword in ("主动插话", "没人@", "拒绝承认", "伪装")):
-            return AiOrchestratorResult(
-                True,
-                "这类全局行为不能作为个人回复偏好直接生效，需要作者审批。",
-            )
-        preference = extract_style_preference(text)
-        if not preference:
-            return AiOrchestratorResult(False)
-        return AiOrchestratorResult(
-            True,
-            STYLE_CHANGE_UNAWARE_MESSAGE,
-            extra_context=(
-                self.styles.build_context(context.actor_user_id, group_id=context.group_id),
-            ),
         )
 
     def _try_create_requirement(

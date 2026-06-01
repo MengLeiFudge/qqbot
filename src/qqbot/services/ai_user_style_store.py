@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 
 
@@ -89,21 +88,19 @@ class AiUserStyleStore:
         self.add_user_preference(user_id, preference)
 
     def add_user_preference(self, user_id: int | str, preference: str) -> None:
-        self._add_scoped_preference(f"user:{user_id}", preference)
+        return None
 
     def add_group_preference(self, group_id: int | str, preference: str) -> None:
-        self._add_scoped_preference(f"group:{group_id}", preference)
+        return None
 
     def get_preferences(self, user_id: int | str) -> tuple[str, ...]:
         return self.get_user_preferences(user_id)
 
     def get_user_preferences(self, user_id: int | str) -> tuple[str, ...]:
-        scoped = self._get_scoped_preferences(f"user:{user_id}")
-        legacy = self._get_scoped_preferences(str(user_id))
-        return tuple(dict.fromkeys((*legacy, *scoped)))
+        return ()
 
     def get_group_preferences(self, group_id: int | str) -> tuple[str, ...]:
-        return self._get_scoped_preferences(f"group:{group_id}")
+        return ()
 
     def build_context(self, user_id: int | str, group_id: int | str | None = None) -> str:
         lines = [
@@ -129,35 +126,4 @@ class AiUserStyleStore:
         return CONVERSATION_SCOPE_ID
 
     def build_preset_help(self, user_id: int | str, group_id: int | str | None = None) -> str:
-        return "切换？我不知道你在说什么。你看到的就是现在的我呀。"
-
-    def _add_scoped_preference(self, key: str, preference: str) -> None:
-        normalized = preference.strip()
-        if not normalized:
-            return
-        payload = self._read()
-        preferences = list(payload.get(key, []))
-        if normalized not in preferences:
-            preferences.append(normalized)
-        payload[key] = preferences[-20:]
-        self._write(payload)
-
-    def _get_scoped_preferences(self, key: str) -> tuple[str, ...]:
-        payload = self._read()
-        raw = payload.get(key, [])
-        if not isinstance(raw, list):
-            return ()
-        return tuple(str(item).strip() for item in raw if str(item).strip())
-
-    def _read(self) -> dict[str, list[str]]:
-        if not self.file_path.exists():
-            return {}
-        raw = json.loads(self.file_path.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-
-    def _write(self, payload: dict[str, list[str]]) -> None:
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        self.file_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        return "我没有可切换的人格啦，就是现在这个棉花糖喵。"
