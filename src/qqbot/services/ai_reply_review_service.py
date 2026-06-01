@@ -278,7 +278,7 @@ def parse_review_result(text: str) -> AiReplyReviewResult:
         if isinstance(item, dict)
     )
     return AiReplyReviewResult(
-        has_issue=bool(payload.get("has_issue", False)),
+        has_issue=bool(payload.get("has_issue", False)) or bool(issues),
         summary=str(payload.get("summary", "")).strip() or ("发现问题" if issues else "未发现问题"),
         issues=issues,
     )

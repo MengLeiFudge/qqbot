@@ -73,6 +73,28 @@ def test_parse_review_result_accepts_json() -> None:
     assert result.issues[0].evidence_message_ids == ("101",)
 
 
+def test_parse_review_result_treats_non_empty_issues_as_problem() -> None:
+    result = parse_review_result(
+        json.dumps(
+            {
+                "has_issue": False,
+                "summary": "写了问题但布尔值错误",
+                "issues": [
+                    {
+                        "issue_type": "low_quality_answer",
+                        "severity": "medium",
+                        "summary": "有明确问题",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    assert result.has_issue is True
+    assert result.summary == "写了问题但布尔值错误"
+
+
 def test_build_auto_fix_prompt_requires_tests_and_commit() -> None:
     result = parse_review_result('{"has_issue":true,"summary":"误接话","issues":[]}')
 
