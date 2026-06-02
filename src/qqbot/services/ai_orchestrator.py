@@ -93,6 +93,31 @@ def looks_like_style_preference_update(text: str) -> bool:
     return bool(re.search(r"^(你要|请你|记住).{0,16}(回复|说话|回答|口吻|语气|结尾)", compact))
 
 
+def _looks_self_style_subject(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if not compact:
+        return False
+    self_markers = ("你", "棉花糖", "机器人", "bot", "Bot", "ai", "AI", "本群", "这个群", "群默认", "回复", "说话", "回答")
+    return any(marker in compact for marker in self_markers)
+
+
+def _looks_style_control_action(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if not compact:
+        return False
+    action_markers = ("设置", "切换", "改成", "换成", "使用", "启用", "修改")
+    return any(marker in compact for marker in action_markers)
+
+
+def _looks_creative_style_request(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if not compact or "风格" not in compact:
+        return False
+    creative_markers = ("生成", "起名", "取名", "写", "作", "画", "润色", "改写")
+    creative_objects = ("名字", "昵称", "文案", "标题", "说法", "句子", "图片", "图", "诗", "故事")
+    return any(marker in compact for marker in creative_markers) and any(marker in compact for marker in creative_objects)
+
+
 def extract_style_preference(text: str) -> str:
     preference = text.strip()
     preference = re.sub(r"^(你要|请你|记住)", "", preference).strip()
@@ -104,6 +129,10 @@ def extract_style_preference(text: str) -> str:
 def parse_style_control_command(text: str) -> StyleControlCommand | None:
     normalized = text.strip()
     if not normalized:
+        return None
+    if _looks_creative_style_request(normalized):
+        return None
+    if not (_looks_self_style_subject(normalized) or _looks_style_control_action(normalized)):
         return None
     scope = "group" if any(marker in normalized for marker in ("本群", "这个群", "群默认")) else "user"
     cleaned = re.sub(r"^(请|麻烦|帮我)?", "", normalized).strip()
@@ -148,7 +177,7 @@ def strip_codex_session_prefix(text: str) -> str:
 
 
 def build_domain_codex_failure_reply(message: str, project_name: str) -> str:
-    return f"这题要查 {project_name} 源码/data 才能答准，但本轮只读查询失败了。我先不按通用机制乱猜喵。"
+    return f"这题要核对 {project_name} 的源码或 data 才能答准；我这边暂时没有足够证据，先不按通用机制补猜喵。"
 
 
 class AiOrchestrator:
@@ -284,8 +313,13 @@ class AiOrchestrator:
                 ),
             )
         compact = re.sub(r"\s+", "", text)
-        if any(keyword in compact for keyword in ("风格", "口吻", "人格", "预设", "人设")) and any(
+        if (
+            not _looks_creative_style_request(text)
+            and (_looks_self_style_subject(text) or _looks_style_control_action(text))
+            and any(keyword in compact for keyword in ("风格", "口吻", "人格", "预设", "人设"))
+            and any(
             keyword in compact for keyword in ("哪些", "有什么", "列表", "支持", "当前", "可预设", "切换", "修改", "设置")
+            )
         ):
             return AiOrchestratorResult(
                 True,

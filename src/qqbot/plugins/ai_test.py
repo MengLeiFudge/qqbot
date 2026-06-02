@@ -19,6 +19,7 @@ from qqbot.services.ai_command import (
     AiChatTriggerKind,
     classify_ai_chat_trigger,
     looks_like_ai_meta_conversation,
+    looks_like_ai_proactive_trigger,
     looks_like_sensitive_credential_request,
     parse_ai_output_mode_command,
     build_ai_conversation_key,
@@ -767,9 +768,51 @@ def should_silence_proactive_batch(items: tuple[AiProactiveBufferItem, ...] | li
 
     user_ids = {str(item.user_id) for item in items if str(item.user_id)}
     combined = "\n".join(prompts)
+    if _looks_like_human_answered_help_thread(prompts, user_count=len(user_ids)):
+        return True
     if _looks_like_human_handled_ai_debug_thread(combined, user_count=len(user_ids)):
         return True
     return False
+
+
+def _looks_like_human_answered_help_thread(prompts: list[str], *, user_count: int) -> bool:
+    if len(prompts) < 2 or user_count < 2:
+        return False
+    first = re.sub(r"\s+", "", prompts[0].strip())
+    if not first:
+        return False
+    if not looks_like_ai_proactive_trigger(first):
+        return False
+    later_text = "\n".join(prompts[1:])
+    compact_later = re.sub(r"\s+", "", later_text)
+    if not compact_later:
+        return False
+    followup_help_markers = (
+        "还有谁知道",
+        "还有人知道",
+        "还有没有",
+        "不对",
+        "没解决",
+        "还是不行",
+        "继续问",
+        "求补充",
+    )
+    if any(marker in compact_later for marker in followup_help_markers):
+        return False
+    answer_markers = (
+        "原胚",
+        "抽奖",
+        "解锁",
+        "配方",
+        "科技",
+        "研究",
+        "获得",
+        "做出来",
+        "合成",
+        "需要",
+        "对应",
+    )
+    return len(compact_later) >= 6 and any(marker in compact_later for marker in answer_markers)
 
 
 def _looks_like_human_handled_ai_debug_thread(text: str, *, user_count: int) -> bool:
@@ -2181,6 +2224,8 @@ def build_group_output_strategy_context(
         "就优先围绕这些协议和接口给参考方向，不要只泛泛回答版本低、参数不支持或环境问题。"
         "如果最近群友已经给出一致且完整的答案，只需认可，例如“是这样”；"
         "如果群友答案不全，只补充缺口；如果明显错误，只纠正错误点，不重复已说过的内容。"
+        "遇到“来个很硬的说法”“继续说”“展开讲”这类承接式追问时，必须先绑定当前消息、引用消息和最近群聊主题；"
+        "如果最近主题无法确定或和短期历史冲突，先问清楚对方要硬说哪件事，不要从旧历史跳到无关主题。"
         "遇到“今天、这个月、到现在、以来、刚开始”等相对时间表达，必须结合当前消息时间判断，可能是在玩时间梗；"
         "如果没有明确自伤意图或现实求救，不要直接升级成危机长答。"
     ]

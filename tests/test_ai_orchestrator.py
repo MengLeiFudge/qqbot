@@ -224,6 +224,28 @@ def test_orchestrator_rejects_style_control_with_extra_preference(tmp_path: Path
     assert result.text == STYLE_CONTROL_REPLY_MESSAGE
 
 
+def test_orchestrator_allows_creative_style_generation_request(tmp_path: Path) -> None:
+    orchestrator = AiOrchestrator(data_root=tmp_path)
+
+    result = asyncio.run(
+        orchestrator.handle(
+            "你能根据群友昵称给我生成十个古代风格的名字吗。中西方都行",
+            AiOrchestratorContext(actor_user_id="3193058216", group_id="1163635014"),
+            NormalizedMessage(
+                text="你能根据群友昵称给我生成十个古代风格的名字吗。中西方都行",
+                outline="[@1443944862] 你能根据群友昵称给我生成十个古代风格的名字吗。中西方都行",
+                at_user_ids=("1443944862",),
+            ),
+        )
+    )
+
+    assert result.handled is False
+    assert result.text != STYLE_CONTROL_REPLY_MESSAGE
+    joined = "\n".join(result.extra_context)
+    assert "身份设定：" in joined
+    assert "生成十个古代风格的名字" not in result.text
+
+
 def test_orchestrator_rejects_style_control_list_request(tmp_path: Path) -> None:
     orchestrator = AiOrchestrator(data_root=tmp_path)
 
@@ -385,8 +407,12 @@ def test_orchestrator_domain_codex_failure_does_not_fall_back_to_plain_llm(
     )
 
     assert result.handled is True
-    assert "只读查询失败" in result.text
-    assert "我先不按通用机制乱猜" in result.text
+    assert "暂时没有足够证据" in result.text
+    assert "先不按通用机制补猜" in result.text
+    assert "只读" not in result.text
+    assert "查询失败" not in result.text
+    assert "本轮" not in result.text
+    assert "Codex" not in result.text
     assert "never sandbox" not in result.text
     assert "read-only" not in result.text
 

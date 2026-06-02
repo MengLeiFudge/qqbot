@@ -826,6 +826,35 @@ def test_should_silence_proactive_batch_keeps_single_unanswered_help() -> None:
     assert should_silence_proactive_batch(items) is False
 
 
+def test_should_silence_proactive_batch_when_human_already_answered_help() -> None:
+    items = [
+        make_proactive_buffer_item(
+            "新手提问:刚开始用这个mod，请问第一个分解塔和转化塔怎么获得？别的塔都转出来了",
+            message_id=51,
+        ),
+        make_proactive_buffer_item(
+            "原胚抽奖，抽别的塔对应的原胚",
+            message_id=52,
+        ),
+    ]
+    items[1] = AiProactiveBufferItem(
+        bot=items[1].bot,
+        event=FakeGroupEvent(user_id="10002", text=items[1].prompt, message_id=52),
+        settings=items[1].settings,
+        store=items[1].store,
+        normalized_message=items[1].normalized_message,
+        prompt=items[1].prompt,
+        request_started=items[1].request_started,
+        request_wall_started=items[1].request_wall_started,
+        event_time=items[1].event_time,
+        message_id=items[1].message_id,
+        group_id=items[1].group_id,
+        user_id="10002",
+    )
+
+    assert should_silence_proactive_batch(items) is True
+
+
 def test_build_proactive_buffer_request_keeps_original_anchor() -> None:
     item = make_proactive_buffer_item("请问这个怎么修？", message_id=23)
 
@@ -2173,6 +2202,8 @@ def test_group_output_strategy_hides_internal_proactive_mode_and_self_reference(
     assert "不要延展玩笑" in context
     assert "技术求助、群管理和安全提醒优先给中性可执行步骤" in context
     assert "我刚刚接话接早了" in context
+    assert "来个很硬的说法" in context
+    assert "不要从旧历史跳到无关主题" in context
 
 
 def test_group_output_strategy_marks_orbital_ring_as_source_backed() -> None:
