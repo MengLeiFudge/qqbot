@@ -4,10 +4,13 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+
+logger = logging.getLogger(__name__)
 
 SHAPEZ_GROUP_ID = "1163635014"
 DEFAULT_OLD_FILE_GRACE_DAYS = 7
@@ -203,6 +206,7 @@ class ShapezGroupFileCleanupService:
         notified = 0
         muted = 0
         deleted = 0
+        failed_private_notices = 0
         for user_id, files in violations.items():
             file_names = tuple(file_info.name for file_info in files)
             file_ids = tuple(file_info.file_id for file_info in files)
@@ -244,12 +248,17 @@ class ShapezGroupFileCleanupService:
                     duration=self.mute_seconds,
                 )
                 muted += 1
-                await bot.call_api(
-                    "send_private_msg",
-                    user_id=int(user_id),
-                    message=build_shapez_cleanup_notice(files),
-                )
-                notified += 1
+                try:
+                    await bot.call_api(
+                        "send_private_msg",
+                        user_id=int(user_id),
+                        message=build_shapez_cleanup_notice(files),
+                    )
+                except Exception as exc:
+                    failed_private_notices += 1
+                    logger.warning("Shapez cleanup private notice failed for user_id=%s: %r", user_id, exc)
+                else:
+                    notified += 1
                 await self._sleep_after_private_notice()
         self.store.save(state)
         return {
@@ -259,6 +268,7 @@ class ShapezGroupFileCleanupService:
             "violating_user_count": len(violations),
             "muted_user_count": muted,
             "notified_user_count": notified,
+            "failed_private_notice_count": failed_private_notices,
             "deleted_file_count": deleted,
         }
 

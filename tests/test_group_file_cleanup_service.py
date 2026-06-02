@@ -26,6 +26,14 @@ class FakeGroupFileBot:
         return {"ok": True}
 
 
+class PrivateNoticeFailingBot(FakeGroupFileBot):
+    async def call_api(self, api: str, **data: object) -> object:
+        if api == "send_private_msg":
+            self.calls.append((api, data))
+            raise RuntimeError("send private failed")
+        return await super().call_api(api, **data)
+
+
 def _service(tmp_path: Path) -> ShapezGroupFileCleanupService:
     return ShapezGroupFileCleanupService(
         store=ShapezGroupFileCleanupStore(tmp_path / "state.json"),
@@ -151,6 +159,35 @@ def test_private_confirmation_unmutes_after_root_files_are_cleaned(tmp_path: Pat
             {"user_id": 10001, "message": "复核通过，已解除禁言。"},
         ),
     ]
+
+
+def test_scan_keeps_pending_when_private_notice_fails(tmp_path: Path) -> None:
+    bot = PrivateNoticeFailingBot()
+    bot.root_payload = {
+        "files": [
+            {
+                "file_id": "root-old",
+                "file_name": "外层旧文件.zip",
+                "file_size": 1024,
+                "upload_time": _ts(8),
+                "uploader_id": "10001",
+            }
+        ],
+        "folders": [],
+    }
+    service = _service(tmp_path)
+
+    result = asyncio.run(
+        service.scan_and_enforce(
+            bot,
+            now=datetime(2026, 6, 2, 8, 0, tzinfo=timezone(timedelta(hours=8))),
+        )
+    )
+
+    assert result["muted_user_count"] == 1
+    assert result["notified_user_count"] == 0
+    assert result["failed_private_notice_count"] == 1
+    assert service.store.load().pending["10001"].status == "pending"
 
 
 def test_scan_deletes_stale_root_files_after_three_days_without_repeating_notice(tmp_path: Path) -> None:
