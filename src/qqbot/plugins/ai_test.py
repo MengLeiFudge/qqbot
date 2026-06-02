@@ -1717,9 +1717,11 @@ def build_ai_reply_message(
 ) -> str | Message:
     if group_id is None or not str(user_id).isdigit():
         return text
+    if not quote:
+        return text
 
     message = Message()
-    if quote and message_id not in {None, ""} and str(message_id).isdigit():
+    if message_id not in {None, ""} and str(message_id).isdigit():
         message += MessageSegment.reply(int(message_id))
     message += MessageSegment.at(int(user_id))
     message += MessageSegment.text(f" {text}")

@@ -327,6 +327,19 @@ def test_build_ai_reply_message_quotes_and_mentions_group_sender() -> None:
     assert str(message).endswith("你好呀")
 
 
+def test_build_ai_reply_message_without_quote_is_plain_group_text() -> None:
+    assert (
+        build_ai_reply_message(
+            "你好呀",
+            group_id=516286670,
+            message_id=12345,
+            user_id="605738729",
+            quote=False,
+        )
+        == "你好呀"
+    )
+
+
 def test_build_ai_reply_message_keeps_private_response_plain() -> None:
     assert build_ai_reply_message(
         "你好呀",
@@ -1830,6 +1843,18 @@ def test_build_ai_reply_notice_message_quotes_and_mentions_group_sender() -> Non
     assert "折叠消息" not in str(message)
 
 
+def test_build_ai_reply_notice_message_without_quote_is_plain_group_text() -> None:
+    assert (
+        build_ai_reply_notice_message(
+            group_id=516286670,
+            message_id=12345,
+            user_id="605738729",
+            quote=False,
+        )
+        == "棉花糖整理了一段较长回复，稍后直接发出。"
+    )
+
+
 def test_should_quote_group_ai_reply_skips_recent_target_message(tmp_path: Path) -> None:
     store = AiGroupContextStore(tmp_path)
     for index in range(1, 7):
@@ -1958,7 +1983,7 @@ def test_finish_continuous_group_ai_reply_delays_followup_parts(monkeypatch) -> 
     )
 
     assert sent_messages == [
-        "[CQ:at,qq=605738729] 第一句",
+        "第一句",
         "第二句话",
         "第三句？",
     ]
