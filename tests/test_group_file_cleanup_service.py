@@ -47,14 +47,15 @@ def test_scan_fetches_full_listing_and_notifies_only_root_old_uploaders(tmp_path
                 "file_id": "root-old",
                 "file_name": "外层旧文件.zip",
                 "file_size": 1024 * 1024,
-                "upload_time": _ts(8),
+                "upload_time": 0,
+                "modify_time": _ts(8),
                 "uploader_id": "10001",
             },
             {
                 "file_id": "root-old-large",
                 "file_name": "更大的外层旧文件.zip",
                 "file_size": 3 * 1024 * 1024,
-                "upload_time": _ts(8),
+                "upload_time": _ts(8) * 1000,
                 "uploader_id": "10001",
             },
             {

@@ -281,6 +281,8 @@ def test_shapez_file_cleanup_preview_is_read_only(tmp_path: Path, monkeypatch) -
     assert payload["preview_only"] is True
     assert payload["root_file_count"] == 1
     assert payload["inner_file_count"] == 1
+    assert payload["root_old_file_count"] == 1
+    assert payload["root_new_file_count"] == 0
     assert payload["violating_user_count"] == 1
     assert payload["violating_file_count"] == 1
     assert payload["users"][0]["user_id"] == "10001"

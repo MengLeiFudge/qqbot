@@ -406,7 +406,9 @@ def _parse_files(raw_files: tuple[dict[str, object], ...], *, parent_folder_id: 
                 file_id=file_id,
                 name=name,
                 size=_first_int(item, "file_size", "size"),
-                uploaded_at=_first_int(item, "upload_time", "uploaded_at", "create_time", "modify_time"),
+                uploaded_at=_normalize_unix_seconds(
+                    _first_positive_int(item, "upload_time", "uploaded_at", "create_time", "modify_time")
+                ),
                 uploader_id=uploader_id,
                 busid=_first_text(item, "busid", "bus_id"),
                 parent_folder_id=parent_folder_id,
@@ -450,6 +452,21 @@ def _first_int(item: dict[str, object], *keys: str) -> int:
         return int(float(text))
     except ValueError:
         return 0
+
+
+def _first_positive_int(item: dict[str, object], *keys: str) -> int:
+    for key in keys:
+        value = _first_int(item, key)
+        if value > 0:
+            return value
+    return 0
+
+
+def _normalize_unix_seconds(value: int) -> int:
+    normalized = int(value)
+    while normalized > 10_000_000_000:
+        normalized //= 1000
+    return normalized
 
 
 def _resolve_zone(timezone_name: str):

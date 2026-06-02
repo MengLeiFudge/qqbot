@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 import subprocess
@@ -284,15 +284,22 @@ def register_admin_routes(
             store=ShapezGroupFileCleanupStore(settings.data_root / "data" / "shapez_file_cleanup_state.json"),
             timezone_name=settings.timezone,
         )
+        current = datetime.now(service.zone)
         snapshot = await service.fetch_snapshot(bot)
-        violations = service.find_violations(snapshot)
+        violations = service.find_violations(snapshot, now=current)
         violating_files = tuple(file_info for files in violations.values() for file_info in files)
+        root_upload_times = tuple(file_info.uploaded_at for file_info in snapshot.root_files if file_info.uploaded_at > 0)
+        cutoff = int((current - timedelta(days=service.old_file_grace_days)).timestamp())
         return {
             "group_id": int(SHAPEZ_GROUP_ID),
             "preview_only": True,
             "root_file_count": len(snapshot.root_files),
             "folder_count": len(snapshot.folders),
             "inner_file_count": len(snapshot.inner_files),
+            "root_old_file_count": sum(1 for file_info in snapshot.root_files if 0 < file_info.uploaded_at <= cutoff),
+            "root_new_file_count": sum(1 for file_info in snapshot.root_files if file_info.uploaded_at > cutoff),
+            "root_upload_time_min": min(root_upload_times, default=0),
+            "root_upload_time_max": max(root_upload_times, default=0),
             "violating_user_count": len(violations),
             "violating_file_count": len(violating_files),
             "violating_total_size": sum(file_info.size for file_info in violating_files),
