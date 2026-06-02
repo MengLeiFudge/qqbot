@@ -15,6 +15,7 @@ DEFAULT_MUTE_SECONDS = 3 * 24 * 60 * 60
 DEFAULT_DELETE_AFTER_SECONDS = 3 * 24 * 60 * 60
 DEFAULT_DAILY_SCAN_HOUR = 8
 DEFAULT_PRIVATE_NOTICE_INTERVAL_SECONDS = 3.0
+DEFAULT_GROUP_FILE_FETCH_COUNT = 10000
 DEFAULT_CONFIRM_TEXTS = frozenset({"1", "已处理", "处理好了", "清理好了", "确认"})
 
 
@@ -33,6 +34,7 @@ class GroupFileInfo:
 class GroupFolderInfo:
     folder_id: str
     name: str
+    total_file_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +142,11 @@ class ShapezGroupFileCleanupService:
         self.sleep = sleep
 
     async def fetch_snapshot(self, bot: Any) -> GroupFileSnapshot:
-        root_payload = await bot.call_api("get_group_root_files", group_id=int(self.group_id))
+        root_payload = await bot.call_api(
+            "get_group_root_files",
+            group_id=int(self.group_id),
+            file_count=DEFAULT_GROUP_FILE_FETCH_COUNT,
+        )
         root_files = tuple(_parse_files(_extract_list(root_payload, "files", "file", "items")))
         folders = tuple(_parse_folders(_extract_list(root_payload, "folders", "folder")))
         inner_files: list[GroupFileInfo] = []
@@ -149,6 +155,7 @@ class ShapezGroupFileCleanupService:
                 "get_group_files_by_folder",
                 group_id=int(self.group_id),
                 folder_id=folder.folder_id,
+                file_count=max(DEFAULT_GROUP_FILE_FETCH_COUNT, folder.total_file_count),
             )
             inner_files.extend(
                 _parse_files(
@@ -414,7 +421,13 @@ def _parse_folders(raw_folders: tuple[dict[str, object], ...]) -> tuple[GroupFol
         folder_id = _first_text(item, "folder_id", "id")
         name = _first_text(item, "folder_name", "name")
         if folder_id:
-            folders.append(GroupFolderInfo(folder_id=folder_id, name=name or folder_id))
+            folders.append(
+                GroupFolderInfo(
+                    folder_id=folder_id,
+                    name=name or folder_id,
+                    total_file_count=_first_int(item, "total_file_count", "file_count"),
+                )
+            )
     return tuple(folders)
 
 
