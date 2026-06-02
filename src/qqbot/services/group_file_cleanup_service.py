@@ -207,6 +207,7 @@ class ShapezGroupFileCleanupService:
         muted = 0
         deleted = 0
         failed_private_notices = 0
+        failed_mutes = 0
         for user_id, files in violations.items():
             file_names = tuple(file_info.name for file_info in files)
             file_ids = tuple(file_info.file_id for file_info in files)
@@ -229,6 +230,34 @@ class ShapezGroupFileCleanupService:
                 continue
             muted_until = int(current.timestamp()) + self.mute_seconds
             should_notify = previous is None or previous.status != "pending"
+            if should_notify:
+                try:
+                    await bot.call_api(
+                        "send_private_msg",
+                        user_id=int(user_id),
+                        message=build_shapez_cleanup_notice(files),
+                    )
+                except Exception as exc:
+                    failed_private_notices += 1
+                    logger.warning("Shapez cleanup private notice failed for user_id=%s: %r", user_id, exc)
+                    await self._sleep_after_private_notice()
+                    continue
+                else:
+                    notified += 1
+                try:
+                    await bot.call_api(
+                        "set_group_ban",
+                        group_id=int(self.group_id),
+                        user_id=int(user_id),
+                        duration=self.mute_seconds,
+                    )
+                except Exception as exc:
+                    failed_mutes += 1
+                    logger.warning("Shapez cleanup mute failed for user_id=%s: %r", user_id, exc)
+                    await self._sleep_after_private_notice()
+                    continue
+                muted += 1
+                await self._sleep_after_private_notice()
             state.pending[user_id] = ShapezPendingCleanup(
                 user_id=user_id,
                 file_ids=file_ids,
@@ -240,26 +269,6 @@ class ShapezGroupFileCleanupService:
                 status="pending",
                 deleted_at=0,
             )
-            if should_notify:
-                await bot.call_api(
-                    "set_group_ban",
-                    group_id=int(self.group_id),
-                    user_id=int(user_id),
-                    duration=self.mute_seconds,
-                )
-                muted += 1
-                try:
-                    await bot.call_api(
-                        "send_private_msg",
-                        user_id=int(user_id),
-                        message=build_shapez_cleanup_notice(files),
-                    )
-                except Exception as exc:
-                    failed_private_notices += 1
-                    logger.warning("Shapez cleanup private notice failed for user_id=%s: %r", user_id, exc)
-                else:
-                    notified += 1
-                await self._sleep_after_private_notice()
         self.store.save(state)
         return {
             "root_file_count": len(snapshot.root_files),
@@ -269,6 +278,7 @@ class ShapezGroupFileCleanupService:
             "muted_user_count": muted,
             "notified_user_count": notified,
             "failed_private_notice_count": failed_private_notices,
+            "failed_mute_count": failed_mutes,
             "deleted_file_count": deleted,
         }
 
