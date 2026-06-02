@@ -12,7 +12,6 @@ if str(SRC) not in sys.path:
 
 from qqbot.plugins.private_memory_cache import (
     handle_private_memory_cache_event,
-    is_shapez_file_cleanup_confirmation_event,
     record_private_chat_memory,
 )
 from qqbot.plugins import private_memory_cache
@@ -20,10 +19,6 @@ from qqbot.config import RuntimeSettings
 from qqbot.services.ai_gateway import AiMetrics, AiResponse
 from qqbot.services.ai_profile_registry import AiProfile
 from qqbot.services.chat_memory_store import ChatMemoryStore
-from qqbot.services.group_file_cleanup_service import (
-    ShapezGroupFileCleanupStore,
-    ShapezPendingCleanup,
-)
 
 
 @dataclass
@@ -130,31 +125,6 @@ def test_handle_private_memory_cache_event_runs_blocking_write_in_thread(monkeyp
     asyncio.run(handle_private_memory_cache_event(event))
 
     assert len(calls) == 1
-
-
-def test_shapez_file_cleanup_confirmation_rule_only_matches_pending_user(tmp_path: Path, monkeypatch) -> None:
-    state_path = tmp_path / "run" / "data" / "shapez_file_cleanup_state.json"
-    store = ShapezGroupFileCleanupStore(state_path)
-    state = store.load()
-    state.pending["10001"] = ShapezPendingCleanup(
-        user_id="10001",
-        file_ids=("file-1",),
-        file_names=("外层旧文件.zip",),
-        first_detected_at=1,
-        last_checked_at=1,
-        muted_until=2,
-        notice_sent_at=1,
-    )
-    store.save(state)
-    monkeypatch.setattr(
-        private_memory_cache,
-        "load_settings",
-        lambda: RuntimeSettings(data_root=tmp_path / "run"),
-    )
-
-    assert is_shapez_file_cleanup_confirmation_event(FakePrivateMessageEvent(user_id=10001, time=1, text="1"))
-    assert not is_shapez_file_cleanup_confirmation_event(FakePrivateMessageEvent(user_id=10002, time=1, text="1"))
-    assert not is_shapez_file_cleanup_confirmation_event(FakePrivateMessageEvent(user_id=10001, time=1, text="你好"))
 
 
 def test_old_private_messages_schedule_one_ai_replay_per_user(monkeypatch) -> None:

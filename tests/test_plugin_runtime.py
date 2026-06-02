@@ -135,6 +135,13 @@ def test_arc_guess_text_is_not_group_control_command() -> None:
     assert re.match(arc.ARC_GUESS_ANSWER_PATTERN, "2eden") is not None
 
 
+def test_group_file_cleanup_commands_are_group_control_commands() -> None:
+    assert group_control.is_group_file_cleanup_command("通知清理文件") is True
+    assert group_control.is_group_file_cleanup_command("清理群文件") is True
+    assert re.match(group_control.GROUP_CONTROL_PATTERN, "通知清理文件") is not None
+    assert group_control.is_group_file_cleanup_command("清理缓存") is False
+
+
 def test_arc_guess_answer_matchers_require_enabled_active_session(monkeypatch) -> None:
     class FakeGroupEvent:
         group_id = 516286670
@@ -202,6 +209,38 @@ class FakeBot:
         self.calls.append((api, data))
         if api == "get_group_info":
             return {"group_id": data.get("group_id"), "group_name": "测试群"}
+
+
+def test_group_file_cleanup_handler_uses_current_group(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCleanupService:
+        def __init__(self, *, store, group_id: str, timezone_name: str) -> None:
+            captured["store"] = store
+            captured["group_id"] = group_id
+            captured["timezone_name"] = timezone_name
+
+        async def scan_and_notify_group(self, bot) -> dict[str, object]:
+            captured["bot"] = bot
+            return {"violating_user_count": 0}
+
+    monkeypatch.setattr(
+        group_control,
+        "load_settings",
+        lambda: SimpleNamespace(data_root=tmp_path, timezone="Asia/Shanghai"),
+    )
+    monkeypatch.setattr(group_control, "ShapezGroupFileCleanupService", FakeCleanupService)
+    bot = FakeBot(self_id="114514")
+
+    result = asyncio.run(group_control.handle_group_file_cleanup_command(bot, 2333))
+
+    assert result == {"violating_user_count": 0}
+    assert captured["group_id"] == "2333"
+    assert captured["timezone_name"] == "Asia/Shanghai"
+    assert captured["bot"] is bot
+    assert bot.calls == [
+        ("send_group_msg", {"group_id": 2333, "message": "当前没有超过一周的外层群文件需要清理。"})
+    ]
 
 
 class FakeRereadEvent:

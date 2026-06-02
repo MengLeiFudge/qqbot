@@ -21,10 +21,6 @@ from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.domain_knowledge_store import DomainKnowledgeStore, build_seed_knowledge_candidates
 from qqbot.services.embedding_vector_store import EmbeddingVectorStore
-from qqbot.services.group_file_cleanup_service import (
-    ShapezGroupFileCleanupService,
-    ShapezGroupFileCleanupStore,
-)
 from qqbot.services.memory_maintenance_service import MemoryMaintenanceService
 from qqbot.services.memory_vector_store import MemoryVectorStore
 from qqbot.services.offline_message_gate import mark_onebot_connected
@@ -36,7 +32,6 @@ driver = get_driver()
 _ARC_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
 _MEMORY_MAINTENANCE_TASKS: dict[str, asyncio.Task] = {}
 _AI_REPLY_REVIEW_TASKS: dict[str, asyncio.Task] = {}
-_SHAPEZ_FILE_CLEANUP_TASKS: dict[str, asyncio.Task] = {}
 
 
 def get_arc_alias_service() -> ArcAliasService:
@@ -102,8 +97,6 @@ async def log_bot_connect(bot: Bot) -> None:
         _MEMORY_MAINTENANCE_TASKS[bot.self_id] = asyncio.create_task(run_memory_maintenance_loop())
     if bot.self_id not in _AI_REPLY_REVIEW_TASKS:
         _AI_REPLY_REVIEW_TASKS[bot.self_id] = asyncio.create_task(run_ai_reply_review_background_loop(bot))
-    if bot.self_id not in _SHAPEZ_FILE_CLEANUP_TASKS:
-        _SHAPEZ_FILE_CLEANUP_TASKS[bot.self_id] = asyncio.create_task(run_shapez_file_cleanup_loop(bot))
 
 
 @driver.on_bot_disconnect
@@ -118,9 +111,6 @@ async def log_bot_disconnect(bot: Bot) -> None:
     review_task = _AI_REPLY_REVIEW_TASKS.pop(bot.self_id, None)
     if review_task is not None:
         review_task.cancel()
-    cleanup_task = _SHAPEZ_FILE_CLEANUP_TASKS.pop(bot.self_id, None)
-    if cleanup_task is not None:
-        cleanup_task.cancel()
 
 
 async def run_arc_background_loop(bot: Bot) -> None:
@@ -177,24 +167,6 @@ async def run_ai_reply_review_background_loop(bot: Bot) -> None:
         raise
     except Exception as exc:
         logger.exception("AI reply review loop crashed: {}", exc)
-
-
-async def run_shapez_file_cleanup_loop(bot: Bot) -> None:
-    settings = load_settings()
-    service = ShapezGroupFileCleanupService(
-        store=ShapezGroupFileCleanupStore(settings.data_root / "data" / "shapez_file_cleanup_state.json"),
-        timezone_name=settings.timezone,
-    )
-    try:
-        while True:
-            result = await service.run_daily_scan(bot)
-            if result.get("ran") is True:
-                logger.info("Shapez group file cleanup scan finished: {}", result)
-            await asyncio.sleep(60)
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.exception("Shapez group file cleanup loop crashed: {}", exc)
 
 
 def run_memory_maintenance_once(service: MemoryMaintenanceService) -> None:

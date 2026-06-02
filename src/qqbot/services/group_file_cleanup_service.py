@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,12 +14,9 @@ logger = logging.getLogger(__name__)
 
 SHAPEZ_GROUP_ID = "1163635014"
 DEFAULT_OLD_FILE_GRACE_DAYS = 7
-DEFAULT_MUTE_SECONDS = 3 * 24 * 60 * 60
-DEFAULT_DELETE_AFTER_SECONDS = 3 * 24 * 60 * 60
-DEFAULT_DAILY_SCAN_HOUR = 8
-DEFAULT_PRIVATE_NOTICE_INTERVAL_SECONDS = 3.0
 DEFAULT_GROUP_FILE_FETCH_COUNT = 10000
-DEFAULT_CONFIRM_TEXTS = frozenset({"1", "已处理", "处理好了", "清理好了", "确认"})
+DEFAULT_GROUP_CLEANUP_SUMMARY_CHUNK_SIZE = 10
+DEFAULT_MUTE_BYTES_PER_MINUTE = 1_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,8 +45,18 @@ class GroupFileSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class GroupFileCleanupSummary:
+    user_id: str
+    files: tuple[GroupFileInfo, ...]
+    file_count: int
+    total_size: int
+    mute_duration_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
 class ShapezPendingCleanup:
     user_id: str
+    group_id: str
     file_ids: tuple[str, ...]
     file_names: tuple[str, ...]
     first_detected_at: int
@@ -86,6 +93,7 @@ class ShapezGroupFileCleanupStore:
                     continue
                 pending[str(user_id)] = ShapezPendingCleanup(
                     user_id=str(item.get("user_id", user_id)),
+                    group_id=str(item.get("group_id", SHAPEZ_GROUP_ID)),
                     file_ids=tuple(str(value) for value in item.get("file_ids", ())),
                     file_names=tuple(str(value) for value in item.get("file_names", ())),
                     first_detected_at=int(item.get("first_detected_at", 0) or 0),
@@ -125,24 +133,14 @@ class ShapezGroupFileCleanupService:
         store: ShapezGroupFileCleanupStore,
         group_id: str = SHAPEZ_GROUP_ID,
         old_file_grace_days: int = DEFAULT_OLD_FILE_GRACE_DAYS,
-        mute_seconds: int = DEFAULT_MUTE_SECONDS,
-        delete_after_seconds: int = DEFAULT_DELETE_AFTER_SECONDS,
-        daily_scan_hour: int = DEFAULT_DAILY_SCAN_HOUR,
-        private_notice_interval_seconds: float = DEFAULT_PRIVATE_NOTICE_INTERVAL_SECONDS,
         timezone_name: str = "Asia/Shanghai",
         now_func: Callable[[], datetime] | None = None,
-        sleep: Callable[[float], Any] = asyncio.sleep,
     ) -> None:
         self.store = store
         self.group_id = str(group_id)
         self.old_file_grace_days = max(0, int(old_file_grace_days))
-        self.mute_seconds = max(60, int(mute_seconds))
-        self.delete_after_seconds = max(60, int(delete_after_seconds))
-        self.daily_scan_hour = int(daily_scan_hour)
-        self.private_notice_interval_seconds = max(0.0, float(private_notice_interval_seconds))
         self.zone = _resolve_zone(timezone_name)
         self.now_func = now_func
-        self.sleep = sleep
 
     async def fetch_snapshot(self, bot: Any) -> GroupFileSnapshot:
         root_payload = await bot.call_api(
@@ -180,92 +178,58 @@ class ShapezGroupFileCleanupService:
             grouped.setdefault(file_info.uploader_id, []).append(file_info)
         return {user_id: tuple(files) for user_id, files in grouped.items()}
 
-    async def run_daily_scan(
-        self,
-        bot: Any,
-        *,
-        now: datetime | None = None,
-        force: bool = False,
-    ) -> dict[str, object]:
-        current = self._coerce_now(now)
-        state = self.store.load()
-        if not force and not self.should_run_daily(state, current):
-            return {"ran": False, "reason": "not_due"}
-        result = await self.scan_and_enforce(bot, now=current)
-        state = self.store.load()
-        state.last_scan_date = current.date().isoformat()
-        state.last_scan_at = int(current.timestamp())
-        self.store.save(state)
-        return {"ran": True, **result}
-
-    async def scan_and_enforce(self, bot: Any, *, now: datetime | None = None) -> dict[str, object]:
+    async def scan_and_notify_group(self, bot: Any, *, now: datetime | None = None) -> dict[str, object]:
         current = self._coerce_now(now)
         snapshot = await self.fetch_snapshot(bot)
         violations = self.find_violations(snapshot, now=current)
+        summaries = build_group_file_cleanup_summaries(violations)
+        if not summaries:
+            return {
+                "root_file_count": len(snapshot.root_files),
+                "folder_count": len(snapshot.folders),
+                "inner_file_count": len(snapshot.inner_files),
+                "violating_user_count": 0,
+                "violating_file_count": 0,
+                "violating_total_size": 0,
+                "muted_user_count": 0,
+                "failed_mute_count": 0,
+                "group_message_count": 0,
+            }
+
+        group_messages = (
+            build_group_cleanup_intro_message(),
+            *build_group_cleanup_summary_messages(summaries),
+        )
+        for message in group_messages:
+            await bot.call_api("send_group_msg", group_id=int(self.group_id), message=message)
+
         state = self.store.load()
-        notified = 0
         muted = 0
-        deleted = 0
-        failed_private_notices = 0
         failed_mutes = 0
-        for user_id, files in violations.items():
-            file_names = tuple(file_info.name for file_info in files)
-            file_ids = tuple(file_info.file_id for file_info in files)
-            previous = state.pending.get(user_id)
-            if previous is not None and previous.status == "pending" and _is_cleanup_expired(previous, current, self.delete_after_seconds):
-                for file_info in files:
-                    await self._delete_group_file(bot, file_info)
-                    deleted += 1
-                state.pending[user_id] = ShapezPendingCleanup(
-                    user_id=user_id,
-                    file_ids=file_ids,
-                    file_names=file_names,
-                    first_detected_at=previous.first_detected_at,
-                    last_checked_at=int(current.timestamp()),
-                    muted_until=previous.muted_until,
-                    notice_sent_at=previous.notice_sent_at,
-                    status="deleted",
-                    deleted_at=int(current.timestamp()),
+        for summary in summaries:
+            previous = state.pending.get(summary.user_id)
+            muted_until = int(current.timestamp()) + summary.mute_duration_seconds
+            try:
+                await bot.call_api(
+                    "set_group_ban",
+                    group_id=int(self.group_id),
+                    user_id=int(summary.user_id),
+                    duration=summary.mute_duration_seconds,
                 )
+            except Exception as exc:
+                failed_mutes += 1
+                logger.warning("Group file cleanup mute failed for group_id=%s user_id=%s: %r", self.group_id, summary.user_id, exc)
                 continue
-            muted_until = int(current.timestamp()) + self.mute_seconds
-            should_notify = previous is None or previous.status != "pending"
-            if should_notify:
-                try:
-                    await bot.call_api(
-                        "send_private_msg",
-                        user_id=int(user_id),
-                        message=build_shapez_cleanup_notice(files),
-                    )
-                except Exception as exc:
-                    failed_private_notices += 1
-                    logger.warning("Shapez cleanup private notice failed for user_id=%s: %r", user_id, exc)
-                    await self._sleep_after_private_notice()
-                    continue
-                else:
-                    notified += 1
-                try:
-                    await bot.call_api(
-                        "set_group_ban",
-                        group_id=int(self.group_id),
-                        user_id=int(user_id),
-                        duration=self.mute_seconds,
-                    )
-                except Exception as exc:
-                    failed_mutes += 1
-                    logger.warning("Shapez cleanup mute failed for user_id=%s: %r", user_id, exc)
-                    await self._sleep_after_private_notice()
-                    continue
-                muted += 1
-                await self._sleep_after_private_notice()
-            state.pending[user_id] = ShapezPendingCleanup(
-                user_id=user_id,
-                file_ids=file_ids,
-                file_names=file_names,
+            muted += 1
+            state.pending[summary.user_id] = ShapezPendingCleanup(
+                user_id=summary.user_id,
+                group_id=self.group_id,
+                file_ids=tuple(file_info.file_id for file_info in summary.files),
+                file_names=tuple(file_info.name for file_info in summary.files),
                 first_detected_at=previous.first_detected_at if previous else int(current.timestamp()),
                 last_checked_at=int(current.timestamp()),
                 muted_until=muted_until,
-                notice_sent_at=int(current.timestamp()) if should_notify else previous.notice_sent_at,
+                notice_sent_at=int(current.timestamp()),
                 status="pending",
                 deleted_at=0,
             )
@@ -274,82 +238,13 @@ class ShapezGroupFileCleanupService:
             "root_file_count": len(snapshot.root_files),
             "folder_count": len(snapshot.folders),
             "inner_file_count": len(snapshot.inner_files),
-            "violating_user_count": len(violations),
+            "violating_user_count": len(summaries),
+            "violating_file_count": sum(summary.file_count for summary in summaries),
+            "violating_total_size": sum(summary.total_size for summary in summaries),
             "muted_user_count": muted,
-            "notified_user_count": notified,
-            "failed_private_notice_count": failed_private_notices,
             "failed_mute_count": failed_mutes,
-            "deleted_file_count": deleted,
+            "group_message_count": len(group_messages),
         }
-
-    async def handle_private_confirmation(
-        self,
-        bot: Any,
-        *,
-        user_id: int | str,
-        text: str,
-        now: datetime | None = None,
-    ) -> bool:
-        normalized = str(text).strip()
-        if normalized not in DEFAULT_CONFIRM_TEXTS:
-            return False
-        user_key = str(user_id)
-        state = self.store.load()
-        pending = state.pending.get(user_key)
-        if pending is None or pending.status != "pending":
-            return False
-        current = self._coerce_now(now)
-        snapshot = await self.fetch_snapshot(bot)
-        violations = self.find_violations(snapshot, now=current)
-        if user_key in violations:
-            state.pending[user_key] = ShapezPendingCleanup(
-                user_id=pending.user_id,
-                file_ids=tuple(file_info.file_id for file_info in violations[user_key]),
-                file_names=tuple(file_info.name for file_info in violations[user_key]),
-                first_detected_at=pending.first_detected_at,
-                last_checked_at=int(current.timestamp()),
-                muted_until=int(current.timestamp()) + self.mute_seconds,
-                notice_sent_at=pending.notice_sent_at,
-                status="pending",
-                deleted_at=0,
-            )
-            self.store.save(state)
-            await bot.call_api(
-                "send_private_msg",
-                user_id=int(user_key),
-                message=build_shapez_cleanup_still_pending_message(state.pending[user_key].file_names),
-            )
-            return True
-        state.pending.pop(user_key, None)
-        self.store.save(state)
-        await bot.call_api(
-            "set_group_ban",
-            group_id=int(self.group_id),
-            user_id=int(user_key),
-            duration=0,
-        )
-        await bot.call_api("send_private_msg", user_id=int(user_key), message="复核通过，已解除禁言。")
-        return True
-
-    async def _delete_group_file(self, bot: Any, file_info: GroupFileInfo) -> None:
-        payload: dict[str, object] = {
-            "group_id": int(self.group_id),
-            "file_id": file_info.file_id,
-        }
-        if file_info.busid:
-            payload["busid"] = int(file_info.busid) if file_info.busid.isdigit() else file_info.busid
-        await bot.call_api("delete_group_file", **payload)
-
-    async def _sleep_after_private_notice(self) -> None:
-        if self.private_notice_interval_seconds > 0:
-            await self.sleep(self.private_notice_interval_seconds)
-
-    def should_run_daily(self, state: ShapezGroupFileCleanupState, now: datetime) -> bool:
-        current = self._coerce_now(now)
-        if state.last_scan_date == current.date().isoformat():
-            return False
-        scheduled_at = current.replace(hour=self.daily_scan_hour, minute=0, second=0, microsecond=0)
-        return current >= scheduled_at
 
     def _coerce_now(self, now: datetime | None) -> datetime:
         if now is None:
@@ -361,42 +256,64 @@ class ShapezGroupFileCleanupService:
         return now.astimezone(self.zone)
 
 
-def build_shapez_cleanup_notice(files: tuple[GroupFileInfo, ...]) -> str:
-    sorted_files = _sort_files_by_size_desc(files)
-    listed = "\n".join(f"- {file_info.name}（{_format_file_size(file_info.size)}）" for file_info in sorted_files[:10])
-    more = "" if len(sorted_files) <= 10 else f"\n还有 {len(sorted_files) - 10} 个文件未列出。"
-    summary = f"共 {len(sorted_files)} 个文件，总大小 {_format_file_size(sum(file_info.size for file_info in sorted_files))}。"
+def build_group_file_cleanup_summaries(
+    violations: dict[str, tuple[GroupFileInfo, ...]]
+) -> tuple[GroupFileCleanupSummary, ...]:
+    summaries: list[GroupFileCleanupSummary] = []
+    for user_id, files in violations.items():
+        sorted_files = _sort_files_by_size_desc(files)
+        total_size = sum(file_info.size for file_info in sorted_files)
+        summaries.append(
+            GroupFileCleanupSummary(
+                user_id=user_id,
+                files=sorted_files,
+                file_count=len(sorted_files),
+                total_size=total_size,
+                mute_duration_seconds=_calculate_size_based_mute_duration(total_size),
+            )
+        )
+    return tuple(sorted(summaries, key=lambda summary: (-summary.total_size, summary.user_id)))
+
+
+def build_group_cleanup_intro_message() -> str:
     return (
-        "检测到你上传到shapez群的文件已经超过一周未归类或删除，已按试运行规则禁言 3 天。请把它们清理掉或移动到合适文件夹内。\n"
-        f"{summary}\n"
-        f"{listed}{more}\n"
-        "处理完成后私聊回复 1，棉花糖会复核；复核通过后解除禁言。连续 3 天仍未处理时，残留的外层文件会被直接删除。"
+        "该清理文件了喵！\n"
+        "以下只统计超过一周、未归类到文件夹内的文件喵。\n"
+        "请将自己的文件删除或移动到合适的文件夹喵！"
     )
 
 
-def build_shapez_cleanup_still_pending_message(file_names: tuple[str, ...]) -> str:
-    listed = "\n".join(f"- {name}" for name in file_names[:10])
-    return "复核还没通过，最外层仍有需要处理的旧文件：\n" + listed
+def build_group_cleanup_summary_messages(
+    summaries: tuple[GroupFileCleanupSummary, ...],
+    *,
+    chunk_size: int = DEFAULT_GROUP_CLEANUP_SUMMARY_CHUNK_SIZE,
+) -> tuple[str, ...]:
+    size = max(1, int(chunk_size))
+    chunks = tuple(summaries[index : index + size] for index in range(0, len(summaries), size))
+    messages: list[str] = []
+    for chunk_index, chunk in enumerate(chunks, start=1):
+        lines = [
+            f"[CQ:at,qq={summary.user_id}] {summary.file_count} 个，{_format_decimal_mb(summary.total_size)}"
+            for summary in chunk
+        ]
+        if len(chunks) > 1:
+            lines.append(f"第 {chunk_index}/{len(chunks)} 条")
+        messages.append("\n".join(lines))
+    return tuple(messages)
 
 
 def _sort_files_by_size_desc(files: tuple[GroupFileInfo, ...]) -> tuple[GroupFileInfo, ...]:
     return tuple(sorted(files, key=lambda file_info: (-file_info.size, file_info.name)))
 
 
-def _format_file_size(size: int) -> str:
-    value = max(0, int(size))
-    units = ("B", "KB", "MB", "GB", "TB")
-    amount = float(value)
-    for unit in units:
-        if amount < 1024 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(amount)} {unit}"
-            return f"{amount:.1f} {unit}"
-        amount /= 1024
+def _format_decimal_mb(size: int) -> str:
+    return f"{max(0, int(size)) / DEFAULT_MUTE_BYTES_PER_MINUTE:.1f} MB"
 
 
-def _is_cleanup_expired(pending: ShapezPendingCleanup, now: datetime, delete_after_seconds: int) -> bool:
-    return int(now.timestamp()) - pending.first_detected_at >= delete_after_seconds
+def _calculate_size_based_mute_duration(size: int) -> int:
+    if size <= 0:
+        return 1
+    return max(1, math.ceil(int(size) * 60 / DEFAULT_MUTE_BYTES_PER_MINUTE))
 
 
 def _extract_list(payload: object, *keys: str) -> tuple[dict[str, object], ...]:
