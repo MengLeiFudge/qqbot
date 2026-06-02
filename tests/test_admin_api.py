@@ -43,6 +43,37 @@ class FakeUploadBot:
         return {"status": "ok"}
 
 
+class FakeGroupFilePreviewBot:
+    async def call_api(self, api: str, **data: object) -> dict[str, object]:
+        if api == "get_group_root_files":
+            return {
+                "files": [
+                    {
+                        "file_id": "root-old",
+                        "file_name": "外层旧文件.zip",
+                        "file_size": 1024,
+                        "upload_time": int((datetime.now(timezone.utc) - timedelta(days=8)).timestamp()),
+                        "uploader_id": "10001",
+                    }
+                ],
+                "folders": [{"folder_id": "folder-a", "folder_name": "教程"}],
+            }
+        if api == "get_group_files_by_folder":
+            return {
+                "files": [
+                    {
+                        "file_id": "inner-old",
+                        "file_name": "内层旧文件.zip",
+                        "file_size": 2048,
+                        "upload_time": int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp()),
+                        "uploader_id": "10002",
+                    }
+                ],
+                "folders": [],
+            }
+        raise AssertionError(f"preview must not call mutating OneBot API: {api}")
+
+
 class FakeSlowGroupListBot:
     async def call_api(self, api: str, **data: object) -> list[dict[str, object]]:
         await asyncio.sleep(1)
@@ -237,6 +268,23 @@ def test_ai_proactive_mode_api_is_removed(tmp_path: Path) -> None:
     )
 
     assert status_code == 404, body
+
+
+def test_shapez_file_cleanup_preview_is_read_only(tmp_path: Path, monkeypatch) -> None:
+    app = build_app(tmp_path)
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": FakeGroupFilePreviewBot()})
+
+    status_code, body = asgi_request(app, "GET", "/admin/api/shapez-file-cleanup/preview")
+
+    assert status_code == 200, body
+    payload = json.loads(body)
+    assert payload["preview_only"] is True
+    assert payload["root_file_count"] == 1
+    assert payload["inner_file_count"] == 1
+    assert payload["violating_user_count"] == 1
+    assert payload["violating_file_count"] == 1
+    assert payload["users"][0]["user_id"] == "10001"
+    assert payload["users"][0]["files"][0]["file_name"] == "外层旧文件.zip"
 
 
 def test_get_connected_group_names_skips_slow_onebot_api(monkeypatch) -> None:

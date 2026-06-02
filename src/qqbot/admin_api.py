@@ -22,6 +22,12 @@ from qqbot.services.fe_artifact_publish_service import (
     publish_fe_artifact,
     publish_local_artifacts,
 )
+from qqbot.services.group_file_cleanup_service import (
+    SHAPEZ_GROUP_ID,
+    GroupFileInfo,
+    ShapezGroupFileCleanupService,
+    ShapezGroupFileCleanupStore,
+)
 
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 ONEBOT_GROUP_LIST_TIMEOUT_SECONDS = 2.0
@@ -265,6 +271,41 @@ def register_admin_routes(
         admin_service: AdminService = Depends(service),
     ) -> dict[str, object]:
         return admin_service.get_group_control_config()
+
+    @app.get("/admin/api/shapez-file-cleanup/preview")
+    async def admin_shapez_file_cleanup_preview(
+        _: None = Depends(require_local_request),
+    ) -> dict[str, object]:
+        bots = nonebot.get_bots()
+        if not bots:
+            raise HTTPException(status_code=503, detail="No connected OneBot bot.")
+        bot = next(iter(bots.values()))
+        service = ShapezGroupFileCleanupService(
+            store=ShapezGroupFileCleanupStore(settings.data_root / "data" / "shapez_file_cleanup_state.json"),
+            timezone_name=settings.timezone,
+        )
+        snapshot = await service.fetch_snapshot(bot)
+        violations = service.find_violations(snapshot)
+        violating_files = tuple(file_info for files in violations.values() for file_info in files)
+        return {
+            "group_id": int(SHAPEZ_GROUP_ID),
+            "preview_only": True,
+            "root_file_count": len(snapshot.root_files),
+            "folder_count": len(snapshot.folders),
+            "inner_file_count": len(snapshot.inner_files),
+            "violating_user_count": len(violations),
+            "violating_file_count": len(violating_files),
+            "violating_total_size": sum(file_info.size for file_info in violating_files),
+            "users": [
+                {
+                    "user_id": user_id,
+                    "file_count": len(files),
+                    "total_size": sum(file_info.size for file_info in files),
+                    "files": [_preview_group_file(file_info) for file_info in sorted(files, key=lambda item: (-item.size, item.name))],
+                }
+                for user_id, files in sorted(violations.items(), key=lambda item: (-sum(file_info.size for file_info in item[1]), item[0]))
+            ],
+        }
 
     @app.get("/admin/api/kun/users")
     async def admin_kun_users(
@@ -1712,6 +1753,16 @@ def _read_git_output(repo_path: Path, *args: str) -> str:
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
+
+
+def _preview_group_file(file_info: GroupFileInfo) -> dict[str, object]:
+    return {
+        "file_id": file_info.file_id,
+        "file_name": file_info.name,
+        "size": file_info.size,
+        "upload_time": file_info.uploaded_at,
+        "uploader_id": file_info.uploader_id,
+    }
 
 
 async def get_connected_group_names(
