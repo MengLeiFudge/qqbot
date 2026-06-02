@@ -34,10 +34,28 @@ class GroupBanFailingBot(FakeGroupFileBot):
         return await super().call_api(api, **data)
 
 
+class GroupMessageFailingBot(FakeGroupFileBot):
+    def __init__(self, *, fail_message_number: int) -> None:
+        super().__init__()
+        self.fail_message_number = fail_message_number
+        self.group_message_count = 0
+
+    async def call_api(self, api: str, **data: object) -> object:
+        if api == "send_group_msg":
+            self.group_message_count += 1
+            self.calls.append((api, data))
+            if self.group_message_count == self.fail_message_number:
+                raise RuntimeError("message was filtered")
+            return {"ok": True}
+        return await super().call_api(api, **data)
+
+
 def _service(tmp_path: Path) -> ShapezGroupFileCleanupService:
     return ShapezGroupFileCleanupService(
         store=ShapezGroupFileCleanupStore(tmp_path / "state.json"),
         timezone_name="Asia/Shanghai",
+        group_message_interval_seconds=0,
+        group_message_retry_count=0,
     )
 
 
@@ -152,3 +170,35 @@ def test_scan_still_lists_user_but_skips_pending_when_mute_fails(tmp_path: Path)
     assert result["failed_mute_count"] == 1
     assert [call for call in bot.calls if call[0] == "send_group_msg"]
     assert "10001" not in service.store.load().pending
+
+
+def test_scan_sends_remaining_messages_but_skips_mute_when_group_notice_fails(tmp_path: Path) -> None:
+    bot = GroupMessageFailingBot(fail_message_number=2)
+    bot.root_payload = {
+        "files": [
+            {
+                "file_id": f"root-old-{index}",
+                "file_name": f"外层旧文件{index}.zip",
+                "file_size": 1_000_000,
+                "upload_time": _ts(8),
+                "uploader_id": str(10000 + index),
+            }
+            for index in range(11)
+        ],
+        "folders": [],
+    }
+    service = _service(tmp_path)
+
+    result = asyncio.run(
+        service.scan_and_notify_group(
+            bot,
+            now=datetime(2026, 6, 2, 8, 0, tzinfo=timezone(timedelta(hours=8))),
+        )
+    )
+
+    assert result["group_message_count"] == 3
+    assert result["failed_group_message_count"] == 1
+    assert result["muted_user_count"] == 0
+    assert not [call for call in bot.calls if call[0] == "set_group_ban"]
+    assert bot.group_message_count == 3
+    assert service.store.load().pending == {}

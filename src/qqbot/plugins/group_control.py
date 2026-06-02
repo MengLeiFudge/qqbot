@@ -93,4 +93,6 @@ async def handle_group_file_cleanup_command(bot: Bot, group_id: int) -> dict[str
     result = await service.scan_and_notify_group(bot)
     if result.get("violating_user_count") == 0:
         await bot.call_api("send_group_msg", group_id=group_id, message="当前没有超过一周的外层群文件需要清理。")
+    elif result.get("failed_group_message_count"):
+        await bot.call_api("send_group_msg", group_id=group_id, message="文件清理名单没有完整发出，本轮已跳过禁言。")
     return result

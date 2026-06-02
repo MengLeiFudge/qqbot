@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
@@ -17,6 +18,8 @@ DEFAULT_OLD_FILE_GRACE_DAYS = 7
 DEFAULT_GROUP_FILE_FETCH_COUNT = 10000
 DEFAULT_GROUP_CLEANUP_SUMMARY_CHUNK_SIZE = 10
 DEFAULT_MUTE_BYTES_PER_MINUTE = 1_000_000
+DEFAULT_GROUP_MESSAGE_INTERVAL_SECONDS = 1.0
+DEFAULT_GROUP_MESSAGE_RETRY_COUNT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,14 +136,20 @@ class ShapezGroupFileCleanupService:
         store: ShapezGroupFileCleanupStore,
         group_id: str = SHAPEZ_GROUP_ID,
         old_file_grace_days: int = DEFAULT_OLD_FILE_GRACE_DAYS,
+        group_message_interval_seconds: float = DEFAULT_GROUP_MESSAGE_INTERVAL_SECONDS,
+        group_message_retry_count: int = DEFAULT_GROUP_MESSAGE_RETRY_COUNT,
         timezone_name: str = "Asia/Shanghai",
         now_func: Callable[[], datetime] | None = None,
+        sleep: Callable[[float], Any] = asyncio.sleep,
     ) -> None:
         self.store = store
         self.group_id = str(group_id)
         self.old_file_grace_days = max(0, int(old_file_grace_days))
+        self.group_message_interval_seconds = max(0.0, float(group_message_interval_seconds))
+        self.group_message_retry_count = max(0, int(group_message_retry_count))
         self.zone = _resolve_zone(timezone_name)
         self.now_func = now_func
+        self.sleep = sleep
 
     async def fetch_snapshot(self, bot: Any) -> GroupFileSnapshot:
         root_payload = await bot.call_api(
@@ -194,14 +203,34 @@ class ShapezGroupFileCleanupService:
                 "muted_user_count": 0,
                 "failed_mute_count": 0,
                 "group_message_count": 0,
+                "failed_group_message_count": 0,
             }
 
         group_messages = (
             build_group_cleanup_intro_message(),
             *build_group_cleanup_summary_messages(summaries),
         )
-        for message in group_messages:
-            await bot.call_api("send_group_msg", group_id=int(self.group_id), message=message)
+        failed_group_messages = 0
+        for index, message in enumerate(group_messages, start=1):
+            if index > 1 and self.group_message_interval_seconds > 0:
+                await self.sleep(self.group_message_interval_seconds)
+            sent = await self._send_group_cleanup_message(bot, message=message, message_index=index)
+            if not sent:
+                failed_group_messages += 1
+
+        if failed_group_messages:
+            return {
+                "root_file_count": len(snapshot.root_files),
+                "folder_count": len(snapshot.folders),
+                "inner_file_count": len(snapshot.inner_files),
+                "violating_user_count": len(summaries),
+                "violating_file_count": sum(summary.file_count for summary in summaries),
+                "violating_total_size": sum(summary.total_size for summary in summaries),
+                "muted_user_count": 0,
+                "failed_mute_count": 0,
+                "group_message_count": len(group_messages),
+                "failed_group_message_count": failed_group_messages,
+            }
 
         state = self.store.load()
         muted = 0
@@ -244,7 +273,25 @@ class ShapezGroupFileCleanupService:
             "muted_user_count": muted,
             "failed_mute_count": failed_mutes,
             "group_message_count": len(group_messages),
+            "failed_group_message_count": failed_group_messages,
         }
+
+    async def _send_group_cleanup_message(self, bot: Any, *, message: str, message_index: int) -> bool:
+        for attempt in range(self.group_message_retry_count + 1):
+            try:
+                await bot.call_api("send_group_msg", group_id=int(self.group_id), message=message)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "Group file cleanup message failed for group_id=%s index=%s attempt=%s: %r",
+                    self.group_id,
+                    message_index,
+                    attempt + 1,
+                    exc,
+                )
+                if attempt < self.group_message_retry_count and self.group_message_interval_seconds > 0:
+                    await self.sleep(self.group_message_interval_seconds)
+        return False
 
     def _coerce_now(self, now: datetime | None) -> datetime:
         if now is None:

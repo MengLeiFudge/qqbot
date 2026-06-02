@@ -243,6 +243,30 @@ def test_group_file_cleanup_handler_uses_current_group(monkeypatch, tmp_path: Pa
     ]
 
 
+def test_group_file_cleanup_handler_reports_incomplete_notice(monkeypatch, tmp_path: Path) -> None:
+    class FakeCleanupService:
+        def __init__(self, *, store, group_id: str, timezone_name: str) -> None:
+            pass
+
+        async def scan_and_notify_group(self, bot) -> dict[str, object]:
+            return {"violating_user_count": 11, "failed_group_message_count": 1, "muted_user_count": 0}
+
+    monkeypatch.setattr(
+        group_control,
+        "load_settings",
+        lambda: SimpleNamespace(data_root=tmp_path, timezone="Asia/Shanghai"),
+    )
+    monkeypatch.setattr(group_control, "ShapezGroupFileCleanupService", FakeCleanupService)
+    bot = FakeBot(self_id="114514")
+
+    result = asyncio.run(group_control.handle_group_file_cleanup_command(bot, 2333))
+
+    assert result["failed_group_message_count"] == 1
+    assert bot.calls == [
+        ("send_group_msg", {"group_id": 2333, "message": "文件清理名单没有完整发出，本轮已跳过禁言。"})
+    ]
+
+
 class FakeRereadEvent:
     group_id = 2333
     time = 10
