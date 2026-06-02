@@ -202,23 +202,22 @@ class ShapezGroupFileCleanupService:
                 "violating_total_size": 0,
                 "muted_user_count": 0,
                 "failed_mute_count": 0,
+                "skipped_mute_count": 0,
                 "group_message_count": 0,
                 "failed_group_message_count": 0,
             }
 
-        group_messages = (
-            build_group_cleanup_intro_message(),
-            *build_group_cleanup_summary_messages(summaries),
-        )
         failed_group_messages = 0
-        for index, message in enumerate(group_messages, start=1):
-            if index > 1 and self.group_message_interval_seconds > 0:
-                await self.sleep(self.group_message_interval_seconds)
-            sent = await self._send_group_cleanup_message(bot, message=message, message_index=index)
-            if not sent:
-                failed_group_messages += 1
+        group_message_count = 1
+        intro_sent = await self._send_group_cleanup_message(
+            bot,
+            message=build_group_cleanup_intro_message(),
+            message_index=1,
+        )
+        if not intro_sent:
+            failed_group_messages += 1
 
-        if failed_group_messages:
+        if not intro_sent:
             return {
                 "root_file_count": len(snapshot.root_files),
                 "folder_count": len(snapshot.folders),
@@ -228,40 +227,36 @@ class ShapezGroupFileCleanupService:
                 "violating_total_size": sum(summary.total_size for summary in summaries),
                 "muted_user_count": 0,
                 "failed_mute_count": 0,
-                "group_message_count": len(group_messages),
+                "skipped_mute_count": len(tuple(summary for summary in summaries if summary.mute_duration_seconds < 60)),
+                "group_message_count": group_message_count,
                 "failed_group_message_count": failed_group_messages,
             }
 
         state = self.store.load()
         muted = 0
         failed_mutes = 0
-        for summary in summaries:
-            previous = state.pending.get(summary.user_id)
-            muted_until = int(current.timestamp()) + summary.mute_duration_seconds
-            try:
-                await bot.call_api(
-                    "set_group_ban",
-                    group_id=int(self.group_id),
-                    user_id=int(summary.user_id),
-                    duration=summary.mute_duration_seconds,
-                )
-            except Exception as exc:
-                failed_mutes += 1
-                logger.warning("Group file cleanup mute failed for group_id=%s user_id=%s: %r", self.group_id, summary.user_id, exc)
-                continue
-            muted += 1
-            state.pending[summary.user_id] = ShapezPendingCleanup(
-                user_id=summary.user_id,
-                group_id=self.group_id,
-                file_ids=tuple(file_info.file_id for file_info in summary.files),
-                file_names=tuple(file_info.name for file_info in summary.files),
-                first_detected_at=previous.first_detected_at if previous else int(current.timestamp()),
-                last_checked_at=int(current.timestamp()),
-                muted_until=muted_until,
-                notice_sent_at=int(current.timestamp()),
-                status="pending",
-                deleted_at=0,
+        skipped_mutes = 0
+        summary_chunks = tuple(
+            summaries[index : index + DEFAULT_GROUP_CLEANUP_SUMMARY_CHUNK_SIZE]
+            for index in range(0, len(summaries), DEFAULT_GROUP_CLEANUP_SUMMARY_CHUNK_SIZE)
+        )
+        for chunk_index, chunk in enumerate(summary_chunks, start=1):
+            if self.group_message_interval_seconds > 0:
+                await self.sleep(self.group_message_interval_seconds)
+            group_message_count += 1
+            message = build_group_cleanup_summary_message(chunk, chunk_index=chunk_index, chunk_count=len(summary_chunks))
+            sent = await self._send_group_cleanup_message(
+                bot,
+                message=message,
+                message_index=group_message_count,
             )
+            if not sent:
+                failed_group_messages += 1
+                continue
+            chunk_result = await self._mute_summaries(bot, state=state, summaries=chunk, now=current)
+            muted += chunk_result["muted"]
+            failed_mutes += chunk_result["failed"]
+            skipped_mutes += chunk_result["skipped"]
         self.store.save(state)
         return {
             "root_file_count": len(snapshot.root_files),
@@ -272,9 +267,53 @@ class ShapezGroupFileCleanupService:
             "violating_total_size": sum(summary.total_size for summary in summaries),
             "muted_user_count": muted,
             "failed_mute_count": failed_mutes,
-            "group_message_count": len(group_messages),
+            "skipped_mute_count": skipped_mutes,
+            "group_message_count": group_message_count,
             "failed_group_message_count": failed_group_messages,
         }
+
+    async def _mute_summaries(
+        self,
+        bot: Any,
+        *,
+        state: ShapezGroupFileCleanupState,
+        summaries: tuple[GroupFileCleanupSummary, ...],
+        now: datetime,
+    ) -> dict[str, int]:
+        muted = 0
+        failed = 0
+        skipped = 0
+        for summary in summaries:
+            if summary.mute_duration_seconds < 60:
+                skipped += 1
+                continue
+            previous = state.pending.get(summary.user_id)
+            muted_until = int(now.timestamp()) + summary.mute_duration_seconds
+            try:
+                await bot.call_api(
+                    "set_group_ban",
+                    group_id=int(self.group_id),
+                    user_id=int(summary.user_id),
+                    duration=summary.mute_duration_seconds,
+                )
+            except Exception as exc:
+                failed += 1
+                logger.warning("Group file cleanup mute failed for group_id=%s user_id=%s: %r", self.group_id, summary.user_id, exc)
+                continue
+            muted += 1
+            state.pending[summary.user_id] = ShapezPendingCleanup(
+                user_id=summary.user_id,
+                group_id=self.group_id,
+                file_ids=tuple(file_info.file_id for file_info in summary.files),
+                file_names=tuple(file_info.name for file_info in summary.files),
+                first_detected_at=previous.first_detected_at if previous else int(now.timestamp()),
+                last_checked_at=int(now.timestamp()),
+                muted_until=muted_until,
+                notice_sent_at=int(now.timestamp()),
+                status="pending",
+                deleted_at=0,
+            )
+        return {"muted": muted, "failed": failed, "skipped": skipped}
 
     async def _send_group_cleanup_message(self, bot: Any, *, message: str, message_index: int) -> bool:
         for attempt in range(self.group_message_retry_count + 1):
@@ -337,16 +376,25 @@ def build_group_cleanup_summary_messages(
 ) -> tuple[str, ...]:
     size = max(1, int(chunk_size))
     chunks = tuple(summaries[index : index + size] for index in range(0, len(summaries), size))
-    messages: list[str] = []
-    for chunk_index, chunk in enumerate(chunks, start=1):
-        lines = [
-            f"[CQ:at,qq={summary.user_id}] {summary.file_count} 个，{_format_decimal_mb(summary.total_size)}"
-            for summary in chunk
-        ]
-        if len(chunks) > 1:
-            lines.append(f"第 {chunk_index}/{len(chunks)} 条")
-        messages.append("\n".join(lines))
-    return tuple(messages)
+    return tuple(
+        build_group_cleanup_summary_message(chunk, chunk_index=chunk_index, chunk_count=len(chunks))
+        for chunk_index, chunk in enumerate(chunks, start=1)
+    )
+
+
+def build_group_cleanup_summary_message(
+    summaries: tuple[GroupFileCleanupSummary, ...],
+    *,
+    chunk_index: int,
+    chunk_count: int,
+) -> str:
+    lines = [
+        f"[CQ:at,qq={summary.user_id}] {summary.file_count} 个，{_format_decimal_mb(summary.total_size)}"
+        for summary in summaries
+    ]
+    if chunk_count > 1:
+        lines.append(f"第 {chunk_index}/{chunk_count} 条")
+    return "\n".join(lines)
 
 
 def _sort_files_by_size_desc(files: tuple[GroupFileInfo, ...]) -> tuple[GroupFileInfo, ...]:
@@ -359,8 +407,11 @@ def _format_decimal_mb(size: int) -> str:
 
 def _calculate_size_based_mute_duration(size: int) -> int:
     if size <= 0:
-        return 1
-    return max(1, math.ceil(int(size) * 60 / DEFAULT_MUTE_BYTES_PER_MINUTE))
+        return 0
+    raw_seconds = int(size) * 60 / DEFAULT_MUTE_BYTES_PER_MINUTE
+    if raw_seconds < 60:
+        return 0
+    return math.ceil(raw_seconds)
 
 
 def _extract_list(payload: object, *keys: str) -> tuple[dict[str, object], ...]:

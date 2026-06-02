@@ -249,7 +249,7 @@ def test_group_file_cleanup_handler_reports_incomplete_notice(monkeypatch, tmp_p
             pass
 
         async def scan_and_notify_group(self, bot) -> dict[str, object]:
-            return {"violating_user_count": 11, "failed_group_message_count": 1, "muted_user_count": 0}
+            return {"violating_user_count": 11, "failed_group_message_count": 1, "muted_user_count": 1}
 
     monkeypatch.setattr(
         group_control,
@@ -263,7 +263,7 @@ def test_group_file_cleanup_handler_reports_incomplete_notice(monkeypatch, tmp_p
 
     assert result["failed_group_message_count"] == 1
     assert bot.calls == [
-        ("send_group_msg", {"group_id": 2333, "message": "文件清理名单没有完整发出，本轮已跳过禁言。"})
+        ("send_group_msg", {"group_id": 2333, "message": "部分文件清理名单没有发出，对应名单已跳过禁言。"})
     ]
 
 

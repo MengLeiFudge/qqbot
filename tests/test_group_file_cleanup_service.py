@@ -90,6 +90,13 @@ def test_scan_notifies_group_and_mutes_root_old_uploaders_by_size(tmp_path: Path
                 "upload_time": _ts(2),
                 "uploader_id": "10002",
             },
+            {
+                "file_id": "root-small",
+                "file_name": "外层小文件.zip",
+                "file_size": 999_999,
+                "upload_time": _ts(8),
+                "uploader_id": "10004",
+            },
         ],
         "folders": [{"folder_id": "folder-a", "folder_name": "教程", "total_file_count": 575}],
     }
@@ -115,11 +122,12 @@ def test_scan_notifies_group_and_mutes_root_old_uploaders_by_size(tmp_path: Path
         )
     )
 
-    assert result["root_file_count"] == 3
+    assert result["root_file_count"] == 4
     assert result["inner_file_count"] == 1
-    assert result["violating_user_count"] == 1
-    assert result["violating_file_count"] == 2
-    assert result["violating_total_size"] == 4_000_000
+    assert result["violating_user_count"] == 2
+    assert result["violating_file_count"] == 3
+    assert result["violating_total_size"] == 4_999_999
+    assert result["skipped_mute_count"] == 1
     assert bot.calls[:2] == [
         ("get_group_root_files", {"group_id": int(SHAPEZ_GROUP_ID), "file_count": 10000}),
         (
@@ -130,12 +138,13 @@ def test_scan_notifies_group_and_mutes_root_old_uploaders_by_size(tmp_path: Path
     group_messages = [str(call[1]["message"]) for call in bot.calls if call[0] == "send_group_msg"]
     assert group_messages == [
         "该清理文件了喵！\n以下只统计超过一周、未归类到文件夹内的文件喵。\n请将自己的文件删除或移动到合适的文件夹喵！",
-        "[CQ:at,qq=10001] 2 个，4.0 MB",
+        "[CQ:at,qq=10001] 2 个，4.0 MB\n[CQ:at,qq=10004] 1 个，1.0 MB",
     ]
     assert (
         "set_group_ban",
         {"group_id": int(SHAPEZ_GROUP_ID), "user_id": 10001, "duration": 240},
     ) in bot.calls
+    assert not any(call[0] == "set_group_ban" and call[1]["user_id"] == 10004 for call in bot.calls)
     assert not [call for call in bot.calls if call[0] == "send_private_msg"]
     pending = service.store.load().pending["10001"]
     assert pending.group_id == SHAPEZ_GROUP_ID
@@ -172,7 +181,7 @@ def test_scan_still_lists_user_but_skips_pending_when_mute_fails(tmp_path: Path)
     assert "10001" not in service.store.load().pending
 
 
-def test_scan_sends_remaining_messages_but_skips_mute_when_group_notice_fails(tmp_path: Path) -> None:
+def test_scan_mutes_only_successfully_announced_chunks(tmp_path: Path) -> None:
     bot = GroupMessageFailingBot(fail_message_number=2)
     bot.root_payload = {
         "files": [
@@ -198,7 +207,10 @@ def test_scan_sends_remaining_messages_but_skips_mute_when_group_notice_fails(tm
 
     assert result["group_message_count"] == 3
     assert result["failed_group_message_count"] == 1
-    assert result["muted_user_count"] == 0
-    assert not [call for call in bot.calls if call[0] == "set_group_ban"]
+    assert result["muted_user_count"] == 1
+    assert result["failed_mute_count"] == 0
+    assert [call for call in bot.calls if call[0] == "set_group_ban"] == [
+        ("set_group_ban", {"group_id": int(SHAPEZ_GROUP_ID), "user_id": 10010, "duration": 60})
+    ]
     assert bot.group_message_count == 3
-    assert service.store.load().pending == {}
+    assert tuple(service.store.load().pending) == ("10010",)
