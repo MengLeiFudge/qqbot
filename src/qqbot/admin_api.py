@@ -54,6 +54,10 @@ class AiOutputModeUpdateRequest(BaseModel):
     mode: str
 
 
+class ShapezFileCleanupUnmuteRequest(BaseModel):
+    user_id: int
+
+
 class CodexGroupBindingUpdateRequest(BaseModel):
     project_id: str = ""
 
@@ -313,6 +317,23 @@ def register_admin_routes(
                 for user_id, files in sorted(violations.items(), key=lambda item: (-sum(file_info.size for file_info in item[1]), item[0]))
             ],
         }
+
+    @app.post("/admin/api/shapez-file-cleanup/unmute")
+    async def admin_shapez_file_cleanup_unmute(
+        payload: ShapezFileCleanupUnmuteRequest,
+        _: None = Depends(require_local_request),
+    ) -> dict[str, object]:
+        bots = nonebot.get_bots()
+        if not bots:
+            raise HTTPException(status_code=503, detail="No connected OneBot bot.")
+        bot = next(iter(bots.values()))
+        await bot.call_api(
+            "set_group_ban",
+            group_id=int(SHAPEZ_GROUP_ID),
+            user_id=int(payload.user_id),
+            duration=0,
+        )
+        return {"ok": True, "group_id": int(SHAPEZ_GROUP_ID), "user_id": int(payload.user_id), "duration": 0}
 
     @app.get("/admin/api/kun/users")
     async def admin_kun_users(

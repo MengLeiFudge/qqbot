@@ -74,6 +74,15 @@ class FakeGroupFilePreviewBot:
         raise AssertionError(f"preview must not call mutating OneBot API: {api}")
 
 
+class FakeGroupBanBot:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def call_api(self, api: str, **data: object) -> dict[str, object]:
+        self.calls.append((api, data))
+        return {"ok": True}
+
+
 class FakeSlowGroupListBot:
     async def call_api(self, api: str, **data: object) -> list[dict[str, object]]:
         await asyncio.sleep(1)
@@ -287,6 +296,33 @@ def test_shapez_file_cleanup_preview_is_read_only(tmp_path: Path, monkeypatch) -
     assert payload["violating_file_count"] == 1
     assert payload["users"][0]["user_id"] == "10001"
     assert payload["users"][0]["files"][0]["file_name"] == "外层旧文件.zip"
+
+
+def test_shapez_file_cleanup_unmute_calls_group_ban_duration_zero(tmp_path: Path, monkeypatch) -> None:
+    bot = FakeGroupBanBot()
+    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
+    app = build_app(tmp_path)
+
+    status_code, body = asgi_request(
+        app,
+        "POST",
+        "/admin/api/shapez-file-cleanup/unmute",
+        {"user_id": 2519502393},
+    )
+
+    assert status_code == 200, body
+    assert json.loads(body) == {
+        "ok": True,
+        "group_id": 1163635014,
+        "user_id": 2519502393,
+        "duration": 0,
+    }
+    assert bot.calls == [
+        (
+            "set_group_ban",
+            {"group_id": 1163635014, "user_id": 2519502393, "duration": 0},
+        )
+    ]
 
 
 def test_get_connected_group_names_skips_slow_onebot_api(monkeypatch) -> None:
