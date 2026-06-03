@@ -32,8 +32,10 @@ Set-Location D:\project\qqbot
 统一启动：
 
 ```powershell
-.\scripts\start-all.ps1
+.\scripts\start_all.bat
 ```
+
+也可以直接运行 PowerShell 入口：`.\scripts\start-all.ps1`。
 
 默认会通过 Windows Terminal 打开一个窗口，并把 NoneBot2、AstrBot 和两个 NapCat 账号放在不同标签页。
 

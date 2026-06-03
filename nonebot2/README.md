@@ -110,7 +110,12 @@ Set-Location D:\project\qqbot
 .\scripts\start-nonebot2.ps1
 ```
 
-旧的 `nonebot2/scripts/start_all.bat` 仍保留给子项目参考，但 NapCat 现在是共用组件，不再作为 NoneBot2 子目录的一部分启动。
+统一启动 NoneBot2、AstrBot 和 NapCat 时，使用 monorepo 根目录脚本：
+
+```powershell
+Set-Location D:\project\qqbot
+.\scripts\start_all.bat
+```
 
 单独启动 qqbot：
 
