@@ -37,6 +37,7 @@ from qqbot.services.ai_message_decision import (
     build_decision_context,
     decide_ai_message,
 )
+from qqbot.services.ai_message_flow import AiMessageSource, build_ai_message_source
 from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.services.ai_pending_task_store import AiPendingTaskStore
 from qqbot.services.embedding_vector_store import EmbeddingVectorStore
@@ -253,22 +254,23 @@ def get_ai_chat_trigger_kind(event: MessageEvent) -> AiChatTriggerKind:
 
 @ai_chat_matcher.handle()
 async def handle_ai(bot: Bot, event: MessageEvent) -> None:
-    request_started = time.perf_counter()
-    request_wall_started = time.time()
     settings = load_settings()
     store = get_settings_store()
-    normalized_message = await normalize_onebot_event_with_fetcher(event, bot.call_api)
-    prompt = build_ai_prompt(normalized_message)
-    event_time = getattr(event, "time", None)
-    message_id = getattr(event, "message_id", None)
-    group_id = getattr(event, "group_id", None)
-    user_id = event.get_user_id()
-    trigger_kind = get_ai_chat_trigger_kind(event)
-    if should_handle_as_rightcodes_draw(prompt):
+    source = await build_ai_message_source(
+        bot=bot,
+        event=event,
+        settings=settings,
+        store=store,
+        normalizer=normalize_onebot_event_with_fetcher,
+        prompt_builder=build_ai_prompt,
+        trigger_resolver=get_ai_chat_trigger_kind,
+        reply_scope_builder=build_ai_reply_scope,
+    )
+    if should_handle_as_rightcodes_draw(source.prompt):
         decision = decide_ai_message(
             trigger_kind=AiChatTriggerKind.DRAW,
-            normalized_message=normalized_message,
-            group_id=group_id,
+            normalized_message=source.normalized_message,
+            group_id=source.group_id,
         )
         async with _AI_DRAW_SEMAPHORE:
             await _handle_ai_locked(
@@ -276,148 +278,122 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 event,
                 settings=settings,
                 store=store,
-                normalized_message=normalized_message,
-                prompt=prompt,
-                request_started=request_started,
-                local_prepare_started=request_started,
+                normalized_message=source.normalized_message,
+                prompt=source.prompt,
+                request_started=source.request_started,
+                local_prepare_started=source.request_started,
                 queue_wait_seconds=0.0,
-                request_wall_started=request_wall_started,
-                event_time=event_time,
-                message_id=message_id,
-                group_id=group_id,
-                user_id=user_id,
+                request_wall_started=source.request_wall_started,
+                event_time=source.event_time,
+                message_id=source.message_id,
+                group_id=source.group_id,
+                user_id=source.user_id,
                 trigger_kind=AiChatTriggerKind.DRAW,
                 decision=decision,
                 force_text_response=False,
                 force_voice_response=False,
             )
         return
-    reply_scope = build_ai_reply_scope(event)
-    voice_singing = should_use_tts_singing_mode(prompt)
+    voice_singing = should_use_tts_singing_mode(source.prompt)
     decision = decide_ai_message(
-        trigger_kind=trigger_kind,
-        normalized_message=normalized_message,
-        group_id=group_id,
+        trigger_kind=source.trigger_kind,
+        normalized_message=source.normalized_message,
+        group_id=source.group_id,
     )
-    if looks_like_sensitive_credential_request(prompt):
+    if looks_like_sensitive_credential_request(source.prompt):
         await ai_chat_matcher.finish(
             build_ai_reply_message(
                 build_sensitive_credential_warning_message(),
-                group_id=group_id,
-                message_id=message_id,
-                user_id=user_id,
+                group_id=source.group_id,
+                message_id=source.message_id,
+                user_id=source.user_id,
                 quote=should_quote_group_ai_reply(
                     settings,
-                    group_id=group_id,
-                    message_id=message_id,
-                    event_time=event_time,
+                    group_id=source.group_id,
+                    message_id=source.message_id,
+                    event_time=source.event_time,
                 ),
             )
         )
         return
-    if trigger_kind == AiChatTriggerKind.PROACTIVE and group_id is not None:
+    if source.trigger_kind == AiChatTriggerKind.PROACTIVE and source.group_id is not None:
         _AI_PROACTIVE_BUFFER.add(
-            reply_scope,
-            AiProactiveBufferItem(
-                bot=bot,
-                event=event,
-                settings=settings,
-                store=store,
-                normalized_message=normalized_message,
-                prompt=prompt,
-                request_started=request_started,
-                request_wall_started=request_wall_started,
-                event_time=event_time,
-                message_id=message_id,
-                group_id=group_id,
-                user_id=user_id,
-            ),
+            source.reply_scope,
+            build_proactive_buffer_item(source),
         )
         logger.info(
             "Buffer proactive AI message: scope={}, user_id={}, group_id={}, message_id={}",
-            reply_scope,
-            user_id,
-            group_id,
-            message_id,
+            source.reply_scope,
+            source.user_id,
+            source.group_id,
+            source.message_id,
         )
         return
-    if group_id is not None:
-        discarded = _AI_PROACTIVE_BUFFER.discard(reply_scope)
+    if source.group_id is not None:
+        discarded = _AI_PROACTIVE_BUFFER.discard(source.reply_scope)
         if discarded:
             logger.info(
                 "Discard buffered proactive AI messages before immediate trigger: scope={}, count={}, trigger={}",
-                reply_scope,
+                source.reply_scope,
                 discarded,
-                trigger_kind.value,
+                source.trigger_kind.value,
             )
-    quick_reply = build_local_quick_ai_reply(normalized_message, prompt)
+    quick_reply = build_local_quick_ai_reply(source.normalized_message, source.prompt)
     if quick_reply:
         await ai_chat_matcher.finish(
             build_ai_reply_message(
                 quick_reply,
-                group_id=group_id,
-                message_id=message_id,
-                user_id=user_id,
+                group_id=source.group_id,
+                message_id=source.message_id,
+                user_id=source.user_id,
                 quote=should_quote_group_ai_reply(
                     settings,
-                    group_id=group_id,
-                    message_id=message_id,
-                    event_time=event_time,
+                    group_id=source.group_id,
+                    message_id=source.message_id,
+                    event_time=source.event_time,
                 ),
             )
         )
         return
     queue_wait_started = time.perf_counter()
-    queue_ticket = _AI_REPLY_QUEUE.join(reply_scope)
+    queue_ticket = _AI_REPLY_QUEUE.join(source.reply_scope)
     force_text_response = queue_ticket.force_text_response and not voice_singing
-    queued_request = AiQueuedRequest(
-        bot=bot,
-        event=event,
-        settings=settings,
-        store=store,
-        normalized_message=normalized_message,
-        prompt=prompt,
-        request_started=request_started,
-        request_wall_started=request_wall_started,
-        event_time=event_time,
-        message_id=message_id,
-        group_id=group_id,
-        user_id=user_id,
-        trigger_kind=trigger_kind,
+    queued_request = build_ai_queued_request(
+        source,
         decision=decision,
         force_voice_response=voice_singing,
-        quote_first_reply=not _AI_REPLY_QUEUE.has_pending(reply_scope),
+        quote_first_reply=not _AI_REPLY_QUEUE.has_pending(source.reply_scope),
     )
     try:
         if queue_ticket.lock.locked():
-            if should_drop_queued_ai_request(trigger_kind, queue_ticket.estimated_wait_seconds):
+            if should_drop_queued_ai_request(source.trigger_kind, queue_ticket.estimated_wait_seconds):
                 logger.info(
                     "Drop queued proactive AI message: user_id={}, group_id={}, message_id={}, estimated_wait={:.3f}s",
-                    user_id,
-                    group_id,
-                    message_id,
+                    source.user_id,
+                    source.group_id,
+                    source.message_id,
                     queue_ticket.estimated_wait_seconds,
                 )
                 return
-            _AI_REPLY_QUEUE.enqueue_pending(reply_scope, queued_request)
+            _AI_REPLY_QUEUE.enqueue_pending(source.reply_scope, queued_request)
             logger.info(
                 "Merge queued AI message into pending batch: scope={}, trigger={}, user_id={}, group_id={}, message_id={}, estimated_wait={:.3f}s",
-                reply_scope,
-                trigger_kind.value,
-                user_id,
-                group_id,
-                message_id,
+                source.reply_scope,
+                source.trigger_kind.value,
+                source.user_id,
+                source.group_id,
+                source.message_id,
                 queue_ticket.estimated_wait_seconds,
             )
             return
         async with queue_ticket.lock:
             await _process_ai_queue_batch(
-                AiQueuedBatch(scope=reply_scope, items=(queued_request,)),
+                AiQueuedBatch(scope=source.reply_scope, items=(queued_request,)),
                 queue_wait_started=queue_wait_started,
                 force_text_response=force_text_response,
             )
             while True:
-                pending_batch = _AI_REPLY_QUEUE.pop_pending_batch(reply_scope)
+                pending_batch = _AI_REPLY_QUEUE.pop_pending_batch(source.reply_scope)
                 if pending_batch is None:
                     break
                 merged_batch = merge_ai_queued_batch(pending_batch)
@@ -427,7 +403,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 ):
                     logger.info(
                         "Drop stale proactive AI batch: scope={}, count={}, waited={:.3f}s",
-                        reply_scope,
+                        source.reply_scope,
                         len(pending_batch.items),
                         time.perf_counter() - pending_batch.first.request_started,
                     )
@@ -439,6 +415,50 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 )
     finally:
         _AI_REPLY_QUEUE.leave(queue_ticket)
+
+
+def build_proactive_buffer_item(source: AiMessageSource) -> AiProactiveBufferItem:
+    return AiProactiveBufferItem(
+        bot=source.bot,
+        event=source.event,
+        settings=source.settings,
+        store=source.store,
+        normalized_message=source.normalized_message,
+        prompt=source.prompt,
+        request_started=source.request_started,
+        request_wall_started=source.request_wall_started,
+        event_time=source.event_time,
+        message_id=source.message_id,
+        group_id=source.group_id,
+        user_id=source.user_id,
+    )
+
+
+def build_ai_queued_request(
+    source: AiMessageSource,
+    *,
+    decision: AiMessageDecision,
+    force_voice_response: bool,
+    quote_first_reply: bool,
+) -> AiQueuedRequest:
+    return AiQueuedRequest(
+        bot=source.bot,
+        event=source.event,
+        settings=source.settings,
+        store=source.store,
+        normalized_message=source.normalized_message,
+        prompt=source.prompt,
+        request_started=source.request_started,
+        request_wall_started=source.request_wall_started,
+        event_time=source.event_time,
+        message_id=source.message_id,
+        group_id=source.group_id,
+        user_id=source.user_id,
+        trigger_kind=source.trigger_kind,
+        decision=decision,
+        force_voice_response=force_voice_response,
+        quote_first_reply=quote_first_reply,
+    )
 
 
 async def _process_ai_queue_batch(
