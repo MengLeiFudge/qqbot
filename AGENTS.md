@@ -1,202 +1,37 @@
-# AGENTS.md - qqbot 工作流程
+# AGENTS.md - QQBot Monorepo 工作流程
 
-本文件记录本仓库的开发、验证和运行约定。README 只介绍仓库；具体工作流程以本文件为准。
+本仓库是机器人运行工作区，包含多个应用和共用协议端。
 
 ## 基本原则
 
 - 默认使用简体中文沟通。
-- 优先读现有代码和测试，再决定修改方式。
-- 保持实现简单直接，避免为了未来功能提前抽象。
-- 修改范围要贴近用户请求，避免顺手重构无关模块。
-- 不提交、不回滚用户已有改动，除非用户明确要求。
-
-## Git Practices
-
-- Atomic commits: one logical change per commit.
-- Do not push unless explicitly approved by the user.
-
-### 提交信息风格
-
-提交信息使用中文 conventional style，格式固定为：
-
-```text
-类型：一句话摘要
-```
-
-类型参考 `MLJ_DSPmods`，只使用以下四类：
-
-- `功能：` 新增用户可见能力、接口、命令或完整工作流。
-- `修复：` 修正 bug、错误行为、崩溃、超时或兼容问题。
-- `重构：` 调整内部结构、拆分模块、改善实现，不改变用户可见行为。
-- `杂项：` 文档、测试、配置、仓库初始化、依赖和维护性变更。
-
-示例：
-
-```text
-功能：支持 Codex 会话产物上传
-修复：移除智能问答空壳入口
-重构：整理 README 与 AGENTS 文档边界
-杂项：初始化 qqbot 仓库
-```
-
-禁止使用空泛摘要，例如 `update`、`fix`、`修改`、`调整代码`。
-
-### Commit Policy for Agents
-
-**核心原则：严禁积压未提交改动。** 任何代码或文档改动必须被记录在 Git 历史中，不允许以“改了一堆文件但零 commit”的状态结束任务。即使用户没有明确要求，也应在验证通过后自动按逻辑单元 commit。
-
-**提交流程：** 主代理根据任务复杂度和风险决定提交方式：
-
-- 改动独立且风险较低：可直接 commit，复核后如有问题再提交修复性 commit。
-- 改动跨多个模块或风险较高：完成自查和验证后按逻辑单元拆分 commit。
-- 已存在用户未提交改动时：先识别改动归属，不要覆盖、回滚或混入无关 commit。
-
-**职责要求：** 启动 Codex 或子代理修改本仓库时，prompt 中必须明确本轮 commit 策略，不能让“代码已改完但暂不提交”成为默认结束状态。
-
-**并行场景：** 多个代理并行执行时，子代理不得各自提交；应由主代理收齐结果、完成审查后统一 commit，以避免历史冲突和责任边界不清。
-
-**Git 串行规则：** Git 使用单一仓库锁；所有 Git 操作必须串行执行，禁止并发 `git add`、`git commit`、`git rebase`、`git stash`、`git checkout`、`git merge` 等命令。只有确认前一个 Git 命令完成且仓库锁已释放后，才能启动下一个 Git 命令。
-
-**commit 要求：**
-
-- 代码改动必须先运行对应测试；涉及共享路径时运行全量 `.venv/Scripts/python.exe -m pytest -q`。
-- 文档-only 改动可不跑全量 pytest，但最终回复必须说明未运行代码测试的原因。
-- 每个逻辑单元一个 commit，不批量堆积。
+- 修改前先确认目标子目录：`nonebot2/`、`astrbot/`、`napcat/`、`scripts/`、`data/`。
+- 不把真实 token、QQ 登录态、数据库、运行日志或本机配置提交进 Git。
+- 完成可验证改动后需要提交，除非用户明确要求暂不提交。
 - 严禁 push，除非用户明确批准。
 
-## 架构边界
+## 目录边界
 
-- `src/qqbot/plugins/` 负责 NoneBot matcher、命令解析、事件入口。
-- `src/qqbot/services/` 负责可测试业务逻辑、持久化和外部服务封装。
-- `plugin_registry.py` 是插件元数据唯一入口；菜单、管理端和全局插件开关优先从这里读取。
-- 插件不使用功能序号；菜单入口使用 `菜单+模块名称/别名` 模糊匹配。
-- 新入群默认启用所有未被全局禁用的插件，不再维护每群功能开关。
-- `群管助手` 只覆盖 QQ/群行为能力，不包含菜单、全局插件开关或 Bot 管理员维护入口；其相关指令和功能只允许 Bot 管理员或机器人自身触发。
-- 新增插件时，先补服务层，再补 matcher；不要把复杂业务逻辑堆在 matcher 里。
-- 群聊显式命令默认需要 direct-at，避免普通聊天误触发；RightCodes 生图关键词命令和全群保守 AI 主动介入是明确例外，可在群聊中不带 @ 触发。
+- `nonebot2/`：原 qqbot / NoneBot2 应用；子目录内的 `AGENTS.md` 是该应用的细化规则。
+- `astrbot/`：AstrBot 当前工作树快照；不保留 AstrBot 上游 Git 历史。
+- `napcat/`：共用 NapCat 程序包；账号数据和登录态应放在 `data/napcat/`。
+- `data/`：统一运行态根目录，默认忽略，不进 Git。
+- `scripts/`：monorepo 根级启动脚本，负责设置各应用运行态路径。
 
-### 群聊与私聊对话处理架构
+## 数据路径
 
-当前对话链路采用 `OneBot V11 事件 -> NoneBot matcher -> 消息规范化 -> 场景分流 -> 服务层编排` 的结构，保持事件入口轻量、业务逻辑可测试：
+- NoneBot2 启动时应设置：
+  - `QQBOT_CONFIG_FILE=D:\project\qqbot\data\nonebot2\config\qqbot.toml`
+  - `QQBOT_DATA_ROOT=D:\project\qqbot\data\nonebot2\run`
+- AstrBot 启动时应设置：
+  - `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot`
+  - AstrBot 实际数据目录为 `D:\project\qqbot\data\astrbot\data`
 
-- `message_normalizer.py` 是 OneBot 消息段到内部消息模型的唯一规范化入口；文本、@、图片、语音、视频、文件和引用消息先统一成 `NormalizedMessage` / `NormalizedReply`，后续 AI、记忆、日志和上下文逻辑不直接解析 CQ 码或 raw segment。
-- AI 触发链路需要读取引用消息或聚合聊天记录时，也必须通过 `message_normalizer.py` 的异步规范化能力调用 OneBot API 递归展开；插件层不要自行解析 `forward` / `node` 消息段。
-- 群聊普通消息会先做旁路记录：`group_nick_cache.py` 负责记录群名片、最近群上下文、管理端消息日志和长期群聊记忆。AI 主动介入不再按群开关控制，所有群聊普通消息都经保守触发判定；不符合求助、点名、领域问题、安全风险或上下文追问的普通闲聊不进入 AI 回复。普通非 @ 主动介入不逐条即时请求 AI，而是按群进入短暂缓冲，安静窗口后批量处理上次处理位置之后的新消息；敏感凭据风险提醒是例外，必须即时本地回复，不进普通 LLM 和主动缓冲。
-- 群聊显式命令和普通 AI 对话默认必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。RightCodes 生图通过 `ai_command.py` 的关键词白名单进入 AI 链路；AI 主动介入通过全群保守启发式进入 AI 链路，不扩大到其他群聊命令。@ 机器人、点名机器人和生图命令保持即时处理；即时触发会清理同群尚未发送的主动介入缓冲，避免过时回复。
-- AI 入口先生成 `MessageDecision`，区分是否回复、领域、难度、延迟策略和输出格式。需要知识库、联网、代码分析、图片生成、数学/严密推理、超过 800 字输入，或判定为不能一句话回答的问题，可以使用 `ACK_THEN_ASYNC` 作为内部复杂度/延迟策略，但普通 LLM 回复不再先发送“我先看看”这类用户可见占位消息，也不为占位创建 pending task。速度优先，但复杂问题、数学题和强领域关联问题不能为了快牺牲准确性。绑定领域群里的普通闲聊不能只因“怎么/原理/为什么”等泛疑问词进入只读 Codex，必须同时命中对应模组术语、领域对象或明确项目别名。
-- 普通 GPT 文本调用按 `list_ai_profile_fallback_order()` 返回的顺序构建 fallback 链；顺序必须是 OpenRouter ICU profile 优先，Codex Everywhere profile 第二层，RightCodes 类 profile 第三层，其他 GPT provider 在后。不要再配置独立的 `openrouter` profile；OpenRouter ICU 就是 OpenRouter 入口。管理端“AI 模型”可以调整后续 provider 顺序，但不能把 Codex Everywhere 或 RightCodes 排到 OpenRouter ICU 前面，也不能把 RightCodes 排到 Codex Everywhere 前面。只要使用普通 GPT profile，应先走 OpenRouter ICU，OpenRouter ICU 超时、无应答或接口错误后才考虑 Codex Everywhere，Codex Everywhere 也失败后才考虑 RightCodes 等后续 provider；不要让单个 current profile 绕过排序。
-- 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。
-- AI 短期会话按会话隔离：私聊使用 `private:<user_id>:<profile>:stable`，群聊使用 `group:<group_id>:<profile>:stable`。群聊是一个整体会话，发言者身份通过消息记录、sender/user_id、长期记忆 actor_id 和群上下文体现，不再用 `group_user:<group_id>:<user_id>` 拆开同一群的短期上下文。
-- 长期记忆检索先生成 `RetrievalPlan`，再按 `space_id`、`actor_id`、`visibility` 和 `forbidden` 边界取证；群聊查询私聊内容时只返回拒绝披露约束，跨群查询只允许当前发言者的公开群聊记忆。
-- 领域知识库采用可信知识和候选知识两层。可信本地资料、已验证修复和管理员确认内容可以入可信知识；普通群聊讨论只能进入候选知识，冲突知识必须等待用户或管理员确认。
-- shapez 群 `1163635014` 第一阶段只信任 `D:\Desktop\游戏\异形工厂` 和群文件中“萌新必看”“速通”类资料；完整聊天记录和高阶电路类资料不作为默认可信知识。
-- 群文件治理由 `group_file_cleanup_service.py` 负责，并通过 `group_control.py` 归入 `群管助手`：Bot 管理员在群内 direct-at 发送 `通知清理文件` 或同义清理文件指令时，才扫描当前群 OneBot `get_group_root_files` 返回的根目录 `files`，并通过 `folders` / `get_group_files_by_folder` 识别文件夹内文件；NapCat 这两个接口必须显式传足够大的 `file_count` 做全量枚举，不能依赖默认数量或把首屏 50 条以内的结果当成完整外层文件列表。处罚只看根目录外层超过一周的旧文件，文件夹内文件不处罚。触发后先在群内发送说明，再按上传者外层旧文件总大小降序分批汇总，每 10 人一条，格式为 `@用户 N 个，X.X MB`；每条名单消息成功发出后，立即只禁言该条名单内对应用户。禁言按 `1 MB = 禁言 1 分钟` 精确到秒换算，换算后小于 60 秒的用户只展示不禁言、不写 pending；群主、管理员等无法禁言者只计入失败，不写 pending。该功能不发送私聊提醒，不通过私聊确认触发复核或解禁，也不再由 lifecycle 自动定时触发。
-- 养鲲群 `319567534` / 万物分馏问题优先根据既有记忆和 MLJ_DSPmods 源码回答；命中领域资料问题时，应让只读 Codex 在对应项目目录查 README、源码、data、配置和测试等证据后只回最终答案。资料查询超时或失败时，必须返回“暂时没有足够项目证据，先不按通用机制补猜”这类短句，不能向群聊暴露 Codex、只读查询、工具状态或失败轮次，也不能落回普通 LLM 编通用答案。bug 可进入 gpt-5.5 high 修复链路；新功能、功能变动或歧义请求必须先 @ 用户确认，不能自动修改代码。
-- 星环群 `1035445959` / OrbitalRing 问题优先让只读 Codex 查 `D:\project\dsp\OrbitalRing-MOD` 源码、README、data、配置和测试等证据后只回最终答案；三阶、二阶、功率、休谟值、火箭、球、配方、建筑和机制类问题不能用通用游戏机制或其他模组经验直接回答，也不要为单个问题硬编码专用答案。资料查询失败时必须说证据不足，不要暴露 Codex、只读查询或工具失败状态，也不要再要求用户提供源码/data 才能继续。
-- 创世工程群 `991895539` / ProjectGenesis 问题优先让只读 Codex 查 `D:\project\dsp\ProjectGenesis` 源码、README、data、配置和测试等证据后只回最终答案；配方、科技、建筑、机制和产线类问题不能用通用游戏机制或其他模组经验直接回答。该群内“堵了还在生产”这类机制问题也应查源码/data，而不是按通用建筑缓存猜测。
-- AI 群聊回复的消息层规则统一由发送侧决定：目标消息在最近 5 条群消息内时直接发文本，不引用也不 @；目标消息超过 5 条时才引用，并使用 `@发言者 + 空格 + 正文` 的消息格式以避免指向不清。主动介入批处理允许回复最近一段群聊整体；只是轻量参与或总结时可以不引用。普通闲聊和轻量提问优先一句短消息，通常控制在 40 字以内；不要输出标题、列表、分节、空行或末尾总结。连续短回复通常只在第一条可能引用，后续不重复引用；如果上一轮 AI 回复等待期间已积压同群后续消息，处理这些后续消息时不要继续引用同一个旧触发消息。AI 文本被切成多条连续回复时，第一条立即发送，后续每条按该条字符数除以 6 秒等待后再发送。长文本走折叠消息。等待期间如果群友已给出一致且完整的答案，机器人应引用该答案短确认；如果答案不全或错误，只补充缺口或纠正错误点，不重复已说过的内容。私聊回复保持普通文本，避免把群聊交互形态带入私聊。
-- AI 群聊回复要区分闲聊、技术排查、群管理和安全提醒。技术、群管理、凭据安全、代码、报错和配置场景优先中性、准确、可执行，不用“抽风”“硬上”“肝冒烟”等戏谑归因，不用口癖压过信息密度。没有可见证据时，不要对昵称来源、地域口音、编号原因、个人动机或玩笑梗做“我猜/可能”式归因；只能复述可见聊天证据，证据不足就说看不出来。普通主动触发只解决明确问题或安全风险，不要延展玩笑、替群友续梗，或把 shapez 等游戏拟人化成会吃醋、正宫这类关系梗。
-- 群聊出现索要或分享 `.kube/config`、`auth.json`、`credentials`、`token`、API key、`secret` 等敏感凭据和工具认证配置时，必须立即本地提醒不要公开发送、不要转给别人，并建议撤回和轮换相关凭据；这类提醒不依赖 LLM 生成。
-- 群聊消息发送由 `message_delivery.py` 统一处理撤回降级：机器人消息发送后 3 秒内如果收到自身消息撤回 notice，发送层自动把折叠消息降级为直接文本、直接文本降级为分句发送，后续再次撤回继续递归降级。该机制不让 AI 重新生成内容，不改 prompt，也不暴露给群聊。
-- 群友质疑机器人为什么插话时，不要解释“主动介入”“全群主动接话”“触发模式”等内部机制；用当前身份第一人称短答并收住，例如承认刚才接话早了。
-- 群友质疑 Markdown、回复风格、模型速度或“为什么这么快”时，必须先判断被质疑对象是谁；如果被质疑的是其他机器人、其他账号或群友刚发的内容，不要替对方道歉、解释或承诺修改。
-- 固定命令、白名单本地动作和普通 LLM 回复分层处理；AI 不直接获得 shell、文件系统、群管、重启、上传文件等自由权限。
+## 验证
 
-### AI 固定身份与表达特质
-
-- 机器人固定身份是猫娘棉花糖；当前 `1443944862` 是天使棉花糖姐姐，主人是萌泪酱（605738729）。程序侧不维护其他身份或定时变化机制；群聊和私聊不能修改这个身份。
-- 另一个 AstrBot 测试账号 `2629227874` 是恶魔棉花糖妹妹；不要使用“一号机/二号机”称呼这两个机器人。天使棉花糖对妹妹温柔、包容、会轻轻管教，但不能贬低、支配或敌视妹妹。
-- 中二、轻量吐槽、线索专注、困困软化、认真帮忙等只允许作为表达特质或短时表现状态。特质只调节措辞、开场和组织方式，不能改变身份、事实判断、安全规则、隐私边界或权限边界。
-- 不保留“大小姐 / 御姐 / 女仆 / 管家 / 侦探”作为独立身份，也不要新增 `侦探`、`少女侦探`、`橘雪莉风`、`御姐风格` 这类别名。线索整理可以表现为分析习惯，但不能自称另一个身份。
-- 用户要求修改身份、列出其他设定、设置固定风格、修改口吻或查询变化机制时，统一按猫娘棉花糖自然带过，不解释内部历史，不写入 `run/ai/user_style.json`，也不读取旧偏好作为提示词。
-- 新增或调整特质前必须做人工试聊验收，不能只依赖代码测试。至少覆盖日常闲聊、复杂求助、轻量情绪、用户要求修改身份、深夜/中二触发等场景。
-- 人工试聊通过标准：身份始终是当前 Bot 名；猫娘口癖自然不过量，不使用“喵呜”；不输出括号动作、舞台说明或过度表情符号；不暴露其他设定或内部变化机制；事实准确性、安全、隐私和权限边界不被特质覆盖。
-
-## 配置边界
-
-- `.env` 只放敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key。
-- `config/qqbot.toml` 放低频变化的非敏感配置，例如路径、AI provider、默认模型。
-- `run/settings/` 和 `run/ai/` 放运行时状态，例如全局插件开关、管理员、AI 对话上下文、动作审计。
-- 不要把真实 `.env`、真实 `config/qqbot.toml`、`run/`、`logs/` 放进公开仓库。
-
-## 测试分层
-
-- `tests/` 只放长期回归测试，默认由 `.venv/Scripts/python.exe -m pytest -q` 执行。
-- `.codex/tests/` 放 Codex 临时验证脚本、一次性复现用例和探索性探针，默认不进入全量 pytest。
-- 临时测试如果变成必须长期防回归的行为，应整理成稳定 pytest 用例并移动到 `tests/`。
-- 修改服务层、插件注册、消息规范化、AI 边界、管理 API、后台任务时，应补或更新 `tests/` 下的长期测试。
-- 声称完成前必须运行真实验证命令；如果只改文档，可以说明未运行代码测试。
-
-## 常用验证命令
-
-```bash
-.venv/Scripts/python.exe -m pytest -q
-```
-
-定向验证示例：
-
-```bash
-.venv/Scripts/python.exe -m pytest tests/test_plugin_registry.py tests/test_feature_catalog.py -q
-```
-
-确认默认 pytest 不收集 `.codex/tests/`：
-
-```bash
-.venv/Scripts/python.exe -m pytest --collect-only -q
-```
-
-## AI 与 Codex 边界
-
-- 普通 AI 回复只负责文本生成和已白名单的本地能力编排。
-- AI 不直接获得 shell、文件系统、群管、重启、上传文件等自由权限。
-- 上传已有项目 zip 产物属于固定白名单能力，只能由 Bot 管理员在群聊触发，或由 `AfterBuildEvent.exe 1` 这类 localhost-only 白名单构建流程调用管理 API。机器人只接收发布方明确列出的项目仓库内真实存在的 `.zip`，不构建、不改代码、不 push。
-- 涉及代码修改时，qqbot 只做中转、权限、项目路由、会话记录、结果回传和产物上传。
-- qqbot 给 Codex 的 prompt 不替目标仓库规定 git、分支、提交、测试、构建、输出格式或 Markdown 规则。
-- 目标仓库的 `AGENTS.md` / README / 项目规范决定 Codex 的具体执行规则。
-- `@机器人 codex <项目>` 进入 Codex 会话模式，`codex` 后面必须写明确项目名或别名；未匹配项目时必须拒绝进入，避免误改仓库。
-- 群聊 Codex 会话按群唯一：同一个群同时只能有一个 active Codex 会话，群内所有 Bot 管理员共享同一会话，直到发送 `退出codex`。
-- 私聊 Codex 会话按管理员唯一：每个 Bot 管理员私聊只能有一个 active Codex 会话，不和群聊会话共享。
-- 非 Bot 管理员不能进入、继续、执行或退出 Codex 会话；群聊中存在 active Codex 会话时，非管理员 @ Bot 也不能接管该会话。
-- 执行阶段按项目加锁：同一个项目同时只能有一个 running Codex 会话，不同群可以同时讨论不同项目。
-- Codex 会话讨论阶段使用只读 sandbox，执行阶段才允许写工作区。
-- Codex 启动参数按读写模式区分服务层级：只读讨论和领域资料查询显式使用 `service_tier=fast`；执行/可写模式显式使用非 fast 的默认层级，不能继承全局 `~/.codex/config.toml` 的 fast 设置。
-- Codex 输出的 `.zip` 产物路径可由 qqbot 解析并上传回来源群，但只能上传目标仓库内真实存在的 zip 文件。
-- 通过群聊触发的 Codex 任务，qqbot 负责把执行结果发回来源群；通过私聊触发的 Codex 任务，qqbot 只向触发用户私聊回报。
-- 直接在本地 Codex 终端执行的任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only `/admin/api/artifacts/publish-local`，用 JSON 直接提交发布事件。请求体必须包含 `timestamp`、`project_id`、当前 `branch`、当前 `commit_hash`、`commit_subject`、`commit_detail` 和 `files` 数组；每个文件项包含 `path`、可选 `name`、可选 `sha256`、`targets` 群号数组和可选 `message`。qqbot 只校验并上传请求中明确列出的文件，不扫描构建目录，不读取发布方仓库里的结果 JSON，不硬编码 MLJ_DSPmods 的模组取舍。
-- `/admin/api/artifacts/publish-local` 的删除策略是按目标群和上传文件名精确匹配：只删除同一目标群内由当前 bot 上传的完全同名文件，再上传新文件。上传后尽量引用文件消息，并发送分支、提交和 `commit_detail`/文件级 `message` 格式化后的说明。说明内容应聚焦本次原因、修复/改动内容和实现方式，不发送文件级 diff 统计。
-- Codex 修改 qqbot 自身项目并成功完成后，必须安排 Bot 重启，使新代码实际生效。
-- 通过 qqbot 触发的自我更新，旧进程应先向来源群或私聊提示“已安排重启”，重启后在 OneBot 重新连接时再向相同目标回报连接状态。
-- 直接在本地 Codex 终端修改 qqbot 时，完成提交和验证后必须调用管理端重启入口，并检查 `onebot_connected=true`、`connected_bot_count>=1`。
-
-## 运行与重启
-
-日常启动入口：
-
-```powershell
-Set-Location D:\project\qqbot
-.\scripts\start_all.bat
-```
-
-管理端重启入口：
-
-```bash
-curl -s -X POST http://127.0.0.1:8080/admin/api/restart
-```
-
-重启后检查：
-
-```bash
-curl -s http://127.0.0.1:8080/admin/api/status
-```
-
-期望状态：
-
-- `onebot_connected=true`
-- `connected_bot_count>=1`
-
-## 文档边界
-
-- README 放仓库简介、能力概览、目录、配置、启动、管理端和主要用户入口。
-- AGENTS 放开发流程、架构约束、测试分层、AI/Codex 边界、验证和重启规则。
-- 具体设计讨论和阶段计划放 `.codex/drafts/`、`.codex/plans/`。
-- 不要把临时讨论流水账写进 README。
+- 结构变更后至少检查：
+  - `git status --short`
+  - 根目录是否只有一个 `.git`
+  - `data/` 是否未进入 Git
+- NoneBot2 相关代码验证优先在 `nonebot2/` 内运行项目测试。
+- AstrBot 相关代码验证优先在 `astrbot/` 内运行 ruff 和定向 pytest。
