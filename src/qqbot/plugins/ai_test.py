@@ -78,6 +78,18 @@ from qqbot.services.offline_message_gate import (
     is_within_onebot_connect_grace,
 )
 from qqbot.services.ai_output_style import sanitize_ai_output_text, sanitize_group_ai_reply_text
+from qqbot.services.ai_queue import (
+    AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST,
+    AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS,
+    AI_PROACTIVE_BUFFER_QUIET_SECONDS,
+    AI_PROACTIVE_BUFFER_MAX_SECONDS,
+    AiProactiveBufferItem,
+    AiProactiveBufferManager,
+    AiQueuedBatch,
+    AiQueuedRequest,
+    AiReplyQueueManager,
+    AiReplyQueueTicket,
+)
 from qqbot.services.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
@@ -88,11 +100,7 @@ from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 AI_TTS_MAX_CHARS = 100
 AI_TTS_FORCE_MAX_CHARS = 500
-AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST = 20.0
-AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS = 45.0
 AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS = 20.0
-AI_PROACTIVE_BUFFER_QUIET_SECONDS = 10.0
-AI_PROACTIVE_BUFFER_MAX_SECONDS = 30.0
 AI_DRAW_CONCURRENCY_LIMIT = 2
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
 AI_CONTINUOUS_REPLY_CHARS_PER_SECOND = 6.0
@@ -130,181 +138,22 @@ class AiPrepareTimer:
             self.stages[name] = self.stages.get(name, 0.0) + time.perf_counter() - started
 
 
-@dataclass(frozen=True)
-class AiReplyQueueTicket:
-    scope: str
-    lock: asyncio.Lock
-    queue_position: int
-    estimated_wait_seconds: float
-    force_text_response: bool
-
-
-@dataclass(frozen=True)
-class AiQueuedRequest:
-    bot: Bot
-    event: MessageEvent
-    settings: RuntimeSettings
-    store: SettingsStore
-    normalized_message: NormalizedMessage
-    prompt: str
-    request_started: float
-    request_wall_started: float
-    event_time: object
-    message_id: object
-    group_id: object | None
-    user_id: str
-    trigger_kind: AiChatTriggerKind
-    decision: AiMessageDecision
-    force_voice_response: bool
-    quote_first_reply: bool = True
-
-
-@dataclass(frozen=True)
-class AiQueuedBatch:
-    scope: str
-    items: tuple[AiQueuedRequest, ...]
-
-    @property
-    def first(self) -> AiQueuedRequest:
-        return self.items[0]
-
-
-@dataclass(frozen=True)
-class AiProactiveBufferItem:
-    bot: Bot
-    event: MessageEvent
-    settings: RuntimeSettings
-    store: SettingsStore
-    normalized_message: NormalizedMessage
-    prompt: str
-    request_started: float
-    request_wall_started: float
-    event_time: object
-    message_id: object
-    group_id: object
-    user_id: str
-
-
-class AiProactiveBufferManager:
-    def __init__(
-        self,
-        *,
-        quiet_seconds: float = AI_PROACTIVE_BUFFER_QUIET_SECONDS,
-        max_seconds: float = AI_PROACTIVE_BUFFER_MAX_SECONDS,
-    ) -> None:
-        self.quiet_seconds = max(0.0, float(quiet_seconds))
-        self.max_seconds = max(self.quiet_seconds, float(max_seconds))
-        self._buffers: dict[str, list[AiProactiveBufferItem]] = {}
-        self._tasks: dict[str, asyncio.Task] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
-
-    def add(self, scope: str, item: AiProactiveBufferItem) -> None:
-        self._buffers.setdefault(scope, []).append(item)
-        task = self._tasks.get(scope)
-        if task is None or task.done():
-            self._tasks[scope] = asyncio.create_task(self._flush_after(scope, self.quiet_seconds))
-            return
-        first = self._buffers[scope][0]
-        age = time.perf_counter() - first.request_started
-        if age >= self.max_seconds:
-            task.cancel()
-            self._tasks[scope] = asyncio.create_task(self.flush(scope))
-
-    def pop(self, scope: str) -> AiQueuedBatch | None:
-        items = self._buffers.pop(scope, [])
-        self._tasks.pop(scope, None)
-        if not items:
-            return None
-        if should_silence_proactive_batch(items):
-            logger.info(
-                "Silence proactive AI batch: scope={}, count={}, group_id={}, first_message_id={}",
-                scope,
-                len(items),
-                items[0].group_id,
-                items[0].message_id,
-            )
-            return None
-        requests = tuple(build_proactive_buffer_queued_request(item) for item in items)
-        return AiQueuedBatch(scope=scope, items=requests)
-
-    def discard(self, scope: str) -> int:
-        items = self._buffers.pop(scope, [])
-        task = self._tasks.pop(scope, None)
-        if task is not None and not task.done():
-            task.cancel()
-        return len(items)
-
-    async def flush(self, scope: str) -> None:
-        lock = self._locks.setdefault(scope, asyncio.Lock())
-        async with lock:
-            batch = self.pop(scope)
-            if batch is None:
-                return
-            await process_ai_queue_batch_with_scope_lock(
-                batch,
-                queue_wait_started=batch.first.request_started,
-            )
-
-    async def _flush_after(self, scope: str, delay_seconds: float) -> None:
-        try:
-            await asyncio.sleep(delay_seconds)
-            await self.flush(scope)
-        except asyncio.CancelledError:
-            raise
-        finally:
-            if self._tasks.get(scope) is asyncio.current_task():
-                self._tasks.pop(scope, None)
-
-
-class AiReplyQueueManager:
-    def __init__(
-        self,
-        *,
-        estimated_seconds_per_request: float = AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST,
-        text_fallback_after_seconds: float = AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS,
-    ) -> None:
-        self.estimated_seconds_per_request = estimated_seconds_per_request
-        self.text_fallback_after_seconds = text_fallback_after_seconds
-        self._locks: dict[str, asyncio.Lock] = {}
-        self._queued_counts: dict[str, int] = {}
-        self._pending_batches: dict[str, list[AiQueuedRequest]] = {}
-
-    def join(self, scope: str) -> AiReplyQueueTicket:
-        queued_ahead = self._queued_counts.get(scope, 0)
-        self._queued_counts[scope] = queued_ahead + 1
-        estimated_wait = queued_ahead * self.estimated_seconds_per_request
-        return AiReplyQueueTicket(
-            scope=scope,
-            lock=self._locks.setdefault(scope, asyncio.Lock()),
-            queue_position=queued_ahead,
-            estimated_wait_seconds=estimated_wait,
-            force_text_response=estimated_wait > self.text_fallback_after_seconds,
-        )
-
-    def leave(self, ticket: AiReplyQueueTicket) -> None:
-        remaining = self._queued_counts.get(ticket.scope, 0) - 1
-        if remaining > 0:
-            self._queued_counts[ticket.scope] = remaining
-            return
-        self._queued_counts.pop(ticket.scope, None)
-        if not ticket.lock.locked():
-            self._locks.pop(ticket.scope, None)
-
-    def enqueue_pending(self, scope: str, request: AiQueuedRequest) -> None:
-        self._pending_batches.setdefault(scope, []).append(request)
-
-    def pop_pending_batch(self, scope: str) -> AiQueuedBatch | None:
-        pending = self._pending_batches.pop(scope, [])
-        if not pending:
-            return None
-        return AiQueuedBatch(scope=scope, items=tuple(pending))
-
-    def has_pending(self, scope: str) -> bool:
-        return bool(self._pending_batches.get(scope))
-
-
 _AI_REPLY_QUEUE = AiReplyQueueManager()
-_AI_PROACTIVE_BUFFER = AiProactiveBufferManager()
+_AI_PROACTIVE_BUFFER = AiProactiveBufferManager(
+    batch_builder=lambda item: build_proactive_buffer_queued_request(item),
+    silence_checker=lambda items: should_silence_proactive_batch(items),
+    silence_logger=lambda scope, items: logger.info(
+        "Silence proactive AI batch: scope={}, count={}, group_id={}, first_message_id={}",
+        scope,
+        len(items),
+        items[0].group_id,
+        items[0].message_id,
+    ),
+    batch_processor=lambda batch, queue_wait_started: process_ai_queue_batch_with_scope_lock(
+        batch,
+        queue_wait_started=queue_wait_started,
+    ),
+)
 _AI_DRAW_SEMAPHORE = asyncio.Semaphore(AI_DRAW_CONCURRENCY_LIMIT)
 
 

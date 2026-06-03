@@ -794,7 +794,12 @@ def make_proactive_buffer_item(prompt: str, *, message_id: int = 1) -> AiProacti
 
 
 def test_proactive_buffer_manager_pops_group_batch() -> None:
-    manager = AiProactiveBufferManager(quiet_seconds=10.0, max_seconds=30.0)
+    manager = AiProactiveBufferManager(
+        quiet_seconds=10.0,
+        max_seconds=30.0,
+        batch_builder=build_proactive_buffer_queued_request,
+        silence_checker=should_silence_proactive_batch,
+    )
     first = make_proactive_buffer_item("请问这个怎么修？", message_id=11)
     second = make_proactive_buffer_item("补充一下，日志里有 timeout", message_id=12)
 
@@ -808,7 +813,12 @@ def test_proactive_buffer_manager_pops_group_batch() -> None:
 
 
 def test_proactive_buffer_manager_silences_human_handled_ai_debug_thread() -> None:
-    manager = AiProactiveBufferManager(quiet_seconds=10.0, max_seconds=30.0)
+    manager = AiProactiveBufferManager(
+        quiet_seconds=10.0,
+        max_seconds=30.0,
+        batch_builder=build_proactive_buffer_queued_request,
+        silence_checker=should_silence_proactive_batch,
+    )
     items = [
         make_proactive_buffer_item("我问为什么报错，说不支持", message_id=31),
         make_proactive_buffer_item("让他自己改到支持", message_id=32),
