@@ -10,20 +10,51 @@ try {
 }
 catch {
 }
+$chcp = Join-Path $env:WINDIR "System32\chcp.com"
+if (Test-Path $chcp) {
+    & $chcp 65001 | Out-Null
+}
 
 $WorkspaceRoot = Split-Path -Parent $PSScriptRoot
 $NapCatRoot = Join-Path $WorkspaceRoot "napcat\onekey\NapCat.44498.Shell"
-$NapCatExe = Join-Path $NapCatRoot "NapCatWinBootMain.exe"
+$AccountScript = Join-Path $PSScriptRoot "start-napcat-account.ps1"
 
-if (-not (Test-Path $NapCatExe)) {
-    throw "NapCat executable not found: $NapCatExe"
+if (-not (Test-Path $AccountScript)) {
+    throw "NapCat account startup script not found: $AccountScript"
 }
 
-Set-Location $NapCatRoot
+function Start-NapCatProcess {
+    param(
+        [string]$Account,
+        [switch]$NoQuickLogin
+    )
+
+    $label = if ($NoQuickLogin -or -not $Account) { "default" } else { $Account }
+    $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        $AccountScript
+    )
+    if ($NoQuickLogin) {
+        $arguments += "-NoQuickLogin"
+    }
+    elseif ($Account) {
+        $arguments += "-Account"
+        $arguments += $Account
+    }
+
+    Start-Process `
+        -FilePath "wt.exe" `
+        -ArgumentList (@("new-tab", "--title", "NapCat-$label", "powershell.exe") + $arguments) `
+        -WorkingDirectory $NapCatRoot `
+        | Out-Null
+}
 
 if ($NoQuickLogin -or -not $Accounts -or $Accounts.Count -eq 0) {
-    & $NapCatExe
-    exit $LASTEXITCODE
+    Start-NapCatProcess -Account "" -NoQuickLogin
+    exit 0
 }
 
 foreach ($account in $Accounts) {
@@ -32,6 +63,6 @@ foreach ($account in $Accounts) {
     }
 
     Write-Host "Starting NapCat quick login account: $account"
-    Start-Process -FilePath $NapCatExe -ArgumentList @($account) -WorkingDirectory $NapCatRoot | Out-Null
+    Start-NapCatProcess -Account $account
     Start-Sleep -Seconds 2
 }

@@ -7,41 +7,70 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptRoot = $PSScriptRoot
 
+function New-PowerShellWtCommand {
+    param(
+        [string]$Script,
+        [string[]]$ExtraArgs = @()
+    )
+
+    $command = @(
+        "powershell.exe",
+        "-NoExit",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        $Script
+    ) + $ExtraArgs
+    return $command
+}
+
+function Add-WtTab {
+    param(
+        [System.Collections.Generic.List[string]]$Arguments,
+        [string]$Title,
+        [string[]]$Command
+    )
+
+    if ($Arguments.Count -gt 0) {
+        $Arguments.Add(";")
+        $Arguments.Add("new-tab")
+    }
+    $Arguments.Add("--title")
+    $Arguments.Add($Title)
+    foreach ($item in $Command) {
+        $Arguments.Add($item)
+    }
+}
+
 $nonebotArgs = @(
-    "-NoExit",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    (Join-Path $ScriptRoot "start-nonebot2.ps1")
 )
 if ($SkipInstall) {
     $nonebotArgs += "-SkipInstall"
 }
 
-Start-Process powershell.exe -ArgumentList $nonebotArgs
+$wtArgs = [System.Collections.Generic.List[string]]::new()
+$wtArgs.Add("-w")
+$wtArgs.Add("-1")
+Add-WtTab `
+    -Arguments $wtArgs `
+    -Title "NoneBot2-1443944862" `
+    -Command (New-PowerShellWtCommand -Script (Join-Path $ScriptRoot "start-nonebot2.ps1") -ExtraArgs $nonebotArgs)
 
-Start-Process powershell.exe -ArgumentList @(
-    "-NoExit",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    (Join-Path $ScriptRoot "start-astrbot.ps1")
-)
+Add-WtTab `
+    -Arguments $wtArgs `
+    -Title "AstrBot-2629227874" `
+    -Command (New-PowerShellWtCommand -Script (Join-Path $ScriptRoot "start-astrbot.ps1"))
 
 if (-not $SkipNapCat) {
-    $napcatArgs = @(
-        "-NoExit",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        (Join-Path $ScriptRoot "start-napcat.ps1")
-    )
-    if ($NapCatAccounts.Count -gt 0) {
-        $napcatArgs += "-Accounts"
-        foreach ($account in $NapCatAccounts) {
-            $napcatArgs += $account
-        }
+    foreach ($account in $NapCatAccounts) {
+        Add-WtTab `
+            -Arguments $wtArgs `
+            -Title "NapCat-$account" `
+            -Command (New-PowerShellWtCommand `
+                -Script (Join-Path $ScriptRoot "start-napcat-account.ps1") `
+                -ExtraArgs @("-Account", $account))
     }
-
-    Start-Process powershell.exe -ArgumentList $napcatArgs
 }
+
+Start-Process -FilePath "wt.exe" -ArgumentList $wtArgs | Out-Null
