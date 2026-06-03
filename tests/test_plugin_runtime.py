@@ -500,7 +500,8 @@ def test_social_group_increase_sends_inviter_notice_and_group_intro(monkeypatch)
             },
         ),
     ]
-    assert "我是萌萌棉花糖♪" in social.BOT_GROUP_INTRO_MESSAGE
+    assert "我是天使棉花糖" in social.BOT_GROUP_INTRO_MESSAGE
+    assert "棉花糖姐姐" in social.BOT_GROUP_INTRO_MESSAGE
     assert "只有萌泪酱才是我最伟大的主人喵" in social.BOT_GROUP_INTRO_MESSAGE
     assert "你可以这样问我" not in social.BOT_GROUP_INTRO_MESSAGE
     assert "你现在有哪些风格" not in social.BOT_GROUP_INTRO_MESSAGE

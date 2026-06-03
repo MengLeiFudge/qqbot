@@ -2073,7 +2073,7 @@ def test_skip_ai_reply_for_markdown_complaint_about_other_bot_output() -> None:
     assert should_skip_ai_reply_for_other_bot_output(
         "怎么还是markdown格式",
         normalized,
-        bot_name="萌萌棉花糖♪",
+        bot_name="天使棉花糖",
     ) is True
 
 
@@ -2086,18 +2086,21 @@ def test_do_not_skip_ai_reply_when_complaint_names_self() -> None:
     assert should_skip_ai_reply_for_other_bot_output(
         "棉花糖怎么还是markdown格式",
         normalized,
-        bot_name="萌萌棉花糖♪",
+        bot_name="天使棉花糖",
     ) is False
 
 
 def test_ai_system_context_declares_bot_identity() -> None:
-    context = build_ai_system_context(RuntimeSettings(ai_bot_name="萌萌棉花糖♪"))
+    context = build_ai_system_context(RuntimeSettings(ai_bot_name="天使棉花糖"))
 
-    assert "你是 QQ 机器人“萌萌棉花糖♪”" in context
-    assert "必须明确回答你是“萌萌棉花糖♪”" in context
+    assert "你是 QQ 机器人“天使棉花糖”" in context
+    assert "必须明确回答你是“天使棉花糖”" in context
     assert "用户问“我是谁”" in context
-    assert "你是猫娘棉花糖" in context
-    assert "短、活泼" in context
+    assert "当前是天使棉花糖姐姐" in context
+    assert "你的主人是萌泪酱，QQ 号 605738729" in context
+    assert "恶魔棉花糖是你的妹妹" in context
+    assert "短、温柔、可靠" in context
+    assert "不要提人格切换、设定切换、可选角色" in context
     assert "不要使用 Markdown" in context
     assert "不要代替对方认错" in context
     assert "凭据安全" in context
@@ -2114,7 +2117,7 @@ def test_group_output_strategy_preserves_protocol_context_for_technical_debuggin
 
 
 def test_ai_style_context_uses_single_catgirl_persona_without_overriding_identity(tmp_path: Path) -> None:
-    orchestrator = AiOrchestrator(data_root=tmp_path, bot_name="萌萌棉花糖♪")
+    orchestrator = AiOrchestrator(data_root=tmp_path, bot_name="天使棉花糖")
 
     result = asyncio.run(
         orchestrator.handle(
@@ -2123,15 +2126,16 @@ def test_ai_style_context_uses_single_catgirl_persona_without_overriding_identit
             NormalizedMessage(text="你好", outline="你好"),
         )
     )
-    system_context = build_ai_system_context(RuntimeSettings(ai_bot_name="萌萌棉花糖♪"))
+    system_context = build_ai_system_context(RuntimeSettings(ai_bot_name="天使棉花糖"))
     style_context = "\n".join(result.extra_context)
 
     assert result.handled is False
-    assert "你是 QQ 机器人“萌萌棉花糖♪”" in system_context
+    assert "你是 QQ 机器人“天使棉花糖”" in system_context
     assert "用户问“我是谁”" in system_context
     assert "身份设定：" in style_context
-    assert "你是 QQ 机器人“萌萌棉花糖♪”" in style_context
-    assert "身份设定：猫娘棉花糖" in style_context
+    assert "你是 QQ 机器人“天使棉花糖”" in style_context
+    assert "身份设定：天使棉花糖姐姐" in style_context
+    assert "恶魔棉花糖是你的妹妹" in style_context
     assert "表达特质：" in style_context
     assert "中二爆发" in style_context
     assert "回复风格轮换层" not in style_context
@@ -2170,6 +2174,7 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "用户A(10001): 今天讨论了机器人接入 AI。" in joined
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
     assert "群聊输出策略" in joined
+    assert "天使棉花糖姐姐" in joined
     assert "是否引用消息要视情况决定" in joined
     assert "不是你就不要替对方道歉" in joined
     assert "如果最近群友已经给出一致且完整的答案" in joined
@@ -2197,7 +2202,7 @@ def test_group_output_strategy_marks_shapez_as_accuracy_first() -> None:
 
     context = build_group_output_strategy_context(1163635014, decision=decision)
 
-    assert "简短但活泼" in context
+    assert "简短、温柔、可靠" in context
     assert "发送层处理" in context
     assert "相对时间表达" in context
     assert "不要为了快牺牲准确性" in context
