@@ -161,8 +161,10 @@ D:\project\qqbot\data\nonebot2\.venv\Scripts\python.exe -m pytest --collect-only
 
 ```powershell
 Set-Location D:\project\qqbot
-.\scripts\start-nonebot2.ps1
+.\scripts\start_all.bat
 ```
+
+单独调试 NoneBot2 时才直接运行 `.\scripts\start-nonebot2.ps1`。
 
 管理端重启入口：
 

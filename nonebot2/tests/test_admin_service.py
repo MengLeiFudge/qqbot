@@ -446,22 +446,38 @@ def test_schedule_restart_launches_start_all(tmp_path: Path, monkeypatch: pytest
     assert "-RestartBot" in command_text
 
 
-def test_windows_restart_command_uses_windows_terminal(tmp_path: Path) -> None:
+def test_schedule_restart_hides_windows_launcher_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = build_service(tmp_path)
+    script = tmp_path / "scripts" / "start_all.bat"
+    script.parent.mkdir(parents=True)
+    script.write_text("@echo off\n", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    def fake_popen(*args: object, **kwargs: object) -> object:
+        calls.append({"args": args, "kwargs": kwargs})
+        return object()
+
+    monkeypatch.setattr(admin_service_module.os, "name", "nt")
+    monkeypatch.setattr(admin_service_module.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200, raising=False)
+    monkeypatch.setattr(admin_service_module.subprocess, "CREATE_NO_WINDOW", 0x8000000, raising=False)
+    monkeypatch.setattr(admin_service_module.subprocess, "Popen", fake_popen)
+
+    payload = service.schedule_restart()
+
+    assert payload["scheduled"] is True
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["creationflags"] == 0x8000200
+
+
+def test_windows_restart_command_runs_start_all_without_windows_terminal(tmp_path: Path) -> None:
     service = build_service(tmp_path)
     script = tmp_path / "scripts" / "start_all.bat"
 
     command = service._build_windows_restart_command(script)
 
     assert command == [
-        "wt.exe",
-        "-w",
-        "-1",
-        "new-tab",
-        "--title",
-        "QQBot-Restart",
-        "-d",
-        str(tmp_path),
         str(script),
         "-SkipInstall",
         "-RestartBot",
     ]
+    assert "wt.exe" not in command

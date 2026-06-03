@@ -39,6 +39,8 @@ Set-Location D:\project\qqbot
 
 默认会通过 Windows Terminal 打开一个窗口，并把 NoneBot2、AstrBot 和两个 NapCat 账号放在不同标签页。
 
+管理端重启入口不会打开 Windows Terminal 标签页；它会后台启动 NoneBot2，等待 `8080` 和 OneBot 连接，并复用已经登录的 NapCat。
+
 默认账号链路：
 
 - `1443944862`：NapCat 反连 NoneBot2，`ws://127.0.0.1:8080/onebot/v11/ws`。

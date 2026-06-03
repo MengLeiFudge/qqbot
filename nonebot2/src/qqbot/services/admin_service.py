@@ -360,7 +360,11 @@ class AdminService:
             raise FileNotFoundError(f"Restart script not found: {script}")
 
         if os.name == "nt":
-            creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+                subprocess,
+                "CREATE_NO_WINDOW",
+                0,
+            )
             subprocess.Popen(
                 self._build_windows_restart_command(script),
                 cwd=str(self.project_root),
@@ -385,14 +389,6 @@ class AdminService:
 
     def _build_windows_restart_command(self, script: Path) -> list[str]:
         return [
-            "wt.exe",
-            "-w",
-            "-1",
-            "new-tab",
-            "--title",
-            "QQBot-Restart",
-            "-d",
-            str(self.project_root),
             str(script),
             "-SkipInstall",
             "-RestartBot",

@@ -35,3 +35,9 @@
   - `data/` 是否未进入 Git
 - NoneBot2 相关代码验证优先在 `nonebot2/` 内运行项目测试。
 - AstrBot 相关代码验证优先在 `astrbot/` 内运行 ruff 和定向 pytest。
+
+## 启动与重启
+
+- 日常启动入口是 `D:\project\qqbot\scripts\start_all.bat`，普通模式使用 Windows Terminal 多标签页展示 NoneBot2、AstrBot 和两个 NapCat 账号窗口。
+- 管理端重启入口使用 `scripts/start_all.bat -SkipInstall -RestartBot` 后台编排，只重启 NoneBot2，等待 `8080` 和 OneBot 连接，不额外打开 WT 或 NapCat 窗口。
+- `-RestartBot` 模式日志写入 `data\nonebot2\logs\start_all\<timestamp>\`。
