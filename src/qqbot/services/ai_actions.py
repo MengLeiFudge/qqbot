@@ -51,9 +51,6 @@ class AiActionResult:
     action_type: str
 
 
-AI_REPLY_REVIEW_CODEX_RESULTS_FILE = "ai/reply_review_codex_results.jsonl"
-
-
 class AiActionExecutor:
     def __init__(
         self,
@@ -174,15 +171,11 @@ class AiActionExecutor:
         await self.execute(nested_action)
 
     async def _run_codex_task(self, request: AiActionRequest, project) -> None:
-        quiet_review_task = request.source == "ai_reply_review"
-        if quiet_review_task:
-            progress_callback = None
-        else:
-            await self._send_codex_progress(
-                request,
-                f"已交给本地 Codex：{project.display_name}\n正在启动并读取项目上下文。",
-            )
-            progress_callback = self._build_codex_progress_callback(request, project.display_name)
+        await self._send_codex_progress(
+            request,
+            f"已交给本地 Codex：{project.display_name}\n正在启动并读取项目上下文。",
+        )
+        progress_callback = self._build_codex_progress_callback(request, project.display_name)
         result = await self.codex_runner(
             CodexTaskRequest(
                 project=project,
@@ -196,24 +189,12 @@ class AiActionExecutor:
         if request.codex_task_id.strip():
             CodexTaskStore(self.data_root).record_result(request.codex_task_id, result)
         status = "成功" if result.ok else "失败"
-        quiet_result_record: dict[str, object] | None = None
-        if quiet_review_task:
-            quiet_result_record = self._append_ai_reply_review_codex_result(request, project, result)
-            message = _format_ai_reply_review_codex_result(
-                project.display_name,
-                result,
-                record=quiet_result_record,
-            )
-        else:
-            message = f"Codex 修复任务{status}：{project.display_name}\n{result.message}"
+        message = f"Codex 修复任务{status}：{project.display_name}\n{result.message}"
         restart_message = ""
         if result.ok:
             restart_message = self._prepare_self_update_restart(project, request)
             if restart_message:
-                if quiet_review_task:
-                    message = f"{message}\n已安排 Bot 重启，重连后会回报状态。"
-                else:
-                    message = f"{message}\n{restart_message}"
+                message = f"{message}\n{restart_message}"
         if request.target_group_id and request.target_group_id.isdigit():
             await call_collapsible_text_api(
                 self.bot,
@@ -309,35 +290,6 @@ class AiActionExecutor:
                 uploaded += 1
         return uploaded
 
-    def _append_ai_reply_review_codex_result(
-        self,
-        request: AiActionRequest,
-        project,
-        result: CodexTaskResult,
-    ) -> dict[str, object]:
-        path = self.data_root / AI_REPLY_REVIEW_CODEX_RESULTS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        record = {
-            "record_id": f"ARR-CODEX-{time.time_ns()}",
-            "created_at": int(time.time()),
-            "project_id": project.project_id,
-            "project_display_name": project.display_name,
-            "actor_user_id": request.actor_user_id,
-            "ok": result.ok,
-            "exit_code": result.exit_code,
-            "message": result.message,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "commit_hash": result.commit_hash,
-            "commit_subject": result.commit_subject,
-            "commit_body": result.commit_body,
-            "prompt": request.codex_prompt,
-            "evidence": request.codex_evidence,
-        }
-        with path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(record, ensure_ascii=False) + "\n")
-        return {**record, "path": str(path)}
-
     def _append_audit(self, request: AiActionRequest, result: AiActionResult) -> None:
         self.audit_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -363,41 +315,3 @@ def _summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 1].rstrip() + "…"
-
-
-def _format_ai_reply_review_codex_result(
-    project_name: str,
-    result: CodexTaskResult,
-    *,
-    record: dict[str, object] | None = None,
-) -> str:
-    record_id = str(record.get("record_id", "")) if record else ""
-    record_path = str(record.get("path", "")) if record else ""
-    suffix = ""
-    if record_id and record_path:
-        suffix = f"\n结果记录：{record_id}\n完整日志：{record_path}"
-    if result.ok:
-        commit_summary = _format_codex_commit_summary(result)
-        if commit_summary:
-            return f"AI 回复自审已自动修复：{project_name}\n{commit_summary}{suffix}"
-        return (
-            f"AI 回复自审已自动修复：{project_name}\n"
-            f"{_summarize_codex_progress_message(result.message, limit=180)}"
-            f"{suffix}"
-        )
-    detail = _summarize_codex_progress_message(result.message, limit=180)
-    exit_code = "无" if result.exit_code is None else str(result.exit_code)
-    return f"AI 回复自审自动修复失败：{project_name}\nexit_code={exit_code}\n{detail}{suffix}"
-
-
-def _format_codex_commit_summary(result: CodexTaskResult) -> str:
-    if not result.commit_hash.strip() and not result.commit_subject.strip():
-        return ""
-    short_hash = result.commit_hash.strip()[:7]
-    lines = []
-    if short_hash or result.commit_subject.strip():
-        lines.append(f"提交：{short_hash} {result.commit_subject.strip()}".strip())
-    body = result.commit_body.strip()
-    if body:
-        lines.append(body)
-    return "\n".join(lines)
