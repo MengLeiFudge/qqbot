@@ -154,24 +154,6 @@ class SettingsStore:
         settings["users"] = users
         self._write_json(self.settings_root / "ai_output_mode.json", settings)
 
-    def list_codex_group_bindings(self) -> dict[str, str]:
-        bindings = self._read_json(self.settings_root / "codex_group_bindings.json", {})
-        return {
-            str(group_id): str(project_id).strip()
-            for group_id, project_id in bindings.items()
-            if str(group_id).strip().isdigit() and str(project_id).strip()
-        }
-
-    def set_codex_group_binding(self, group_id: int, project_id: str) -> None:
-        bindings = self.list_codex_group_bindings()
-        cleaned_project = project_id.strip()
-        key = str(group_id)
-        if cleaned_project:
-            bindings[key] = cleaned_project
-        else:
-            bindings.pop(key, None)
-        self._write_json(self.settings_root / "codex_group_bindings.json", bindings)
-
     def remove_group_scoped_settings(self, group_id: int | str) -> list[str]:
         group_key = str(group_id).strip()
         removed: list[str] = []
@@ -183,7 +165,7 @@ class SettingsStore:
             func_state_path.unlink()
             removed.append(str(func_state_path))
 
-        for file_name in ("lolicon.json", "codex_group_bindings.json", "ai_proactive.json"):
+        for file_name in ("lolicon.json", "ai_proactive.json"):
             path = self.settings_root / file_name
             payload = self._read_json(path, {})
             groups = payload.get("groups") if file_name == "ai_proactive.json" else None

@@ -827,9 +827,6 @@ async def _handle_ai_locked(
         )
     record_private_chat_memory(settings, event, normalized_message)
 
-    if not settings.ai_enabled:
-        await ai_chat_matcher.finish("AI 未启用。请设置 QQBOT_AI_ENABLED=true。")
-
     prepare_timer = AiPrepareTimer({})
     with prepare_timer.stage("profiles"):
         profiles = load_ai_profiles(settings.ai_profile_file)

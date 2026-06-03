@@ -501,7 +501,7 @@ def test_message_decision_treats_project_genesis_group_as_source_backed_domain()
     assert "D:/project/dsp/ProjectGenesis" in context
 
 
-def test_message_decision_routes_project_genesis_mechanism_question_to_domain_codex() -> None:
+def test_message_decision_routes_project_genesis_mechanism_question_to_domain_qa() -> None:
     decision = decide_ai_message(
         trigger_kind=AiChatTriggerKind.PROACTIVE,
         normalized_message=NormalizedMessage(
@@ -516,7 +516,7 @@ def test_message_decision_routes_project_genesis_mechanism_question_to_domain_co
     assert decision.latency_policy == AiLatencyPolicy.ACK_THEN_ASYNC
 
 
-def test_message_decision_does_not_route_unrelated_project_genesis_group_chat_to_codex() -> None:
+def test_message_decision_does_not_route_unrelated_project_genesis_group_chat_to_domain_qa() -> None:
     decision = decide_ai_message(
         trigger_kind=AiChatTriggerKind.PROACTIVE,
         normalized_message=NormalizedMessage(
@@ -741,7 +741,7 @@ def make_queued_request(
     return AiQueuedRequest(
         bot=FakeVoiceBot(),
         event=event,
-        settings=RuntimeSettings(ai_enabled=True),
+        settings=RuntimeSettings(),
         store=SettingsStore(Path("/tmp/qqbot-test-store"), author_qq=605738729),
         normalized_message=normalize_onebot_message(event.original_message),
         prompt=prompt,
@@ -780,7 +780,7 @@ def make_proactive_buffer_item(prompt: str, *, message_id: int = 1) -> AiProacti
     return AiProactiveBufferItem(
         bot=FakeVoiceBot(),
         event=event,
-        settings=RuntimeSettings(ai_enabled=True),
+        settings=RuntimeSettings(),
         store=SettingsStore(Path("/tmp/qqbot-test-store"), author_qq=605738729),
         normalized_message=normalize_onebot_message(event.original_message),
         prompt=prompt,
@@ -922,7 +922,7 @@ def test_handle_ai_routes_rightcodes_draw_outside_reply_queue(monkeypatch, tmp_p
             queue_calls.append(scope)
             raise AssertionError("生图不应进入普通 AI 回复队列")
 
-    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path))
     monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
     monkeypatch.setattr("qqbot.plugins.ai_test._AI_REPLY_QUEUE", FailingQueue())
     monkeypatch.setattr("qqbot.plugins.ai_test._AI_DRAW_SEMAPHORE", semaphore)
@@ -950,7 +950,7 @@ def test_handle_ai_buffers_proactive_messages_without_calling_gateway(monkeypatc
         def join(self, scope: str):
             raise AssertionError("proactive 首条消息应先进 buffer")
 
-    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path))
     monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
     monkeypatch.setattr("qqbot.plugins.ai_test._AI_PROACTIVE_BUFFER", FakeProactiveBuffer())
     monkeypatch.setattr("qqbot.plugins.ai_test._AI_REPLY_QUEUE", FailingQueue())
@@ -1022,7 +1022,7 @@ def test_handle_ai_sends_immediate_warning_for_sensitive_credentials(monkeypatch
         sent.append(message)
         raise FinishException(message)
 
-    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path))
     monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
     monkeypatch.setattr("qqbot.plugins.ai_test._AI_PROACTIVE_BUFFER", FailingProactiveBuffer())
     monkeypatch.setattr("qqbot.plugins.ai_test._AI_REPLY_QUEUE", FailingQueue())
@@ -1061,7 +1061,7 @@ def test_handle_ai_discards_proactive_buffer_before_direct_message(monkeypatch, 
     async def fake_handle_ai_locked(*args, **kwargs) -> None:
         handled_prompts.append(kwargs["prompt"])
 
-    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True))
+    monkeypatch.setattr("qqbot.plugins.ai_test.load_settings", lambda: RuntimeSettings(data_root=tmp_path))
     monkeypatch.setattr("qqbot.plugins.ai_test.get_settings_store", lambda: SettingsStore(tmp_path, author_qq=605738729))
     monkeypatch.setattr("qqbot.plugins.ai_test._AI_PROACTIVE_BUFFER", FakeProactiveBuffer())
     monkeypatch.setattr("qqbot.plugins.ai_test._handle_ai_locked", fake_handle_ai_locked)
@@ -1127,7 +1127,6 @@ def test_handle_ai_recent_group_summary_sends_ack_and_skips_heavy_context(
     event = FakeGroupEvent(text="棉花糖，总结一下群友说了什么", message_id=103)
     settings = RuntimeSettings(
         data_root=tmp_path,
-        ai_enabled=True,
         ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
@@ -1306,7 +1305,7 @@ def test_complete_ai_request_tries_next_profile_after_retryable_fallback(
     assert [attempt.profile_name for attempt in response.attempts] == ["openrouter-icu", "routin"]
 
 
-def test_ai_profile_order_defaults_to_openrouter_icu_then_codex_everywhere_then_rightcodes(tmp_path: Path) -> None:
+def test_ai_profile_order_defaults_to_openrouter_icu_then_rightcodes(tmp_path: Path) -> None:
     profiles = {
         "rightcodes": AiProfile(
             name="rightcodes",
@@ -1315,14 +1314,6 @@ def test_ai_profile_order_defaults_to_openrouter_icu_then_codex_everywhere_then_
             model="gpt-5.5",
             vision_model="gpt-5.5",
             api_key_env="QQBOT_AI_KEY_RIGHTCODES",
-        ),
-        "codex-everywhere": AiProfile(
-            name="codex-everywhere",
-            provider="openai_compatible",
-            base_url="https://codex-everywhere.com/v1",
-            model="gpt-5.5",
-            vision_model="gpt-5.5",
-            api_key_env="QQBOT_AI_KEY_CODEX_EVERYWHERE",
         ),
         "openrouter-icu": AiProfile(
             name="openrouter-icu",
@@ -1341,7 +1332,7 @@ def test_ai_profile_order_defaults_to_openrouter_icu_then_codex_everywhere_then_
         preferred_profile="rightcodes",
     )
 
-    assert order == ("openrouter-icu", "codex-everywhere", "rightcodes")
+    assert order == ("openrouter-icu", "rightcodes")
 
 
 def test_build_ai_gateway_chain_skips_failed_profile_cooldown(tmp_path: Path, monkeypatch) -> None:
@@ -1422,7 +1413,6 @@ def test_handle_ai_locked_complex_direct_reply_does_not_send_processing_ack(
     )
     settings = RuntimeSettings(
         data_root=tmp_path,
-        ai_enabled=True,
         ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
@@ -1489,7 +1479,6 @@ def test_handle_ai_locked_complex_direct_fallback_stays_silent_without_ack(
     )
     settings = RuntimeSettings(
         data_root=tmp_path,
-        ai_enabled=True,
         ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
@@ -1626,7 +1615,6 @@ def test_handle_ai_locked_keeps_group_fallback_silent_without_ack(
     event = FakeGroupEvent(text="你好", message_id=23456, group_id=516286670, user_id="605738729")
     settings = RuntimeSettings(
         data_root=tmp_path,
-        ai_enabled=True,
         ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
@@ -1686,7 +1674,6 @@ def test_handle_ai_locked_proactive_complex_task_does_not_send_processing_ack(
     )
     settings = RuntimeSettings(
         data_root=tmp_path,
-        ai_enabled=True,
         ai_default_profile="openrouter-icu",
         ai_profile_file=tmp_path / "qqbot.toml",
     )
@@ -1764,7 +1751,7 @@ def test_handle_ai_locked_falls_back_to_text_when_voice_requested(
 
     event = FakeGroupEvent(text="唱一下小星星")
     store = SettingsStore(tmp_path, author_qq=605738729)
-    settings = RuntimeSettings(data_root=tmp_path, ai_enabled=True, ai_show_metrics=False)
+    settings = RuntimeSettings(data_root=tmp_path, ai_show_metrics=False)
     finish_message = object()
 
     try:

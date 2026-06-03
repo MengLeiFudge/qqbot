@@ -13,7 +13,6 @@ from qqbot.services.arc_background_service import ArcBackgroundService
 from qqbot.services.arc_constant_service import ArcConstantService
 from qqbot.services.arc_event_service import ArcEventService, _fetch_latest_arc_version
 from qqbot.services.arc_guess_service import ArcGuessService
-from qqbot.services.codex_self_update_service import publish_pending_codex_self_update_notices
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.domain_knowledge_store import DomainKnowledgeStore, build_seed_knowledge_candidates
@@ -81,10 +80,6 @@ async def log_bot_connect(bot: Bot) -> None:
     reset_offline_private_ai_replay_state()
     logger.success("OneBot bot connected: {}, connected_at={}", bot.self_id, connected_at)
     settings = load_settings()
-    try:
-        await publish_pending_codex_self_update_notices(bot, settings.data_root)
-    except Exception as exc:
-        logger.exception("Failed to publish Codex self-update notices: {}", exc)
     if bot.self_id in _ARC_BACKGROUND_TASKS:
         pass
     else:

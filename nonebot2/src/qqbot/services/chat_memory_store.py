@@ -1830,8 +1830,8 @@ def infer_rule_tags(text: str) -> tuple[str, ...]:
         tags.append("知识库")
     if any(keyword in normalized for keyword in ("ai", "模型", "prompt", "提示词")):
         tags.append("AI")
-    if any(keyword in normalized for keyword in ("codex", "代码", "项目", "提交")):
-        tags.append("Codex")
+    if any(keyword in normalized for keyword in ("代码", "项目", "提交")):
+        tags.append("代码项目")
     if any(keyword in normalized for keyword in ("群管", "禁言", "复读", "管理")):
         tags.append("群管")
     return tuple(dict.fromkeys(tags))
@@ -1852,8 +1852,8 @@ def infer_rule_topics(text: str) -> tuple[str, ...]:
         topics.append("shapez")
     if any(keyword in normalized for keyword in ("ai", "模型", "prompt", "提示词", "长期记忆")):
         topics.append("AI")
-    if any(keyword in normalized for keyword in ("codex", "代码", "项目", "提交")):
-        topics.append("Codex")
+    if any(keyword in normalized for keyword in ("代码", "项目", "提交")):
+        topics.append("代码项目")
     if any(keyword in normalized for keyword in ("群管", "禁言", "复读", "管理")):
         topics.append("群管")
     return tuple(dict.fromkeys(topics))
@@ -1863,7 +1863,7 @@ def extract_rule_entities(text: str) -> tuple[str, ...]:
     entities: list[str] = []
     entities.extend(re.findall(r"\b\d{5,12}\b", text))
     entities.extend(re.findall(r"\b[A-Za-z][A-Za-z0-9_\-]{2,}\b", text))
-    for marker in ("萌泪", "萌泪酱", "可可", "棉花糖", "shapez", "Codex"):
+    for marker in ("萌泪", "萌泪酱", "可可", "棉花糖", "shapez"):
         if marker.lower() in text.lower():
             entities.append(marker)
     return tuple(dict.fromkeys(entities))
@@ -2285,7 +2285,7 @@ def build_like_terms(query: str) -> list[str]:
         "萌泪酱",
         "棉花糖",
         "shapez",
-        "Codex",
+        "代码项目",
         "AI",
         "群管",
         "禁言",

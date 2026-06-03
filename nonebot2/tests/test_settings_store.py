@@ -162,7 +162,6 @@ def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: P
     func_state.parent.mkdir(parents=True)
     func_state.write_text('{"Arc": true}', encoding="utf-8")
     store.set_lolicon_config(10001, True, False)
-    store.set_codex_group_binding(10001, "qqbot")
     proactive = tmp_path / "settings" / "ai_proactive.json"
     proactive.write_text('{"groups": {"10001": true, "10002": true}}', encoding="utf-8")
 
@@ -171,7 +170,6 @@ def test_remove_group_scoped_settings_deletes_group_specific_entries(tmp_path: P
     assert str(func_state) in removed
     assert not func_state.exists()
     assert store.get_lolicon_config(10001) == (False, False)
-    assert store.list_codex_group_bindings() == {}
     proactive_text = proactive.read_text(encoding="utf-8")
     assert '"10001"' not in proactive_text
     assert '"10002"' in proactive_text

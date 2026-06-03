@@ -18,7 +18,6 @@ arcaea_record_maven = "C:/path/to/maven/bin/mvn.cmd"
 arcaea_record_java_home = "C:/path/to/jdk"
 
 [ai]
-enabled = false
 default_profile = "openrouter-icu"
 max_context_messages = 12
 group_context_messages = 30
@@ -46,17 +45,6 @@ max_output_tokens = 4096
 [ai.providers.openrouter-icu.extra_body]
 reasoning = { effort = "high" }
 
-[ai.providers.codex-everywhere]
-provider = "openai_compatible"
-base_url = "https://codex-everywhere.com/v1"
-model = "gpt-5.5"
-api_key_env = "QQBOT_AI_KEY_CODEX_EVERYWHERE"
-timeout_seconds = 45
-max_output_tokens = 4096
-
-[ai.providers.codex-everywhere.extra_body]
-reasoning = { effort = "high" }
-
 [ai.providers.rightcodes-high]
 provider = "openai_compatible"
 base_url = "https://example.com/v1"
@@ -80,47 +68,3 @@ max_output_tokens = 4096
 # @机器人 棉花生图 一只糖果猫娘
 # @机器人 棉花糖生图 [nano-banana-pro] 赛博城市
 # 棉花生图一只糖果猫娘
-
-[codex.projects.mlj_dspmods]
-display_name = "MLJ_DSPmods"
-repo_path = "/mnt/d/project/dsp/MLJ_DSPmods"
-aliases = ["分馏", "万物分馏", "FE", "FractionateEverything", "DSP MOD", "MLJ_DSPmods"]
-
-[codex.projects.orbital_ring]
-display_name = "OrbitalRing-MOD"
-repo_path = "/mnt/d/project/dsp/OrbitalRing-MOD"
-aliases = ["星环", "OrbitalRing", "OrbitalRing-MOD", "ProjectOrbitalRing"]
-
-[codex.projects.project_genesis]
-display_name = "ProjectGenesis"
-repo_path = "/mnt/d/project/dsp/ProjectGenesis"
-aliases = ["创世", "创世工程", "ProjectGenesis", "Project Genesis", "Genesis"]
-
-[codex.projects.dsp_calc]
-display_name = "dsp-calc"
-repo_path = "/mnt/d/project/dsp/dsp-calc"
-aliases = ["dsp-calc", "DSP 计算器", "计算器"]
-
-[codex.projects.qqbot]
-display_name = "qqbot"
-repo_path = "/mnt/d/project/qqbot"
-aliases = ["机器人", "bot", "qqbot", "棉花糖"]
-
-[codex.projects.tfwr_simulator]
-display_name = "TFWR_Simulator"
-repo_path = "/mnt/d/project/python/TFWR_Simulator"
-aliases = ["TFWR", "模拟器", "排行榜", "GameSimulator", "TFWR_Simulator"]
-
-[codex.projects.factorio_mods]
-display_name = "MLJ_Factorio_Mods"
-repo_path = "/mnt/d/project/factorio/MLJ_Factorio_Mods"
-aliases = ["Factorio", "异星工厂", "异星模组", "MLJ_Factorio_Mods", "section autocraft", "section-autocraft"]
-
-[codex.groups."319567534"]
-project = "mlj_dspmods"
-
-[codex.groups."1035445959"]
-project = "orbital_ring"
-
-[codex.groups."991895539"]
-project = "project_genesis"

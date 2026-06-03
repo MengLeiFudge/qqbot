@@ -14,12 +14,9 @@ from pydantic import BaseModel
 
 from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
-from qqbot.services.codex_task_service import get_codex_project_by_id, normalize_local_path
 from qqbot.services.fe_artifact_publish_service import (
     LocalArtifactPublishContext,
     LocalArtifactPublishFile,
-    is_fe_artifact_path,
-    publish_fe_artifact,
     publish_local_artifacts,
 )
 from qqbot.services.group_file_cleanup_service import (
@@ -56,17 +53,6 @@ class AiOutputModeUpdateRequest(BaseModel):
 
 class ShapezFileCleanupUnmuteRequest(BaseModel):
     user_id: int
-
-
-class CodexGroupBindingUpdateRequest(BaseModel):
-    project_id: str = ""
-
-
-class LocalArtifactUploadRequest(BaseModel):
-    project_id: str
-    group_id: int
-    files: list[str] = []
-    message: str = ""
 
 
 class LocalArtifactPublishFileRequest(BaseModel):
@@ -433,81 +419,11 @@ def register_admin_routes(
     ) -> dict[str, object]:
         return admin_service.list_ai_diagnostics()
 
-    @app.get("/admin/api/codex/group-bindings")
-    async def admin_codex_group_bindings(
-        _: None = Depends(require_local_request),
-        admin_service: AdminService = Depends(service),
-    ) -> dict[str, object]:
-        return admin_service.list_codex_group_bindings(await resolve_group_names())
-
-    @app.put("/admin/api/codex/group-bindings/{group_id}")
-    async def admin_update_codex_group_binding(
-        group_id: int,
-        payload: CodexGroupBindingUpdateRequest,
-        _: None = Depends(require_local_request),
-        admin_service: AdminService = Depends(service),
-    ) -> dict[str, object]:
-        try:
-            return admin_service.set_codex_group_binding(
-                group_id,
-                payload.project_id,
-                await resolve_group_names(),
-            )
-        except ValueError as exc:
-            detail = str(exc)
-            status_code = 404 if "Unknown Codex project" in detail else 400
-            raise HTTPException(status_code=status_code, detail=detail) from exc
-
-    @app.post("/admin/api/artifacts/upload-local")
-    async def admin_upload_local_artifacts(
-        payload: LocalArtifactUploadRequest,
-        _: None = Depends(require_local_request),
-    ) -> dict[str, object]:
-        project = get_codex_project_by_id(payload.project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="Unknown Codex project.")
-        if payload.group_id <= 0:
-            raise HTTPException(status_code=400, detail="Invalid group id.")
-        if not payload.files:
-            raise HTTPException(status_code=400, detail="No artifact files to upload.")
-
-        bots = nonebot.get_bots()
-        if not bots:
-            raise HTTPException(status_code=503, detail="No connected OneBot bot.")
-
-        repo_path = normalize_local_path(project.repo_path)
-        if not repo_path.is_dir():
-            raise HTTPException(status_code=404, detail="Project repository does not exist.")
-
-        artifact = _resolve_fe_artifact_to_publish(payload, repo_path)
-        if artifact is None:
-            raise HTTPException(status_code=404, detail="No FractionateEverything zip artifact found.")
-        bot = next(iter(bots.values()))
-        publish_message = payload.message.strip()
-        result = await publish_fe_artifact(
-            bot,
-            payload.group_id,
-            artifact,
-            repo_path,
-            message=publish_message,
-            data_root=settings.data_root,
-        )
-        return {
-            "ok": True,
-            "uploaded": result.uploaded,
-            "deleted": result.deleted,
-            "skipped": result.skipped,
-            "reason": result.reason,
-        }
-
     @app.post("/admin/api/artifacts/publish-local")
     async def admin_publish_local_artifacts(
         payload: LocalArtifactPublishRequest,
         _: None = Depends(require_local_request),
     ) -> dict[str, object]:
-        project = get_codex_project_by_id(payload.project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="Unknown Codex project.")
         if not payload.files:
             raise HTTPException(status_code=400, detail="No artifact files to publish.")
         _validate_publish_timestamp(payload.timestamp)
@@ -517,9 +433,7 @@ def register_admin_routes(
         if not bots:
             raise HTTPException(status_code=503, detail="No connected OneBot bot.")
 
-        repo_path = normalize_local_path(project.repo_path)
-        if not repo_path.is_dir():
-            raise HTTPException(status_code=404, detail="Project repository does not exist.")
+        repo_path = _infer_publish_repo_path(payload.files)
         _validate_publish_git_context(payload, repo_path)
 
         files = [
@@ -887,14 +801,6 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           </div>
           <div id="aiDiagnosticsSummary" class="status"></div>
           <div id="aiDiagnosticsList" class="diagnostic-list"></div>
-        </div>
-        <div class="panel-block">
-          <h3>Codex 群绑定项目</h3>
-          <div class="row">
-            <button onclick="loadCodexGroupBindings()">刷新</button>
-            <span id="codexBindingStatus" class="muted"></span>
-          </div>
-          <div id="codexBindingList" class="binding-list"></div>
         </div>
         <div class="panel-block">
           <h3>Bot 管理员</h3>
@@ -1414,70 +1320,6 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       return entries.map(([name, value]) => `${{name}} ${{formatDuration(value)}}`).join("；");
     }}
 
-    let codexBindingPayload = {{ groups: [], projects: [] }};
-
-    async function loadCodexGroupBindings() {{
-      const status = document.getElementById("codexBindingStatus");
-      status.textContent = "正在读取...";
-      codexBindingPayload = await api("/admin/api/codex/group-bindings");
-      renderCodexGroupBindings();
-      status.textContent = `已读取：${{codexBindingPayload.groups.length}} 个群，${{codexBindingPayload.projects.length}} 个项目`;
-    }}
-
-    function renderCodexGroupBindings() {{
-      const list = document.getElementById("codexBindingList");
-      if (!codexBindingPayload.groups.length) {{
-        list.innerHTML = `<div class="muted">暂无已知群。</div>`;
-        return;
-      }}
-      list.innerHTML = codexBindingPayload.groups.map(group => renderCodexBindingRow(group)).join("");
-    }}
-
-    function renderCodexBindingRow(group) {{
-      const current = group.project_id || group.effective_project_id || "";
-      const options = [
-        renderCodexProjectOption("", "未绑定", current),
-        ...codexBindingPayload.projects.map(project => renderCodexProjectOption(
-          project.id,
-          `${{project.name}} / ${{project.id}}`,
-          current,
-        )),
-      ].join("");
-      const source = group.source === "runtime" ? "面板设置" : (group.source === "default" ? "默认配置" : "未绑定");
-      const effective = group.effective_project_name || "未绑定";
-      return `
-        <div class="binding-row">
-          <div>
-            <div class="binding-title">${{escapeHtml(group.display_name)}}</div>
-            <div class="binding-meta">当前生效：${{escapeHtml(effective)}} / 来源：${{escapeHtml(source)}}</div>
-          </div>
-          <select id="codex_binding_${{group.group_id}}">${{options}}</select>
-          <button onclick="saveCodexGroupBinding(${{group.group_id}})">保存</button>
-        </div>
-      `;
-    }}
-
-    function renderCodexProjectOption(value, label, current) {{
-      const selected = String(value) === String(current) ? " selected" : "";
-      return `<option value="${{escapeHtml(value)}}"${{selected}}>${{escapeHtml(label)}}</option>`;
-    }}
-
-    async function saveCodexGroupBinding(groupId) {{
-      const status = document.getElementById("codexBindingStatus");
-      const select = document.getElementById(`codex_binding_${{groupId}}`);
-      status.textContent = "正在保存...";
-      try {{
-        codexBindingPayload = await api(`/admin/api/codex/group-bindings/${{groupId}}`, {{
-          method: "PUT",
-          body: JSON.stringify({{ project_id: select.value }}),
-        }});
-        renderCodexGroupBindings();
-        status.textContent = "已保存。";
-      }} catch (error) {{
-        status.textContent = `保存失败：${{error.message}}`;
-      }}
-    }}
-
     async function togglePlugin(pluginId, enabled) {{
       await api(`/admin/api/plugins/${{pluginId}}`, {{
         method: "PUT",
@@ -1657,41 +1499,12 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         .replaceAll("'", "&#39;");
     }}
     setInterval(loadGroupMessages, 3000);
-    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadAiOutputModes(), loadAiDiagnostics(), loadCodexGroupBindings(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
+    Promise.all([loadStatus().then(loadGroups), loadGroupMessages(), loadPlugins(), loadAiProvider(), loadAiOutputModes(), loadAiDiagnostics(), loadAdmins(), loadLogs(), loadKunUsers(true)]).catch(error => {{
       document.body.insertAdjacentHTML("beforeend", `<pre>${{error.message}}</pre>`);
     }});
   </script>
 </body>
 </html>"""
-
-
-def _validate_local_artifact_path(raw_path: str, repo_path: Path) -> Path:
-    artifact = normalize_local_path(raw_path)
-    if artifact.suffix.lower() != ".zip":
-        raise HTTPException(status_code=400, detail="Only zip artifacts can be uploaded.")
-    if not artifact.is_file():
-        raise HTTPException(status_code=404, detail="Artifact file does not exist.")
-    if not is_fe_artifact_path(artifact):
-        raise HTTPException(status_code=400, detail="Only FractionateEverything zip artifacts can be uploaded.")
-    try:
-        artifact.resolve().relative_to(repo_path.resolve())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Artifact must be inside project repository.") from exc
-    return artifact
-
-
-def _resolve_fe_artifact_to_publish(
-    payload: LocalArtifactUploadRequest,
-    repo_path: Path,
-) -> Path | None:
-    artifacts = [
-        _validate_local_artifact_path(file_path, repo_path)
-        for file_path in payload.files
-    ]
-    if not artifacts:
-        return None
-    artifacts.sort(key=lambda artifact: (artifact.stat().st_mtime, artifact.name), reverse=True)
-    return artifacts[0]
 
 
 def _build_local_artifact_publish_file(
@@ -1712,7 +1525,7 @@ def _build_local_artifact_publish_file(
 
 
 def _validate_generic_local_artifact_path(raw_path: str, repo_path: Path) -> Path:
-    artifact = normalize_local_path(raw_path)
+    artifact = _normalize_local_path(raw_path)
     if artifact.suffix.lower() != ".zip":
         raise HTTPException(status_code=400, detail="Only zip artifacts can be uploaded.")
     if not artifact.is_file():
@@ -1722,6 +1535,39 @@ def _validate_generic_local_artifact_path(raw_path: str, repo_path: Path) -> Pat
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Artifact must be inside project repository.") from exc
     return artifact
+
+
+def _infer_publish_repo_path(files: list[LocalArtifactPublishFileRequest]) -> Path:
+    first_path = _normalize_local_path(files[0].path)
+    repo_path = _find_git_repo_root(first_path.parent)
+    if repo_path is None:
+        raise HTTPException(status_code=400, detail="Cannot infer project git repository from artifact path.")
+    for file_payload in files:
+        artifact = _normalize_local_path(file_payload.path)
+        try:
+            artifact.resolve().relative_to(repo_path.resolve())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="All artifacts must be inside the same project repository.") from exc
+    return repo_path
+
+
+def _find_git_repo_root(start: Path) -> Path | None:
+    current = start.resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _normalize_local_path(raw_path: str) -> Path:
+    text = raw_path.strip()
+    if len(text) >= 3 and text[1] == ":":
+        return Path(text)
+    if text.startswith("/mnt/") and len(text) > 6 and text[6:7] == "/":
+        drive = text[5:6].upper()
+        rest = text[7:].replace("/", "\\")
+        return Path(f"{drive}:\\{rest}")
+    return Path(text)
 
 
 def _validate_publish_timestamp(timestamp: str) -> None:

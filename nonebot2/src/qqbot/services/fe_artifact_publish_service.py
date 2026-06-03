@@ -10,7 +10,6 @@ import subprocess
 from typing import Any
 
 from qqbot.config import load_settings
-from qqbot.services.codex_task_service import normalize_local_path
 
 FE_ARTIFACT_NAME_RE = re.compile(r"^FractionateEverything_\d+(?:\.\d+)*\.zip$", re.IGNORECASE)
 
@@ -52,6 +51,17 @@ class CommitSummary:
     short_hash: str
     title: str
     body: str
+
+
+def normalize_local_path(path: str | Path) -> Path:
+    text = str(path).strip()
+    if len(text) >= 3 and text[1] == ":":
+        return Path(text)
+    if text.startswith("/mnt/") and len(text) > 6 and text[6:7] == "/":
+        drive = text[5:6].upper()
+        rest = text[7:].replace("/", "\\")
+        return Path(f"{drive}:\\{rest}")
+    return Path(text)
 
 
 async def publish_fe_artifact(

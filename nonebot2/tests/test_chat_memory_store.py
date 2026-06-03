@@ -529,12 +529,12 @@ def test_chat_memory_store_extracts_bot_assigned_at_user_nickname(
         group_id=10001,
         subject="群主题摘要",
         predicate="摘要",
-        object="近期群聊多次讨论 Codex。",
+        object="近期群聊多次讨论代码项目。",
         confidence=0.75,
         source_type="system",
         trust_level="system",
         topics=("主题摘要",),
-        entities=("群主题摘要", "Codex"),
+        entities=("群主题摘要", "代码项目"),
     )
     store.append_message(
         group_id=10001,

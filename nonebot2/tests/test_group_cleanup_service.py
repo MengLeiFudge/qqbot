@@ -18,7 +18,6 @@ def test_group_cleanup_service_removes_group_scoped_runtime_state(tmp_path: Path
     data_root = tmp_path / "run"
     settings_store = SettingsStore(data_root, author_qq=605738729)
     settings_store.set_lolicon_config(10001, True, False)
-    settings_store.set_codex_group_binding(10001, "qqbot")
     func_state = data_root / "settings" / "func_state" / "10001.json"
     func_state.parent.mkdir(parents=True)
     func_state.write_text('{"Arc": true}', encoding="utf-8")
@@ -59,7 +58,6 @@ def test_group_cleanup_service_removes_group_scoped_runtime_state(tmp_path: Path
     assert result.group_id == 10001
     assert not func_state.exists()
     assert settings_store.get_lolicon_config(10001) == (False, False)
-    assert settings_store.list_codex_group_bindings() == {}
     assert GroupNickStore(data_root / "settings" / "group_nick.json").records == {}
     assert AiGroupContextStore(data_root).load_messages(10001) == ()
     assert GroupMessageLogStore(data_root).load_messages(10001) == ()

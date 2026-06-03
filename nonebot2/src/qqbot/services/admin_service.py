@@ -15,7 +15,6 @@ from qqbot.services.ai_runtime import (
     list_ai_profile_fallback_order,
 )
 from qqbot.services.chat_memory_store import ChatMemoryStore
-from qqbot.services.codex_task_service import load_codex_group_bindings, load_codex_projects
 from qqbot.services.domain_knowledge_store import (
     DomainKnowledgeStore,
     build_seed_knowledge_candidates,
@@ -60,55 +59,6 @@ class AdminService:
             }
             for group_id in group_ids
         ]
-
-    def list_codex_group_bindings(
-        self,
-        group_names: dict[int, str] | None = None,
-    ) -> dict[str, object]:
-        group_names = group_names or {}
-        projects = load_codex_projects()
-        default_bindings = load_codex_group_bindings()
-        runtime_bindings = self.store.list_codex_group_bindings()
-        group_ids = sorted(
-            set(self._list_known_group_ids())
-            | set(group_names)
-            | {int(group_id) for group_id in default_bindings if str(group_id).isdigit()}
-            | {int(group_id) for group_id in runtime_bindings if str(group_id).isdigit()}
-        )
-        return {
-            "projects": [
-                {
-                    "id": project.project_id,
-                    "name": project.display_name,
-                    "repo_path": project.repo_path,
-                    "aliases": list(project.aliases),
-                }
-                for project in sorted(projects.values(), key=lambda item: item.display_name.lower())
-            ],
-            "groups": [
-                self._build_codex_group_binding_item(
-                    group_id,
-                    group_names.get(group_id, ""),
-                    runtime_bindings,
-                    default_bindings,
-                    projects,
-                )
-                for group_id in group_ids
-            ],
-        }
-
-    def set_codex_group_binding(
-        self,
-        group_id: int,
-        project_id: str,
-        group_names: dict[int, str] | None = None,
-    ) -> dict[str, object]:
-        if group_id <= 0:
-            raise ValueError("Invalid group id.")
-        if project_id and project_id not in load_codex_projects():
-            raise ValueError(f"Unknown Codex project: {project_id}")
-        self.store.set_codex_group_binding(group_id, project_id)
-        return self.list_codex_group_bindings(group_names)
 
     def list_plugins(self) -> dict[str, object]:
         states = self.store.list_plugin_states()
@@ -279,7 +229,6 @@ class AdminService:
             for profile in enabled_profiles
         ]
         return {
-            "enabled": self.settings.ai_enabled,
             "current_profile": current_profile,
             "default_profile": get_default_ai_profile_name(self.settings),
             "fallback_order": list(fallback_order),
@@ -564,30 +513,6 @@ class AdminService:
         if fallback_name and fallback_name not in {str(qq), DEFAULT_AUTHOR_NAME}:
             return fallback_name
         return ""
-
-    def _build_codex_group_binding_item(
-        self,
-        group_id: int,
-        group_name: str,
-        runtime_bindings: dict[str, str],
-        default_bindings: dict[str, str],
-        projects: dict[str, object],
-    ) -> dict[str, object]:
-        key = str(group_id)
-        runtime_project_id = runtime_bindings.get(key, "")
-        default_project_id = default_bindings.get(key, "")
-        effective_project_id = runtime_project_id or default_project_id
-        project = projects.get(effective_project_id)
-        return {
-            "group_id": group_id,
-            "group_name": group_name,
-            "display_name": self._format_group_display_name(group_id, group_name),
-            "project_id": runtime_project_id,
-            "default_project_id": default_project_id,
-            "effective_project_id": effective_project_id,
-            "effective_project_name": getattr(project, "display_name", ""),
-            "source": "runtime" if runtime_project_id else ("default" if default_project_id else "none"),
-        }
 
     @staticmethod
     def _memory_fact_to_payload(fact: object) -> dict[str, object]:

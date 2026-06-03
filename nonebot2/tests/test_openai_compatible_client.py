@@ -102,7 +102,7 @@ def test_openai_compatible_client_complete_uses_streaming_responses_request() ->
     call = http_client.calls[0]
     assert call["url"] == "https://token-plan-cn.xiaomimimo.com/v1/responses"
     assert call["headers"]["Authorization"] == "Bearer secret-key"
-    assert call["headers"]["User-Agent"] == "codex-cli"
+    assert call["headers"]["User-Agent"] == "qqbot-nonebot2"
     assert call["json"]["model"] == "mimo-v2.5-pro"
     assert call["json"]["max_output_tokens"] == 2048
     assert "只用中文回答。" in call["json"]["instructions"]

@@ -29,7 +29,6 @@ def test_runtime_settings_defaults() -> None:
     assert settings.ai_timeout_seconds == 45.0
     assert settings.ai_first_attempt_timeout_seconds == 0.0
     assert settings.ai_max_attempts == 2
-    assert settings.ai_enabled is False
     assert settings.ai_default_profile == "default"
     assert settings.ai_profile_file.as_posix().endswith("config/qqbot.toml")
     assert settings.ai_max_context_messages == 12
@@ -64,7 +63,6 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
             "QQBOT_AI_TIMEOUT_SECONDS": "8.5",
             "QQBOT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS": "2.5",
             "QQBOT_AI_MAX_ATTEMPTS": "3",
-            "QQBOT_AI_ENABLED": "true",
             "QQBOT_AI_DEFAULT_PROFILE": "xiaomi",
             "QQBOT_AI_PROFILE_FILE": "D:/project/qqbot/config/ai_providers.toml",
             "QQBOT_AI_MAX_CONTEXT_MESSAGES": "8",
@@ -98,7 +96,6 @@ def test_runtime_settings_parses_superusers_and_token() -> None:
     assert settings.ai_timeout_seconds == 8.5
     assert settings.ai_first_attempt_timeout_seconds == 2.5
     assert settings.ai_max_attempts == 3
-    assert settings.ai_enabled is True
     assert settings.ai_default_profile == "xiaomi"
     assert settings.ai_profile_file.as_posix() == "D:/project/qqbot/config/ai_providers.toml"
     assert settings.ai_max_context_messages == 8
@@ -138,7 +135,6 @@ data_root = "./custom-run"
 arc_assets_root = "D:/config/arcaea"
 
 [ai]
-enabled = true
 default_profile = "xiaomi"
 max_context_messages = 8
 show_metrics = true
@@ -167,7 +163,6 @@ embedding_timeout_seconds = 10
     assert settings.author_name == "配置作者"
     assert settings.data_root.as_posix() == "custom-run"
     assert settings.arc_assets_root.as_posix() == "D:/config/arcaea"
-    assert settings.ai_enabled is True
     assert settings.ai_default_profile == "xiaomi"
     assert settings.ai_max_context_messages == 8
     assert settings.ai_show_metrics is True
@@ -190,7 +185,6 @@ def test_load_settings_ignores_missing_legacy_ai_profile_file(
     config_file.write_text(
         """
 [ai]
-enabled = true
 default_profile = "xiaomi"
 
 [ai.providers.xiaomi]

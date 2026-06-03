@@ -174,7 +174,7 @@ def test_call_collapsible_text_api_uses_group_forward_for_long_text() -> None:
             "send_group_msg",
             group_id=10001,
             message=message,
-            title="Codex 回报",
+            title="任务回报",
         )
     )
 
@@ -183,7 +183,7 @@ def test_call_collapsible_text_api_uses_group_forward_for_long_text() -> None:
     assert api == "send_group_forward_msg"
     assert data["group_id"] == 10001
     assert data["messages"][0]["type"] == "node"
-    assert data["messages"][0]["data"]["name"] == "Codex 回报"
+    assert data["messages"][0]["data"]["name"] == "任务回报"
     assert "long text" in data["messages"][0]["data"]["content"]
     assert bot.interval_flags == [True]
 

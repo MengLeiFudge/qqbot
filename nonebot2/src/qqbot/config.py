@@ -76,7 +76,6 @@ class RuntimeSettings:
     ai_timeout_seconds: float = DEFAULT_AI_TIMEOUT_SECONDS
     ai_first_attempt_timeout_seconds: float = DEFAULT_AI_FIRST_ATTEMPT_TIMEOUT_SECONDS
     ai_max_attempts: int = DEFAULT_AI_MAX_ATTEMPTS
-    ai_enabled: bool = False
     ai_default_profile: str = DEFAULT_AI_DEFAULT_PROFILE
     ai_profile_file: Path = DEFAULT_AI_PROFILE_FILE
     ai_max_context_messages: int = DEFAULT_AI_MAX_CONTEXT_MESSAGES
@@ -140,7 +139,6 @@ class RuntimeSettings:
                 )
             ),
             ai_max_attempts=int(mapping.get("QQBOT_AI_MAX_ATTEMPTS", str(DEFAULT_AI_MAX_ATTEMPTS))),
-            ai_enabled=_parse_bool(mapping.get("QQBOT_AI_ENABLED", ""), default=False),
             ai_default_profile=mapping.get(
                 "QQBOT_AI_DEFAULT_PROFILE",
                 DEFAULT_AI_DEFAULT_PROFILE,
@@ -289,7 +287,6 @@ def _load_config_mapping(config_file: Path) -> dict[str, str]:
         mapping,
         data.get("ai"),
         {
-            "enabled": "QQBOT_AI_ENABLED",
             "default_profile": "QQBOT_AI_DEFAULT_PROFILE",
             "profile_file": "QQBOT_AI_PROFILE_FILE",
             "max_context_messages": "QQBOT_AI_MAX_CONTEXT_MESSAGES",

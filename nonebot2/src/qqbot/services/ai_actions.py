@@ -8,19 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from qqbot.services.codex_task_service import (
-    CodexProgressEvent,
-    CodexTaskRequest,
-    CodexTaskResult,
-    CodexTaskStore,
-    extract_codex_zip_artifacts,
-    get_codex_project_by_id,
-    get_codex_project_for_group,
-    run_codex_task,
-)
-from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
 from qqbot.services.message_delivery import (
-    call_collapsible_text_api,
     call_split_text_api,
     wait_for_group_message_interval,
 )
@@ -36,10 +24,6 @@ class AiActionRequest:
     file_path: str = ""
     delay_seconds: float | None = None
     nested_action: "AiActionRequest | None" = None
-    codex_project_id: str = ""
-    codex_task_id: str = ""
-    codex_prompt: str = ""
-    codex_evidence: str = ""
     is_admin: bool = False
     source: str = "ai"
 
@@ -59,7 +43,6 @@ class AiActionExecutor:
         data_root: Path,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         task_factory: Callable[[Awaitable[None]], Any] | None = None,
-        codex_runner: Callable[[CodexTaskRequest], Awaitable[CodexTaskResult]] = run_codex_task,
         self_restart_scheduler: Callable[[], object] | None = None,
     ) -> None:
         self.bot = bot
@@ -67,7 +50,6 @@ class AiActionExecutor:
         self.audit_path = Path(data_root) / "ai" / "actions" / "audit.jsonl"
         self.sleep = sleep
         self.task_factory = task_factory or asyncio.create_task
-        self.codex_runner = codex_runner
         self.self_restart_scheduler = self_restart_scheduler
 
     async def execute(self, request: AiActionRequest) -> AiActionResult:
@@ -79,8 +61,6 @@ class AiActionExecutor:
             result = await self._send_group_file(request)
         elif request.action_type == "schedule_once":
             result = self._schedule_once(request)
-        elif request.action_type == "run_codex_task":
-            result = self._schedule_codex_task(request)
         else:
             result = AiActionResult(False, f"未知机器人动作：{request.action_type}", request.action_type)
         self._append_audit(request, result)
@@ -149,146 +129,9 @@ class AiActionExecutor:
         self.task_factory(self._run_delayed(delay_seconds, request.nested_action))
         return AiActionResult(True, "已安排延迟任务。", request.action_type)
 
-    def _schedule_codex_task(self, request: AiActionRequest) -> AiActionResult:
-        if not request.is_admin:
-            return AiActionResult(False, "只有 Bot 管理员才能启动 Codex 修复任务。", request.action_type)
-        project = get_codex_project_by_id(request.codex_project_id)
-        if project is None:
-            project = get_codex_project_for_group(request.target_group_id, data_root=self.data_root)
-        if project is None or project.project_id != request.codex_project_id:
-            return AiActionResult(False, "没有找到可修复的代码仓库。", request.action_type)
-        if not request.codex_prompt.strip() and not request.codex_evidence.strip():
-            return AiActionResult(False, "Codex 修复任务缺少问题描述。", request.action_type)
-        self.task_factory(self._run_codex_task(request, project))
-        return AiActionResult(
-            True,
-            f"已启动 Codex 修复任务：{project.display_name}。我会先发进度，完成后再回报结果。",
-            request.action_type,
-        )
-
     async def _run_delayed(self, delay_seconds: float, nested_action: AiActionRequest) -> None:
         await self.sleep(delay_seconds)
         await self.execute(nested_action)
-
-    async def _run_codex_task(self, request: AiActionRequest, project) -> None:
-        await self._send_codex_progress(
-            request,
-            f"已交给本地 Codex：{project.display_name}\n正在启动并读取项目上下文。",
-        )
-        progress_callback = self._build_codex_progress_callback(request, project.display_name)
-        result = await self.codex_runner(
-            CodexTaskRequest(
-                project=project,
-                actor_user_id=request.actor_user_id,
-                group_id=request.target_group_id,
-                prompt=request.codex_prompt,
-                evidence=request.codex_evidence,
-                progress_callback=progress_callback,
-            )
-        )
-        if request.codex_task_id.strip():
-            CodexTaskStore(self.data_root).record_result(request.codex_task_id, result)
-        status = "成功" if result.ok else "失败"
-        message = f"Codex 修复任务{status}：{project.display_name}\n{result.message}"
-        restart_message = ""
-        if result.ok:
-            restart_message = self._prepare_self_update_restart(project, request)
-            if restart_message:
-                message = f"{message}\n{restart_message}"
-        if request.target_group_id and request.target_group_id.isdigit():
-            await call_collapsible_text_api(
-                self.bot,
-                "send_group_msg",
-                group_id=int(request.target_group_id),
-                message=message,
-                title=f"Codex 回报：{project.display_name}",
-            )
-            if result.ok:
-                await self._upload_codex_artifacts(result.message, project.repo_path, request)
-        else:
-            await call_split_text_api(
-                self.bot,
-                "send_private_msg",
-                user_id=int(request.actor_user_id),
-                message=message,
-            )
-        if restart_message:
-            self.task_factory(self._run_delayed_self_restart())
-
-    async def _send_codex_progress(self, request: AiActionRequest, message: str) -> None:
-        if request.target_group_id and request.target_group_id.isdigit():
-            await call_split_text_api(
-                self.bot,
-                "send_group_msg",
-                group_id=int(request.target_group_id),
-                message=message,
-            )
-            return
-        await call_split_text_api(
-            self.bot,
-            "send_private_msg",
-            user_id=int(request.actor_user_id),
-            message=message,
-        )
-
-    def _build_codex_progress_callback(self, request: AiActionRequest, project_name: str):
-        last_sent_at = 0.0
-
-        async def report(event: CodexProgressEvent) -> None:
-            nonlocal last_sent_at
-            now = time.monotonic()
-            if event.phase == "output" and now - last_sent_at < 8:
-                return
-            last_sent_at = now
-            line = _summarize_codex_progress_message(event.message)
-            if event.phase == "output":
-                line = f"Codex 还在处理：{project_name}\n{line}"
-            else:
-                line = f"Codex 状态：{project_name}\n{line}"
-            await self._send_codex_progress(request, line)
-
-        return report
-
-    def _prepare_self_update_restart(self, project, request: AiActionRequest) -> str:
-        if project.project_id != "qqbot" or self.self_restart_scheduler is None:
-            return ""
-        target_type = "group" if request.target_group_id else "private"
-        target_id = request.target_group_id or request.actor_user_id
-        source_label = (
-            f"Codex 草稿 {request.codex_task_id}"
-            if request.codex_task_id.strip()
-            else "Codex 修复任务"
-        )
-        CodexSelfUpdateNoticeStore(self.data_root).add_notice(
-            target_type=target_type,
-            target_id=target_id,
-            project_display_name=project.display_name,
-            source_label=source_label,
-        )
-        target_label = "本群" if target_type == "group" else "私聊"
-        return f"qqbot 自身项目已执行成功，已安排 Bot 重启。重启完成后会向{target_label}回报连接状态。"
-
-    async def _run_delayed_self_restart(self) -> None:
-        await self.sleep(2)
-        if self.self_restart_scheduler is not None:
-            self.self_restart_scheduler()
-
-    async def _upload_codex_artifacts(self, text: str, repo_path: str, request: AiActionRequest) -> int:
-        uploaded = 0
-        for artifact in extract_codex_zip_artifacts(text, repo_path):
-            result = await self.execute(
-                AiActionRequest(
-                    action_type="send_group_file",
-                    actor_user_id=request.actor_user_id,
-                    target_group_id=request.target_group_id,
-                    file_path=str(artifact),
-                    is_admin=request.is_admin,
-                    source=request.source,
-                )
-            )
-            if result.ok:
-                uploaded += 1
-        return uploaded
 
     def _append_audit(self, request: AiActionRequest, result: AiActionResult) -> None:
         self.audit_path.parent.mkdir(parents=True, exist_ok=True)
@@ -308,10 +151,3 @@ def _serialize_action(request: AiActionRequest) -> dict[str, object]:
     if nested is not None:
         payload["nested_action"] = _serialize_action(nested)
     return payload
-
-
-def _summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
-    cleaned = " ".join(message.strip().split())
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[: limit - 1].rstrip() + "…"

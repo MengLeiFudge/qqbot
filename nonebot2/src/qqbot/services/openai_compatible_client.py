@@ -63,7 +63,7 @@ class OpenAICompatibleClient(AiClient):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "User-Agent": "codex-cli",
+            "User-Agent": "qqbot-nonebot2",
         }
 
         start = time.perf_counter()

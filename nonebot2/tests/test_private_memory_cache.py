@@ -292,7 +292,7 @@ def test_offline_private_replay_uses_only_pending_message_ids(tmp_path: Path, mo
     monkeypatch.setattr(
         private_memory_cache,
         "load_settings",
-        lambda: RuntimeSettings(data_root=tmp_path, ai_enabled=True, ai_default_profile="default"),
+        lambda: RuntimeSettings(data_root=tmp_path, ai_default_profile="default"),
     )
     profiles = {
         "openrouter-icu": AiProfile(

@@ -7,32 +7,14 @@ import logging
 import os
 from pathlib import Path
 import re
-import time
 
 from qqbot.services.ai_actions import AiActionExecutor, AiActionRequest
-from qqbot.services.ai_command import AiChatTriggerKind
-from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
-from qqbot.services.ai_message_decision import AiDomain, AiMessageIntent, decide_ai_message
+from qqbot.services.ai_message_decision import AiMessageIntent, decide_ai_message
 from qqbot.services.ai_requirement_store import AiRequirementStore
 from qqbot.services.ai_tool_registry import AiToolContext, build_default_ai_tool_registry
 from qqbot.services.ai_user_style_store import AiUserStyleStore
-from qqbot.services.codex_self_update_service import CodexSelfUpdateNoticeStore
-from qqbot.services.codex_task_service import (
-    CodexProgressEvent,
-    CodexSessionRequest,
-    CodexSessionStore,
-    CodexTaskResult,
-    extract_codex_zip_artifacts,
-    get_codex_project_by_id,
-    load_codex_projects,
-    resolve_codex_project_for_session_start,
-    resolve_codex_project_for_text,
-    run_codex_session_turn,
-)
 from qqbot.services.feature_catalog import list_visible_features
-from qqbot.services.fe_artifact_publish_service import publish_fe_artifact
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
-from qqbot.services.project_artifact_service import find_latest_project_zip
 from qqbot.services.rightcodes_draw_client import (
     RightCodesDrawClient,
     RightCodesDrawRequest,
@@ -68,20 +50,7 @@ class StyleControlCommand:
 
 
 STYLE_CONTROL_REPLY_MESSAGE = "棉花糖就是棉花糖啦，继续正常聊就好喵。"
-_LOCAL_DOMAIN_TRIGGER_KIND = AiChatTriggerKind.DIRECT
-DOMAIN_CODEX_TIMEOUT_SECONDS = 120
 logger = logging.getLogger(__name__)
-
-
-def _find_group_message_index(records: tuple[AiGroupMessageRecord, ...], message_id: str) -> int | None:
-    for index, record in enumerate(records):
-        if record.message_id == message_id:
-            return index
-    return None
-
-
-def _format_codex_reply_context_line(reply: NormalizedReply) -> str:
-    return f"引用消息：{reply.sender_name}({reply.user_id}): {reply.message.outline}"
 
 
 def looks_like_style_preference_update(text: str) -> bool:
@@ -150,36 +119,6 @@ def parse_style_control_command(text: str) -> StyleControlCommand | None:
     return StyleControlCommand(scope=scope, extra_preference=extra_preference)
 
 
-def summarize_codex_progress_message(message: str, *, limit: int = 120) -> str:
-    cleaned = " ".join(message.strip().split())
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[: limit - 1].rstrip() + "…"
-
-
-def build_domain_codex_prompt(user_text: str, project_name: str) -> str:
-    return (
-        "这是一次群聊领域问答，只做只读资料查询，不修改文件、不提交、不启动构建、不执行破坏性操作。\n"
-        f"目标项目：{project_name}\n"
-        "请在当前项目目录内查 README、源码、data、配置和测试等本地证据后回答。\n"
-        "最终只输出可以直接发到 QQ 群里的答案，不要输出 Codex 会话前缀、内部路由、工具过程或让我提供源码/data/截图。\n"
-        "回答要短，但必须说明关键依据；能给出文件名、字段名、方法名或数据来源时要给。\n"
-        "如果证据不足，明确说查到哪里、缺什么证据，不要按通用游戏经验编答案。\n"
-        "用户问题：\n"
-        f"{user_text.strip()}"
-    )
-
-
-def strip_codex_session_prefix(text: str) -> str:
-    cleaned = text.strip()
-    cleaned = re.sub(r"(?im)^\s*(?:DOMAIN-QA|CODEX-S\d+)\s+Codex[：:]\s*", "", cleaned).strip()
-    return cleaned or "我没查到足够证据，先不乱答喵。"
-
-
-def build_domain_codex_failure_reply(message: str, project_name: str) -> str:
-    return f"这题要核对 {project_name} 的源码或 data 才能答准；我这边暂时没有足够证据，先不按通用机制补猜喵。"
-
-
 class AiOrchestrator:
     def __init__(
         self,
@@ -187,23 +126,18 @@ class AiOrchestrator:
         data_root: Path,
         bot_name: str = "QQBot",
         action_executor: AiActionExecutor | None = None,
-        codex_session_runner: Callable[[CodexSessionRequest], Awaitable[CodexTaskResult]] = run_codex_session_turn,
         self_restart_scheduler: Callable[[], object] | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         task_factory: Callable[[Awaitable[None]], object] | None = None,
     ) -> None:
         self.data_root = Path(data_root)
         self.action_executor = action_executor
-        self.codex_session_runner = codex_session_runner
         self.self_restart_scheduler = self_restart_scheduler
         self.sleep = sleep
         self.task_factory = task_factory or asyncio.create_task
         self.styles = AiUserStyleStore(self.data_root, bot_name=bot_name)
         self.requirements = AiRequirementStore(self.data_root)
         self.tools = build_default_ai_tool_registry()
-
-    def _codex_session_store(self) -> CodexSessionStore:
-        return CodexSessionStore(self.data_root)
 
     async def handle(
         self,
@@ -214,14 +148,6 @@ class AiOrchestrator:
         text = prompt.strip()
         if not text:
             return AiOrchestratorResult(False)
-
-        codex_session_result = await self._try_handle_codex_session(text, context, normalized_message)
-        if codex_session_result.handled:
-            return codex_session_result
-
-        upload_artifact_result = await self._try_upload_latest_project_zip(text, context)
-        if upload_artifact_result.handled:
-            return upload_artifact_result
 
         group_plugins_result = self._try_list_group_plugins(text, context)
         if group_plugins_result.handled:
@@ -246,10 +172,6 @@ class AiOrchestrator:
         requirement_list_result = self._try_list_requirements(text, context)
         if requirement_list_result.handled:
             return requirement_list_result
-
-        domain_codex_result = await self._try_answer_domain_question_with_codex(text, context, normalized_message)
-        if domain_codex_result.handled:
-            return domain_codex_result
 
         shapez_result = self._try_render_shapez(text, context)
         if shapez_result.handled:
@@ -329,66 +251,6 @@ class AiOrchestrator:
                 ),
             )
         return AiOrchestratorResult(False)
-
-    async def _try_upload_latest_project_zip(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-    ) -> AiOrchestratorResult:
-        if not looks_like_latest_zip_upload_request(text):
-            return AiOrchestratorResult(False)
-        if not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能上传项目压缩包。")
-        if context.group_id is None:
-            return AiOrchestratorResult(True, "上传项目压缩包需要在群聊里使用。")
-        if self.action_executor is None:
-            return AiOrchestratorResult(True, "当前没有可用的群文件上传执行器。")
-
-        project_match = resolve_codex_project_for_text(
-            text,
-            group_id=context.group_id,
-            data_root=self.data_root,
-        )
-        if project_match is None:
-            return AiOrchestratorResult(True, "没有找到要上传产物的项目，请写清楚项目名或别名。")
-
-        artifact = find_latest_project_zip(project_match.project, text)
-        if artifact is None:
-            return AiOrchestratorResult(
-                True,
-                f"没有找到 {project_match.project.display_name} 的 zip 产物。",
-            )
-        if project_match.project.project_id == "mlj_dspmods":
-            bots = self.action_executor.bot
-            result = await publish_fe_artifact(
-                bots,
-                int(context.group_id),
-                artifact.path,
-                project_match.project.repo_path,
-                data_root=self.data_root,
-            )
-            if result.skipped:
-                return AiOrchestratorResult(True, "FE 压缩包内容没有变化，已跳过上传。")
-            deleted_text = f"，已清理旧包 {len(result.deleted)} 个" if result.deleted else ""
-            return AiOrchestratorResult(
-                True,
-                f"已上传最新压缩包：{artifact.file_name}{deleted_text}",
-            )
-        result = await self.action_executor.execute(
-            AiActionRequest(
-                action_type="send_group_file",
-                actor_user_id=context.actor_user_id,
-                target_group_id=context.group_id,
-                file_path=str(artifact.path),
-                is_admin=context.is_admin,
-            )
-        )
-        if not result.ok:
-            return AiOrchestratorResult(True, result.message)
-        return AiOrchestratorResult(
-            True,
-            f"已上传最新压缩包：{artifact.file_name}",
-        )
 
     def _try_create_requirement(
         self,
@@ -493,65 +355,6 @@ class AiOrchestrator:
             image_path=str(result.payload.get("image_path", "")) or None,
         )
 
-    async def _try_answer_domain_question_with_codex(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-        normalized_message: NormalizedMessage,
-    ) -> AiOrchestratorResult:
-        decision = decide_ai_message(
-            trigger_kind=_LOCAL_DOMAIN_TRIGGER_KIND,
-            normalized_message=normalized_message,
-            group_id=context.group_id,
-        )
-        if decision.intent != AiMessageIntent.DOMAIN_QA:
-            return AiOrchestratorResult(False)
-        if decision.domain not in {AiDomain.FRACTIONATE_EVERYTHING, AiDomain.ORBITAL_RING, AiDomain.PROJECT_GENESIS}:
-            return AiOrchestratorResult(False)
-        project_match = resolve_codex_project_for_text(
-            text,
-            group_id=context.group_id,
-            data_root=self.data_root,
-        )
-        if project_match is None:
-            return AiOrchestratorResult(False)
-        if decision.domain == AiDomain.FRACTIONATE_EVERYTHING and project_match.project.project_id != "mlj_dspmods":
-            return AiOrchestratorResult(False)
-        if decision.domain == AiDomain.ORBITAL_RING and project_match.project.project_id != "orbital_ring":
-            return AiOrchestratorResult(False)
-        if decision.domain == AiDomain.PROJECT_GENESIS and project_match.project.project_id != "project_genesis":
-            return AiOrchestratorResult(False)
-        result = await self.codex_session_runner(
-            CodexSessionRequest(
-                project=project_match.project,
-                actor_user_id=context.actor_user_id,
-                group_id=context.group_id,
-                session_id="DOMAIN-QA",
-                prompt=build_domain_codex_prompt(text, project_match.project.display_name),
-                transcript=(),
-                source_context=self._build_codex_source_context(
-                    group_id=context.group_id,
-                    reply=normalized_message.reply,
-                ),
-                mode="discuss",
-                timeout_seconds=DOMAIN_CODEX_TIMEOUT_SECONDS,
-                progress_callback=None,
-            )
-        )
-        logger.info(
-            "Domain Codex QA finished: group_id=%s project=%s ok=%s exit_code=%s",
-            context.group_id,
-            project_match.project.project_id,
-            result.ok,
-            getattr(result, "exit_code", None),
-        )
-        if not result.ok:
-            return AiOrchestratorResult(
-                True,
-                build_domain_codex_failure_reply(result.message, project_match.project.display_name),
-            )
-        return AiOrchestratorResult(True, strip_codex_session_prefix(result.message))
-
     async def _try_schedule_private_message(
         self,
         text: str,
@@ -586,328 +389,6 @@ class AiOrchestrator:
             return AiOrchestratorResult(True, result.message)
         return AiOrchestratorResult(True, f"已安排，约 {format_delay(delay)} 后私聊你。")
 
-    async def _try_handle_codex_session(
-        self,
-        text: str,
-        context: AiOrchestratorContext,
-        normalized_message: NormalizedMessage,
-    ) -> AiOrchestratorResult:
-        store = self._codex_session_store()
-        active_session = store.get_active_session(
-            actor_user_id=context.actor_user_id,
-            group_id=context.group_id,
-        )
-        if looks_like_codex_control_request(text) and not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能使用 Codex 模式。")
-        if active_session is not None and not context.is_admin:
-            # 非 Bot 管理员不参与群 Codex 会话，普通 @ 消息继续交给后续 AI 流程。
-            return AiOrchestratorResult(False)
-        if looks_like_codex_exit_request(text):
-            if active_session is None:
-                return AiOrchestratorResult(True, "当前没有正在进行的 Codex 模式。")
-            store.close_session(active_session.session_id)
-            return AiOrchestratorResult(True, f"已退出 Codex 模式：{active_session.session_id}")
-
-        if looks_like_codex_status_request(text):
-            if active_session is None:
-                return AiOrchestratorResult(True, "当前没有正在进行的 Codex 模式。")
-            return AiOrchestratorResult(
-                True,
-                (
-                    f"当前 Codex 模式：{active_session.session_id}\n"
-                    f"项目：{active_session.project_display_name}\n"
-                    f"状态：{active_session.status}\n"
-                    f"对话轮数：{len(active_session.transcript) // 2}"
-                ),
-            )
-
-        if looks_like_codex_enter_request(text):
-            initial_prompt = extract_codex_enter_project_query(text)
-            if active_session is not None:
-                if initial_prompt:
-                    return await self._forward_codex_session_message(
-                        active_session=active_session,
-                        prompt=initial_prompt,
-                        context=context,
-                        normalized_message=normalized_message,
-                    )
-                return AiOrchestratorResult(
-                    True,
-                    f"当前已在 Codex 模式 {active_session.session_id}：{active_session.project_display_name}",
-                )
-            project_query = infer_codex_project_query(initial_prompt)
-            project_match = resolve_codex_project_for_session_start(
-                project_query,
-                group_id=context.group_id,
-                data_root=self.data_root,
-            )
-            if project_match is None:
-                return AiOrchestratorResult(True, build_codex_project_not_found_reply(project_query or "当前会话"))
-            session = store.create_session(
-                project=project_match.project,
-                actor_user_id=context.actor_user_id,
-                group_id=context.group_id,
-            )
-            enter_message = (
-                f"已进入 Codex 模式 {session.session_id}：{session.project_display_name}\n"
-                "后续 @ 我的消息会直接转给 Codex，不走普通 AI。\n"
-                "当前是只读讨论；发送“执行”才允许改代码；发送“退出codex”结束。"
-            )
-            if initial_prompt and initial_prompt != project_query:
-                forward_result = await self._forward_codex_session_message(
-                    active_session=session,
-                    prompt=initial_prompt,
-                    context=context,
-                    normalized_message=normalized_message,
-                )
-                return AiOrchestratorResult(
-                    True,
-                    f"{enter_message}\n{forward_result.text}",
-                )
-            return AiOrchestratorResult(True, enter_message)
-
-        if active_session is None:
-            return AiOrchestratorResult(False)
-
-        return await self._forward_codex_session_message(
-            active_session=active_session,
-            prompt=text,
-            context=context,
-            normalized_message=normalized_message,
-        )
-
-    async def _forward_codex_session_message(
-        self,
-        *,
-        active_session,
-        prompt: str,
-        context: AiOrchestratorContext,
-        normalized_message: NormalizedMessage,
-    ) -> AiOrchestratorResult:
-        store = self._codex_session_store()
-        text = prompt.strip()
-        if not text:
-            return AiOrchestratorResult(
-                True,
-                f"当前 Codex 模式 {active_session.session_id}：{active_session.project_display_name}",
-            )
-
-        mode = "execute" if looks_like_codex_execute_request(text) else "discuss"
-        project = get_codex_project_by_id(active_session.project_id)
-        if project is None:
-            return AiOrchestratorResult(True, f"Codex 会话 {active_session.session_id} 对应的项目不存在。")
-        if active_session.status == "running":
-            updated = store.append_pending_message(active_session.session_id, text)
-            return AiOrchestratorResult(
-                True,
-                (
-                    f"已收到 Codex 调整：{active_session.session_id}\n"
-                    f"当前还有 {len(updated.pending_messages)} 条调整在队列里，"
-                    "会合并到当前结果后的下一阶段。"
-                ),
-            )
-        if mode == "execute":
-            running = store.get_running_project_session(project.project_id)
-            if running is not None:
-                return AiOrchestratorResult(
-                    True,
-                    (
-                        f"项目 {project.display_name} 已有 Codex 会话正在执行："
-                        f"{running.session_id}。请等待它完成后再执行。"
-                    ),
-                )
-            store.mark_status(active_session.session_id, "running")
-        result = await self.codex_session_runner(
-            CodexSessionRequest(
-                project=project,
-                actor_user_id=context.actor_user_id,
-                group_id=context.group_id,
-                session_id=active_session.session_id,
-                prompt=text,
-                transcript=active_session.transcript,
-                source_context=self._build_codex_source_context(
-                    group_id=context.group_id,
-                    reply=normalized_message.reply,
-                ),
-                mode=mode,
-                progress_callback=self._build_codex_session_progress_callback(
-                    context=context,
-                    session_id=active_session.session_id,
-                    project_name=project.display_name,
-                ),
-            )
-        )
-        updated = store.append_turn(
-            active_session.session_id,
-            user_message=text,
-            codex_message=result.message,
-        )
-        pending_messages = store.pop_pending_messages(active_session.session_id)
-        for pending_message in pending_messages:
-            updated = store.append_turn(
-                active_session.session_id,
-                user_message=f"[运行中补充] {pending_message}",
-                codex_message="已收到这条运行中调整。",
-            )
-        if mode == "execute":
-            store.mark_status(active_session.session_id, "discussing")
-        message = result.message
-        if pending_messages:
-            message = f"{message}\n已合并 {len(pending_messages)} 条运行中调整，下一轮会优先带给 Codex。"
-        if mode == "execute" and result.ok:
-            uploaded_count = await self._upload_codex_artifacts_from_text(
-                text=result.message,
-                project_repo_path=project.repo_path,
-                context=context,
-            )
-            if uploaded_count > 0:
-                message = f"{message}\n已上传 {uploaded_count} 个产物到群。"
-            restart_message = self._schedule_self_update_restart(
-                project_id=project.project_id,
-                project_display_name=project.display_name,
-                actor_user_id=context.actor_user_id,
-                group_id=context.group_id,
-                source_label=f"Codex 会话 {active_session.session_id}",
-            )
-            if restart_message:
-                message = f"{message}\n{restart_message}"
-        prefix = f"{updated.session_id} Codex："
-        return AiOrchestratorResult(True, f"{prefix}\n{message}")
-
-    def _build_codex_session_progress_callback(
-        self,
-        *,
-        context: AiOrchestratorContext,
-        session_id: str,
-        project_name: str,
-    ):
-        if self.action_executor is None:
-            return None
-        last_sent_at = 0.0
-
-        async def report(event: CodexProgressEvent) -> None:
-            nonlocal last_sent_at
-            now = time.monotonic()
-            if event.phase == "output" and now - last_sent_at < 8:
-                return
-            last_sent_at = now
-            summary = summarize_codex_progress_message(event.message)
-            if event.phase == "output":
-                message = f"{session_id} Codex 还在处理：{project_name}\n{summary}"
-            else:
-                message = f"{session_id} Codex 状态：{project_name}\n{summary}"
-            await self._send_codex_session_progress(context, message)
-
-        return report
-
-    async def _send_codex_session_progress(
-        self,
-        context: AiOrchestratorContext,
-        message: str,
-    ) -> None:
-        if self.action_executor is None:
-            return
-        if context.group_id is not None:
-            await self.action_executor.execute(
-                AiActionRequest(
-                    action_type="send_group_message",
-                    actor_user_id=context.actor_user_id,
-                    target_group_id=context.group_id,
-                    message=message,
-                    is_admin=context.is_admin,
-                )
-            )
-            return
-        await self.action_executor.execute(
-            AiActionRequest(
-                action_type="send_private_message",
-                actor_user_id=context.actor_user_id,
-                target_user_id=context.actor_user_id,
-                message=message,
-                is_admin=context.is_admin,
-            )
-        )
-
-    def _build_codex_source_context(
-        self,
-        *,
-        group_id: str | None,
-        reply: NormalizedReply | None,
-    ) -> tuple[str, ...]:
-        if group_id is None or reply is None:
-            return ()
-
-        reply_line = _format_codex_reply_context_line(reply)
-        if not reply.message_id:
-            return (reply_line,)
-
-        records = AiGroupContextStore(self.data_root).load_messages(group_id)
-        anchor_index = _find_group_message_index(records, reply.message_id)
-        if anchor_index is None:
-            return (reply_line,)
-
-        radius = 3
-        start = max(0, anchor_index - radius)
-        end = min(len(records), anchor_index + radius + 1)
-        context_lines = ["引用消息及其附近群聊记录："]
-        for index, record in enumerate(records[start:end], start=start):
-            prefix = "【引用】" if index == anchor_index else ""
-            context_lines.append(
-                f"{prefix}{record.sender_name}({record.user_id}): {record.text}"
-            )
-        return tuple(context_lines)
-
-    def _schedule_self_update_restart(
-        self,
-        *,
-        project_id: str,
-        project_display_name: str,
-        actor_user_id: str,
-        group_id: str | None,
-        source_label: str,
-    ) -> str:
-        if project_id != "qqbot" or self.self_restart_scheduler is None:
-            return ""
-        target_type = "group" if group_id else "private"
-        target_id = group_id or actor_user_id
-        CodexSelfUpdateNoticeStore(self.data_root).add_notice(
-            target_type=target_type,
-            target_id=target_id,
-            project_display_name=project_display_name,
-            source_label=source_label,
-        )
-        self.task_factory(self._run_delayed_self_restart())
-        target_label = "本群" if target_type == "group" else "私聊"
-        return f"qqbot 自身项目已执行成功，已安排 Bot 重启。重启完成后会向{target_label}回报连接状态。"
-
-    async def _run_delayed_self_restart(self) -> None:
-        await self.sleep(8)
-        if self.self_restart_scheduler is not None:
-            self.self_restart_scheduler()
-
-    async def _upload_codex_artifacts_from_text(
-        self,
-        *,
-        text: str,
-        project_repo_path: str,
-        context: AiOrchestratorContext,
-    ) -> int:
-        if self.action_executor is None or context.group_id is None:
-            return 0
-        uploaded = 0
-        for artifact in extract_codex_zip_artifacts(text, project_repo_path):
-            result = await self.action_executor.execute(
-                AiActionRequest(
-                    action_type="send_group_file",
-                    actor_user_id=context.actor_user_id,
-                    target_group_id=context.group_id,
-                    file_path=str(artifact),
-                    is_admin=context.is_admin,
-                )
-            )
-            if result.ok:
-                uploaded += 1
-        return uploaded
 
 def parse_delay_seconds(text: str) -> float | None:
     match = re.search(r"(\d+(?:\.\d+)?)\s*(秒|分钟|分|小时|时)后", text)
@@ -930,98 +411,6 @@ def extract_quoted_message(text: str) -> str:
     if len(tail) == 2:
         return tail[1].strip(" ：:，,。")
     return ""
-
-
-def looks_like_latest_zip_upload_request(text: str) -> bool:
-    compact = re.sub(r"\s+", "", text).lower()
-    wants_upload = any(keyword in compact for keyword in ("上传", "发到群", "传到群"))
-    wants_latest = "最新" in compact
-    wants_zip = any(keyword in compact for keyword in ("压缩包", "zip", "产物"))
-    return wants_upload and wants_latest and wants_zip
-
-
-def looks_like_codex_enter_request(text: str) -> bool:
-    return re.match(r"(?i)^codex(?:\s+|[:：]|$)", text.strip()) is not None
-
-
-def looks_like_codex_control_request(text: str) -> bool:
-    return (
-        looks_like_codex_enter_request(text)
-        or looks_like_codex_exit_request(text)
-        or looks_like_codex_status_request(text)
-        or looks_like_codex_execute_request(text)
-    )
-
-
-def extract_codex_enter_project_query(text: str) -> str:
-    match = re.match(r"(?i)^codex(?:\s+|[:：])(?P<query>.+)$", text.strip())
-    if match is None:
-        return ""
-    return match.group("query").strip(" ：:，,。")
-
-
-def infer_codex_project_query(text: str) -> str:
-    stripped = text.strip()
-    if not stripped:
-        return ""
-    projects = load_codex_projects()
-    normalized = re.sub(r"\s+", "", stripped).lower()
-    for project in projects.values():
-        names = (project.project_id, project.display_name, Path(project.repo_path).name, *project.aliases)
-        if any(normalized == re.sub(r"\s+", "", name).lower() for name in names if name.strip()):
-            return stripped
-    return ""
-
-
-def build_codex_project_required_reply() -> str:
-    return (
-        "进入 Codex 模式可以只写 codex，群聊会使用当前群绑定项目，私聊默认使用 qqbot。\n"
-        "也可以写项目名或直接带首条需求，例如：codex 分馏、codex 看一下这个报错。\n"
-        f"可用项目：{format_codex_project_options()}"
-    )
-
-
-def build_codex_project_not_found_reply(query: str) -> str:
-    return (
-        f"没有找到 Codex 项目：{query}\n"
-        "可以只写 codex 使用当前作用域默认项目，或在 codex 后面写明确项目名/别名。\n"
-        f"可用项目：{format_codex_project_options()}"
-    )
-
-
-def format_codex_project_options() -> str:
-    projects = load_codex_projects()
-    return "、".join(
-        f"{project.display_name}({project.project_id})"
-        for project in projects.values()
-    )
-
-
-def looks_like_codex_exit_request(text: str) -> bool:
-    compact = re.sub(r"\s+", "", text).lower()
-    return compact in {"退出codex", "取消codex", "结束codex", "codex退出"}
-
-
-def looks_like_codex_status_request(text: str) -> bool:
-    compact = re.sub(r"\s+", "", text).lower()
-    return compact in {"codex状态", "codexstatus", "当前codex"}
-
-
-def looks_like_codex_execute_request(text: str) -> bool:
-    compact = re.sub(r"\s+", "", text).lower()
-    return any(
-        keyword in compact
-        for keyword in (
-            "执行codex",
-            "执行",
-            "开始执行",
-            "开始改",
-            "按这个改",
-            "交给codex",
-            "让codex修",
-            "继续修",
-        )
-    )
 
 
 def format_delay(seconds: float) -> str:

@@ -214,9 +214,9 @@ def test_admin_page_returns_html(tmp_path: Path) -> None:
     assert "AI 诊断" in body
     assert "AI 主动介入" not in body
     assert "/admin/api/ai/proactive-modes" not in body
-    assert "Codex 群绑定项目" in body
-    assert "/admin/api/codex/group-bindings" in body
-    assert "renderCodexProjectOption" in body
+    assert "Codex 群绑定项目" not in body
+    assert "/admin/api/codex/group-bindings" not in body
+    assert "renderCodexProjectOption" not in body
     assert "实时信息" in body
     assert "主控面板" not in body
     assert "id=\"realtimePanel\"" in body
@@ -427,307 +427,12 @@ def test_memory_admin_api_debugs_rebuilds_and_updates_facts(tmp_path: Path) -> N
     assert json.loads(disable_body) == {"fact_id": chat_fact.id, "status": "disabled", "updated": True}
 
 
-def test_upload_local_artifact_api_uploads_repo_zip(tmp_path: Path, monkeypatch) -> None:
-    repo = tmp_path / "repo"
-    package = repo / "AfterBuildEvent" / "bin" / "win" / "Debug" / "ModZips" / "FractionateEverything_2.3.0.zip"
-    package.parent.mkdir(parents=True)
-    package.write_bytes(b"zip")
-    bot = FakeUploadBot()
-    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
-    monkeypatch.setattr(
-        "qqbot.admin_api.get_codex_project_by_id",
-        lambda project_id: type(
-            "Project",
-            (),
-            {
-                "project_id": project_id,
-                "display_name": "MLJ_DSPmods",
-                "repo_path": str(repo),
-            },
-        )(),
-        raising=False,
-    )
-    app = build_app(tmp_path)
-
-    status_code, body = asgi_request(
-        app,
-        "POST",
-        "/admin/api/artifacts/upload-local",
-        json_body={
-            "project_id": "mlj_dspmods",
-            "group_id": 319567534,
-            "files": [str(package)],
-        },
-    )
-
-    assert status_code == 200, body
-    assert json.loads(body) == {
-        "ok": True,
-        "uploaded": [
-            {
-                "file": str(package),
-                "name": "FractionateEverything_2.3.0.zip",
-            }
-        ],
-        "deleted": [],
-        "skipped": False,
-        "reason": "",
-    }
-    assert bot.calls == [
-        (
-            "get_group_root_files",
-            {
-                "group_id": 319567534,
-            },
-        ),
-        (
-            "upload_group_file",
-            {
-                "group_id": 319567534,
-                "file": str(package),
-                "name": "FractionateEverything_2.3.0.zip",
-            },
-        )
-    ]
-
-
-def test_upload_local_artifact_api_rejects_zip_outside_repo(tmp_path: Path, monkeypatch) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    package = tmp_path / "FractionateEverything_2.3.0.zip"
-    package.write_bytes(b"zip")
-    bot = FakeUploadBot()
-    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
-    monkeypatch.setattr(
-        "qqbot.admin_api.get_codex_project_by_id",
-        lambda project_id: type(
-            "Project",
-            (),
-            {
-                "project_id": project_id,
-                "display_name": "MLJ_DSPmods",
-                "repo_path": str(repo),
-            },
-        )(),
-        raising=False,
-    )
-    app = build_app(tmp_path)
-
-    status_code, body = asgi_request(
-        app,
-        "POST",
-        "/admin/api/artifacts/upload-local",
-        json_body={
-            "project_id": "mlj_dspmods",
-            "group_id": 319567534,
-            "files": [str(package)],
-        },
-    )
-
-    assert status_code == 400
-    assert "Artifact must be inside project repository" in body
-    assert bot.calls == []
-
-
-def test_publish_fe_artifact_deletes_old_fe_zips_and_uploads_only_fe(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    repo = tmp_path / "repo"
-    modzips = repo / "AfterBuildEvent" / "bin" / "win" / "Debug" / "ModZips"
-    fe_package = modzips / "FractionateEverything_2.3.0.zip"
-    get_data_package = modzips / "GetDspData_1.0.0.zip"
-    modzips.mkdir(parents=True)
-    fe_package.write_bytes(b"fe")
-    get_data_package.write_bytes(b"get-data")
-    bot = FakeUploadBot()
-    bot.group_files = [
-        {
-            "file_id": "old-fe-1",
-            "busid": 1,
-            "file_name": "FractionateEverything_2.2.9.zip",
-            "uploader": 114514,
-        },
-        {
-            "file_id": "old-fe-2",
-            "busid": 2,
-            "file_name": "FractionateEverything_2.3.0.zip",
-            "uploader": 114514,
-        },
-        {
-            "file_id": "keep-get-data",
-            "busid": 3,
-            "file_name": "GetDspData_1.0.0.zip",
-            "uploader": 114514,
-        },
-        {
-            "file_id": "keep-user-fe",
-            "busid": 4,
-            "file_name": "FractionateEverything_2.0.0.zip",
-            "uploader": 10001,
-        },
-    ]
-    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
-    monkeypatch.setattr(
-        "qqbot.services.fe_artifact_publish_service.read_latest_commit_summary",
-        lambda repo_path: type(
-            "Commit",
-            (),
-            {
-                "short_hash": "c251753",
-                "title": "修复：避免分馏处理器静态初始化崩溃",
-                "body": "",
-            },
-        )(),
-    )
-    monkeypatch.setattr(
-        "qqbot.admin_api.get_codex_project_by_id",
-        lambda project_id: type(
-            "Project",
-            (),
-            {
-                "project_id": project_id,
-                "display_name": "MLJ_DSPmods",
-                "repo_path": str(repo),
-            },
-        )(),
-        raising=False,
-    )
-    app = build_app(tmp_path)
-
-    status_code, body = asgi_request(
-        app,
-        "POST",
-        "/admin/api/artifacts/upload-local",
-        json_body={
-            "project_id": "mlj_dspmods",
-            "group_id": 319567534,
-            "files": [str(fe_package)],
-            "message": "原因：用户反馈启动崩溃\n修复：避免 ProcessManager 静态初始化读取未就绪字段",
-        },
-    )
-
-    assert status_code == 200, body
-    assert json.loads(body) == {
-        "ok": True,
-        "uploaded": [
-            {
-                "file": str(fe_package),
-                "name": "FractionateEverything_2.3.0.zip",
-            }
-        ],
-        "deleted": [
-            "FractionateEverything_2.2.9.zip",
-            "FractionateEverything_2.3.0.zip",
-        ],
-        "skipped": False,
-        "reason": "",
-    }
-    assert bot.calls == [
-        (
-            "get_group_root_files",
-            {
-                "group_id": 319567534,
-            },
-        ),
-        (
-            "delete_group_file",
-            {
-                "group_id": 319567534,
-                "file_id": "old-fe-1",
-                "busid": 1,
-            },
-        ),
-        (
-            "delete_group_file",
-            {
-                "group_id": 319567534,
-                "file_id": "old-fe-2",
-                "busid": 2,
-            },
-        ),
-        (
-            "upload_group_file",
-            {
-                "group_id": 319567534,
-                "file": str(fe_package),
-                "name": "FractionateEverything_2.3.0.zip",
-            },
-        ),
-        (
-            "send_group_msg",
-            {
-                "group_id": 319567534,
-                "message": (
-                    "[CQ:reply,id=24680]c251753 修复：避免分馏处理器静态初始化崩溃\n\n"
-                    "根本原因：\n"
-                    "用户反馈启动崩溃\n\n"
-                    "修复方式：\n"
-                    "避免 ProcessManager 静态初始化读取未就绪字段"
-                ),
-            },
-        ),
-    ]
-
-
-def test_publish_fe_artifact_skips_unchanged_fe_zip(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    repo = tmp_path / "repo"
-    modzips = repo / "AfterBuildEvent" / "bin" / "win" / "Debug" / "ModZips"
-    fe_package = modzips / "FractionateEverything_2.3.0.zip"
-    modzips.mkdir(parents=True)
-    fe_package.write_bytes(b"same-fe-content")
-    sha256 = __import__("hashlib").sha256(fe_package.read_bytes()).hexdigest()
-    state_path = tmp_path / "run" / "fe_artifacts" / "319567534.json"
-    state_path.parent.mkdir(parents=True)
-    state_path.write_text(json.dumps({"sha256": sha256}), encoding="utf-8")
-    bot = FakeUploadBot()
-    monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
-    monkeypatch.setattr(
-        "qqbot.admin_api.get_codex_project_by_id",
-        lambda project_id: type(
-            "Project",
-            (),
-            {
-                "project_id": project_id,
-                "display_name": "MLJ_DSPmods",
-                "repo_path": str(repo),
-            },
-        )(),
-        raising=False,
-    )
-    app = build_app(tmp_path)
-
-    status_code, body = asgi_request(
-        app,
-        "POST",
-        "/admin/api/artifacts/upload-local",
-        json_body={
-            "project_id": "mlj_dspmods",
-            "group_id": 319567534,
-            "files": [str(fe_package)],
-            "message": "原因：这次 FE 包没变",
-        },
-    )
-
-    assert status_code == 200, body
-    assert json.loads(body) == {
-        "ok": True,
-        "uploaded": [],
-        "deleted": [],
-        "skipped": True,
-        "reason": "FE package sha256 unchanged.",
-    }
-    assert bot.calls == []
-
-
 def test_publish_local_artifacts_uploads_declared_files_to_multiple_groups(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
     modzips = repo / "AfterBuildEvent" / "bin" / "Debug" / "ModZips"
     package = modzips / "MyNewMod_1.0.0.zip"
     modzips.mkdir(parents=True)
@@ -755,19 +460,6 @@ def test_publish_local_artifacts_uploads_declared_files_to_multiple_groups(
         },
     ]
     monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
-    monkeypatch.setattr(
-        "qqbot.admin_api.get_codex_project_by_id",
-        lambda project_id: type(
-            "Project",
-            (),
-            {
-                "project_id": project_id,
-                "display_name": "MLJ_DSPmods",
-                "repo_path": str(repo),
-            },
-        )(),
-        raising=False,
-    )
     monkeypatch.setattr(
         "qqbot.admin_api._read_git_output",
         lambda repo_path, *args: "master-224"
@@ -904,24 +596,12 @@ def test_publish_local_artifacts_rejects_stale_request(
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
     package = repo / "ModZips" / "MyNewMod_1.0.0.zip"
     package.parent.mkdir(parents=True)
     package.write_bytes(b"new-mod")
     bot = FakeUploadBot()
     monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
-    monkeypatch.setattr(
-        "qqbot.admin_api.get_codex_project_by_id",
-        lambda project_id: type(
-            "Project",
-            (),
-            {
-                "project_id": project_id,
-                "display_name": "MLJ_DSPmods",
-                "repo_path": str(repo),
-            },
-        )(),
-        raising=False,
-    )
     monkeypatch.setattr(
         "qqbot.admin_api._read_git_output",
         lambda repo_path, *args: "master"
@@ -951,24 +631,12 @@ def test_publish_local_artifacts_rejects_wrong_branch(
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
     package = repo / "ModZips" / "MyNewMod_1.0.0.zip"
     package.parent.mkdir(parents=True)
     package.write_bytes(b"new-mod")
     bot = FakeUploadBot()
     monkeypatch.setattr("qqbot.admin_api.nonebot.get_bots", lambda: {"114514": bot})
-    monkeypatch.setattr(
-        "qqbot.admin_api.get_codex_project_by_id",
-        lambda project_id: type(
-            "Project",
-            (),
-            {
-                "project_id": project_id,
-                "display_name": "MLJ_DSPmods",
-                "repo_path": str(repo),
-            },
-        )(),
-        raising=False,
-    )
     monkeypatch.setattr(
         "qqbot.admin_api._read_git_output",
         lambda repo_path, *args: "master"
@@ -1247,44 +915,6 @@ def test_ai_diagnostics_api_returns_summary(tmp_path: Path) -> None:
     assert payload["records"][0]["queue_wait_seconds"] == 0.5
     assert payload["records"][0]["prepare_stages"] == {"context": 0.2}
     assert payload["records"][0]["prompt_chars"] == 12
-
-
-def test_codex_group_bindings_api_lists_and_updates_runtime_binding(tmp_path: Path) -> None:
-    app = build_app(tmp_path)
-
-    list_status, list_body = asgi_request(app, "GET", "/admin/api/codex/group-bindings")
-    update_status, update_body = asgi_request(
-        app,
-        "PUT",
-        "/admin/api/codex/group-bindings/516286670",
-        json_body={"project_id": "qqbot"},
-    )
-
-    assert list_status == 200
-    list_payload = json.loads(list_body)
-    default_group = next(group for group in list_payload["groups"] if group["group_id"] == 319567534)
-    assert default_group["effective_project_id"] == "mlj_dspmods"
-    assert default_group["source"] == "default"
-    assert update_status == 200
-    update_payload = json.loads(update_body)
-    updated_group = next(group for group in update_payload["groups"] if group["group_id"] == 516286670)
-    assert updated_group["project_id"] == "qqbot"
-    assert updated_group["effective_project_id"] == "qqbot"
-    assert updated_group["source"] == "runtime"
-
-
-def test_codex_group_bindings_api_rejects_unknown_project(tmp_path: Path) -> None:
-    app = build_app(tmp_path)
-
-    status_code, body = asgi_request(
-        app,
-        "PUT",
-        "/admin/api/codex/group-bindings/516286670",
-        json_body={"project_id": "missing"},
-    )
-
-    assert status_code == 404
-    assert "Unknown Codex project" in body
 
 
 def test_admin_endpoints_update_admin_state(tmp_path: Path) -> None:
