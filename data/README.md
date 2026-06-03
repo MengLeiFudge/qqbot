@@ -8,4 +8,4 @@
 - `nonebot2/logs/`：NoneBot2 日志。
 - `astrbot/data/`：AstrBot 的真实数据目录。
 - `astrbot/archive/`：迁移时保留的旧 AstrBot `.git`、`.venv` 和缓存。
-- `napcat/`：预留给 NapCat 账号配置、登录态和日志。
+- `napcat/`：预留给 NapCat 账号配置、登录态和日志；当前 NapCat 仍使用 `napcat/` 一键包内的既有账号配置。

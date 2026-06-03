@@ -26,6 +26,7 @@ PowerShell:
 Set-Location D:\project\qqbot
 .\scripts\start-nonebot2.ps1
 .\scripts\start-astrbot.ps1
+.\scripts\start-napcat.ps1
 ```
 
 统一启动：
@@ -33,5 +34,10 @@ Set-Location D:\project\qqbot
 ```powershell
 .\scripts\start-all.ps1
 ```
+
+默认账号链路：
+
+- `1443944862`：NapCat 反连 NoneBot2，`ws://127.0.0.1:8080/onebot/v11/ws`。
+- `2629227874`：NapCat 反连 AstrBot，`ws://127.0.0.1:6199/ws`。
 
 NapCat 仍使用 `napcat/` 下的一键包；后续再把账号配置和登录态收拢到 `data/napcat/`。
