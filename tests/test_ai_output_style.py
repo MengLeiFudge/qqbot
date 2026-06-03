@@ -32,6 +32,16 @@ def test_sanitize_ai_output_keeps_non_action_parentheses() -> None:
     assert sanitize_ai_output_text(text) == text
 
 
+def test_sanitize_ai_output_removes_blank_lines_and_markdown_lists() -> None:
+    text = "有效操作：\n\n- 少复读\n- 正常问问题\n\n一句话总结：\n把调戏机器人改成正常交流。"
+
+    cleaned = sanitize_ai_output_text(text)
+
+    assert "\n\n" not in cleaned
+    assert "- " not in cleaned
+    assert cleaned == "有效操作：\n少复读\n正常问问题\n一句话总结：\n把调戏机器人改成正常交流。"
+
+
 def test_sanitize_group_ai_reply_drops_shapez_personification() -> None:
     text = (
         "小声点小声点，shapez 会吃醋的！\n"

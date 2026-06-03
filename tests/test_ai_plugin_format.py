@@ -2100,6 +2100,8 @@ def test_ai_system_context_declares_bot_identity() -> None:
     assert "你的主人是萌泪酱，QQ 号 605738729" in context
     assert "恶魔棉花糖是你的妹妹" in context
     assert "短、温柔、可靠" in context
+    assert "普通闲聊默认一句话，最多两句" in context
+    assert "不要列清单" in context
     assert "不要提人格切换、设定切换、可选角色" in context
     assert "不要使用 Markdown" in context
     assert "不要代替对方认错" in context
@@ -2175,6 +2177,8 @@ def test_ai_context_includes_recent_group_messages(tmp_path: Path) -> None:
     assert "萌泪(605738729): 总结一下群聊内容" not in joined
     assert "群聊输出策略" in joined
     assert "天使棉花糖姐姐" in joined
+    assert "优先 40 字以内" in joined
+    assert "不要输出标题、列表、分节、空行" in joined
     assert "是否引用消息要视情况决定" in joined
     assert "不是你就不要替对方道歉" in joined
     assert "如果最近群友已经给出一致且完整的答案" in joined
