@@ -161,10 +161,12 @@ D:\project\qqbot\data\nonebot2\.venv\Scripts\python.exe -m pytest --collect-only
 
 ```powershell
 Set-Location D:\project\qqbot
-.\scripts\start_all.bat
+.\scripts\start-nonebot2.bat
+.\scripts\start-astrbot.bat
+.\scripts\start-all.bat
 ```
 
-单独调试 NoneBot2 时才直接运行 `.\scripts\start-nonebot2.ps1`。
+三个入口分别负责启动/重启 bot1、bot2、bot1+bot2；单独调试 NoneBot2 时才直接运行 `.\scripts\start-nonebot2.ps1`。
 
 管理端重启入口：
 

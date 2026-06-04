@@ -20,24 +20,16 @@
 
 ## 启动
 
-PowerShell:
+日常入口：
 
 ```powershell
 Set-Location D:\project\qqbot
-.\scripts\start-nonebot2.ps1
-.\scripts\start-astrbot.ps1
-.\scripts\start-napcat.ps1
+.\scripts\start-nonebot2.bat
+.\scripts\start-astrbot.bat
+.\scripts\start-all.bat
 ```
 
-统一启动：
-
-```powershell
-.\scripts\start_all.bat
-```
-
-也可以直接运行 PowerShell 入口：`.\scripts\start-all.ps1`。
-
-默认会通过 Windows Terminal 打开一个窗口，并把 NoneBot2、AstrBot 和两个 NapCat 账号放在不同标签页。
+三个入口分别负责启动/重启 bot1、bot2、bot1+bot2。每个入口会拉起对应 Bot 和 NapCat 子窗口，子窗口确认就绪后退出；全部子窗口完成后入口窗口退出。
 
 管理端重启入口不会打开 Windows Terminal 标签页；它会后台启动 NoneBot2，等待 `8080` 和 OneBot 连接，并复用已经登录的 NapCat。
 

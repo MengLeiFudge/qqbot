@@ -947,7 +947,7 @@ def test_admin_endpoints_update_admin_state(tmp_path: Path) -> None:
 
 
 def test_restart_endpoint_schedules_restart(tmp_path: Path, monkeypatch) -> None:
-    script = tmp_path / "scripts" / "start_all.bat"
+    script = tmp_path / "scripts" / "start-nonebot2.bat"
     script.parent.mkdir(parents=True)
     script.write_text("@echo off\n", encoding="utf-8")
     calls: list[dict[str, object]] = []

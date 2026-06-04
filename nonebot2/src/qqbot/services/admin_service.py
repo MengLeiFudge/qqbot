@@ -39,7 +39,7 @@ class AdminService:
         return cls(
             settings=settings,
             store=SettingsStore(settings.data_root, settings.author_qq),
-            project_root=Path(__file__).resolve().parents[3],
+            project_root=Path(__file__).resolve().parents[4],
         )
 
     def list_groups(
@@ -355,7 +355,7 @@ class AdminService:
         }
 
     def schedule_restart(self) -> dict[str, object]:
-        script = self.project_root / "scripts" / "start_all.bat"
+        script = self.project_root / "scripts" / "start-nonebot2.bat"
         if not script.is_file():
             raise FileNotFoundError(f"Restart script not found: {script}")
 
@@ -453,7 +453,7 @@ class AdminService:
         return sorted(group_ids)
 
     def _startup_logs_root(self) -> Path:
-        return self.project_root / "logs" / "start_all"
+        return self.settings.data_root.parent / "logs" / "start_all"
 
     def _kun_service(self) -> KunService:
         return KunService(self.settings.data_root / "data" / "kun" / "users.json")

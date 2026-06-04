@@ -423,9 +423,9 @@ def test_log_reading_rejects_unsafe_file_names_and_unknown_runs(tmp_path: Path) 
         service.read_startup_log("20260425-000000", "launcher.log")
 
 
-def test_schedule_restart_launches_start_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_schedule_restart_launches_start_nonebot2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     service = build_service(tmp_path)
-    script = tmp_path / "scripts" / "start_all.bat"
+    script = tmp_path / "scripts" / "start-nonebot2.bat"
     script.parent.mkdir(parents=True)
     script.write_text("@echo off\n", encoding="utf-8")
     calls: list[dict[str, object]] = []
@@ -441,14 +441,14 @@ def test_schedule_restart_launches_start_all(tmp_path: Path, monkeypatch: pytest
     assert payload["scheduled"] is True
     assert len(calls) == 1
     command_text = " ".join(str(part) for part in calls[0]["args"])
-    assert "start_all.bat" in command_text
+    assert "start-nonebot2.bat" in command_text
     assert "-SkipInstall" in command_text
     assert "-RestartBot" in command_text
 
 
 def test_schedule_restart_hides_windows_launcher_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     service = build_service(tmp_path)
-    script = tmp_path / "scripts" / "start_all.bat"
+    script = tmp_path / "scripts" / "start-nonebot2.bat"
     script.parent.mkdir(parents=True)
     script.write_text("@echo off\n", encoding="utf-8")
     calls: list[dict[str, object]] = []
@@ -469,9 +469,9 @@ def test_schedule_restart_hides_windows_launcher_window(tmp_path: Path, monkeypa
     assert calls[0]["kwargs"]["creationflags"] == 0x8000200
 
 
-def test_windows_restart_command_runs_start_all_without_windows_terminal(tmp_path: Path) -> None:
+def test_windows_restart_command_runs_start_nonebot2_without_windows_terminal(tmp_path: Path) -> None:
     service = build_service(tmp_path)
-    script = tmp_path / "scripts" / "start_all.bat"
+    script = tmp_path / "scripts" / "start-nonebot2.bat"
 
     command = service._build_windows_restart_command(script)
 

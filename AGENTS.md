@@ -38,6 +38,7 @@
 
 ## 启动与重启
 
-- 日常启动入口是 `D:\project\qqbot\scripts\start_all.bat`，普通模式使用 Windows Terminal 多标签页展示 NoneBot2、AstrBot 和两个 NapCat 账号窗口。
-- 管理端重启入口使用 `scripts/start_all.bat -SkipInstall -RestartBot` 后台编排，只重启 NoneBot2，等待 `8080` 和 OneBot 连接，不额外打开 WT 或 NapCat 窗口。
+- 日常启动入口是 `D:\project\qqbot\scripts\start-nonebot2.bat`、`scripts\start-astrbot.bat`、`scripts\start-all.bat`，分别启动/重启 bot1、bot2、bot1+bot2。
+- 普通启动入口会拉起对应 Bot 和 NapCat 子窗口；子窗口确认端口和反连就绪后退出，全部子窗口完成后入口窗口退出。
+- 管理端重启入口使用 `scripts/start-nonebot2.bat -SkipInstall -RestartBot` 后台编排，只重启 NoneBot2，等待 `8080` 和 OneBot 连接，不额外打开 NapCat 窗口。
 - `-RestartBot` 模式日志写入 `data\nonebot2\logs\start_all\<timestamp>\`。

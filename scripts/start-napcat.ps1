@@ -46,8 +46,8 @@ function Start-NapCatProcess {
     }
 
     Start-Process `
-        -FilePath "wt.exe" `
-        -ArgumentList (@("new-tab", "--title", "NapCat-$label", "powershell.exe") + $arguments) `
+        -FilePath "powershell.exe" `
+        -ArgumentList $arguments `
         -WorkingDirectory $NapCatRoot `
         | Out-Null
 }
