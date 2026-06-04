@@ -14,10 +14,6 @@ from qqbot.services.openai_compatible_client import OpenAICompatibleClient
 from qqbot.services.settings_store import SettingsStore
 
 
-OPENROUTER_ICU_PROFILE_HINTS = ("openrouter-icu", "openrouter_icu", "openrouter icu", "icu")
-RIGHTCODES_PROFILE_HINTS = ("rightcodes", "right.codes")
-
-
 def get_default_ai_profile_name(settings: RuntimeSettings) -> str:
     return (
         load_ai_default_profile_name(settings.ai_profile_file)
@@ -33,15 +29,12 @@ def get_current_ai_profile_name(
     profiles = profiles if profiles is not None else load_ai_profiles(settings.ai_profile_file)
     enabled_names = {profile.name for profile in list_enabled_profiles(profiles)}
     default_profile = get_default_ai_profile_name(settings)
-    saved_profile = store.get_ai_provider(default_profile)
 
-    if saved_profile in enabled_names:
-        return saved_profile
     if default_profile in enabled_names:
         return default_profile
     if enabled_names:
         return next(profile.name for profile in list_enabled_profiles(profiles))
-    return saved_profile
+    return default_profile
 
 
 def list_ai_profile_fallback_order(
@@ -54,56 +47,14 @@ def list_ai_profile_fallback_order(
     profiles = profiles if profiles is not None else load_ai_profiles(settings.ai_profile_file)
     enabled = list_enabled_profiles(profiles)
     enabled_names = {profile.name for profile in enabled}
-    configured_order = store.get_ai_profile_priority(_default_ai_profile_priority(enabled))
-    ordered: list[str] = [profile_name for profile_name in configured_order if profile_name in enabled_names]
     primary = preferred_profile or get_current_ai_profile_name(settings, store, profiles)
-    if primary in enabled_names and not ordered:
+    ordered: list[str] = []
+    if primary in enabled_names:
         ordered.append(primary)
-    default_profile = get_default_ai_profile_name(settings)
-    if default_profile in enabled_names and default_profile not in ordered:
-        ordered.append(default_profile)
     for profile in enabled:
         if profile.name not in ordered:
             ordered.append(profile.name)
-    return _sort_profile_names_by_provider_priority(ordered, profiles)
-
-
-def _default_ai_profile_priority(enabled: list[AiProfile]) -> tuple[str, ...]:
-    return tuple(profile.name for profile in sorted(enabled, key=_profile_priority_key))
-
-
-def _profile_priority_key(profile: AiProfile) -> tuple[int, int, str]:
-    provider_key = _profile_provider_priority_key(profile)
-    return (provider_key[0], provider_key[1], profile.name)
-
-
-def _sort_profile_names_by_provider_priority(
-    names: list[str],
-    profiles: dict[str, AiProfile],
-) -> tuple[str, ...]:
-    indexed_names = list(enumerate(dict.fromkeys(names)))
-    return tuple(
-        name
-        for _index, name in sorted(
-            indexed_names,
-            key=lambda item: (*_profile_provider_priority_key(profiles[item[1]]), item[0]),
-        )
-    )
-
-
-def _profile_provider_priority_key(profile: AiProfile) -> tuple[int, int]:
-    haystack = f"{profile.name} {profile.base_url}".lower()
-    if _contains_any(haystack, OPENROUTER_ICU_PROFILE_HINTS):
-        return (0, 0)
-    if _contains_any(haystack, RIGHTCODES_PROFILE_HINTS):
-        return (1, 0)
-    if profile.model.lower().startswith("gpt-"):
-        return (2, 0)
-    return (3, 0)
-
-
-def _contains_any(text: str, hints: tuple[str, ...]) -> bool:
-    return any(hint in text for hint in hints)
+    return tuple(ordered)
 
 
 def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:

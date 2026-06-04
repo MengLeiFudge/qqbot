@@ -310,7 +310,7 @@ def build_decision_context(decision: AiMessageDecision) -> str:
             "不知道来源、配方、升级材料或界面行为时，必须先查源码/资料，不能编通用答案。"
         )
         lines.append(
-            "FE 自修权限：bug 可进入 gpt-5.5 high 修复链路；新功能、功能变动或歧义请求必须 @ 用户确认后才能修改。"
+            "FE bug 只做解释、证据整理和需求记录；不要承诺或触发自动修改代码。"
         )
         lines.append(f"本轮 FE 反馈类型：{decision.fe_feedback_kind.value}。")
     if decision.domain == AiDomain.ORBITAL_RING:

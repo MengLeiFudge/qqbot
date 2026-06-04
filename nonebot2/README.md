@@ -49,6 +49,7 @@
 ```text
 QQBOT_ONEBOT_ACCESS_TOKEN=你的 OneBot token
 QQBOT_NAPCAT_QQ=你的机器人 QQ
+QQBOT_AI_KEY_CODEX_EVERYWHERE=你的 Codex Everywhere API Key
 QQBOT_AI_KEY_OPENROUTER_ICU=你的 OpenRouter ICU API Key
 QQBOT_AI_KEY_RIGHTCODES=你的 RightCodes API Key
 FACTORIO_USERNAME=你的 Factorio 用户名
@@ -59,24 +60,33 @@ AI provider 示例：
 
 ```toml
 [ai]
-default_profile = "openrouter-icu"
+default_profile = "codex-everywhere"
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
 bot_name = "QQBot"
 
+[ai.providers.codex-everywhere]
+enabled = true
+provider = "openai_compatible"
+base_url = "https://codex-everywhere.com/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_CODEX_EVERYWHERE"
+timeout_seconds = 45
+max_output_tokens = 4096
+
 [ai.providers.openrouter-icu]
 enabled = true
 provider = "openai_compatible"
 base_url = "https://rehdasu.cn/v1"
-model = "gpt-5.5"
+model = "gpt-5.4-mini"
 api_key_env = "QQBOT_AI_KEY_OPENROUTER_ICU"
 timeout_seconds = 45
 max_output_tokens = 4096
 
 ```
 
-普通 GPT 文本调用按管理端“AI 模型”里的调用顺序依次尝试。默认顺序固定为 OpenRouter ICU 优先、RightCodes 第二层、其他 GPT provider 在后；前面的 provider 无应答、超时或接口错误时，才会继续尝试后面的 provider。AI 没有总启停开关，配置 provider/API key 后直接接入。
+普通 GPT 文本调用只按 `data/nonebot2/config/qqbot.toml` 的 `[ai].default_profile` 和 `[ai.providers]` 决定当前模型与 fallback 顺序；`data/nonebot2/run/settings/ai.json`、私聊“切换AI”命令和管理端都不能覆盖模型选择。管理端“AI 模型”只读展示当前配置来源，修改模型或顺序后必须重启 bot1 才会生效。AI 没有总启停开关，配置 provider/API key 后直接接入。
 
 群聊普通 AI 对话不需要每群开关；所有群都会使用保守主动触发判定，只有明确求助、提到机器人、领域问题、安全风险或上下文适合介入时才进入 AI 回复。普通非 @ 主动介入会先按群缓冲一小段会话，再统一判断是否回复；@ 机器人、点名机器人、生图命令和敏感凭据风险提醒会即时处理。主动介入可以回复最近一段群聊整体，并按场景决定是否引用最关键的触发消息；目标消息在最近 5 条群消息内时直接发文本，不引用也不 @，较早消息才引用并 @ 发言者以避免指向不清。同一轮等待期间积压的后续回复不再继续引用同一条旧消息。普通闲聊和轻量提问优先一句短消息，不写标题、列表、分节、空行或末尾总结；复杂问题、数学/推理问题和强领域关联问题会优先保证准确性，但不会先发“我先看看”这类占位消息。如果等待期间群友已经给出一致答案，机器人会引用该答案并短确认，避免重复刷屏。AI 文本被切成多条连续回复时，第一条立即发送，后续每条按约 6 字/秒的阅读节奏延迟发送。
 
@@ -142,7 +152,7 @@ http://127.0.0.1:8080/admin
 
 - 查看 qqbot / OneBot 连接状态
 - 重启 Bot
-- 查看和切换当前 AI 模型，调整普通 GPT provider 调用顺序
+- 只读查看当前 AI 模型和普通 GPT provider 调用顺序
 - 查看和切换全局插件开关
 - 查看、添加、删除 Bot 管理员
 - 查看 `data/nonebot2/logs/` 下的启动日志

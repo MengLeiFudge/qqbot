@@ -70,33 +70,6 @@ class SettingsStore:
             for spec in list_visible_plugin_specs()
         }
 
-    def get_ai_provider(self, default_profile: str) -> str:
-        settings = self._read_json(self.settings_root / "ai.json", {})
-        profile = str(settings.get("provider", "")).strip()
-        return profile or default_profile
-
-    def set_ai_provider(self, profile: str) -> None:
-        settings = self._read_json(self.settings_root / "ai.json", {})
-        cleaned = profile.strip()
-        settings["provider"] = cleaned
-        priority = _normalize_string_list(settings.get("profile_priority"))
-        if cleaned:
-            settings["profile_priority"] = [cleaned, *[item for item in priority if item != cleaned]]
-        self._write_json(self.settings_root / "ai.json", settings)
-
-    def get_ai_profile_priority(self, default_order: list[str] | tuple[str, ...]) -> tuple[str, ...]:
-        settings = self._read_json(self.settings_root / "ai.json", {})
-        saved_order = _normalize_string_list(settings.get("profile_priority"))
-        return tuple(_dedupe_strings([*saved_order, *default_order]))
-
-    def set_ai_profile_priority(self, profiles: list[str] | tuple[str, ...]) -> None:
-        settings = self._read_json(self.settings_root / "ai.json", {})
-        priority = _dedupe_strings(str(profile).strip() for profile in profiles)
-        settings["profile_priority"] = priority
-        if priority:
-            settings["provider"] = priority[0]
-        self._write_json(self.settings_root / "ai.json", settings)
-
     def get_ai_output_mode(
         self,
         *,

@@ -190,13 +190,9 @@ async def handle_ai_model(event: MessageEvent) -> None:
 
     profiles = load_ai_profiles(settings.ai_profile_file)
     if command.action == "switch" and command.profile is not None:
-        enabled_names = {profile.name for profile in list_enabled_profiles(profiles)}
-        if command.profile not in enabled_names:
-            await ai_model_matcher.finish(
-                "未知或未启用的 AI 模型："
-                f"{command.profile}\n可用：{', '.join(sorted(enabled_names)) or '无'}"
-            )
-        store.set_ai_provider(command.profile)
+        await ai_model_matcher.finish(
+            "AI 模型由 qqbot.toml 控制，请修改 [ai].default_profile / [ai.providers] 后重启 bot1。"
+        )
 
     current_profile = get_current_ai_profile_name(settings, store, profiles)
     enabled_profiles = ", ".join(profile.name for profile in list_enabled_profiles(profiles)) or "无"

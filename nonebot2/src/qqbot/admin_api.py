@@ -369,7 +369,7 @@ def register_admin_routes(
         try:
             return admin_service.set_ai_provider(payload.profile)
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.put("/admin/api/ai/profile-priority")
     async def admin_update_ai_profile_priority(
@@ -380,7 +380,7 @@ def register_admin_routes(
         try:
             return admin_service.set_ai_profile_priority(payload.profiles)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/admin/api/ai/output-modes")
     async def admin_ai_output_modes(
@@ -775,7 +775,6 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           <h3>AI 模型</h3>
           <div class="row">
             <select id="aiProviderSelect"></select>
-            <button onclick="saveAiProvider()">保存</button>
             <span id="aiProviderStatus" class="muted"></span>
           </div>
           <div id="aiProfilePriorityList" class="binding-list"></div>
@@ -1100,22 +1099,15 @@ def build_admin_html(settings: RuntimeSettings) -> str:
         return `<option value="${{escapeHtml(profile.name)}}">${{escapeHtml(label)}}</option>`;
       }}).join("");
       select.value = payload.current_profile;
+      select.disabled = Boolean(payload.config_locked);
       document.getElementById("aiProviderStatus").textContent =
-        `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}，调用顺序：${{(payload.fallback_order || []).join(" → ")}}`;
+        `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}，调用顺序：${{(payload.fallback_order || []).join(" → ")}}。${{payload.message || "配置来源：qqbot.toml，修改后重启 bot1。"}}`;
       renderAiProfilePriority(payload);
     }}
 
     async function saveAiProvider() {{
-      const profile = document.getElementById("aiProviderSelect").value;
       const status = document.getElementById("aiProviderStatus");
-      if (!profile) return;
-      status.textContent = "正在保存...";
-      const payload = await api("/admin/api/ai/provider", {{
-        method: "PUT",
-        body: JSON.stringify({{ profile }}),
-      }});
-      status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}，调用顺序：${{(payload.fallback_order || []).join(" → ")}}`;
-      renderAiProfilePriority(payload);
+      status.textContent = "AI 模型由 qqbot.toml 控制，修改配置后重启 bot1。";
     }}
 
     function renderAiProfilePriority(payload) {{
@@ -1136,32 +1128,14 @@ def build_admin_html(settings: RuntimeSettings) -> str:
               <div class="binding-title">${{index + 1}}. ${{escapeHtml(name)}} / ${{escapeHtml(profile.model || "")}}</div>
               <div class="binding-meta">${{escapeHtml(profile.provider || "")}}${{profile.note ? ` / ${{escapeHtml(profile.note)}}` : ""}}</div>
             </div>
-            <button onclick="moveAiProfile(${{index}}, -1)">上移</button>
-            <button onclick="moveAiProfile(${{index}}, 1)">下移</button>
           </div>
         `;
       }}).join("");
     }}
 
     async function moveAiProfile(index, delta) {{
-      const rows = [...document.querySelectorAll("[data-ai-profile]")];
-      const order = rows.map(row => row.dataset.aiProfile).filter(Boolean);
-      const target = index + delta;
-      if (index < 0 || target < 0 || target >= order.length) return;
-      [order[index], order[target]] = [order[target], order[index]];
       const status = document.getElementById("aiProviderStatus");
-      status.textContent = "正在保存调用顺序...";
-      try {{
-        const payload = await api("/admin/api/ai/profile-priority", {{
-          method: "PUT",
-          body: JSON.stringify({{ profiles: order }}),
-        }});
-        status.textContent = `当前：${{payload.current_profile}}，默认：${{payload.default_profile}}，调用顺序：${{(payload.fallback_order || []).join(" → ")}}`;
-        document.getElementById("aiProviderSelect").value = payload.current_profile;
-        renderAiProfilePriority(payload);
-      }} catch (error) {{
-        status.textContent = `保存失败：${{error.message}}`;
-      }}
+      status.textContent = "AI 调用顺序由 qqbot.toml 控制，修改配置后重启 bot1。";
     }}
 
     let aiOutputModePayload = {{ groups: [], modes: [] }};

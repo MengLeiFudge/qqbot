@@ -26,6 +26,7 @@ from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_p
 from qqbot.services.settings_store import AI_OUTPUT_MODES, AI_OUTPUT_TEXT_MODE, SettingsStore
 
 STARTUP_LOG_FILES = {"launcher.log", "qqbot_stdout.log", "qqbot_stderr.log"}
+AI_CONFIG_LOCKED_MESSAGE = "AI 模型由 qqbot.toml 控制；请修改 [ai].default_profile / [ai.providers] 后重启 bot1。"
 
 
 @dataclass(slots=True)
@@ -233,32 +234,16 @@ class AdminService:
             "default_profile": get_default_ai_profile_name(self.settings),
             "fallback_order": list(fallback_order),
             "profiles": profile_payloads,
+            "config_locked": True,
+            "config_source": str(self.settings.ai_profile_file),
+            "message": AI_CONFIG_LOCKED_MESSAGE,
         }
 
     def set_ai_provider(self, profile: str) -> dict[str, object]:
-        profiles = load_ai_profiles(self.settings.ai_profile_file)
-        if profile not in {item.name for item in list_enabled_profiles(profiles)}:
-            raise ValueError(f"Unknown AI profile: {profile}")
-        self.store.set_ai_provider(profile)
-        return self.list_ai()
+        raise ValueError(AI_CONFIG_LOCKED_MESSAGE)
 
     def set_ai_profile_priority(self, profiles: list[str]) -> dict[str, object]:
-        configured_profiles = load_ai_profiles(self.settings.ai_profile_file)
-        enabled_names = {item.name for item in list_enabled_profiles(configured_profiles)}
-        cleaned = []
-        seen: set[str] = set()
-        for profile in profiles:
-            name = str(profile).strip()
-            if not name or name in seen:
-                continue
-            if name not in enabled_names:
-                raise ValueError(f"Unknown AI profile: {name}")
-            cleaned.append(name)
-            seen.add(name)
-        if not cleaned:
-            raise ValueError("AI profile priority cannot be empty.")
-        self.store.set_ai_profile_priority(cleaned)
-        return self.list_ai()
+        raise ValueError(AI_CONFIG_LOCKED_MESSAGE)
 
     def list_ai_output_modes(
         self,

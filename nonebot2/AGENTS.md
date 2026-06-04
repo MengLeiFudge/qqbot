@@ -84,7 +84,7 @@
 - 群聊普通消息会先做旁路记录：`group_nick_cache.py` 负责记录群名片、最近群上下文、管理端消息日志和长期群聊记忆。AI 主动介入不再按群开关控制，所有群聊普通消息都经保守触发判定；不符合求助、点名、领域问题、安全风险或上下文追问的普通闲聊不进入 AI 回复。普通非 @ 主动介入不逐条即时请求 AI，而是按群进入短暂缓冲，安静窗口后批量处理上次处理位置之后的新消息；敏感凭据风险提醒是例外，必须即时本地回复，不进普通 LLM 和主动缓冲。
 - 群聊显式命令和普通 AI 对话默认必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。RightCodes 生图通过 `ai_command.py` 的关键词白名单进入 AI 链路；AI 主动介入通过全群保守启发式进入 AI 链路，不扩大到其他群聊命令。@ 机器人、点名机器人和生图命令保持即时处理；即时触发会清理同群尚未发送的主动介入缓冲，避免过时回复。
 - AI 入口先生成 `MessageDecision`，区分是否回复、领域、难度、延迟策略和输出格式。需要知识库、联网、代码分析、图片生成、数学/严密推理、超过 800 字输入，或判定为不能一句话回答的问题，可以使用 `ACK_THEN_ASYNC` 作为内部复杂度/延迟策略，但普通 LLM 回复不再先发送“我先看看”这类用户可见占位消息，也不为占位创建 pending task。速度优先，但复杂问题、数学题和强领域关联问题不能为了快牺牲准确性。绑定领域群里的普通闲聊不能只因“怎么/原理/为什么”等泛疑问词进入重型处理，必须同时命中对应模组术语、领域对象或明确项目别名。
-- 普通 GPT 文本调用按 `list_ai_profile_fallback_order()` 返回的顺序构建 fallback 链；顺序必须是 OpenRouter ICU profile 优先，RightCodes 类 profile 第二层，其他 GPT provider 在后。不要再配置独立的 `openrouter` profile；OpenRouter ICU 就是 OpenRouter 入口。管理端“AI 模型”可以调整后续 provider 顺序，但不能把 RightCodes 排到 OpenRouter ICU 前面。只要使用普通 GPT profile，应先走 OpenRouter ICU，OpenRouter ICU 超时、无应答或接口错误后才考虑 RightCodes 等后续 provider；不要让单个 current profile 绕过排序。
+- 普通 GPT 文本调用按 `data\nonebot2\config\qqbot.toml` 的 `[ai].default_profile` 和 `[ai.providers]` 构建当前 profile 与 fallback 链；不要用 `data\nonebot2\run\settings\ai.json`、私聊“切换AI”命令、管理端保存按钮或硬编码 provider 排序覆盖配置文件。管理端“AI 模型”只能只读展示配置来源。修改模型、默认 profile 或 provider 顺序后必须重启 bot1 并验证真实运行配置；任何情况下都不要使用 `gpt-5.5`。
 - 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。
 - AI 短期会话按会话隔离：私聊使用 `private:<user_id>:<profile>:stable`，群聊使用 `group:<group_id>:<profile>:stable`。群聊是一个整体会话，发言者身份通过消息记录、sender/user_id、长期记忆 actor_id 和群上下文体现，不再用 `group_user:<group_id>:<user_id>` 拆开同一群的短期上下文。
 - 长期记忆检索先生成 `RetrievalPlan`，再按 `space_id`、`actor_id`、`visibility` 和 `forbidden` 边界取证；群聊查询私聊内容时只返回拒绝披露约束，跨群查询只允许当前发言者的公开群聊记忆。
@@ -117,7 +117,7 @@
 - 真实运行配置统一放在 monorepo 根目录 `D:\project\qqbot\data\nonebot2\config\`。
 - `data\nonebot2\config\.env` 只放敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key、Factorio 凭据。
 - `data\nonebot2\config\qqbot.toml` 放低频变化的非敏感配置，例如路径、AI provider、默认模型。
-- `data\nonebot2\run\settings\` 和 `data\nonebot2\run\ai\` 放运行时状态，例如全局插件开关、管理员、AI 对话上下文、动作审计。
+- `data\nonebot2\run\settings\` 和 `data\nonebot2\run\ai\` 放运行时状态，例如全局插件开关、管理员、AI 对话上下文、动作审计；不得在这里保存或读取 AI 模型/profile/fallback 顺序覆盖。
 - 可提交模板只放在 `nonebot2\config\env.example` 和 `nonebot2\config\qqbot.toml.example`。
 - 不要在 `nonebot2\` 根目录下再创建真实 `.env`、`.env.example` 或 `config\qqbot.toml` 作为运行入口。
 - 不要把真实 `.env`、真实 `qqbot.toml`、`run/`、`logs/` 放进公开仓库。
@@ -152,6 +152,7 @@ D:\project\qqbot\data\nonebot2\.venv\Scripts\python.exe -m pytest --collect-only
 
 - 普通 AI 回复只负责文本生成和已白名单的本地能力编排。
 - AI 不直接获得 shell、文件系统、群管、重启、上传文件等自由权限。
+- AI 不提供自动修 bug 功能；FE 等项目 bug 只能做解释、证据整理和需求记录，不承诺或触发自动修改代码。
 - 上传已有项目 zip 产物属于固定白名单能力，只能由 localhost-only 白名单构建流程调用管理 API。机器人只接收发布方明确列出的项目仓库内真实存在的 `.zip`，不构建、不改代码、不 push。
 - qqbot 不提供群聊或私聊 Codex 会话模式，不从 QQ 消息启动本地代码修改流程。
 - 直接在本地终端执行的开发任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only `/admin/api/artifacts/publish-local`，用 JSON 直接提交发布事件。请求体必须包含 `timestamp`、当前 `branch`、当前 `commit_hash`、`commit_subject`、`commit_detail` 和 `files` 数组；每个文件项包含 `path`、可选 `name`、可选 `sha256`、`targets` 群号数组和可选 `message`。qqbot 只校验并上传请求中明确列出的文件，不扫描构建目录，不读取发布方仓库里的结果 JSON，不硬编码 MLJ_DSPmods 的模组取舍。

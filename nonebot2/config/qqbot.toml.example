@@ -18,7 +18,7 @@ arcaea_record_maven = "C:/path/to/maven/bin/mvn.cmd"
 arcaea_record_java_home = "C:/path/to/jdk"
 
 [ai]
-default_profile = "openrouter-icu"
+default_profile = "codex-everywhere"
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
@@ -34,10 +34,19 @@ embedding_model = "text-embedding-3-small"
 embedding_api_key_env = "QQBOT_OPENAI_API_KEY"
 embedding_timeout_seconds = 45
 
+[ai.providers.codex-everywhere]
+provider = "openai_compatible"
+base_url = "https://codex-everywhere.com/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_CODEX_EVERYWHERE"
+timeout_seconds = 45
+max_output_tokens = 4096
+supports_vision = false
+
 [ai.providers.openrouter-icu]
 provider = "openai_compatible"
 base_url = "https://rehdasu.cn/v1"
-model = "gpt-5.5"
+model = "gpt-5.4-mini"
 api_key_env = "QQBOT_AI_KEY_OPENROUTER_ICU"
 timeout_seconds = 45
 max_output_tokens = 4096
@@ -49,7 +58,7 @@ reasoning = { effort = "high" }
 [ai.providers.rightcodes]
 provider = "openai_compatible"
 base_url = "https://right.codes/codex/v1"
-model = "gpt-5.5"
+model = "gpt-5.4-mini"
 api_key_env = "QQBOT_AI_KEY_RIGHTCODES"
 timeout_seconds = 45
 max_output_tokens = 4096
@@ -61,7 +70,7 @@ reasoning = { effort = "high" }
 [ai.providers.hicode]
 provider = "openai_compatible"
 base_url = "https://www.hi-code.cc/v1"
-model = "gpt-5.5"
+model = "gpt-5.4-mini"
 api_key_env = "QQBOT_AI_KEY_HICODE"
 timeout_seconds = 45
 max_output_tokens = 4096
