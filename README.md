@@ -18,6 +18,14 @@
 - `data/astrbot/data/`：AstrBot 的 `cmd_config.json`、`data_v4.db`、插件和插件数据。
 - `data/napcat/`：预留给 NapCat 账号配置、登录态和日志。
 
+可提交配置模板只放在：
+
+- `nonebot2/config/env.example`：敏感环境变量和本机账号示例。
+- `nonebot2/config/qqbot.toml.example`：非敏感运行配置示例。
+- `astrbot/config/`：AstrBot 插件和本机配置示例。
+
+不要再使用 `nonebot2/.env`、`nonebot2/.env.example` 或 `nonebot2/config/qqbot.toml` 作为运行配置入口；根级启动脚本会固定读取 `data/nonebot2/config/`。
+
 ## 启动
 
 日常入口：

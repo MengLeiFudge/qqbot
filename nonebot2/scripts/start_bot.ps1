@@ -24,9 +24,4 @@ if (-not $SkipInstall) {
     & $PythonPath -m pip install -e .[dev]
 }
 
-if (-not $env:QQBOT_CONFIG_FILE -and -not (Test-Path ".env") -and (Test-Path ".env.example")) {
-    Copy-Item ".env.example" ".env"
-    Write-Host "Copied .env.example to .env. Update access token if needed."
-}
-
 & $PythonPath bot.py

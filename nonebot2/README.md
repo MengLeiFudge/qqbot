@@ -29,20 +29,26 @@
 - `scripts/start_bot.ps1`：NoneBot2 子项目启动入口，通常由根级 `scripts/start-nonebot2.ps1` 调用
 - `tests/`：长期回归测试
 - `config/qqbot.toml.example`：非敏感配置示例
-- `.env.example`：敏感信息和本机账号配置示例
+- `config/env.example`：敏感信息和本机账号配置示例
 
 ## 配置
 
-配置分三层：
+迁移后配置分三层：
 
-- `.env`：敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key。
-- `config/qqbot.toml`：机器人一般配置、路径、AI provider、默认模型等低频修改项。
-- `run/settings/` 和 `run/ai/`：管理端和运行时经常变化的状态，例如全局插件开关、管理员列表、AI 对话上下文。
+- `D:\project\qqbot\data\nonebot2\config\.env`：敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key、Factorio 凭据。
+- `D:\project\qqbot\data\nonebot2\config\qqbot.toml`：机器人一般配置、路径、AI provider、默认模型等低频修改项。
+- `D:\project\qqbot\data\nonebot2\run\settings\` 和 `D:\project\qqbot\data\nonebot2\run\ai\`：管理端和运行时经常变化的状态，例如全局插件开关、管理员列表、AI 对话上下文。
 
-最小启动配置：
+可提交模板：
+
+- `config/env.example`
+- `config/qqbot.toml.example`
+
+不要再使用 `nonebot2\.env`、`nonebot2\.env.example` 或 `nonebot2\config\qqbot.toml` 作为运行入口。
+
+最小 `.env` 配置：
 
 ```text
-QQBOT_CONFIG_FILE=./config/qqbot.toml
 QQBOT_ONEBOT_ACCESS_TOKEN=你的 OneBot token
 QQBOT_NAPCAT_QQ=你的机器人 QQ
 QQBOT_AI_KEY_OPENROUTER_ICU=你的 OpenRouter ICU API Key
@@ -103,7 +109,7 @@ Set-Location D:\project\qqbot
 
 ```powershell
 Set-Location D:\project\qqbot
-.\scripts\start_all.bat
+.\scripts\start-all.bat
 ```
 
 单独启动 qqbot：

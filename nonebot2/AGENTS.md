@@ -114,10 +114,13 @@
 
 ## 配置边界
 
-- `.env` 只放敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key。
-- `config/qqbot.toml` 放低频变化的非敏感配置，例如路径、AI provider、默认模型。
-- `run/settings/` 和 `run/ai/` 放运行时状态，例如全局插件开关、管理员、AI 对话上下文、动作审计。
-- 不要把真实 `.env`、真实 `config/qqbot.toml`、`run/`、`logs/` 放进公开仓库。
+- 真实运行配置统一放在 monorepo 根目录 `D:\project\qqbot\data\nonebot2\config\`。
+- `data\nonebot2\config\.env` 只放敏感信息和本机账号，例如 OneBot token、NapCat QQ、AI API key、Factorio 凭据。
+- `data\nonebot2\config\qqbot.toml` 放低频变化的非敏感配置，例如路径、AI provider、默认模型。
+- `data\nonebot2\run\settings\` 和 `data\nonebot2\run\ai\` 放运行时状态，例如全局插件开关、管理员、AI 对话上下文、动作审计。
+- 可提交模板只放在 `nonebot2\config\env.example` 和 `nonebot2\config\qqbot.toml.example`。
+- 不要在 `nonebot2\` 根目录下再创建真实 `.env`、`.env.example` 或 `config\qqbot.toml` 作为运行入口。
+- 不要把真实 `.env`、真实 `qqbot.toml`、`run/`、`logs/` 放进公开仓库。
 
 ## 测试分层
 
