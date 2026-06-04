@@ -3,7 +3,7 @@
 这是本机机器人 monorepo 工作区，按运行组件拆分：
 
 - `nonebot2/`：天使棉花糖，原 qqbot / NoneBot2 应用。
-- `astrbot/`：恶魔棉花糖，AstrBot 应用当前工作树快照。
+- `astrbot/`：AstrBot 上游源码快照和本机配置示例；实际 bot2 Core 由 `uv tool` 管理。
 - `napcat/`：共用 NapCat / QQ 登录端程序包。
 - `data/`：统一运行态数据目录，默认不进 Git。
 - `scripts/`：根级 Windows 启动脚本。
@@ -26,6 +26,8 @@
 
 不要再使用 `nonebot2/.env`、`nonebot2/.env.example` 或 `nonebot2/config/qqbot.toml` 作为运行配置入口；根级启动脚本会固定读取 `data/nonebot2/config/`。
 
+AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps1` 会调用 `uv tool` 安装的 `astrbot` 命令，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。
+
 ## 启动
 
 日常入口：
@@ -47,3 +49,16 @@ Set-Location D:\project\qqbot
 - `2629227874`：NapCat 反连 AstrBot，`ws://127.0.0.1:6199/ws`。
 
 NapCat 仍使用 `napcat/` 下的一键包；后续再把账号配置和登录态收拢到 `data/napcat/`。
+
+## 更新
+
+AstrBot Core 使用手动更新入口：
+
+```powershell
+Set-Location D:\project\qqbot
+.\scripts\update-astrbot.bat
+```
+
+该脚本默认使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会先用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
+
+更新后使用 `scripts\start-astrbot.bat` 启动 bot2。修改 `astrbot/` 里的源码快照不会影响实际运行的 bot2，除非重新切换回源码模式。
