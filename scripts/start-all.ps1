@@ -38,13 +38,35 @@ function Get-ComponentLogRoot {
 function Write-LauncherLog {
     param(
         [string]$LogFile,
-        [string]$Message
+        [string]$Message,
+        [switch]$NoConsole
     )
 
     $parent = Split-Path -Parent $LogFile
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
     $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
+    if (-not $NoConsole) {
+        Write-Host $line
+    }
+}
+
+function Get-LogTailText {
+    param(
+        [string]$Path,
+        [int]$Count = 12
+    )
+
+    if (-not (Test-Path $Path)) {
+        return ""
+    }
+    try {
+        $lines = Get-Content -Path $Path -Tail $Count -ErrorAction Stop
+        return ($lines -join "`n").Trim()
+    }
+    catch {
+        return ""
+    }
 }
 
 function Test-TcpPort {
@@ -77,14 +99,20 @@ function Wait-TcpPort {
         [string]$HostName,
         [int]$Port,
         [int]$TimeoutSeconds,
-        [string]$LogFile
+        [string]$LogFile,
+        [System.Diagnostics.Process]$Process = $null
     )
 
+    Write-LauncherLog -LogFile $LogFile -Message "Waiting for port ${HostName}:$Port for up to $TimeoutSeconds seconds."
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         if (Test-TcpPort -HostName $HostName -Port $Port) {
             Write-LauncherLog -LogFile $LogFile -Message "Port ${HostName}:$Port is ready."
             return $true
+        }
+        if ($Process -and $Process.HasExited) {
+            Write-LauncherLog -LogFile $LogFile -Message "Background process pid=$($Process.Id) exited before port ${HostName}:$Port was ready. exit_code=$($Process.ExitCode)"
+            return $false
         }
         Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $deadline)
@@ -110,6 +138,7 @@ function Wait-NoneBotConnection {
         [string]$LogFile
     )
 
+    Write-LauncherLog -LogFile $LogFile -Message "Waiting for NoneBot OneBot connection for up to $TimeoutSeconds seconds."
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         $status = Get-AdminStatus -Url "http://127.0.0.1:8080/admin/api/status"
@@ -131,6 +160,7 @@ function Wait-EstablishedConnection {
         [string]$LogFile
     )
 
+    Write-LauncherLog -LogFile $LogFile -Message "Waiting for established TCP connection on local port $Port for up to $TimeoutSeconds seconds."
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         try {
@@ -215,7 +245,8 @@ function Stop-ProcessByPort {
         }
     }
     catch {
-        Write-LauncherLog -LogFile $LogFile -Message "Port owner lookup failed for $Name on $Port: $($_.Exception.Message)"
+        $message = "Port owner lookup failed for {0} on {1}: {2}" -f $Name, $Port, $_.Exception.Message
+        Write-LauncherLog -LogFile $LogFile -Message $message
     }
 }
 
@@ -227,7 +258,8 @@ function Get-NapCatAccountProcesses {
             Where-Object {
                 $_.CommandLine -and
                 $_.CommandLine.Contains($Account) -and
-                ($_.CommandLine -match 'NapCat|QQ\.exe|NapCatWinBootMain')
+                ($_.CommandLine -match 'NapCatWinBootMain|QQ\.exe') -and
+                ($_.CommandLine -notmatch 'start-all\.ps1|start-napcat-account\.ps1')
             }
     }
     catch {
@@ -245,23 +277,31 @@ function Start-BackgroundPowerShell {
     param(
         [string]$CommandText,
         [string]$WorkingDirectory,
-        [string]$LogFile
+        [string]$StdoutLog,
+        [string]$StderrLog,
+        [string]$LauncherLog
     )
 
+    $wrappedCommand = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
+        "`$env:PYTHONUTF8 = '1'; `$env:PYTHONIOENCODING = 'utf-8'; " +
+        "& { $CommandText }"
     $arguments = @(
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        $CommandText
+        $wrappedCommand
     )
     $process = Start-Process `
         -FilePath "powershell.exe" `
         -ArgumentList $arguments `
         -WorkingDirectory $WorkingDirectory `
         -WindowStyle Hidden `
+        -RedirectStandardOutput $StdoutLog `
+        -RedirectStandardError $StderrLog `
         -PassThru
-    Write-LauncherLog -LogFile $LogFile -Message "Started background PowerShell pid=$($process.Id)."
+    Write-LauncherLog -LogFile $LauncherLog -Message "Started background PowerShell pid=$($process.Id)."
+    return $process
 }
 
 function Start-NoneBotComponent {
@@ -284,11 +324,20 @@ function Start-NoneBotComponent {
 
     $script = Join-Path $ScriptRoot "start-nonebot2.ps1"
     $extra = if ($SkipInstall) { "-SkipInstall" } else { "" }
-    $command = "& '$script' $extra > '$stdoutLog' 2> '$stderrLog'"
-    Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -LogFile $launcherLog
+    $command = "& '$script' $extra"
+    $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
+    Write-LauncherLog -LogFile $launcherLog -Message "NoneBot2 stdout log: $stdoutLog"
 
-    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 8080 -TimeoutSeconds 90 -LogFile $launcherLog)) {
-        throw "NoneBot2 did not open port 8080."
+    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 8080 -TimeoutSeconds 90 -LogFile $launcherLog -Process $process)) {
+        $tail = Get-LogTailText -Path $stdoutLog
+        if ($tail) {
+            Write-Host "Recent NoneBot2 output:" -ForegroundColor Yellow
+            Write-Host $tail
+        }
+        if ($process.HasExited) {
+            throw "NoneBot2 exited before opening port 8080. exit_code=$($process.ExitCode). Log: $stdoutLog"
+        }
+        throw "NoneBot2 did not open port 8080. Log: $stdoutLog"
     }
     if (-not $NoNapCatWait) {
         Write-LauncherLog -LogFile $launcherLog -Message "NoneBot2 component is ready for NapCat."
@@ -311,11 +360,20 @@ function Start-AstrBotComponent {
     Stop-ProcessByPort -Port 6199 -Name "AstrBot" -LogFile $launcherLog
 
     $script = Join-Path $ScriptRoot "start-astrbot.ps1"
-    $command = "& '$script' > '$stdoutLog' 2> '$stderrLog'"
-    Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -LogFile $launcherLog
+    $command = "& '$script'"
+    $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
+    Write-LauncherLog -LogFile $launcherLog -Message "AstrBot stdout log: $stdoutLog"
 
-    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 6185 -TimeoutSeconds 120 -LogFile $launcherLog)) {
-        throw "AstrBot did not open port 6185."
+    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 6185 -TimeoutSeconds 120 -LogFile $launcherLog -Process $process)) {
+        $tail = Get-LogTailText -Path $stdoutLog
+        if ($tail) {
+            Write-Host "Recent AstrBot output:" -ForegroundColor Yellow
+            Write-Host $tail
+        }
+        if ($process.HasExited) {
+            throw "AstrBot exited before opening port 6185. exit_code=$($process.ExitCode). Log: $stdoutLog"
+        }
+        throw "AstrBot did not open port 6185. Log: $stdoutLog"
     }
     if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 6199 -TimeoutSeconds 120 -LogFile $launcherLog)) {
         throw "AstrBot did not open port 6199."
@@ -349,8 +407,9 @@ function Start-NapCatComponent {
     }
     else {
         $script = Join-Path $ScriptRoot "start-napcat-account.ps1"
-        $command = "& '$script' -Account '$Account' > '$stdoutLog' 2> '$stderrLog'"
-        Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -LogFile $launcherLog
+        $command = "& '$script' -Account '$Account'"
+        $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
+        Write-LauncherLog -LogFile $launcherLog -Message "NapCat stdout log: $stdoutLog"
     }
 
     if ($DoneCheck -eq "nonebot2") {
@@ -412,13 +471,14 @@ function Invoke-Child {
             default { throw "Unknown component: $Component" }
         }
         Complete-Child -RunId $RunId -Component $Component
+        Write-Host "$Component ready. Closing this window."
         exit 0
     }
     catch {
         $message = $_.Exception.Message
-        Write-Host "启动失败：$message" -ForegroundColor Red
+        Write-Host "Startup failed: $message" -ForegroundColor Red
         Fail-Child -RunId $RunId -Component $Component -Message $message
-        Read-Host "按 Enter 关闭窗口"
+        Read-Host "Press Enter to close this window"
         exit 1
     }
 }
@@ -460,6 +520,7 @@ function Wait-Children {
     New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null
     $pending = [System.Collections.Generic.HashSet[string]]::new([string[]]$Components)
     while ($pending.Count -gt 0) {
+        $readyThisRound = $false
         foreach ($componentName in @($pending)) {
             $donePath = Join-Path $controlRoot "$componentName.done"
             $failedPath = Join-Path $controlRoot "$componentName.failed"
@@ -470,9 +531,13 @@ function Wait-Children {
             if (Test-Path $donePath) {
                 [void]$pending.Remove($componentName)
                 Write-Host "$componentName ready."
+                $readyThisRound = $true
             }
         }
         if ($pending.Count -gt 0) {
+            if ($readyThisRound) {
+                Write-Host "Waiting for: $($pending -join ', ')"
+            }
             Start-Sleep -Seconds 1
         }
     }
@@ -493,7 +558,7 @@ function Invoke-Parent {
         $components += "napcat-astrbot"
     }
 
-    Write-Host "启动目标: $Target"
+    Write-Host "Starting target: $Target"
     foreach ($componentName in $components) {
         switch ($componentName) {
             "nonebot2" { Start-ChildWindow -RunId $runId -Component $componentName -Title "NoneBot2-1443944862" }
@@ -503,7 +568,7 @@ function Invoke-Parent {
         }
     }
     Wait-Children -RunId $runId -Components $components
-    Write-Host "全部目标已就绪。"
+    Write-Host "All targets are ready."
 }
 
 if ($Child) {
@@ -514,10 +579,20 @@ if ($Child) {
 if ($RestartBot) {
     $runId = New-RunId
     Start-NoneBotComponent -RunId $runId
-    if (-not (Wait-NoneBotConnection -TimeoutSeconds 120 -LogFile (Join-Path (Get-ComponentLogRoot -Component "nonebot2" -RunId $runId) "launcher.log"))) {
+    $restartLogRoot = Get-ComponentLogRoot -Component "nonebot2" -RunId $runId
+    $restartLogFile = Join-Path $restartLogRoot "launcher.log"
+    if (-not (Wait-NoneBotConnection -TimeoutSeconds 120 -LogFile $restartLogFile)) {
         exit 2
     }
     exit 0
 }
 
-Invoke-Parent
+try {
+    Invoke-Parent
+    exit 0
+}
+catch {
+    $message = $_.Exception.Message
+    Write-Host "Startup failed: $message" -ForegroundColor Red
+    exit 1
+}

@@ -13,18 +13,21 @@ $VenvRoot = Join-Path $DataRoot ".venv"
 New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 New-Item -ItemType Directory -Path $RunRoot -Force | Out-Null
 
-$env:QQBOT_CONFIG_FILE = Join-Path $ConfigDir "qqbot.toml"
-$env:QQBOT_DATA_ROOT = $RunRoot
-$env:QQBOT_VENV_PATH = $VenvRoot
-
 $envFile = Join-Path $ConfigDir ".env"
 if (Test-Path $envFile) {
     Get-Content $envFile | ForEach-Object {
         if ($_ -match '^\s*([^#][^=]+?)\s*=\s*(.*)\s*$') {
-            [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim(), "Process")
+            $key = $matches[1].Trim()
+            if ($key -notin @("QQBOT_CONFIG_FILE", "QQBOT_DATA_ROOT", "QQBOT_VENV_PATH")) {
+                [Environment]::SetEnvironmentVariable($key, $matches[2].Trim(), "Process")
+            }
         }
     }
 }
+
+$env:QQBOT_CONFIG_FILE = Join-Path $ConfigDir "qqbot.toml"
+$env:QQBOT_DATA_ROOT = $RunRoot
+$env:QQBOT_VENV_PATH = $VenvRoot
 
 Set-Location $AppRoot
 $startScript = Join-Path $AppRoot "scripts\start_bot.ps1"
