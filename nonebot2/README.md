@@ -4,7 +4,7 @@
 
 这个仓库承接旧 `mirai` 机器人的功能迁移，并在 Python 侧补充插件注册、AI 接入、本机管理端和 NapCat 一键启动流程。
 
-开发流程、测试分层、AI 边界和重启验证规则见 `AGENTS.md`。
+开发流程、AI 边界和重启验证规则见 `AGENTS.md`。
 
 ## 当前能力
 
@@ -25,9 +25,7 @@
 - `src/qqbot/plugins/`：NoneBot matcher 与事件处理
 - `src/qqbot/services/`：业务服务层、持久化和 AI 编排
 - `src/qqbot/services/plugin_registry.py`：插件元数据注册表
-- `tests/`：长期回归测试
 - `scripts/start_bot.ps1`：NoneBot2 子项目启动入口，通常由根级 `scripts/start-nonebot2.ps1` 调用
-- `tests/`：长期回归测试
 - `config/qqbot.toml.example`：非敏感配置示例
 - `config/env.example`：敏感信息和本机账号配置示例
 

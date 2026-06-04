@@ -34,8 +34,8 @@
   - `git status --short`
   - 根目录是否只有一个 `.git`
   - `data/` 是否未进入 Git
-- NoneBot2 相关代码验证优先在 `nonebot2/` 内运行项目测试。
-- AstrBot 相关代码验证优先在 `astrbot/` 内运行 ruff 和定向 pytest。
+- NoneBot2 测试套件已移除；相关代码验证优先使用 `python -m py_compile`、启动探针、管理端状态检查或更窄的运行时复核。
+- AstrBot 测试套件已移除；相关代码验证优先在 `astrbot/` 内运行 ruff、`python -m py_compile` 和实际 uv tool 启动探针。
 - AstrBot Core 运行/更新脚本变更优先做 PowerShell 语法检查；不要把源码快照测试结果当作 uv tool 运行态验证。
 
 ## 启动与重启

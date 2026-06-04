@@ -71,9 +71,6 @@ dependencies = [
 [dependency-groups]
 dev = [
   "commitizen>=4.9.1",
-  "pytest>=8.4.1",
-  "pytest-asyncio>=1.1.0",
-  "pytest-cov>=6.2.1",
   "ruff>=0.15.0",
 ]
 
@@ -84,7 +81,7 @@ astrbot = "astrbot.cli.__main__:cli"
 Repository = "https://github.com/AstrBotDevs/AstrBot"
 
 [tool.ruff]
-exclude = ["astrbot/core/utils/t2i/local_strategy.py", "astrbot/api/all.py", "tests"]
+exclude = ["astrbot/core/utils/t2i/local_strategy.py", "astrbot/api/all.py"]
 line-length = 88
 target-version = "py310"
 
@@ -114,7 +111,7 @@ pythonVersion = "3.10"
 reportMissingTypeStubs = false
 reportMissingImports = false
 include = ["astrbot"]
-exclude = ["dashboard", "node_modules", "dist", "data", "tests"]
+exclude = ["dashboard", "node_modules", "dist", "data"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
