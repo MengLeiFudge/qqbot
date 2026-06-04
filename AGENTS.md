@@ -49,7 +49,7 @@
 
 - AstrBot Core 手动更新入口是 `D:\project\qqbot\scripts\update-astrbot.bat`。
 - 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat、NoneBot2/OneBot adapter、AstrBot 更新入口。
-- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；更新前必须确认 NapCat/QQ 已关闭，脚本会把旧 `napcat\onekey` 备份到 `data\napcat\archives\`。
+- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；正式更新会先停止本工作区关联的 NapCat/QQ 进程，再把旧 `napcat\onekey` 备份到 `data\napcat\archives\`。
 - NoneBot2/OneBot adapter 手动更新入口是 `D:\project\qqbot\scripts\update-nonebot2.bat`；只按 `nonebot2\pyproject.toml` 版本约束升级依赖，不自动放宽主版本上限。
 - OneBot v11 本身是协议；本仓库实际更新对象是 NapCat 协议端和 `nonebot-adapter-onebot`。
 - `update-astrbot.bat` 默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。

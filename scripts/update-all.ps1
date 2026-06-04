@@ -2,7 +2,8 @@ param(
     [switch]$DryRun,
     [switch]$SkipNapCat,
     [switch]$SkipNoneBot2,
-    [switch]$SkipAstrBot
+    [switch]$SkipAstrBot,
+    [switch]$NoStopProcesses
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +32,9 @@ function Invoke-UpdateScript {
     $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $script)
     if ($DryRun) {
         $arguments += "-DryRun"
+    }
+    if ($NoStopProcesses -and $ScriptName -eq "update-napcat.ps1") {
+        $arguments += "-NoStopProcesses"
     }
 
     & powershell.exe @arguments

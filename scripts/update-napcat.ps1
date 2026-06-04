@@ -1,5 +1,6 @@
 param(
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NoStopProcesses
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +44,30 @@ function Get-NapCatProcesses {
     })
 }
 
+function Format-ProcessSummary {
+    param([array]$Processes)
+
+    if (-not $Processes -or $Processes.Count -eq 0) {
+        return "(none)"
+    }
+    return (($Processes | ForEach-Object { "$($_.ProcessId): $($_.Name)" }) -join "; ")
+}
+
+function Stop-NapCatProcesses {
+    param([array]$Processes)
+
+    foreach ($processInfo in $Processes) {
+        Write-Step "Stopping process $($processInfo.ProcessId): $($processInfo.Name)"
+        Stop-Process -Id $processInfo.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
+    Start-Sleep -Seconds 2
+    $remaining = @(Get-NapCatProcesses)
+    if ($remaining.Count -gt 0) {
+        throw "Some NapCat/QQ processes are still running: $(Format-ProcessSummary $remaining)"
+    }
+}
+
 Write-Step "NapCat update started."
 Write-Step "Workspace: $WorkspaceRoot"
 Write-Step "Log: $logFile"
@@ -52,6 +77,15 @@ if ($DryRun) {
 
 $api = "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
 if ($DryRun) {
+    $running = @(Get-NapCatProcesses)
+    if ($running.Count -gt 0) {
+        if ($NoStopProcesses) {
+            Write-Step "Would require these processes to be closed manually: $(Format-ProcessSummary $running)"
+        }
+        else {
+            Write-Step "Would stop running NapCat/QQ processes: $(Format-ProcessSummary $running)"
+        }
+    }
     Write-Step "Would query latest release: $api"
     Write-Step "Would download asset matching NapCat Shell Windows OneKey zip."
     Write-Step "Would archive current napcat\onekey to data\napcat\archives\onekey-$timestamp."
@@ -62,8 +96,11 @@ if ($DryRun) {
 
 $running = @(Get-NapCatProcesses)
 if ($running.Count -gt 0) {
-    $summary = ($running | ForEach-Object { "$($_.ProcessId): $($_.Name)" }) -join "; "
-    throw "NapCat appears to be running. Close NapCat/QQ first. Processes: $summary"
+    if ($NoStopProcesses) {
+        throw "NapCat/QQ is running. Close these processes first or rerun without -NoStopProcesses: $(Format-ProcessSummary $running)"
+    }
+    Write-Step "Running NapCat/QQ processes detected: $(Format-ProcessSummary $running)"
+    Stop-NapCatProcesses $running
 }
 
 $headers = @{ "User-Agent" = "qqbot-update-script" }

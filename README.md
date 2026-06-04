@@ -69,7 +69,7 @@ Set-Location D:\project\qqbot
 
 `update-all.bat` 会按顺序更新 NapCat、NoneBot2/OneBot adapter、AstrBot Core。
 
-NapCat 更新会从 GitHub 最新 release 下载 Windows Shell OneKey zip，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，再替换程序包。更新前请关闭 NapCat/QQ。
+NapCat 更新会先停止本工作区关联的 NapCat/QQ 进程，再从 GitHub 最新 release 下载 Windows Shell OneKey zip，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，再替换程序包。
 
 NoneBot2 更新会按 `nonebot2\pyproject.toml` 中的版本约束升级依赖；OneBot v11 对应的 Python 适配器是 `nonebot-adapter-onebot`，随 NoneBot2 更新入口一起处理。
 
