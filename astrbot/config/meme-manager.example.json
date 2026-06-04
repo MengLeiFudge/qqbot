@@ -1,0 +1,38 @@
+{
+  "image_host": "",
+  "image_host_config": {
+    "stardots": {
+      "key": "",
+      "secret": "",
+      "space": ""
+    },
+    "cloudflare_r2": {
+      "account_id": "",
+      "access_key_id": "",
+      "secret_access_key": "",
+      "bucket_name": "",
+      "public_url": ""
+    }
+  },
+  "webui_port": 0,
+  "prompt": {
+    "prompt_head": "",
+    "prompt_tail_1": "",
+    "prompt_tail_2": ""
+  },
+  "emotion_llm_enabled": false,
+  "emotion_llm_provider_id": "",
+  "convert_static_to_gif": false,
+  "max_emotions_per_message": 1,
+  "emotions_probability": 0.0,
+  "strict_max_emotions_per_message": true,
+  "enable_loose_emotion_matching": false,
+  "enable_alternative_markup": false,
+  "remove_invalid_alternative_markup": true,
+  "enable_repeated_emotion_detection": true,
+  "high_confidence_emotions": [],
+  "content_cleanup_rule": "",
+  "enable_mixed_message": false,
+  "mixed_message_probability": 0.0,
+  "streaming_compatibility": true
+}

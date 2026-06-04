@@ -8,6 +8,8 @@ data/*
 *.pid
 __pycache__/
 *.py[cod]
+**/__pycache__/
+**/*.py[cod]
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -16,6 +18,11 @@ __pycache__/
 .codex/
 .agents/
 .venv/
+venv/
+venv-old/
+venv_old/
+.venv_old/
+source_.venv_old/
 
 # Python build output
 build/

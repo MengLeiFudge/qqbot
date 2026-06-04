@@ -41,20 +41,40 @@ model = "gpt-5.5"
 api_key_env = "QQBOT_AI_KEY_OPENROUTER_ICU"
 timeout_seconds = 45
 max_output_tokens = 4096
+supports_vision = false
 
 [ai.providers.openrouter-icu.extra_body]
 reasoning = { effort = "high" }
 
-[ai.providers.rightcodes-high]
+[ai.providers.rightcodes]
 provider = "openai_compatible"
-base_url = "https://example.com/v1"
+base_url = "https://right.codes/codex/v1"
 model = "gpt-5.5"
 api_key_env = "QQBOT_AI_KEY_RIGHTCODES"
 timeout_seconds = 45
 max_output_tokens = 4096
+supports_vision = false
 
-[ai.providers.rightcodes-high.extra_body]
+[ai.providers.rightcodes.extra_body]
 reasoning = { effort = "high" }
+
+[ai.providers.hicode]
+provider = "openai_compatible"
+base_url = "https://www.hi-code.cc/v1"
+model = "gpt-5.5"
+api_key_env = "QQBOT_AI_KEY_HICODE"
+timeout_seconds = 45
+max_output_tokens = 4096
+supports_vision = false
+
+[ai.providers.routin]
+provider = "openai_compatible"
+base_url = "https://api.routin.ai/v1"
+model = "gpt-5.2"
+api_key_env = "QQBOT_AI_KEY_ROUTIN"
+timeout_seconds = 45
+max_output_tokens = 4096
+supports_vision = false
 
 [ai.providers.tokenflux]
 provider = "openai_compatible"
@@ -63,6 +83,17 @@ model = "example-model"
 api_key_env = "QQBOT_AI_KEY_TOKENFLUX"
 timeout_seconds = 45
 max_output_tokens = 4096
+supports_vision = false
+
+[ai.providers.xiaomi]
+provider = "xiaomi_mimo"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+model = "mimo-v2.5"
+vision_model = "mimo-v2.5"
+api_key_env = "QQBOT_AI_KEY_XIAOMI"
+timeout_seconds = 45
+max_output_tokens = 4096
+supports_vision = true
 
 # RightCodes 生图使用 QQBOT_AI_KEY_RIGHTCODES，命令示例：
 # @机器人 棉花生图 一只糖果猫娘
