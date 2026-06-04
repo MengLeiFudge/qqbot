@@ -16,12 +16,34 @@ if (Test-Path $chcp) {
 }
 
 $WorkspaceRoot = Split-Path -Parent $PSScriptRoot
-$NapCatRoot = Join-Path $WorkspaceRoot "napcat\onekey\NapCat.44498.Shell"
+$OneKeyRoot = Join-Path $WorkspaceRoot "napcat\onekey"
 $AccountScript = Join-Path $PSScriptRoot "start-napcat-account.ps1"
 
 if (-not (Test-Path $AccountScript)) {
     throw "NapCat account startup script not found: $AccountScript"
 }
+
+function Resolve-NapCatRoot {
+    $versionedRoots = @(Get-ChildItem -Path $OneKeyRoot -Directory -Filter "NapCat.*.Shell" -ErrorAction SilentlyContinue | Where-Object {
+        Test-Path (Join-Path $_.FullName "NapCatWinBootMain.exe")
+    } | Sort-Object LastWriteTime -Descending)
+    if ($versionedRoots.Count -gt 0) {
+        return $versionedRoots[0].FullName
+    }
+
+    $bootmain = Join-Path $OneKeyRoot "bootmain"
+    if (Test-Path (Join-Path $bootmain "NapCatWinBootMain.exe")) {
+        return $bootmain
+    }
+
+    if (Test-Path (Join-Path $OneKeyRoot "NapCatWinBootMain.exe")) {
+        return $OneKeyRoot
+    }
+
+    throw "NapCat executable not found under: $OneKeyRoot"
+}
+
+$NapCatRoot = Resolve-NapCatRoot
 
 function Start-NapCatProcess {
     param(

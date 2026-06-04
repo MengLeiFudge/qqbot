@@ -43,9 +43,68 @@ function Invoke-LoggedCommand {
     if ($Command.Count -gt 1) {
         $arguments = $Command[1..($Command.Count - 1)]
     }
-    & $exe @arguments 2>&1 | Tee-Object -FilePath $logFile -Append
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code ${LASTEXITCODE}: $($Command -join ' ')"
+
+    $stdoutFile = Join-Path $env:TEMP ("qqbot-update-stdout-{0}.log" -f ([guid]::NewGuid().ToString("N")))
+    $stderrFile = Join-Path $env:TEMP ("qqbot-update-stderr-{0}.log" -f ([guid]::NewGuid().ToString("N")))
+    $process = Start-Process `
+        -FilePath $exe `
+        -ArgumentList $arguments `
+        -NoNewWindow `
+        -Wait `
+        -PassThru `
+        -RedirectStandardOutput $stdoutFile `
+        -RedirectStandardError $stderrFile
+
+    foreach ($path in @($stdoutFile, $stderrFile)) {
+        if (Test-Path $path) {
+            Get-Content -Path $path -Encoding UTF8 | ForEach-Object {
+                Write-Host $_
+                Add-Content -Path $logFile -Value $_ -Encoding UTF8
+            }
+            Remove-Item -Path $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($process.ExitCode -ne 0) {
+        throw "Command failed with exit code $($process.ExitCode): $($Command -join ' ')"
+    }
+}
+
+function Invoke-CapturedCommand {
+    param([string[]]$Command)
+
+    $exe = $Command[0]
+    $arguments = @()
+    if ($Command.Count -gt 1) {
+        $arguments = $Command[1..($Command.Count - 1)]
+    }
+
+    $stdoutFile = Join-Path $env:TEMP ("qqbot-update-stdout-{0}.log" -f ([guid]::NewGuid().ToString("N")))
+    $stderrFile = Join-Path $env:TEMP ("qqbot-update-stderr-{0}.log" -f ([guid]::NewGuid().ToString("N")))
+    $process = Start-Process `
+        -FilePath $exe `
+        -ArgumentList $arguments `
+        -NoNewWindow `
+        -Wait `
+        -PassThru `
+        -RedirectStandardOutput $stdoutFile `
+        -RedirectStandardError $stderrFile
+
+    $stdout = ""
+    $stderr = ""
+    if (Test-Path $stdoutFile) {
+        $stdout = Get-Content -Path $stdoutFile -Raw -Encoding UTF8
+        Remove-Item -Path $stdoutFile -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $stderrFile) {
+        $stderr = Get-Content -Path $stderrFile -Raw -Encoding UTF8
+        Remove-Item -Path $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+
+    [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Stdout = $stdout
+        Stderr = $stderr
     }
 }
 
@@ -56,6 +115,11 @@ function Get-UvCommand {
 
     if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
         throw "uv not found and Windows py launcher is not available. Install uv first: https://docs.astral.sh/uv/"
+    }
+
+    $moduleCheck = Invoke-CapturedCommand @("py", "-$PythonVersion", "-m", "uv", "--version")
+    if ($moduleCheck.ExitCode -eq 0) {
+        return @("py", "-$PythonVersion", "-m", "uv")
     }
 
     if ($DryRun) {
@@ -81,7 +145,12 @@ $canUseUv = $uvCommand.Count -gt 0
 
 if ($canUseUv) {
     $toolListCommand = @($uvCommand + @("tool", "list", "--show-paths"))
-    $toolList = (& $toolListCommand[0] @($toolListCommand | Select-Object -Skip 1) 2>&1) -join "`n"
+    $toolListResult = Invoke-CapturedCommand $toolListCommand
+    $toolList = (($toolListResult.Stdout, $toolListResult.Stderr) -join "`n").Trim()
+    if ($toolListResult.ExitCode -ne 0 -and $toolList -notmatch "No tools installed") {
+        Add-Content -Path $logFile -Value $toolList -Encoding UTF8
+        throw "Command failed with exit code $($toolListResult.ExitCode): $($toolListCommand -join ' ')"
+    }
     Add-Content -Path $logFile -Value $toolList -Encoding UTF8
     $isInstalled = $toolList -match "(?m)^astrbot\s"
 }
@@ -114,14 +183,11 @@ if ($DryRun) {
 }
 else {
     if (Get-Command astrbot -ErrorAction SilentlyContinue) {
-        & astrbot --version 2>&1 | Tee-Object -FilePath $logFile -Append
+        Invoke-LoggedCommand @("astrbot", "--version")
     }
     else {
         $versionCommand = @($uvCommand + @("tool", "run", "--from", "astrbot", "--python", $PythonVersion, "astrbot", "--version"))
-        & $versionCommand[0] @($versionCommand | Select-Object -Skip 1) 2>&1 | Tee-Object -FilePath $logFile -Append
-    }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Step "AstrBot version check failed; try starting AstrBot to verify runtime behavior."
+        Invoke-LoggedCommand $versionCommand
     }
 }
 

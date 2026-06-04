@@ -14,7 +14,7 @@
 
 - `nonebot2/`：原 qqbot / NoneBot2 应用；子目录内的 `AGENTS.md` 是该应用的细化规则。
 - `astrbot/`：AstrBot 上游源码快照和本机配置示例；不保留 AstrBot 上游 Git 历史，也不作为 bot2 Core 的日常启动来源。
-- `napcat/`：共用 NapCat 程序包；账号数据和登录态应放在 `data/napcat/`。
+- `napcat/`：共用 NapCat 程序包；账号数据、登录态、更新下载和旧包备份应放在 `data/napcat/`。
 - `data/`：统一运行态根目录，默认忽略，不进 Git。
 - `scripts/`：monorepo 根级启动脚本，负责设置各应用运行态路径。
 
@@ -48,6 +48,10 @@
 ## 更新
 
 - AstrBot Core 手动更新入口是 `D:\project\qqbot\scripts\update-astrbot.bat`。
+- 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat、NoneBot2/OneBot adapter、AstrBot 更新入口。
+- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；更新前必须确认 NapCat/QQ 已关闭，脚本会把旧 `napcat\onekey` 备份到 `data\napcat\archives\`。
+- NoneBot2/OneBot adapter 手动更新入口是 `D:\project\qqbot\scripts\update-nonebot2.bat`；只按 `nonebot2\pyproject.toml` 版本约束升级依赖，不自动放宽主版本上限。
+- OneBot v11 本身是协议；本仓库实际更新对象是 NapCat 协议端和 `nonebot-adapter-onebot`。
 - `update-astrbot.bat` 默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
 - Windows PATH 找不到 `uv` 时，更新脚本可以用 `py -3.14 -m pip install --user -U uv` 自举用户级 uv。
 - 更新日志写入 `data\astrbot\logs\updates\`，真实数据仍在 `data\astrbot\data\`。

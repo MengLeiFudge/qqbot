@@ -10,13 +10,13 @@
 
 ## 数据目录
 
-`data/` 存放真实配置、数据库、日志、QQ 登录态、AI 会话和插件数据。
+`data/` 存放真实配置、数据库、日志、QQ 登录态、AI 会话、插件数据和更新备份。
 
 - `data/nonebot2/config/`：NoneBot2 的 `.env`、`qqbot.toml`。
 - `data/nonebot2/run/`：NoneBot2 运行态。
 - `data/nonebot2/logs/`：NoneBot2 启动和运行日志。
 - `data/astrbot/data/`：AstrBot 的 `cmd_config.json`、`data_v4.db`、插件和插件数据。
-- `data/napcat/`：预留给 NapCat 账号配置、登录态和日志。
+- `data/napcat/`：NapCat 更新下载、旧包备份、账号配置、登录态和日志。
 
 可提交配置模板只放在：
 
@@ -56,9 +56,23 @@ AstrBot Core 使用手动更新入口：
 
 ```powershell
 Set-Location D:\project\qqbot
+.\scripts\update-all.bat
+```
+
+分项更新入口：
+
+```powershell
+.\scripts\update-napcat.bat
+.\scripts\update-nonebot2.bat
 .\scripts\update-astrbot.bat
 ```
 
-该脚本默认使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会先用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
+`update-all.bat` 会按顺序更新 NapCat、NoneBot2/OneBot adapter、AstrBot Core。
+
+NapCat 更新会从 GitHub 最新 release 下载 Windows Shell OneKey zip，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，再替换程序包。更新前请关闭 NapCat/QQ。
+
+NoneBot2 更新会按 `nonebot2\pyproject.toml` 中的版本约束升级依赖；OneBot v11 对应的 Python 适配器是 `nonebot-adapter-onebot`，随 NoneBot2 更新入口一起处理。
+
+AstrBot 更新默认使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会先用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
 
 更新后使用 `scripts\start-astrbot.bat` 启动 bot2。修改 `astrbot/` 里的源码快照不会影响实际运行的 bot2，除非重新切换回源码模式。
