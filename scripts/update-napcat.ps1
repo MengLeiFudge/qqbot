@@ -68,6 +68,69 @@ function Stop-NapCatProcesses {
     }
 }
 
+function Get-OneKeyConfigRoot {
+    param([string]$Root)
+
+    $currentConfig = Join-Path $Root "napcat\config"
+    if (Test-Path $currentConfig) {
+        return $currentConfig
+    }
+
+    $legacyConfig = Get-ChildItem -Path $Root -Directory -Filter "NapCat.*.Shell" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Get-ChildItem -Path (Join-Path $_.FullName "versions") -Directory -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+        } |
+        ForEach-Object {
+            $candidate = Join-Path $_.FullName "resources\app\napcat\config"
+            if (Test-Path $candidate) {
+                $candidate
+            }
+        } |
+        Select-Object -First 1
+
+    if ($legacyConfig) {
+        return $legacyConfig
+    }
+
+    $bootmainConfig = Join-Path $Root "bootmain\config"
+    if (Test-Path $bootmainConfig) {
+        return $bootmainConfig
+    }
+
+    return ""
+}
+
+function Copy-NapCatAccountConfigs {
+    param(
+        [string]$FromRoot,
+        [string]$ToRoot
+    )
+
+    $sourceConfig = Get-OneKeyConfigRoot -Root $FromRoot
+    $targetConfig = Get-OneKeyConfigRoot -Root $ToRoot
+    if (-not $sourceConfig) {
+        Write-Step "No previous NapCat account config directory found; skipping config migration."
+        return
+    }
+    if (-not $targetConfig) {
+        $targetConfig = Join-Path $ToRoot "napcat\config"
+        New-Item -ItemType Directory -Path $targetConfig -Force | Out-Null
+    }
+
+    $patterns = @("napcat_*.json", "napcat_protocol_*.json", "onebot11_*.json")
+    $copied = 0
+    foreach ($pattern in $patterns) {
+        $files = @(Get-ChildItem -Path $sourceConfig -File -Filter $pattern -ErrorAction SilentlyContinue)
+        foreach ($file in $files) {
+            Copy-Item -Path $file.FullName -Destination (Join-Path $targetConfig $file.Name) -Force
+            $copied += 1
+        }
+    }
+    Write-Step "Migrated NapCat account config files: $copied"
+}
+
 Write-Step "NapCat update started."
 Write-Step "Workspace: $WorkspaceRoot"
 Write-Step "Log: $logFile"
@@ -146,6 +209,9 @@ if (Test-Path $OneKeyRoot) {
 
 Write-Step "Activating new onekey package."
 Move-Item -Path $newOneKeyRoot -Destination $OneKeyRoot
+if (Test-Path $archivePath) {
+    Copy-NapCatAccountConfigs -FromRoot $archivePath -ToRoot $OneKeyRoot
+}
 Remove-Item -Path $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Step "NapCat update finished. Start bots with scripts\start-all.bat."

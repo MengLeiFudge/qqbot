@@ -19,36 +19,70 @@ $WorkspaceRoot = Split-Path -Parent $PSScriptRoot
 $OneKeyRoot = Join-Path $WorkspaceRoot "napcat\onekey"
 
 function Resolve-NapCatRoot {
+    $currentRoot = Join-Path $OneKeyRoot "napcat"
+    if (Test-Path (Join-Path $currentRoot "NapCatWinBootMain.exe")) {
+        return @{
+            Root = $currentRoot
+            Mode = "launcher"
+            Launcher = Join-Path $currentRoot "launcher-user.bat"
+            Exe = Join-Path $currentRoot "NapCatWinBootMain.exe"
+        }
+    }
+
     $versionedRoots = @(Get-ChildItem -Path $OneKeyRoot -Directory -Filter "NapCat.*.Shell" -ErrorAction SilentlyContinue | Where-Object {
         Test-Path (Join-Path $_.FullName "NapCatWinBootMain.exe")
     } | Sort-Object LastWriteTime -Descending)
     if ($versionedRoots.Count -gt 0) {
-        return $versionedRoots[0].FullName
+        return @{
+            Root = $versionedRoots[0].FullName
+            Mode = "direct"
+            Launcher = ""
+            Exe = Join-Path $versionedRoots[0].FullName "NapCatWinBootMain.exe"
+        }
     }
 
     $bootmain = Join-Path $OneKeyRoot "bootmain"
     if (Test-Path (Join-Path $bootmain "NapCatWinBootMain.exe")) {
-        return $bootmain
+        return @{
+            Root = $bootmain
+            Mode = "direct"
+            Launcher = ""
+            Exe = Join-Path $bootmain "NapCatWinBootMain.exe"
+        }
     }
 
     if (Test-Path (Join-Path $OneKeyRoot "NapCatWinBootMain.exe")) {
-        return $OneKeyRoot
+        return @{
+            Root = $OneKeyRoot
+            Mode = "direct"
+            Launcher = ""
+            Exe = Join-Path $OneKeyRoot "NapCatWinBootMain.exe"
+        }
     }
 
     throw "NapCat executable not found under: $OneKeyRoot"
 }
 
-$NapCatRoot = Resolve-NapCatRoot
-$NapCatExe = Join-Path $NapCatRoot "NapCatWinBootMain.exe"
+$resolved = Resolve-NapCatRoot
+$NapCatRoot = $resolved.Root
+$NapCatExe = $resolved.Exe
 
 if (-not (Test-Path $NapCatExe)) {
     throw "NapCat executable not found: $NapCatExe"
+}
+if ($resolved.Mode -eq "launcher" -and -not (Test-Path $resolved.Launcher)) {
+    throw "NapCat launcher not found: $($resolved.Launcher)"
 }
 
 Set-Location $NapCatRoot
 
 if ($NoQuickLogin -or -not $Account) {
-    & $NapCatExe
+    if ($resolved.Mode -eq "launcher") {
+        & $resolved.Launcher
+    }
+    else {
+        & $NapCatExe
+    }
     exit $LASTEXITCODE
 }
 
@@ -56,5 +90,11 @@ if (-not ($Account -match '^\d+$')) {
     throw "Invalid NapCat account: $Account"
 }
 
-& $NapCatExe $Account
+if ($resolved.Mode -eq "launcher") {
+    $env:NAPCAT_QUICK_ACCOUNT = $Account
+    & $resolved.Launcher
+}
+else {
+    & $NapCatExe $Account
+}
 exit $LASTEXITCODE

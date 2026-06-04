@@ -48,7 +48,7 @@ Set-Location D:\project\qqbot
 - `1443944862`：NapCat 反连 NoneBot2，`ws://127.0.0.1:8080/onebot/v11/ws`。
 - `2629227874`：NapCat 反连 AstrBot，`ws://127.0.0.1:6199/ws`。
 
-NapCat 仍使用 `napcat/` 下的一键包；后续再把账号配置和登录态收拢到 `data/napcat/`。
+NapCat 仍使用 `napcat/` 下的一键包；更新脚本会保留并迁移账号 OneBot 配置，更新下载和旧包备份放在 `data/napcat/`。
 
 ## 更新
 
@@ -69,7 +69,7 @@ Set-Location D:\project\qqbot
 
 `update-all.bat` 会按顺序更新 NapCat、NoneBot2/OneBot adapter、AstrBot Core。
 
-NapCat 更新会先停止本工作区关联的 NapCat/QQ 进程，再从 GitHub 最新 release 下载 Windows Shell OneKey zip，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，再替换程序包。
+NapCat 更新会先停止本工作区关联的 NapCat/QQ 进程，再从 GitHub 最新 release 下载 Windows Shell OneKey zip，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换程序包后自动迁移 `napcat_*.json`、`napcat_protocol_*.json` 和 `onebot11_*.json` 账号配置。
 
 NoneBot2 更新会按 `nonebot2\pyproject.toml` 中的版本约束升级依赖；OneBot v11 对应的 Python 适配器是 `nonebot-adapter-onebot`，随 NoneBot2 更新入口一起处理。
 

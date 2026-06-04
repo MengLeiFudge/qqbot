@@ -14,7 +14,7 @@
 
 - `nonebot2/`：原 qqbot / NoneBot2 应用；子目录内的 `AGENTS.md` 是该应用的细化规则。
 - `astrbot/`：AstrBot 上游源码快照和本机配置示例；不保留 AstrBot 上游 Git 历史，也不作为 bot2 Core 的日常启动来源。
-- `napcat/`：共用 NapCat 程序包；账号数据、登录态、更新下载和旧包备份应放在 `data/napcat/`。
+- `napcat/`：共用 NapCat 程序包；更新下载和旧包备份应放在 `data/napcat/`，当前账号 OneBot 配置随一键包放置并由更新脚本迁移。
 - `data/`：统一运行态根目录，默认忽略，不进 Git。
 - `scripts/`：monorepo 根级启动脚本，负责设置各应用运行态路径。
 
@@ -42,6 +42,7 @@
 
 - 日常启动入口是 `D:\project\qqbot\scripts\start-nonebot2.bat`、`scripts\start-astrbot.bat`、`scripts\start-all.bat`，分别启动/重启 bot1、bot2、bot1+bot2。
 - 普通启动入口会拉起对应 Bot 和 NapCat 子窗口；子窗口确认端口和反连就绪后退出，全部子窗口完成后入口窗口退出。
+- NapCat 启动脚本必须同时兼容新版 `napcat\onekey\napcat\launcher-user.bat` 和旧版 `NapCat.*.Shell` / `bootmain` 结构；新版 quick login 使用 `NAPCAT_QUICK_ACCOUNT` 环境变量。
 - 管理端重启入口使用 `scripts/start-nonebot2.bat -SkipInstall -RestartBot` 后台编排，只重启 NoneBot2，等待 `8080` 和 OneBot 连接，不额外打开 NapCat 窗口。
 - `-RestartBot` 模式日志写入 `data\nonebot2\logs\start_all\<timestamp>\`。
 
@@ -49,7 +50,7 @@
 
 - AstrBot Core 手动更新入口是 `D:\project\qqbot\scripts\update-astrbot.bat`。
 - 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat、NoneBot2/OneBot adapter、AstrBot 更新入口。
-- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；正式更新会先停止本工作区关联的 NapCat/QQ 进程，再把旧 `napcat\onekey` 备份到 `data\napcat\archives\`。
+- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；正式更新会先停止本工作区关联的 NapCat/QQ 进程，再把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换后迁移账号 OneBot 配置。
 - NoneBot2/OneBot adapter 手动更新入口是 `D:\project\qqbot\scripts\update-nonebot2.bat`；只按 `nonebot2\pyproject.toml` 版本约束升级依赖，不自动放宽主版本上限。
 - OneBot v11 本身是协议；本仓库实际更新对象是 NapCat 协议端和 `nonebot-adapter-onebot`。
 - `update-astrbot.bat` 默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
