@@ -41,6 +41,10 @@
 ## 启动与重启
 
 - 日常启动入口是 `D:\project\qqbot\scripts\start-nonebot2.bat`、`scripts\start-astrbot.bat`、`scripts\start-all.bat`，分别启动/重启 bot1、bot2、bot1+bot2。
+- 修改会影响正在运行机器人的代码、配置、提示词、运行包或启动脚本后，必须重启对应机器人并做启动验证；不能只停在“已修改/已提交”。若当前环境无法重启，最终回复必须明确写出未重启、原因和应执行的入口。
+- 只影响 `nonebot2/` 或 `data\nonebot2\config` 的改动，重启 bot1：`scripts\start-nonebot2.bat -SkipInstall -RestartBot`。
+- 只影响 AstrBot Core、`data\astrbot\data\cmd_config.json`、AstrBot persona 或 uv tool 运行包的改动，重启 bot2：`scripts\start-astrbot.bat`。
+- 同时影响 bot1 和 bot2，使用 `scripts\start-all.bat`；需要 NapCat 重新反连时也使用普通启动入口，不要只重启 Python 进程。
 - 普通启动入口会拉起对应 Bot 和 NapCat 子窗口；子窗口确认端口和反连就绪后退出，全部子窗口完成后入口窗口退出。
 - NapCat 启动脚本必须同时兼容新版 `napcat\onekey\napcat\launcher-user.bat` 和旧版 `NapCat.*.Shell` / `bootmain` 结构；新版 quick login 使用 `NAPCAT_QUICK_ACCOUNT` 环境变量。
 - 管理端重启入口使用 `scripts/start-nonebot2.bat -SkipInstall -RestartBot` 后台编排，只重启 NoneBot2，等待 `8080` 和 OneBot 连接，不额外打开 NapCat 窗口。
