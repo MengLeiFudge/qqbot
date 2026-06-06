@@ -47,6 +47,13 @@ from qqbot.features.ai.profile_registry import (
 )
 from qqbot.features.ai.runtime import build_ai_gateway, get_current_ai_profile_name
 from qqbot.features.ai.runtime import list_ai_profile_fallback_order
+from qqbot.features.ai.topic_concentration import (
+    ProactiveTopicInterest,
+    TopicConcentrationMessage,
+    build_ai_proactive_reply_decision_prompt,
+    build_topic_concentration_prompt,
+    parse_ai_proactive_reply_decision,
+)
 from qqbot.features.ai.user_style_store import AiUserStyleStore
 from qqbot.services.admin_service import AdminService
 from qqbot.services.bot_loop_guard import BotLoopGuard
@@ -90,12 +97,9 @@ from qqbot.features.ai.queue import (
     AiReplyQueueTicket,
 )
 from qqbot.features.ai.reply_pipeline import (
-    AI_CONTINUOUS_REPLY_CHARS_PER_SECOND,
     AI_RECENT_REPLY_NO_QUOTE_MESSAGES,
-    LOW_INFORMATION_REPLY_OPENERS,
     build_ai_reply_message,
     build_ai_reply_notice_message,
-    calculate_continuous_reply_delay_seconds,
     finish_continuous_group_ai_reply as _finish_continuous_group_ai_reply,
     should_quote_group_ai_reply,
     split_continuous_ai_reply_text,
@@ -118,8 +122,10 @@ AI_ACK_FALLBACK_MAX_ATTEMPTS = 3
 AI_RECENT_ANSWER_LOOKBACK_SECONDS = 180
 AI_RECENT_ANSWER_MAX_RECORDS = 8
 AI_PROFILE_FALLBACK_COOLDOWN_SECONDS = 120.0
+AI_PROACTIVE_TOPIC_INTEREST_SECONDS = 180.0
 _BOT_LOOP_GUARD = BotLoopGuard()
 _AI_PROFILE_FAILURE_UNTIL: dict[str, float] = {}
+_AI_PROACTIVE_TOPIC_INTEREST: dict[str, tuple[ProactiveTopicInterest, float]] = {}
 
 
 @dataclass
@@ -436,10 +442,20 @@ def merge_ai_queued_batch(batch: AiQueuedBatch) -> AiQueuedBatch:
     if len(batch.items) <= 1:
         return batch
     first = batch.first
-    lines = ["同一会话在等待期间又收到这些消息，请综合后一次性简短回复："]
-    for index, item in enumerate(batch.items, start=1):
-        lines.append(f"{index}. {item.prompt}")
-    merged_prompt = "\n".join(lines)
+    if all(item.trigger_kind == AiChatTriggerKind.PROACTIVE for item in batch.items):
+        active_interest = _get_active_proactive_topic_interest(first.group_id)
+        merged_prompt = build_topic_concentration_prompt(
+            (
+                TopicConcentrationMessage(item.prompt, str(item.user_id))
+                for item in batch.items
+            ),
+            active_interest=active_interest,
+        )
+    else:
+        lines = ["同一会话在等待期间又收到这些消息，请综合后一次性简短回复："]
+        for index, item in enumerate(batch.items, start=1):
+            lines.append(f"{index}. {item.prompt}")
+        merged_prompt = "\n".join(lines)
     merged_outline = "\n".join(item.normalized_message.outline for item in batch.items if item.normalized_message.outline)
     merged_text = "\n".join(item.normalized_message.text for item in batch.items if item.normalized_message.text)
     merged_images: list[str] = []
@@ -557,15 +573,13 @@ def build_proactive_buffer_queued_request(item: AiProactiveBufferItem) -> AiQueu
     )
 
 
-def should_silence_proactive_batch(items: tuple[AiProactiveBufferItem, ...] | list[AiProactiveBufferItem]) -> bool:
+async def should_silence_proactive_batch(items: tuple[AiProactiveBufferItem, ...] | list[AiProactiveBufferItem]) -> bool:
     if not items:
         return False
     if any(looks_like_sensitive_credential_request(item.prompt) for item in items):
         return False
     prompts = [item.prompt.strip() for item in items if item.prompt.strip()]
     if not prompts:
-        return False
-    if len(prompts) == 1 and not looks_like_ai_meta_conversation(prompts[0]):
         return False
 
     user_ids = {str(item.user_id) for item in items if str(item.user_id)}
@@ -574,7 +588,118 @@ def should_silence_proactive_batch(items: tuple[AiProactiveBufferItem, ...] | li
         return True
     if _looks_like_human_handled_ai_debug_thread(combined, user_count=len(user_ids)):
         return True
+
+    decision = await _decide_ai_proactive_batch(items)
+    if decision is None:
+        logger.info(
+            "Silence proactive AI batch after decision failure: count={}, group_id={}, first_message_id={}",
+            len(items),
+            items[0].group_id,
+            items[0].message_id,
+        )
+        return True
+    if not decision.should_reply:
+        logger.info(
+            "Silence proactive AI batch by AI decision: count={}, topic_key={}, topic_type={}, reason={}",
+            len(items),
+            decision.topic_key,
+            decision.topic_type,
+            decision.reason,
+        )
+        return True
+    _set_active_proactive_topic_interest(items[0].group_id, decision)
+    logger.info(
+        "Allow proactive AI batch by AI decision: count={}, topic_key={}, topic_type={}, style={}, max_length={}, reason={}",
+        len(items),
+        decision.topic_key,
+        decision.topic_type,
+        decision.reply_style,
+        decision.max_length,
+        decision.reason,
+    )
     return False
+
+
+async def _decide_ai_proactive_batch(items: tuple[AiProactiveBufferItem, ...] | list[AiProactiveBufferItem]):
+    first = items[0]
+    profiles = load_ai_profiles(first.settings.ai_profile_file)
+    profile = get_current_ai_profile_name(first.settings, first.store, profiles)
+    profile_order = list_ai_profile_fallback_order(
+        first.settings,
+        first.store,
+        profiles,
+        preferred_profile=profile,
+    )
+    gateway_chain = build_ai_gateway_chain(first.settings, profile_order)
+    if not gateway_chain:
+        return None
+    prompt = build_ai_proactive_reply_decision_prompt(
+        (
+            TopicConcentrationMessage(item.prompt, str(item.user_id))
+            for item in items
+        ),
+        active_interest=_get_active_proactive_topic_interest(first.group_id),
+    )
+    request = AiRequest(
+        plugin_id="ai",
+        capability="proactive_reply_decision",
+        prompt=prompt,
+        user_id=str(first.user_id),
+        group_id=str(first.group_id),
+        context=(),
+    )
+    try:
+        response = await complete_ai_request_with_profile_fallbacks(
+            gateway_chain,
+            request,
+            pending_task_id="",
+            group_id=first.group_id,
+            user_id=str(first.user_id),
+            message_id=first.message_id,
+        )
+    except Exception as exc:
+        logger.warning("Proactive AI decision request failed: {}", exc)
+        return None
+    if response.fallback:
+        logger.info(
+            "Proactive AI decision fallback: group_id={}, reason={}, profile={}",
+            first.group_id,
+            response.fallback_reason,
+            response.profile_name,
+        )
+        return None
+    try:
+        return parse_ai_proactive_reply_decision(response.text)
+    except Exception as exc:
+        logger.warning("Proactive AI decision parse failed: error={}, text={}", exc, response.text[:240])
+        return None
+
+
+def _get_active_proactive_topic_interest(group_id: object | None) -> ProactiveTopicInterest | None:
+    if group_id is None:
+        return None
+    key = str(group_id)
+    current = _AI_PROACTIVE_TOPIC_INTEREST.get(key)
+    if current is None:
+        return None
+    interest, expires_at = current
+    if time.monotonic() >= expires_at:
+        _AI_PROACTIVE_TOPIC_INTEREST.pop(key, None)
+        return None
+    return interest
+
+
+def _set_active_proactive_topic_interest(group_id: object | None, decision) -> None:
+    if group_id is None:
+        return
+    _AI_PROACTIVE_TOPIC_INTEREST[str(group_id)] = (
+        ProactiveTopicInterest(
+            topic_key=decision.topic_key,
+            topic_type=decision.topic_type,
+            reason=decision.reason,
+        ),
+        time.monotonic() + AI_PROACTIVE_TOPIC_INTEREST_SECONDS,
+    )
 
 
 def _looks_like_human_answered_help_thread(prompts: list[str], *, user_count: int) -> bool:
@@ -1810,7 +1935,7 @@ def build_ai_system_context(settings: RuntimeSettings) -> str:
         "关系：主人是萌泪酱（QQ 605738729），仅在系统明确对方是主人时称呼“主人”，无关对话不主动提。妹妹是“👿棉花糖👿”，你非常包容、宠溺她，会温柔地顺着她。"
         "性格：温柔、体贴、包容，但是智商稍微低一些，有点呆萌和笨拙。遇到复杂事情会显得不太聪明，但总是在努力帮忙。"
         "语气：像个温柔的笨蛋姐姐。合适时句末自然带“喵”（绝对不能用“喵呜”，也不要每句都带）。"
-        "核心硬规则：严格遵循社交软件短消息风格；默认回复 1 句话，最多 2 句；日常闲聊必须在 40 字以内。"
+        "核心硬规则：严格遵循社交软件短消息风格；低信息日常闲聊默认 1 句话、40 字以内；已经形成话题、解释/澄清/技术问题按需要 80-160 字或更详细，不强行压缩。"
         "绝对不使用标题、列表、分节、空行、Markdown 等排版格式，不要最后总结。"
         "遇到技术、配置、报错等严肃问题时，不要卖萌压过信息密度。先用短句回应情绪，然后给出中立准确的信息；如果不懂，就坦白自己笨笨的不太明白，但会努力查证。"
         "不提人格切换，不假装人类，不替主人承诺现实行为。"
@@ -1977,7 +2102,8 @@ def build_group_output_strategy_context(
         return ""
     parts = [
         "群聊输出策略：按天使棉花糖姐姐的当前身份自然短答，简短、温柔、可靠；像社交软件实时聊天，不要写宣言式长段，不要为了显得正式而失去语气。"
-        "普通闲聊和轻量提问优先 40 字以内，一句话能回就一句；不要输出标题、列表、分节、空行或最后再写一句总结。"
+        "低信息闲聊优先 40 字以内，一句话能回就一句；正在聊的话题可用 80-160 字，技术、配置、报错按信息完整性优先。"
+        "不要输出标题、列表、分节、空行或最后再写一句总结。"
         "普通主动触发时只解决明确问题或安全风险；不要延展玩笑、不要替群友续梗、不要把 shapez 或其他游戏拟人化成会吃醋、正宫这类关系梗。"
         "不要用“它”“这个 bot”称呼自己；需要提到自己时用“我”或“棉花糖”。"
         "不能把其他机器人、其他账号或群友刚发的内容当成自己的输出；"

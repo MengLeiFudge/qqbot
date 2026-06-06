@@ -11,7 +11,9 @@ from qqbot.config import RuntimeSettings
 from qqbot.features.ai.group_context_store import AiGroupContextStore
 from qqbot.services.message_delivery import finish_split_text, send_split_text
 
-AI_CONTINUOUS_REPLY_CHARS_PER_SECOND = 6.0
+AI_CONTINUOUS_REPLY_CHARS_PER_SECOND = 18.0
+AI_CONTINUOUS_REPLY_MIN_DELAY_SECONDS = 1.2
+AI_CONTINUOUS_REPLY_MAX_DELAY_SECONDS = 3.0
 AI_RECENT_REPLY_NO_QUOTE_MESSAGES = 5
 LOW_INFORMATION_REPLY_OPENERS = {
     "哦哦",
@@ -100,7 +102,15 @@ async def finish_continuous_group_ai_reply(
 
 
 def calculate_continuous_reply_delay_seconds(text: str) -> float:
-    return max(0.0, len(str(text)) / AI_CONTINUOUS_REPLY_CHARS_PER_SECOND)
+    if not str(text):
+        return 0.0
+    return min(
+        AI_CONTINUOUS_REPLY_MAX_DELAY_SECONDS,
+        max(
+            AI_CONTINUOUS_REPLY_MIN_DELAY_SECONDS,
+            len(str(text)) / AI_CONTINUOUS_REPLY_CHARS_PER_SECOND,
+        ),
+    )
 
 
 def split_continuous_ai_reply_text(text: str) -> list[str]:

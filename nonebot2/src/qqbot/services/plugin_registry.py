@@ -91,7 +91,7 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
         name="AI测试",
         commands=("ai",),
         scopes=("private",),
-        ai_capabilities=("chat",),
+        ai_capabilities=("chat", "proactive_reply_decision"),
         visible=False,
     ),
     PluginSpec(

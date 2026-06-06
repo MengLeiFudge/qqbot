@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -77,7 +78,7 @@ class AiProactiveBufferManager:
         quiet_seconds: float = AI_PROACTIVE_BUFFER_QUIET_SECONDS,
         max_seconds: float = AI_PROACTIVE_BUFFER_MAX_SECONDS,
         batch_builder: Callable[[AiProactiveBufferItem], AiQueuedRequest] | None = None,
-        silence_checker: Callable[[tuple[AiProactiveBufferItem, ...]], bool] | None = None,
+        silence_checker: Callable[[tuple[AiProactiveBufferItem, ...]], Awaitable[bool] | bool] | None = None,
         silence_logger: Callable[[str, tuple[AiProactiveBufferItem, ...]], None] | None = None,
         batch_processor: Callable[[AiQueuedBatch, float], Awaitable[None]] | None = None,
     ) -> None:
@@ -103,16 +104,20 @@ class AiProactiveBufferManager:
             task.cancel()
             self._tasks[scope] = asyncio.create_task(self.flush(scope))
 
-    def pop(self, scope: str) -> AiQueuedBatch | None:
+    async def pop(self, scope: str) -> AiQueuedBatch | None:
         items = self._buffers.pop(scope, [])
         self._tasks.pop(scope, None)
         if not items:
             return None
         item_tuple = tuple(items)
-        if self.silence_checker is not None and self.silence_checker(item_tuple):
-            if self.silence_logger is not None:
-                self.silence_logger(scope, item_tuple)
-            return None
+        if self.silence_checker is not None:
+            should_silence = self.silence_checker(item_tuple)
+            if inspect.isawaitable(should_silence):
+                should_silence = await should_silence
+            if should_silence:
+                if self.silence_logger is not None:
+                    self.silence_logger(scope, item_tuple)
+                return None
         if self.batch_builder is None:
             raise RuntimeError("AiProactiveBufferManager.batch_builder is not configured")
         requests = tuple(self.batch_builder(item) for item in item_tuple)
@@ -130,7 +135,7 @@ class AiProactiveBufferManager:
             raise RuntimeError("AiProactiveBufferManager.batch_processor is not configured")
         lock = self._locks.setdefault(scope, asyncio.Lock())
         async with lock:
-            batch = self.pop(scope)
+            batch = await self.pop(scope)
             if batch is None:
                 return
             await self.batch_processor(batch, batch.first.request_started)

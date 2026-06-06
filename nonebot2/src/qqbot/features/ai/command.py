@@ -11,6 +11,10 @@ from qqbot.features.ai.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
 )
+from qqbot.features.ai.topic_concentration import (
+    is_third_party_named_mention,
+    looks_like_topic_concentration_candidate,
+)
 from qqbot.features.group.reread_service import DEFAULT_REREAD_STATE, is_plain_text_message
 
 QQ_GROUP_MANAGER_USER_IDS = {"2854196310"}
@@ -139,41 +143,7 @@ def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = (
     if looks_like_ambiguous_chat_evaluation(compact):
         return False
 
-    question_markers = ("?", "？", "吗", "么", "呢")
-    explicit_help_markers = (
-        "有人知道",
-        "有谁知道",
-        "谁知道",
-        "求助",
-        "请问",
-        "问一下",
-        "能不能帮",
-        "帮我看",
-    )
-    diagnostic_markers = (
-        "怎么修",
-        "怎么解决",
-        "怎么处理",
-        "怎么排查",
-        "怎么弄",
-        "怎么搞",
-        "怎么办",
-        "为啥报错",
-        "为什么报错",
-        "咋修",
-        "咋解决",
-        "咋处理",
-        "咋排查",
-        "咋办",
-    )
-    if any(marker in compact for marker in explicit_help_markers) and (
-        any(marker in compact for marker in question_markers)
-        or len(compact) >= 8
-    ):
-        return True
-    if any(marker in compact for marker in diagnostic_markers):
-        return True
-    return False
+    return looks_like_topic_concentration_candidate(compact, bot_names=bot_names)
 
 
 def looks_like_sensitive_credential_request(text: str) -> bool:
@@ -320,7 +290,10 @@ def looks_like_ai_named_trigger(text: str, *, bot_names: tuple[str, ...] = ()) -
         start = lower.find(name)
         while start >= 0:
             end = start + len(name)
-            if _named_reference_is_call(compact[:start], compact[end:], compact):
+            if (
+                not is_third_party_named_mention(compact[:start], compact[end:])
+                and _named_reference_is_call(compact[:start], compact[end:], compact)
+            ):
                 return True
             start = lower.find(name, start + len(name))
     return False
