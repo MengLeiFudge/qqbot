@@ -23,7 +23,7 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
     PluginSpec(
         id="group_assistant",
         name="群管助手",
-        aliases=("群管", "群管理", "群功能", "QQ助手", "qq助手", "社交事件", "复读"),
+        aliases=("群管", "群管理", "群功能", "QQ助手", "qq助手", "社交事件"),
         menu_lines=(
             "通知清理文件：统计超过一周的外层群文件并按大小禁言上传者",
         ),
@@ -32,6 +32,17 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
         ),
         scopes=("group",),
         admin_only=True,
+    ),
+    PluginSpec(
+        id="reread",
+        name="复读",
+        aliases=("随机复读",),
+        menu_lines=(
+            "群里连续出现相同文字消息时概率复读；连续次数越多概率越高，复读后短时间内不重复同一内容",
+        ),
+        commands=("复读",),
+        scopes=("group",),
+        requires_direct_at=False,
     ),
     PluginSpec(
         id="lolicon",

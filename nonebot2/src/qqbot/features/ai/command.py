@@ -11,6 +11,7 @@ from qqbot.features.ai.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
 )
+from qqbot.features.group.reread_service import DEFAULT_REREAD_STATE, is_plain_text_message
 
 QQ_GROUP_MANAGER_USER_IDS = {"2854196310"}
 
@@ -82,6 +83,8 @@ def classify_ai_chat_trigger(
         or parse_ai_output_mode_command(prompt) is not None
     ):
         return AiChatTriggerKind.IGNORE
+    if is_duplicate_reread_text_message(event, prompt):
+        return AiChatTriggerKind.IGNORE
     if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
         return AiChatTriggerKind.DRAW
     if is_direct_command_event(event):
@@ -91,6 +94,20 @@ def classify_ai_chat_trigger(
     if looks_like_ai_proactive_trigger(prompt, bot_names=bot_names):
         return AiChatTriggerKind.PROACTIVE
     return AiChatTriggerKind.IGNORE
+
+
+def is_duplicate_reread_text_message(event, text: str) -> bool:
+    if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
+        return False
+    message = getattr(event, "original_message", None) or getattr(event, "message", None)
+    if not is_plain_text_message(message):
+        return False
+    observation = DEFAULT_REREAD_STATE.observe(
+        getattr(event, "group_id", ""),
+        text,
+        message_id=getattr(event, "message_id", ""),
+    )
+    return observation.is_duplicate
 
 
 def is_group_manager_welcome_message(event, text: str) -> bool:
