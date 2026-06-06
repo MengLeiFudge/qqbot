@@ -13,13 +13,13 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.rule import Rule
 
 from qqbot.config import load_settings
-from qqbot.services.arcaea_record_apk_downloader import ArcaeaRecordApkDownloader
-from qqbot.services.arc_apk_update_service import ArcApkUpdateManager
-from qqbot.services.arc_alias_service import load_song_titles
-from qqbot.services.arc_event_service import ArcEventService, _fetch_latest_arc_version
-from qqbot.services.arc_guess_service import ArcGuessService
-from qqbot.services.arc_service import ArcService
-from qqbot.services.arc_constant_service import ArcConstantService
+from qqbot.features.arc.arcaea_record_apk_downloader import ArcaeaRecordApkDownloader
+from qqbot.features.arc.apk_update_service import ArcApkUpdateManager
+from qqbot.features.arc.alias_service import load_song_titles
+from qqbot.features.arc.event_service import ArcEventService, _fetch_latest_arc_version
+from qqbot.features.arc.guess_service import ArcGuessService
+from qqbot.features.arc.service import ArcService
+from qqbot.features.arc.constant_service import ArcConstantService
 from qqbot.services.async_tools import run_blocking
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.feature_catalog import get_feature_by_menu_key

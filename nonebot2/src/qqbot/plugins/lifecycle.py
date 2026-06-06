@@ -7,12 +7,12 @@ from nonebot import get_driver, logger
 from nonebot.adapters.onebot.v11 import Bot
 
 from qqbot.config import load_settings
-from qqbot.services.arc_alias_service import ArcAliasService
-from qqbot.services.arc_alias_service import load_song_titles
-from qqbot.services.arc_background_service import ArcBackgroundService
-from qqbot.services.arc_constant_service import ArcConstantService
-from qqbot.services.arc_event_service import ArcEventService, _fetch_latest_arc_version
-from qqbot.services.arc_guess_service import ArcGuessService
+from qqbot.features.arc.alias_service import ArcAliasService
+from qqbot.features.arc.alias_service import load_song_titles
+from qqbot.features.arc.background_service import ArcBackgroundService
+from qqbot.features.arc.constant_service import ArcConstantService
+from qqbot.features.arc.event_service import ArcEventService, _fetch_latest_arc_version
+from qqbot.features.arc.guess_service import ArcGuessService
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.chat_memory_store import ChatMemoryStore
 from qqbot.services.domain_knowledge_store import DomainKnowledgeStore, build_seed_knowledge_candidates
