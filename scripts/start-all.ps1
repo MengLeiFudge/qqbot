@@ -7,7 +7,9 @@ param(
     [ValidateSet("", "nonebot2", "astrbot", "napcat-nonebot2", "napcat-astrbot")]
     [string]$Component = "",
     [string]$RunId = "",
-    [string]$WindowTitle = ""
+    [string]$WindowTitle = "",
+    [ValidateSet("", "dual", "full")]
+    [string]$FeatureMode = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -379,7 +381,8 @@ function Start-AstrBotComponent {
     Stop-ProcessByPort -Port 6199 -Name "AstrBot" -LogFile $launcherLog
 
     $script = Join-Path $ScriptRoot "start-astrbot.ps1"
-    $command = "& '$script'"
+    $featureModeArg = if ($FeatureMode) { " -FeatureMode '$FeatureMode'" } else { "" }
+    $command = "& '$script'$featureModeArg"
     $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
     Write-LauncherLog -LogFile $launcherLog -Message "AstrBot stdout log: $stdoutLog"
 
@@ -537,6 +540,9 @@ function Start-ChildWindow {
     if ($SkipInstall) {
         $arguments += "-SkipInstall"
     }
+    if ($FeatureMode) {
+        $arguments += @("-FeatureMode", $FeatureMode)
+    }
     Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WorkingDirectory $WorkspaceRoot | Out-Null
 }
 
@@ -589,6 +595,10 @@ function Wait-Children {
 }
 
 function Invoke-Parent {
+    if ($FeatureMode -eq "full" -and $Target -ne "astrbot") {
+        throw "FeatureMode full is only allowed with -Target astrbot. Use dual when NoneBot2 is also running."
+    }
+
     $runId = New-RunId
     $controlRoot = Get-ControlRoot -RunId $runId
     New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null

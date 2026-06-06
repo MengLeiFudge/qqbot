@@ -7,13 +7,14 @@ import os
 from pathlib import Path
 import random
 import re
+import socket
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, MessageChain
+from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
 from astrbot.api.message_components import Plain, Poke
 from astrbot.api.star import Context, Star, register
@@ -26,6 +27,12 @@ FACTORIO_DOWNLOAD_PATTERN = (
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单(?!\d+$)\S+$"
 REREAD_COOLDOWN_SECONDS = 120.0
+FEATURE_MODE_ENV = "QQBOT_ASTRBOT_FEATURE_MODE"
+FEATURE_MODE_DUAL = "dual"
+FEATURE_MODE_FULL = "full"
+FEATURE_MODES = {FEATURE_MODE_DUAL, FEATURE_MODE_FULL}
+NONEBOT2_HOST = "127.0.0.1"
+NONEBOT2_PORT = 8080
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,19 +200,23 @@ class RereadRepeatState:
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.1.0",
+    "0.2.0",
 )
 class QQBotFeaturesPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config=None):
         super().__init__(context)
+        self._feature_mode = read_feature_mode(config)
         self._reread_state = RereadRepeatState()
-        logger.info("[QQBotFeatures] migrated feature plugin loaded")
+        logger.info(
+            "[QQBotFeatures] migrated feature plugin loaded, mode=%s",
+            self._feature_mode,
+        )
 
     @filter.regex(MENU_PATTERN)
     async def menu(self, event: AstrMessageEvent):
         if not _is_direct_or_private(event):
             return
-        yield event.plain_result(build_menu_text())
+        yield event.plain_result(build_menu_text(self._feature_mode))
         event.stop_event()
 
     @filter.regex(FEATURE_MENU_PATTERN)
@@ -238,6 +249,8 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
     async def reread(self, event: AstrMessageEvent):
+        if not allow_passive_events(self._feature_mode):
+            return
         text = event.get_message_str().strip()
         if should_skip_reread(event, text):
             return
@@ -254,6 +267,8 @@ class QQBotFeaturesPlugin(Star):
             return
         post_type = str(raw.get("post_type") or "")
         if post_type == "notice":
+            if not allow_passive_events(self._feature_mode):
+                return
             async for result in self._handle_onebot_notice(event, raw):
                 yield result
             return
@@ -349,8 +364,8 @@ def find_feature(key: str) -> FeatureSpec | None:
     return None
 
 
-def build_menu_text() -> str:
-    lines = ["NoneBot2 已迁移功能清单："]
+def build_menu_text(feature_mode: str = FEATURE_MODE_DUAL) -> str:
+    lines = ["NoneBot2 已迁移功能清单：", build_feature_mode_text(feature_mode)]
     for feature in FEATURES:
         lines.append(f"- {feature.name}：{feature.status}")
     lines.append("发送 菜单模块名 查看具体命令，例如 菜单Factorio。")
@@ -361,6 +376,51 @@ def build_feature_menu_text(feature: FeatureSpec) -> str:
     lines = [f"{feature.name}：{feature.status}"]
     lines.extend(feature.lines)
     return "\n".join(lines)
+
+
+def read_feature_mode(config=None) -> str:
+    source = FEATURE_MODE_ENV
+    raw = os.environ.get(FEATURE_MODE_ENV, "").strip().lower()
+    if not raw and config is not None:
+        raw = str(config.get("feature_mode", "") or "").strip().lower()
+        source = "plugin_config.feature_mode"
+    if not raw:
+        return FEATURE_MODE_DUAL
+    if raw in FEATURE_MODES:
+        if raw == FEATURE_MODE_FULL and is_nonebot2_port_open():
+            logger.warning(
+                "[QQBotFeatures] requested full mode but NoneBot2 is reachable at %s:%s, fallback to %s",
+                NONEBOT2_HOST,
+                NONEBOT2_PORT,
+                FEATURE_MODE_DUAL,
+            )
+            return FEATURE_MODE_DUAL
+        return raw
+    logger.warning(
+        "[QQBotFeatures] invalid %s=%r, fallback to %s",
+        source,
+        raw,
+        FEATURE_MODE_DUAL,
+    )
+    return FEATURE_MODE_DUAL
+
+
+def allow_passive_events(feature_mode: str) -> bool:
+    return feature_mode == FEATURE_MODE_FULL
+
+
+def is_nonebot2_port_open() -> bool:
+    try:
+        with socket.create_connection((NONEBOT2_HOST, NONEBOT2_PORT), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def build_feature_mode_text(feature_mode: str) -> str:
+    if feature_mode == FEATURE_MODE_FULL:
+        return "当前模式：full，AstrBot 接管已迁移自动事件。"
+    return "当前模式：dual，自动事件由 NoneBot2 负责，AstrBot 只响应明确唤醒/私聊命令。"
 
 
 def should_skip_reread(event: AstrMessageEvent, text: str) -> bool:

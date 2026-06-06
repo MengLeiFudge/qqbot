@@ -1,0 +1,12 @@
+{
+  "feature_mode": {
+    "description": "迁移功能响应模式",
+    "type": "string",
+    "default": "dual",
+    "options": [
+      "dual",
+      "full"
+    ],
+    "hint": "dual: bot1/bot2 双开时只响应明确唤醒或私聊命令，自动事件由 NoneBot2 负责；full: AstrBot-only 时接管复读、入群欢迎、戳一戳等已迁移自动事件。环境变量 QQBOT_ASTRBOT_FEATURE_MODE 会覆盖这里。"
+  }
+}

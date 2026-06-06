@@ -31,6 +31,8 @@ AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps
 
 `astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、菜单、Factorio 下载链接、复读、入群欢迎、戳一戳响应，以及社交请求日志；群文件清理、Lolicon、养鲲、落樱、Arc、shapez 和 NoneBot2 AI runtime 属于二期适配或使用 AstrBot 原生链路。
 
+`astrbot_plugin_qqbot_features` 默认使用 `dual` 模式：bot1 和 bot2 同时在线时，AstrBot 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 NoneBot2 负责，避免同一事件双机器人重复回应。以后切换到 AstrBot-only 时，先停用 bot1，再使用 `scripts\start-astrbot.bat -FeatureMode full` 启动 bot2，或在 AstrBot 插件配置中把 `feature_mode` 改为 `full` 后重启 bot2；环境变量 `QQBOT_ASTRBOT_FEATURE_MODE` 会覆盖插件配置。启动脚本会阻止 `full` 模式和 NoneBot2 双开。
+
 ## 启动
 
 日常入口：
