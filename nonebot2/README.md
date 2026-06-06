@@ -171,6 +171,8 @@ http://127.0.0.1:8080/admin
 - `养鲲` / `属性` / `等级排行` / `财富排行` / `背包` / `商城` / `签到` / `boss` / `挑战`
 - `注册樱花勇者` / `个人信息` / `加经验500` / `加5力量` / `恢复`
 
+Lolicon 美图使用 `https://api.lolicon.app/setu/v2` 获取图片信息，并把 PID、页码、作者、r18、尺寸、tags、扩展名、aiType、uploadDate、原始 URL 和本地路径写入 `data/nonebot2/run/data/lolicon/lolicon.sqlite3`。图片缓存优先复用旧平铺目录 `data/nonebot2/run/data/lolicon/img/{pid}.{ext}`；新下载图片按 `img/r18/` 和 `img/non-r18/` 分类保存，已有本地文件时不会重复下载。
+
 ## Arc 插件
 
 Arc 用户入口统一在 `src/qqbot/plugins/arc.py`：

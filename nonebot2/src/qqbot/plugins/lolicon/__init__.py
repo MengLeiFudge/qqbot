@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import json
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-
 from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from nonebot.adapters.onebot.v11 import MessageEvent
 
 from qqbot.services.async_tools import run_blocking
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.features.lolicon.service import LoliconMode, parse_lolicon_command, parse_lolicon_response
+from qqbot.features.lolicon.service import (
+    LoliconImageStore,
+    LoliconMode,
+    fetch_lolicon_items,
+    parse_lolicon_command,
+)
+from qqbot.config import load_settings
 from qqbot.services.settings_store import get_settings_store
 
 lolicon_admin_matcher = on_regex(
@@ -27,23 +29,12 @@ lolicon_matcher = on_regex(
 )
 
 
-def fetch_lolicon_items(mode: LoliconMode, num: int, tags: list[str]):
-    query = {
-        "r18": mode.value,
-        "num": min(max(num, 1), 20),
-        "size": "original",
-    }
-    if tags:
-        query["tag"] = tags
-    url = "https://api.lolicon.app/setu/v2?" + urlencode(query, doseq=True)
-    request = Request(url, headers={"User-Agent": "qqbot/0.1"})
-    with urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    return parse_lolicon_response(payload)
-
-
 async def fetch_lolicon_items_async(mode: LoliconMode, num: int, tags: list[str]):
     return await run_blocking(fetch_lolicon_items, mode, num, tags)
+
+
+async def prepare_lolicon_item_async(store: LoliconImageStore, item):
+    return await run_blocking(store.prepare_item, item)
 
 
 @lolicon_admin_matcher.handle()
@@ -77,6 +68,7 @@ async def handle_lolicon(event: MessageEvent) -> None:
         return
 
     store = get_settings_store()
+    settings = load_settings()
     if hasattr(event, "group_id"):
         group_r18, show_image = store.get_lolicon_config(event.group_id)
         if command.mode != LoliconMode.NON_R18 and not group_r18:
@@ -88,17 +80,21 @@ async def handle_lolicon(event: MessageEvent) -> None:
     if not items:
         await lolicon_matcher.finish("没有找到符合你要求的图片呢QAQ\n尝试减少一些tag吧！")
 
+    image_store = LoliconImageStore(settings.data_root)
     for index, item in enumerate(items, start=1):
+        item = await prepare_lolicon_item_async(image_store, item)
         message = Message(
             [
                 MessageSegment.text(f"图片索引：{index} / {len(items)}\n"),
             ]
         )
         if show_image or not item.r18:
-            message += MessageSegment.image(item.url)
+            image_source = item.local_path.as_posix() if item.local_path is not None else item.url
+            message += MessageSegment.image(image_source)
         else:
             message += MessageSegment.text(item.url)
         message += MessageSegment.text(
             f"\n{item.title}(PID {item.pid})\nby {item.author}(UID {item.uid})"
+            f"\nTags: {', '.join(item.tags) if item.tags else '-'}"
         )
         await lolicon_matcher.send(message)
