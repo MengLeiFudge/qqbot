@@ -136,7 +136,6 @@ def run_mirai_data_migration(legacy_run: Path, data_root: Path) -> dict[str, int
         settings_root / "lolicon.json",
     )
 
-    copied_zfb = int(copy_file(legacy_run / "data" / "zfb.jpg", data_root / "zfb.jpg"))
     copied_shapez_db = int(
         copy_file(
             legacy_run / "data" / "shapez" / "db_2c1r_1+3_new.csv",
@@ -155,7 +154,6 @@ def run_mirai_data_migration(legacy_run: Path, data_root: Path) -> dict[str, int
     return {
         "func_state_files": func_state_count,
         "group_nick_entries": group_nick_count,
-        "copied_zfb": copied_zfb,
         "copied_shapez_db": copied_shapez_db,
         "copied_shapez_img": copied_shapez_img,
         "copied_lolicon_img": copied_lolicon_img,
