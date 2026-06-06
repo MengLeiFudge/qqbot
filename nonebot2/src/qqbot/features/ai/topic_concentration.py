@@ -106,6 +106,24 @@ LOW_INFORMATION_MARKERS = (
     "是吧",
     "好耶",
 )
+FOLLOWUP_DISCUSSION_MARKERS = (
+    "这个",
+    "那个",
+    "这里",
+    "这边",
+    "刚才",
+    "上面",
+    "所以",
+    "但是",
+    "然后",
+    "不对",
+    "好像",
+    "是不是",
+    "能不能",
+    "要不要",
+)
+
+
 def looks_like_topic_concentration_candidate(
     text: str,
     *,
@@ -122,7 +140,9 @@ def looks_like_topic_concentration_candidate(
         return True
     if _has_any(compact, QUESTION_MARKERS) and len(compact) >= 6:
         return True
-    return _has_any(compact.lower(), DOMAIN_MARKERS) and len(compact) >= 8
+    if _has_any(compact.lower(), DOMAIN_MARKERS) and len(compact) >= 8:
+        return True
+    return len(compact) >= 18 and _has_any(compact, FOLLOWUP_DISCUSSION_MARKERS)
 
 
 def build_topic_concentration_prompt(
@@ -160,7 +180,8 @@ def build_ai_proactive_reply_decision_prompt(
         "话题浓度不是求助/诊断/疑问词数量，而是聊天类型或具体话题簇，例如“图灵完备里面线路怎么接”“某种分馏塔怎么用”。",
         "短时间内如果存在高兴趣话题，应优先判断当前消息是否仍在延续同一话题；无关插话、别的 bot 输出、让别人呼叫棉花糖、玩梗和低信息闲聊不能抢走接话权。",
         "只有当前话题确实轮到棉花糖补充、回答、澄清、保护安全或延续已形成讨论时，should_reply 才为 true。",
-        "如果群友已经说清楚、问题不是问棉花糖、是在评价其他机器人、或只是提到棉花糖这个名字但不是叫棉花糖说话，should_reply 必须为 false。",
+        "不要因为没有 @ 棉花糖就一律拒绝；如果最近候选已经形成具体话题，且棉花糖能补上关键事实、澄清误解或延续正在进行的技术/配置/问题讨论，可以 should_reply=true。",
+        "也不要因为棉花糖能回答就每次都接；如果群友已经说清楚、问题不是问棉花糖、是在评价其他机器人、或只是提到棉花糖这个名字但不是叫棉花糖说话，should_reply 必须为 false。",
         "输出字段：should_reply(boolean), topic_key(string), topic_type(string), reason(string), reply_style(casual|topic|technical|safety), max_length(short|normal|detail)。",
         "max_length 含义：short 仅适合低信息闲聊；normal 适合正在聊的话题；detail 只用于技术/配置/报错。不要把话题讨论强行压到 40 字。",
     ]
@@ -183,12 +204,13 @@ def build_ai_proactive_reply_decision_prompt(
 
 def parse_ai_proactive_reply_decision(text: str) -> AiProactiveReplyDecision:
     payload = _extract_json_object(text)
-    should_reply = bool(payload.get("should_reply"))
+    raw_should_reply = payload.get("should_reply")
     topic_key = _clean_json_string(payload.get("topic_key"))[:80]
     topic_type = _clean_json_string(payload.get("topic_type"))[:80]
     reason = _clean_json_string(payload.get("reason"))[:160]
     reply_style = _clean_json_string(payload.get("reply_style")).lower()
     max_length = _clean_json_string(payload.get("max_length")).lower()
+    should_reply = _coerce_should_reply(raw_should_reply, reason)
     if reply_style not in {"casual", "topic", "technical", "safety"}:
         reply_style = "topic"
     if max_length not in {"short", "normal", "detail"}:
@@ -302,3 +324,64 @@ def _extract_json_object(text: str) -> dict[str, object]:
 
 def _clean_json_string(value: object) -> str:
     return str(value or "").strip()
+
+
+def _coerce_should_reply(raw_value: object, reason: str) -> bool:
+    if isinstance(raw_value, bool):
+        should_reply = raw_value
+    elif isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"true", "yes", "1", "是", "应回复", "需要回复"}:
+            should_reply = True
+        elif normalized in {"false", "no", "0", "否", "不回复", "静默"}:
+            should_reply = False
+        else:
+            should_reply = bool(normalized)
+    else:
+        should_reply = bool(raw_value)
+    if should_reply:
+        return True
+
+    compact_reason = _compact(reason)
+    if not compact_reason:
+        return False
+    negative_markers = (
+        "不适合",
+        "不必",
+        "不需要",
+        "无需",
+        "暂不",
+        "不要",
+        "不能",
+        "没有形成",
+        "不是",
+        "无法",
+        "缺少",
+        "已说清楚",
+        "已经说清楚",
+        "已经回答",
+    )
+    if any(marker in compact_reason for marker in negative_markers):
+        return False
+    positive_markers = (
+        "适合接话",
+        "适合主动接话",
+        "适合继续",
+        "适合补充",
+        "可以接话",
+        "可以补充",
+        "可以继续",
+        "明确求助",
+        "明确的技术求助",
+        "具体技术讨论",
+        "具体问题",
+        "技术话题",
+        "需要棉花糖",
+        "棉花糖可以",
+        "能补上",
+        "补充解释",
+        "补充说明",
+        "澄清误解",
+        "排查思路",
+    )
+    return any(marker in compact_reason for marker in positive_markers)

@@ -15,6 +15,10 @@ def test_short_casual_chat_can_be_candidate_for_ai_decision() -> None:
     assert looks_like_topic_concentration_candidate("怎么儿童节不叫人打游戏")
 
 
+def test_followup_discussion_can_enter_ai_decision() -> None:
+    assert looks_like_topic_concentration_candidate("这个方案好像还要再看一下配置入口")
+
+
 def test_parse_ai_proactive_reply_decision_json() -> None:
     decision = parse_ai_proactive_reply_decision(
         '{"should_reply": true, "topic_key": "图灵完备线路", "topic_type": "游戏技术讨论", '
@@ -38,6 +42,17 @@ def test_parse_ai_proactive_reply_decision_fenced_json() -> None:
     assert not decision.should_reply
     assert decision.topic_key == "棉花糖双子"
     assert decision.max_length == "short"
+
+
+def test_parse_ai_proactive_reply_decision_corrects_inconsistent_positive_reason() -> None:
+    decision = parse_ai_proactive_reply_decision(
+        '{"should_reply": false, "topic_key": "pi卡顿", "topic_type": "技术求助", '
+        '"reason": "这是明确的技术求助，棉花糖可以补充排查思路。", '
+        '"reply_style": "technical", "max_length": "detail"}'
+    )
+
+    assert decision.should_reply
+    assert decision.max_length == "detail"
 
 
 def test_ai_decision_prompt_defines_topic_concentration_and_interest() -> None:

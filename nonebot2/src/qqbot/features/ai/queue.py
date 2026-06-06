@@ -14,8 +14,8 @@ from qqbot.services.message_normalizer import NormalizedMessage
 from qqbot.services.settings_store import SettingsStore
 
 AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST = 20.0
-AI_PROACTIVE_BUFFER_QUIET_SECONDS = 10.0
-AI_PROACTIVE_BUFFER_MAX_SECONDS = 30.0
+AI_PROACTIVE_BUFFER_QUIET_SECONDS = 6.0
+AI_PROACTIVE_BUFFER_MAX_SECONDS = 18.0
 
 
 @dataclass(frozen=True)
