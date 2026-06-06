@@ -1,0 +1,20 @@
+{
+  "enabled_groups": {
+    "description": "启用上下文桥的群号 allowlist",
+    "type": "string",
+    "default": "",
+    "hint": "逗号分隔。留空表示所有有 bot1 公开群上下文文件的群都启用。"
+  },
+  "max_messages": {
+    "description": "注入的最近消息条数",
+    "type": "int",
+    "default": 12,
+    "hint": "从 bot1 的 run/ai/group_context/<群号>.json 读取最近 N 条公开群消息。"
+  },
+  "max_chars": {
+    "description": "注入文本最大长度",
+    "type": "int",
+    "default": 1800,
+    "hint": "限制注入到 AstrBot LLM 请求的总字符数，避免上下文过长。"
+  }
+}
