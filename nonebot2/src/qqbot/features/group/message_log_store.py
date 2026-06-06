@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import threading
 
-from qqbot.services.ai_output_style import sanitize_ai_output_text
+from qqbot.features.ai.output_style import sanitize_ai_output_text
 from qqbot.services.json_file_store import atomic_write_json, load_json_array
 
 

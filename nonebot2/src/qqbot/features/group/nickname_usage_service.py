@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 import sqlite3
 
-from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.features.ai.chat_memory_store import ChatMemoryStore
 from qqbot.features.group.nick_store import GroupNickStore, normalize_call_name
 
 

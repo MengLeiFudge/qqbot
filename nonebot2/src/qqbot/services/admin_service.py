@@ -6,16 +6,16 @@ from pathlib import Path
 import subprocess
 
 from qqbot.config import DEFAULT_AUTHOR_NAME, RuntimeSettings
-from qqbot.services.ai_diagnostics import AiDiagnosticsStore
-from qqbot.services.ai_pending_task_store import AiPendingTaskStore
-from qqbot.services.ai_profile_registry import list_enabled_profiles, load_ai_profiles
-from qqbot.services.ai_runtime import (
+from qqbot.features.ai.diagnostics import AiDiagnosticsStore
+from qqbot.features.ai.pending_task_store import AiPendingTaskStore
+from qqbot.features.ai.profile_registry import list_enabled_profiles, load_ai_profiles
+from qqbot.features.ai.runtime import (
     get_current_ai_profile_name,
     get_default_ai_profile_name,
     list_ai_profile_fallback_order,
 )
-from qqbot.services.chat_memory_store import ChatMemoryStore
-from qqbot.services.domain_knowledge_store import (
+from qqbot.features.ai.chat_memory_store import ChatMemoryStore
+from qqbot.features.ai.domain_knowledge_store import (
     DomainKnowledgeStore,
     build_seed_knowledge_candidates,
 )

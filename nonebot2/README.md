@@ -23,7 +23,7 @@
 - `src/qqbot/config.py`：环境变量与运行配置
 - `src/qqbot/bootstrap.py`：适配器注册、管理端路由、插件加载
 - `src/qqbot/plugins/`：NoneBot matcher 与事件处理
-- `src/qqbot/features/`：按功能归属的业务服务、持久化、外部客户端和渲染逻辑
+- `src/qqbot/features/`：按功能归属的业务服务、持久化、外部客户端和渲染逻辑；AI 对话、长期记忆、领域知识、embedding 和 provider 客户端归入 `features/ai/`
 - `src/qqbot/services/`：共享基础设施、迁移期兼容入口和跨功能服务
 - `src/qqbot/services/plugin_registry.py`：插件元数据注册表
 - `scripts/start_bot.ps1`：NoneBot2 子项目启动入口，通常由根级 `scripts/start-nonebot2.ps1` 调用

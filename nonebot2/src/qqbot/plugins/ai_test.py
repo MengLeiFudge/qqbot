@@ -14,8 +14,8 @@ from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegme
 from nonebot.rule import Rule
 
 from qqbot.config import RuntimeSettings, load_settings
-from qqbot.services.ai_actions import AiActionExecutor
-from qqbot.services.ai_command import (
+from qqbot.features.ai.actions import AiActionExecutor
+from qqbot.features.ai.command import (
     AiChatTriggerKind,
     classify_ai_chat_trigger,
     looks_like_ai_meta_conversation,
@@ -25,11 +25,11 @@ from qqbot.services.ai_command import (
     build_ai_conversation_key,
     parse_ai_model_command,
 )
-from qqbot.services.ai_conversation_store import AiConversationStore
-from qqbot.services.ai_diagnostics import AiDiagnosticsStore, build_ai_diagnostics_record
-from qqbot.services.ai_gateway import AiRequest, AiResponse
-from qqbot.services.ai_group_context_store import AiGroupContextStore, AiGroupMessageRecord
-from qqbot.services.ai_message_decision import (
+from qqbot.features.ai.conversation_store import AiConversationStore
+from qqbot.features.ai.diagnostics import AiDiagnosticsStore, build_ai_diagnostics_record
+from qqbot.features.ai.gateway import AiRequest, AiResponse
+from qqbot.features.ai.group_context_store import AiGroupContextStore, AiGroupMessageRecord
+from qqbot.features.ai.message_decision import (
     AiDomain,
     AiLatencyPolicy,
     AiMessageDifficulty,
@@ -37,18 +37,18 @@ from qqbot.services.ai_message_decision import (
     build_decision_context,
     decide_ai_message,
 )
-from qqbot.services.ai_message_flow import AiMessageSource, build_ai_message_source
-from qqbot.services.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
-from qqbot.services.ai_pending_task_store import AiPendingTaskStore
-from qqbot.services.embedding_vector_store import EmbeddingVectorStore
-from qqbot.services.ai_orchestrator import AiOrchestrator, AiOrchestratorContext
-from qqbot.services.ai_profile_registry import (
+from qqbot.features.ai.message_flow import AiMessageSource, build_ai_message_source
+from qqbot.features.ai.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
+from qqbot.features.ai.pending_task_store import AiPendingTaskStore
+from qqbot.features.ai.embedding_vector_store import EmbeddingVectorStore
+from qqbot.features.ai.orchestrator import AiOrchestrator, AiOrchestratorContext
+from qqbot.features.ai.profile_registry import (
     list_enabled_profiles,
     load_ai_profiles,
 )
-from qqbot.services.ai_runtime import build_ai_gateway, get_current_ai_profile_name
-from qqbot.services.ai_runtime import list_ai_profile_fallback_order
-from qqbot.services.ai_user_style_store import AiUserStyleStore
+from qqbot.features.ai.runtime import build_ai_gateway, get_current_ai_profile_name
+from qqbot.features.ai.runtime import list_ai_profile_fallback_order
+from qqbot.features.ai.user_style_store import AiUserStyleStore
 from qqbot.services.admin_service import AdminService
 from qqbot.services.bot_loop_guard import BotLoopGuard
 from qqbot.services.command_guard import direct_command_rule, is_direct_command_event
@@ -63,7 +63,7 @@ from qqbot.services.message_normalizer import (
     normalize_onebot_event,
     normalize_onebot_event_with_fetcher,
 )
-from qqbot.services.memory_retrieval_service import (
+from qqbot.features.ai.memory_retrieval_service import (
     RetrievalPlan,
     format_evidence_bundle,
     retrieve_memory_evidence,
@@ -73,13 +73,13 @@ from qqbot.services.nickname_usage_service import (
     NicknameUsageService,
     NicknameUsageSummary,
 )
-from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
+from qqbot.features.ai.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.offline_message_gate import (
     is_before_onebot_connect,
     is_within_onebot_connect_grace,
 )
-from qqbot.services.ai_output_style import sanitize_ai_output_text, sanitize_group_ai_reply_text
-from qqbot.services.ai_queue import (
+from qqbot.features.ai.output_style import sanitize_ai_output_text, sanitize_group_ai_reply_text
+from qqbot.features.ai.queue import (
     AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST,
     AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS,
     AI_PROACTIVE_BUFFER_QUIET_SECONDS,
@@ -91,7 +91,7 @@ from qqbot.services.ai_queue import (
     AiReplyQueueManager,
     AiReplyQueueTicket,
 )
-from qqbot.services.ai_reply_pipeline import (
+from qqbot.features.ai.reply_pipeline import (
     AI_CONTINUOUS_REPLY_CHARS_PER_SECOND,
     AI_RECENT_REPLY_NO_QUOTE_MESSAGES,
     LOW_INFORMATION_REPLY_OPENERS,
@@ -102,11 +102,11 @@ from qqbot.services.ai_reply_pipeline import (
     should_quote_group_ai_reply,
     split_continuous_ai_reply_text,
 )
-from qqbot.services.rightcodes_draw_client import (
+from qqbot.features.ai.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
 )
-from qqbot.services.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
+from qqbot.features.ai.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 

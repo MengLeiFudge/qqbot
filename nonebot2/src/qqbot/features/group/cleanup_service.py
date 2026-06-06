@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from qqbot.services.ai_group_context_store import AiGroupContextStore
-from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.features.ai.group_context_store import AiGroupContextStore
+from qqbot.features.ai.chat_memory_store import ChatMemoryStore
 from qqbot.features.group.message_log_store import GroupMessageLogStore
 from qqbot.features.group.nick_store import GroupNickStore
 from qqbot.services.settings_store import SettingsStore

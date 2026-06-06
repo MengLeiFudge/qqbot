@@ -7,8 +7,8 @@ from typing import Any
 from nonebot.adapters.onebot.v11 import Bot as OneBotV11Bot
 
 from qqbot.config import load_settings
-from qqbot.services.ai_group_context_store import AiGroupContextStore
-from qqbot.services.chat_memory_store import ChatMemoryStore
+from qqbot.features.ai.group_context_store import AiGroupContextStore
+from qqbot.features.ai.chat_memory_store import ChatMemoryStore
 from qqbot.services.group_message_log_store import GroupMessageLogStore
 from qqbot.services.message_delivery import (
     has_waited_group_message_interval,

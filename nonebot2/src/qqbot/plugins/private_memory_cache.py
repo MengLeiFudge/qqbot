@@ -7,17 +7,17 @@ from nonebot.rule import Rule
 from nonebot.adapters.onebot.v11 import Bot, PrivateMessageEvent
 
 from qqbot.config import load_settings
-from qqbot.services.ai_conversation_store import AiConversationStore
-from qqbot.services.ai_gateway import AiRequest
-from qqbot.services.ai_group_context_store import AiGroupContextStore
-from qqbot.services.ai_profile_registry import load_ai_profiles
-from qqbot.services.ai_runtime import (
+from qqbot.features.ai.conversation_store import AiConversationStore
+from qqbot.features.ai.gateway import AiRequest
+from qqbot.features.ai.group_context_store import AiGroupContextStore
+from qqbot.features.ai.profile_registry import load_ai_profiles
+from qqbot.features.ai.runtime import (
     build_ai_gateway,
     get_current_ai_profile_name,
     list_ai_profile_fallback_order,
 )
-from qqbot.services.ai_user_style_store import AiUserStyleStore
-from qqbot.services.chat_memory_store import ChatMemoryStore, build_user_actor_id
+from qqbot.features.ai.user_style_store import AiUserStyleStore
+from qqbot.features.ai.chat_memory_store import ChatMemoryStore, build_user_actor_id
 from qqbot.services.message_delivery import call_split_text_api
 from qqbot.services.message_normalizer import normalize_onebot_event
 from qqbot.services.offline_message_gate import is_before_onebot_connect

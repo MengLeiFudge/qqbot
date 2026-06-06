@@ -14,13 +14,13 @@ from qqbot.features.arc.constant_service import ArcConstantService
 from qqbot.features.arc.event_service import ArcEventService, _fetch_latest_arc_version
 from qqbot.features.arc.guess_service import ArcGuessService
 from qqbot.services.feature_catalog import get_feature_by_menu_key
-from qqbot.services.chat_memory_store import ChatMemoryStore
-from qqbot.services.domain_knowledge_store import DomainKnowledgeStore, build_seed_knowledge_candidates
-from qqbot.services.embedding_vector_store import EmbeddingVectorStore
-from qqbot.services.memory_maintenance_service import MemoryMaintenanceService
-from qqbot.services.memory_vector_store import MemoryVectorStore
+from qqbot.features.ai.chat_memory_store import ChatMemoryStore
+from qqbot.features.ai.domain_knowledge_store import DomainKnowledgeStore, build_seed_knowledge_candidates
+from qqbot.features.ai.embedding_vector_store import EmbeddingVectorStore
+from qqbot.features.ai.memory_maintenance_service import MemoryMaintenanceService
+from qqbot.features.ai.memory_vector_store import MemoryVectorStore
 from qqbot.services.offline_message_gate import mark_onebot_connected
-from qqbot.services.openai_embedding_client import OpenAIEmbeddingClient
+from qqbot.features.ai.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.settings_store import get_settings_store
 from qqbot.plugins.private_memory_cache import reset_offline_private_ai_replay_state
 
