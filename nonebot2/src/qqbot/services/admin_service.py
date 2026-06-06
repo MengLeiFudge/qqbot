@@ -96,10 +96,8 @@ class AdminService:
 
     def get_group_control_config(self) -> dict[str, object]:
         return {
-            "reread_policy": "consecutive_duplicate_once",
-            "reread_description": "同一群连续两条相同消息时复读一次，后续相同消息不再复读，直到出现不同消息。",
-            "random_thunder_enabled": False,
-            "manual_controls": ["禁言", "解禁", "群禁言", "群解禁", "踢出"],
+            "file_cleanup_enabled": True,
+            "file_cleanup_description": "作者在群内 @机器人 发送“通知清理文件”，统计超过一周的外层群文件，并按上传者总大小禁言。",
         }
 
     def get_kun_user(self, qq: int) -> dict[str, object]:

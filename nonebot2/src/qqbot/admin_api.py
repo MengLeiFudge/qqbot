@@ -663,24 +663,16 @@ def build_admin_html(settings: RuntimeSettings) -> str:
       </section>
       <section id="groupControlPanel" class="tab-panel">
         <div class="panel-block">
-          <h2>群管管理</h2>
-          <h3>群管配置</h3>
+          <h2>群管助手</h2>
+          <h3>群文件清理</h3>
           <div class="row">
             <button onclick="loadGroupControlConfig()">读取</button>
             <span id="groupControlStatus" class="muted"></span>
           </div>
           <div class="status">
             <div>
-              <strong>复读</strong>
-              <p id="rereadPolicyText" class="muted">待读取。</p>
-            </div>
-            <div>
-              <strong>随机禁言</strong>
-              <p id="randomThunderText" class="muted">待读取。</p>
-            </div>
-            <div>
-              <strong>手动群管</strong>
-              <p id="manualControlsText" class="muted">待读取。</p>
+              <strong>外层旧群文件</strong>
+              <p id="groupFileCleanupText" class="muted">待读取。</p>
             </div>
           </div>
         </div>
@@ -1281,9 +1273,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     async function loadGroupControlConfig() {{
       const status = document.getElementById("groupControlStatus");
       const payload = await api("/admin/api/group-control");
-      document.getElementById("rereadPolicyText").textContent = payload.reread_description || "连续相同消息复读一次。";
-      document.getElementById("randomThunderText").textContent = payload.random_thunder_enabled ? "已启用" : "已移除自动随机禁言。";
-      document.getElementById("manualControlsText").textContent = (payload.manual_controls || []).join("、") || "无";
+      document.getElementById("groupFileCleanupText").textContent = payload.file_cleanup_description || "未配置。";
       status.textContent = "已读取。";
     }}
 

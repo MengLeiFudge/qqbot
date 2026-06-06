@@ -1,1 +1,1 @@
-from qqbot.features.group.control_service import *  # noqa: F401,F403
+"""群管助手已移除手动禁言/踢出命令，仅保留群文件清理入口。"""
