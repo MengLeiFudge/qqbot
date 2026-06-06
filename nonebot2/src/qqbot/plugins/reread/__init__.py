@@ -6,7 +6,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent
 from qqbot.services.command_guard import is_likely_command
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.offline_message_gate import is_before_onebot_connect
-from qqbot.services.reread_service import (
+from qqbot.features.group.reread_service import (
     RereadRepeatState,
     render_reread_message,
     should_skip_reread_message,

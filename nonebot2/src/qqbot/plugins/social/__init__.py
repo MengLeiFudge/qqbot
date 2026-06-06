@@ -17,7 +17,7 @@ from nonebot.adapters.onebot.v11 import (
 from qqbot.services.message_delivery import call_split_text_api
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.settings_store import get_settings_store
-from qqbot.services.social_service import (
+from qqbot.features.group.social_service import (
     build_group_member_welcome_message,
     plan_poke_response,
     should_auto_approve_request,

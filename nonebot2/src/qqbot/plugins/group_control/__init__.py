@@ -6,8 +6,8 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from qqbot.config import load_settings
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.feature_catalog import get_feature_by_menu_key
-from qqbot.services.group_file_cleanup_service import ShapezGroupFileCleanupService, ShapezGroupFileCleanupStore
-from qqbot.services.group_control_service import parse_group_control_command
+from qqbot.features.group.file_cleanup_service import ShapezGroupFileCleanupService, ShapezGroupFileCleanupStore
+from qqbot.features.group.control_service import parse_group_control_command
 from qqbot.services.settings_store import get_settings_store
 
 GROUP_FILE_CLEANUP_PATTERN = r"^(通知)?(大家|全员|群友)?(清理|整理)(群)?文件$|^(群)?文件(清理|整理)(通知)?$"

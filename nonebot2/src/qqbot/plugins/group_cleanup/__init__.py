@@ -4,7 +4,7 @@ from nonebot import logger, on_notice
 from nonebot.adapters.onebot.v11 import GroupDecreaseNoticeEvent
 
 from qqbot.config import load_settings
-from qqbot.services.group_cleanup_service import GroupCleanupService
+from qqbot.features.group.cleanup_service import GroupCleanupService
 
 group_cleanup_matcher = on_notice(priority=1, block=False)
 

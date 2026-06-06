@@ -9,8 +9,8 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent
 from qqbot.config import load_settings
 from qqbot.services.ai_group_context_store import AiGroupContextStore
 from qqbot.services.chat_memory_store import ChatMemoryStore
-from qqbot.services.group_message_log_store import GroupMessageLogStore
-from qqbot.services.group_nick_store import GroupNickStore, get_group_nick_store
+from qqbot.features.group.message_log_store import GroupMessageLogStore
+from qqbot.features.group.nick_store import GroupNickStore, get_group_nick_store
 from qqbot.services.message_normalizer import normalize_onebot_event
 
 group_nick_cache_matcher = on_message(priority=1, block=False)
