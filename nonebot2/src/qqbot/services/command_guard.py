@@ -17,6 +17,7 @@ COMMAND_PATTERNS = [
     r"^(?:猜\s*)?[1-9][0-9]*\s*.+$",
     r"^[开关](群色图|图片显示)$",
     r"^(来点)?([美色涩蛇]图|混合).*",
+    r"(?i)^(i|view|chart|chart1|chart2|path|path1|path2|p|puzzle|puzzle1|puzzle2)\s+.+$",
     r"^(通知)?(大家|全员|群友)?(清理|整理)(群)?文件$|^(群)?文件(清理|整理)(通知)?$",
     r"(?i)^.*(?:factorio|异星|太空时代|space\s*age|spaceage).*(?:下载|安装包).*(?:链接|地址)?$",
 ]

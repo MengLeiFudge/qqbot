@@ -7,6 +7,8 @@ import re
 
 from PIL import Image, ImageDraw
 
+from qqbot.features.shapez.path_renderer import render_shape_path_image
+
 
 SHAPE_TOKEN_PATTERN = r"(?:--|__|P-|c[rgbypcuwolmhzik]|[CRSW123456X][rgbypcuwolmhzik_])"
 SHAPE_PATTERN = re.compile(rf"{SHAPE_TOKEN_PATTERN}{{4}}(?::{SHAPE_TOKEN_PATTERN}{{4}}){{0,4}}")
@@ -112,6 +114,10 @@ def render_shape_chart(data_root: Path, short_code: str) -> tuple[ShapeCode, Pat
     output.parent.mkdir(parents=True, exist_ok=True)
     generate_shape_chart(shape).save(output, format="PNG")
     return shape, output, describe_shape_layers(shape)
+
+
+def render_shape_path(data_root: Path, short_code: str):
+    return render_shape_path_image(data_root, short_code)
 
 
 def generate_shape_image(shape: ShapeCode, size: int = 384) -> Image.Image:

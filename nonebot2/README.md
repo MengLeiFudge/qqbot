@@ -167,7 +167,7 @@ http://127.0.0.1:8080/admin
 - `来点色图` / `美图 凯露 10`
 - `arctj10.5` / `zm` / `开*` / `10骨折光` / `猜 骨折光` / `arcqh` / `jx` / `archd` / `xz`
 - `Factorio下载链接` / `异星下载链接`：获取 Space Age Windows 安装包下载链接；获取到了就发链接，没获取到就说明失败原因
-- `i CrRgSbWy` / `view CrRgSbWy` / `chart CrRgSbWy`
+- `i CrRgSbWy` / `view CrRgSbWy` / `chart CrRgSbWy` / `path RuRuRuRu`
 - `养鲲` / `属性` / `等级排行` / `财富排行` / `背包` / `商城` / `签到` / `boss` / `挑战`
 - `注册樱花勇者` / `个人信息` / `加经验500` / `加5力量` / `恢复`
 
