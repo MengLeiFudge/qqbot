@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -11,6 +12,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from qqbot.services.feature_catalog import FeatureDefinition
 from qqbot.services.message_delivery import call_split_text_api
 from qqbot.services.settings_store import SettingsStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -62,7 +65,7 @@ class ArcBackgroundService:
                 self.state.alias_last_synced_at = current.isoformat()
                 self._save()
             except Exception:
-                pass
+                logger.exception("Arc alias cache sync failed")
         if self.should_run_constants_sync(current):
             try:
                 if self.constant_service is not None and self.constant_song_loader is not None:
@@ -75,7 +78,7 @@ class ArcBackgroundService:
                     self.state.constants_last_synced_at = current.isoformat()
                     self._save()
             except Exception:
-                pass
+                logger.exception("Arc constants sync failed")
         if self.should_run_version_check(current):
             await self.check_version_and_notify(bot, now=current)
         await self.expire_arc_guess_sessions(bot, now=current)
@@ -126,18 +129,23 @@ class ArcBackgroundService:
             events = self.event_service.fetch_active_events(now=current)
             messages = self.event_service.render_event_messages(events, now=current)
         except Exception:
+            logger.exception("Arc activity reminder fetch/render failed")
             return
         if messages == ["当前没有活动梯子。"]:
             return
         for group_id in pending_group_ids:
-            for message in messages:
-                await call_split_text_api(
-                    bot,
-                    "send_group_msg",
-                    group_id=group_id,
-                    message=message,
-                    group_interval_sleep=self.sleep_func,
-                )
+            try:
+                for message in messages:
+                    await call_split_text_api(
+                        bot,
+                        "send_group_msg",
+                        group_id=group_id,
+                        message=message,
+                        group_interval_sleep=self.sleep_func,
+                    )
+            except Exception:
+                logger.exception("Arc activity reminder send failed: group_id=%s", group_id)
+                continue
             self.state.group_last_reminded_on[str(group_id)] = today
             self._save()
 
@@ -160,6 +168,7 @@ class ArcBackgroundService:
         try:
             groups = await bot.call_api("get_group_list")
         except Exception:
+            logger.exception("Arc activity reminder group list fetch failed")
             return []
         group_ids = []
         for group in groups or []:

@@ -101,14 +101,14 @@ async def log_bot_disconnect(bot: Bot) -> None:
 
 async def run_arc_background_loop(bot: Bot) -> None:
     service = get_arc_background_service()
-    try:
-        while True:
+    while True:
+        try:
             await service.run_once(bot)
-            await asyncio.sleep(60)
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.exception("Arc background loop crashed: {}", exc)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Arc background loop failed once and will continue: {}", exc)
+        await asyncio.sleep(60)
 
 
 async def run_memory_maintenance_loop() -> None:
