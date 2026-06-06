@@ -173,7 +173,7 @@ async def replay_offline_private_ai_once(bot: Bot, user_id: str) -> None:
     prompt = build_offline_private_replay_prompt(incoming_records)
     fake_event = OfflinePrivateAiEvent(user_id=user_id, text=prompt, timestamp=incoming_records[-1].timestamp)
     normalized = normalize_onebot_event(fake_event)
-    from qqbot.plugins.ai_test import build_ai_context, format_ai_response
+    from qqbot.plugins.ai import build_ai_context, format_ai_response
 
     conversation_store = AiConversationStore(
         settings.data_root,
@@ -181,7 +181,7 @@ async def replay_offline_private_ai_once(bot: Bot, user_id: str) -> None:
     )
     conversation_scope = AiUserStyleStore.conversation_scope_id()
     key = conversation_store.private_key(user_id, profile, conversation_scope)
-    from qqbot.plugins.ai_test import complete_ai_request_with_profile_fallbacks
+    from qqbot.plugins.ai import complete_ai_request_with_profile_fallbacks
 
     request = AiRequest(
         plugin_id="ai",

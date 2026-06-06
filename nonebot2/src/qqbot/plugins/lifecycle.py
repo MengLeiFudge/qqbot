@@ -22,7 +22,7 @@ from qqbot.features.ai.memory_vector_store import MemoryVectorStore
 from qqbot.services.offline_message_gate import mark_onebot_connected
 from qqbot.features.ai.openai_embedding_client import OpenAIEmbeddingClient
 from qqbot.services.settings_store import get_settings_store
-from qqbot.plugins.private_memory_cache import reset_offline_private_ai_replay_state
+from qqbot.plugins.ai.private_memory_cache import reset_offline_private_ai_replay_state
 
 driver = get_driver()
 _ARC_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
