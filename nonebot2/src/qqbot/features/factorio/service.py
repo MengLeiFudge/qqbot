@@ -103,8 +103,6 @@ class FactorioDownloadService:
         resolved_url = self.http_client.resolve_redirect(url, self.timeout_seconds)
         if not resolved_url:
             raise FactorioDownloadError("Factorio 下载接口没有返回下载地址")
-        if _contains_secret(resolved_url, credentials):
-            raise FactorioDownloadError("Factorio 下载接口返回了包含 token 的地址，已拒绝发送")
         return FactorioDownloadLink(version=version, url=resolved_url)
 
     def _fetch_stable_space_age_version(self) -> str:
@@ -133,20 +131,7 @@ def build_factorio_download_url(version: str, credentials: FactorioCredentials) 
 
 
 def render_factorio_download_link_message(link: FactorioDownloadLink) -> str:
-    return render_factorio_download_safety_message(link.version)
-
-
-def render_factorio_download_safety_message(version: str | None = None) -> str:
-    version_text = f"当前稳定版是 {version}。" if version else ""
-    return (
-        "Factorio: Space Age Windows 安装包请从 Factorio 官网账号下载页获取。"
-        f"{version_text}"
-        "棉花糖不在群里转发带时效签名的安装包直链。"
-    )
-
-
-def _contains_secret(url: str, credentials: FactorioCredentials) -> bool:
-    return credentials.token in url
+    return f"Factorio: Space Age Windows {link.version} 下载链接：\n{link.url}"
 
 
 def _user_agent() -> str:

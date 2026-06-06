@@ -9,7 +9,7 @@ from qqbot.services.command_guard import direct_command_rule
 from qqbot.features.factorio.service import (
     FactorioDownloadError,
     FactorioDownloadService,
-    render_factorio_download_safety_message,
+    render_factorio_download_link_message,
 )
 
 
@@ -34,7 +34,6 @@ async def handle_factorio_download(event: MessageEvent) -> None:
         )
     except FactorioDownloadError as exc:
         await factorio_download_matcher.finish(
-            "Factorio: Space Age Windows 安装包请从 Factorio 官网账号下载页获取。"
-            f"本轮没有生成群聊下载直链：{exc}"
+            f"Factorio: 没获取到 Space Age Windows 下载链接：{exc}"
         )
-    await factorio_download_matcher.finish(render_factorio_download_safety_message(link.version))
+    await factorio_download_matcher.finish(render_factorio_download_link_message(link))

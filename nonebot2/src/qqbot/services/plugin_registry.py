@@ -158,7 +158,7 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
         name="Factorio",
         aliases=("异星工厂", "太空时代", "Space Age", "spaceage"),
         menu_lines=(
-            "Factorio下载链接 / 异星下载链接：提示从 Factorio 官网账号下载页获取安装包",
+            "Factorio下载链接 / 异星下载链接：获取 Space Age Windows 安装包下载链接",
         ),
         menu_keys=("factorio", "spaceage"),
         commands=("Factorio下载链接", "异星下载链接", "太空时代下载链接"),
