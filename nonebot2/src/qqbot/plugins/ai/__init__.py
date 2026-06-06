@@ -225,7 +225,7 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             group_id=source.group_id,
         )
         async with _AI_DRAW_SEMAPHORE:
-            await _handle_ai_locked(
+            await _handle_rightcodes_draw(
                 bot,
                 event,
                 settings=settings,
@@ -1096,6 +1096,193 @@ async def _handle_ai_locked(
     )
 
 
+async def _handle_rightcodes_draw(
+    bot: Bot,
+    event: MessageEvent,
+    *,
+    settings: RuntimeSettings,
+    store: SettingsStore,
+    normalized_message: NormalizedMessage,
+    prompt: str,
+    request_started: float,
+    request_wall_started: float,
+    event_time: object,
+    message_id: object,
+    group_id: object | None,
+    user_id: str,
+    trigger_kind: AiChatTriggerKind = AiChatTriggerKind.DRAW,
+    decision: AiMessageDecision | None = None,
+    local_prepare_started: float | None = None,
+    queue_wait_seconds: float = 0.0,
+    quote_first_reply: bool = True,
+) -> None:
+    del trigger_kind, decision, queue_wait_seconds, quote_first_reply
+    local_prepare_started = local_prepare_started if local_prepare_started is not None else request_started
+    if group_id is not None and is_before_onebot_connect(event_time):
+        logger.info(
+            "Skip old draw message: user_id={}, group_id={}, message_id={}, event_time={}",
+            user_id,
+            group_id,
+            message_id,
+            event_time,
+        )
+        return
+    if group_id is not None and is_within_onebot_connect_grace(event_time):
+        logger.info(
+            "Skip draw message in connect grace: user_id={}, group_id={}, message_id={}, event_time={}",
+            user_id,
+            group_id,
+            message_id,
+            event_time,
+        )
+        return
+    if group_id is not None:
+        loop_decision = _BOT_LOOP_GUARD.record_trigger(group_id, user_id, prompt)
+        if loop_decision == "blocked":
+            logger.info(
+                "Skip blacklisted suspected bot draw: user_id={}, group_id={}, message_id={}",
+                user_id,
+                group_id,
+                message_id,
+            )
+            return
+    if event_time is not None:
+        logger.info(
+            "AI draw message received: user_id={}, group_id={}, message_id={}, event_time={}, receive_lag={:.3f}s",
+            user_id,
+            group_id,
+            message_id,
+            event_time,
+            request_wall_started - float(event_time),
+        )
+    else:
+        logger.info(
+            "AI draw message received: user_id={}, group_id={}, message_id={}, event_time=None",
+            user_id,
+            group_id,
+            message_id,
+        )
+
+    logger.info(
+        "RightCodes draw command detected: user_id={}, group_id={}, message_id={}, local_prepare={:.3f}s",
+        user_id,
+        group_id,
+        message_id,
+        time.perf_counter() - local_prepare_started,
+    )
+    quota = RightCodesDrawQuotaStore(settings.data_root).reserve(user_id)
+    if not quota.allowed:
+        await ai_chat_matcher.finish(
+            build_ai_reply_message(
+                format_draw_quota_exceeded_message(quota.used, quota.limit),
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+                quote=should_quote_group_ai_reply(
+                    settings,
+                    group_id=group_id,
+                    message_id=message_id,
+                    event_time=event_time,
+                ),
+            )
+        )
+
+    start_message: str | Message = format_draw_start_message(quota.used, quota.limit)
+    if group_id is not None:
+        start_message = build_ai_reply_message(
+            start_message,
+            group_id=group_id,
+            message_id=message_id,
+            user_id=user_id,
+            quote=should_quote_group_ai_reply(
+                settings,
+                group_id=group_id,
+                message_id=message_id,
+                event_time=event_time,
+            ),
+        )
+    draw_start_send_started = time.perf_counter()
+    logger.info(
+        "RightCodes draw start notice sending: user_id={}, group_id={}, message_id={}, quota={}/{}",
+        user_id,
+        group_id,
+        message_id,
+        quota.used,
+        quota.limit,
+    )
+    await ai_chat_matcher.send(start_message)
+    logger.info(
+        "RightCodes draw start notice sent: user_id={}, group_id={}, message_id={}, send_seconds={:.3f}",
+        user_id,
+        group_id,
+        message_id,
+        time.perf_counter() - draw_start_send_started,
+    )
+
+    restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
+    orchestrator = AiOrchestrator(
+        data_root=settings.data_root,
+        bot_name=settings.ai_bot_name,
+        action_executor=AiActionExecutor(
+            bot=bot,
+            data_root=settings.data_root,
+            self_restart_scheduler=restart_scheduler,
+        ),
+        self_restart_scheduler=restart_scheduler,
+    )
+    local_result = await orchestrator.handle(
+        prompt,
+        AiOrchestratorContext(
+            actor_user_id=event.get_user_id(),
+            group_id=str(getattr(event, "group_id", "")) or None,
+            is_admin=store.is_bot_admin(int(event.get_user_id())),
+        ),
+        normalized_message,
+    )
+    if not local_result.image_path:
+        RightCodesDrawQuotaStore(settings.data_root).refund(user_id)
+    if not local_result.handled:
+        await ai_chat_matcher.finish(
+            build_ai_reply_message(
+                "没有识别到有效的生图提示词。",
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+                quote=should_quote_group_ai_reply(
+                    settings,
+                    group_id=group_id,
+                    message_id=message_id,
+                    event_time=event_time,
+                ),
+            )
+        )
+
+    local_message = format_local_ai_result(local_result)
+    if isinstance(local_message, str) and group_id is not None:
+        local_message = sanitize_group_ai_reply_text(local_message, prompt=prompt, group_id=group_id)
+        if not local_message:
+            return
+        local_message = build_ai_reply_message(
+            local_message,
+            group_id=group_id,
+            message_id=message_id,
+            user_id=user_id,
+            quote=should_quote_group_ai_reply(
+                settings,
+                group_id=group_id,
+                message_id=message_id,
+                event_time=event_time,
+            ),
+        )
+    await finish_split_text(
+        ai_chat_matcher,
+        local_message,
+        group_id=group_id,
+        bot=bot,
+        title="棉花糖的生图结果",
+    )
+
+
 def build_ai_reply_scope(event: MessageEvent) -> str:
     group_id = getattr(event, "group_id", None)
     if group_id is not None:
@@ -1933,7 +2120,9 @@ def should_include_long_term_memory_context(
         return False
     if is_private_memory_query(text) or is_cross_group_memory_query(text):
         return True
-    if normalized_message.at_user_ids:
+    self_id = str(getattr(event, "self_id", "") or "")
+    at_user_ids = {str(user_id) for user_id in normalized_message.at_user_ids}
+    if at_user_ids and (not self_id or bool(at_user_ids - {self_id})):
         return True
     memory_markers = (
         "记得",

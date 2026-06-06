@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
+from importlib import import_module
+import pkgutil
 
 import nonebot
 from nonebot import logger
@@ -31,7 +32,20 @@ def bootstrap(settings: RuntimeSettings) -> None:
     install_onebot_group_message_throttle()
     register_admin_routes(driver.server_app, settings)
 
-    plugin_dir = Path(__file__).resolve().parent / "plugins"
-    nonebot.load_plugins(str(plugin_dir))
-    logger.info("Loaded qqbot plugins from {}", plugin_dir)
+    plugin_names = _discover_plugin_module_names()
+    loaded_plugins = [
+        plugin_name
+        for plugin_name in plugin_names
+        if nonebot.load_plugin(plugin_name) is not None
+    ]
+    logger.info("Loaded qqbot plugins: {}", ", ".join(loaded_plugins))
     _BOOTSTRAPPED = True
+
+
+def _discover_plugin_module_names(package_name: str = "qqbot.plugins") -> list[str]:
+    package = import_module(package_name)
+    return [
+        f"{package_name}.{module.name}"
+        for module in sorted(pkgutil.iter_modules(package.__path__), key=lambda item: item.name)
+        if not module.name.startswith("_")
+    ]
