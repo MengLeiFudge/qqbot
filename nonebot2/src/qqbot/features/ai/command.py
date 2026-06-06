@@ -22,13 +22,6 @@ class AiModelCommand:
     profile: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class AiOutputModeCommand:
-    action: str
-    scope: str = "auto"
-    mode: str | None = None
-
-
 class AiChatTriggerKind(StrEnum):
     IGNORE = "ignore"
     PRIVATE = "private"
@@ -74,13 +67,10 @@ def classify_ai_chat_trigger(
             or parse_ai_model_command(prompt) is not None
         ):
             return AiChatTriggerKind.IGNORE
-        if parse_ai_output_mode_command(prompt) is not None:
-            return AiChatTriggerKind.IGNORE
         return AiChatTriggerKind.PRIVATE
     if (
         is_likely_command(prompt)
         or parse_ai_model_command(prompt) is not None
-        or parse_ai_output_mode_command(prompt) is not None
     ):
         return AiChatTriggerKind.IGNORE
     if is_duplicate_reread_text_message(event, prompt):
@@ -133,55 +123,6 @@ def parse_ai_model_command(text: str) -> AiModelCommand | None:
     if match is None:
         return None
     return AiModelCommand(action="switch", profile=match.group(1).strip())
-
-
-def parse_ai_output_mode_command(text: str) -> AiOutputModeCommand | None:
-    normalized = re.sub(r"\s+", "", text.strip())
-    if not normalized:
-        return None
-
-    if normalized in {"AI回复模式", "AI输出模式", "回复模式", "输出模式"}:
-        return AiOutputModeCommand(action="status")
-
-    scope = "auto"
-    rest = normalized
-    if rest.startswith("本群"):
-        scope = "group"
-        rest = rest.removeprefix("本群")
-    elif rest.startswith("我的"):
-        scope = "user"
-        rest = rest.removeprefix("我的")
-
-    if rest in {
-        "AI语音模式",
-        "AI回复语音模式",
-        "切换语音",
-        "切到语音",
-        "切换到语音",
-        "语音模式",
-        "语音回复",
-    }:
-        return AiOutputModeCommand(action="set", scope=scope, mode="voice")
-    if rest in {
-        "AI文字模式",
-        "AI文本模式",
-        "AI回复文字模式",
-        "AI回复文本模式",
-        "切换文字",
-        "切换文本",
-        "切到文字",
-        "切到文本",
-        "切回文字",
-        "切回文本",
-        "切换到文字",
-        "切换到文本",
-        "文字模式",
-        "文本模式",
-        "文字回复",
-        "文本回复",
-    }:
-        return AiOutputModeCommand(action="set", scope=scope, mode="text")
-    return None
 
 
 def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = ()) -> bool:

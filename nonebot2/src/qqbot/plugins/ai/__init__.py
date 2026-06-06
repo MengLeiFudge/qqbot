@@ -17,12 +17,11 @@ from qqbot.config import RuntimeSettings, load_settings
 from qqbot.features.ai.actions import AiActionExecutor
 from qqbot.features.ai.command import (
     AiChatTriggerKind,
+    build_ai_conversation_key,
     classify_ai_chat_trigger,
     looks_like_ai_meta_conversation,
     looks_like_ai_proactive_trigger,
     looks_like_sensitive_credential_request,
-    parse_ai_output_mode_command,
-    build_ai_conversation_key,
     parse_ai_model_command,
 )
 from qqbot.features.ai.conversation_store import AiConversationStore
@@ -81,7 +80,6 @@ from qqbot.services.offline_message_gate import (
 from qqbot.features.ai.output_style import sanitize_ai_output_text, sanitize_group_ai_reply_text
 from qqbot.features.ai.queue import (
     AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST,
-    AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS,
     AI_PROACTIVE_BUFFER_QUIET_SECONDS,
     AI_PROACTIVE_BUFFER_MAX_SECONDS,
     AiProactiveBufferItem,
@@ -110,8 +108,6 @@ from qqbot.features.ai.rightcodes_draw_quota_store import RightCodesDrawQuotaSto
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
-AI_TTS_MAX_CHARS = 100
-AI_TTS_FORCE_MAX_CHARS = 500
 AI_PROACTIVE_QUEUE_DROP_AFTER_SECONDS = 20.0
 AI_DRAW_CONCURRENCY_LIMIT = 2
 AI_CONTINUOUS_REPLY_TARGET_CHARS = 90
@@ -164,12 +160,6 @@ ai_model_matcher = on_regex(
     block=True,
     rule=direct_command_rule(),
 )
-ai_output_mode_matcher = on_regex(
-    r"^(本群|我的)?(?:AI(回复|输出)?(语音|文字|文本|回复)模式|(回复|输出)模式|切换语音|切到语音|切换到语音|语音模式|语音回复|切换文字|切换文本|切到文字|切到文本|切回文字|切回文本|切换到文字|切换到文本|文字模式|文本模式|文字回复|文本回复)$",
-    priority=10,
-    block=True,
-    rule=direct_command_rule(),
-)
 ai_chat_matcher = on_message(
     priority=2,
     block=True,
@@ -198,40 +188,6 @@ async def handle_ai_model(event: MessageEvent) -> None:
     enabled_profiles = ", ".join(profile.name for profile in list_enabled_profiles(profiles)) or "无"
     await ai_model_matcher.finish(
         f"当前 AI 模型：{current_profile}\n可用模型：{enabled_profiles}"
-    )
-
-
-@ai_output_mode_matcher.handle()
-async def handle_ai_output_mode(event: MessageEvent) -> None:
-    store = get_settings_store()
-    command = parse_ai_output_mode_command(event.get_plaintext())
-    if command is None:
-        return
-
-    group_id = getattr(event, "group_id", None)
-    user_id = event.get_user_id()
-    if command.action == "status":
-        mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
-        await ai_output_mode_matcher.finish(f"当前 AI 回复模式：{format_ai_output_mode(mode)}")
-
-    scope = command.scope
-    if scope == "auto":
-        scope = "group" if group_id is not None else "user"
-    if command.mode is None:
-        return
-    if scope == "group":
-        if group_id is None:
-            await ai_output_mode_matcher.finish("群 AI 回复模式只能在群聊中设置。")
-        if not store.is_bot_admin(int(user_id)):
-            await ai_output_mode_matcher.finish("只有作者才能设置本群 AI 回复模式。")
-        store.set_group_ai_output_mode(group_id, command.mode)
-        await ai_output_mode_matcher.finish(
-            f"本群 AI 回复模式已切换为：{format_ai_output_mode(command.mode)}"
-        )
-
-    store.set_user_ai_output_mode(user_id, command.mode)
-    await ai_output_mode_matcher.finish(
-        f"你的 AI 回复模式已切换为：{format_ai_output_mode(command.mode)}"
     )
 
 
@@ -286,11 +242,8 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 user_id=source.user_id,
                 trigger_kind=AiChatTriggerKind.DRAW,
                 decision=decision,
-                force_text_response=False,
-                force_voice_response=False,
             )
         return
-    voice_singing = should_use_tts_singing_mode(source.prompt)
     decision = decide_ai_message(
         trigger_kind=source.trigger_kind,
         normalized_message=source.normalized_message,
@@ -353,11 +306,9 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
         return
     queue_wait_started = time.perf_counter()
     queue_ticket = _AI_REPLY_QUEUE.join(source.reply_scope)
-    force_text_response = queue_ticket.force_text_response and not voice_singing
     queued_request = build_ai_queued_request(
         source,
         decision=decision,
-        force_voice_response=voice_singing,
         quote_first_reply=not _AI_REPLY_QUEUE.has_pending(source.reply_scope),
     )
     try:
@@ -386,7 +337,6 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
             await _process_ai_queue_batch(
                 AiQueuedBatch(scope=source.reply_scope, items=(queued_request,)),
                 queue_wait_started=queue_wait_started,
-                force_text_response=force_text_response,
             )
             while True:
                 pending_batch = _AI_REPLY_QUEUE.pop_pending_batch(source.reply_scope)
@@ -407,7 +357,6 @@ async def handle_ai(bot: Bot, event: MessageEvent) -> None:
                 await _process_ai_queue_batch(
                     merged_batch,
                     queue_wait_started=pending_batch.first.request_started,
-                    force_text_response=force_text_response,
                 )
     finally:
         _AI_REPLY_QUEUE.leave(queue_ticket)
@@ -434,7 +383,6 @@ def build_ai_queued_request(
     source: AiMessageSource,
     *,
     decision: AiMessageDecision,
-    force_voice_response: bool,
     quote_first_reply: bool,
 ) -> AiQueuedRequest:
     return AiQueuedRequest(
@@ -452,7 +400,6 @@ def build_ai_queued_request(
         user_id=source.user_id,
         trigger_kind=source.trigger_kind,
         decision=decision,
-        force_voice_response=force_voice_response,
         quote_first_reply=quote_first_reply,
     )
 
@@ -461,7 +408,6 @@ async def _process_ai_queue_batch(
     batch: AiQueuedBatch,
     *,
     queue_wait_started: float,
-    force_text_response: bool,
 ) -> None:
     request = batch.first
     local_prepare_started = time.perf_counter()
@@ -482,8 +428,6 @@ async def _process_ai_queue_batch(
         user_id=request.user_id,
         trigger_kind=request.trigger_kind,
         decision=request.decision,
-        force_text_response=force_text_response,
-        force_voice_response=request.force_voice_response,
         quote_first_reply=request.quote_first_reply,
     )
 
@@ -525,7 +469,6 @@ def merge_ai_queued_batch(batch: AiQueuedBatch) -> AiQueuedBatch:
         user_id=first.user_id,
         trigger_kind=_merge_trigger_kind(item.trigger_kind for item in batch.items),
         decision=first.decision,
-        force_voice_response=any(item.force_voice_response for item in batch.items),
         quote_first_reply=first.quote_first_reply,
     )
     return AiQueuedBatch(scope=batch.scope, items=(merged_request,))
@@ -535,11 +478,8 @@ async def process_ai_queue_batch_with_scope_lock(
     batch: AiQueuedBatch,
     *,
     queue_wait_started: float,
-    force_text_response: bool | None = None,
 ) -> None:
     queue_ticket = _AI_REPLY_QUEUE.join(batch.scope)
-    if force_text_response is None:
-        force_text_response = queue_ticket.force_text_response
     try:
         if queue_ticket.lock.locked():
             for request in batch.items:
@@ -567,7 +507,6 @@ async def process_ai_queue_batch_with_scope_lock(
             await _process_ai_queue_batch(
                 merged_batch,
                 queue_wait_started=queue_wait_started,
-                force_text_response=force_text_response,
             )
             while True:
                 pending_batch = _AI_REPLY_QUEUE.pop_pending_batch(batch.scope)
@@ -588,7 +527,6 @@ async def process_ai_queue_batch_with_scope_lock(
                 await _process_ai_queue_batch(
                     merged_pending,
                     queue_wait_started=pending_batch.first.request_started,
-                    force_text_response=force_text_response,
                 )
     finally:
         _AI_REPLY_QUEUE.leave(queue_ticket)
@@ -615,7 +553,6 @@ def build_proactive_buffer_queued_request(item: AiProactiveBufferItem) -> AiQueu
         user_id=item.user_id,
         trigger_kind=AiChatTriggerKind.PROACTIVE,
         decision=decision,
-        force_voice_response=False,
         quote_first_reply=True,
     )
 
@@ -739,8 +676,6 @@ async def _handle_ai_locked(
     decision: AiMessageDecision | None = None,
     local_prepare_started: float | None = None,
     queue_wait_seconds: float = 0.0,
-    force_text_response: bool = False,
-    force_voice_response: bool = False,
     quote_first_reply: bool = True,
 ) -> None:
     local_prepare_started = local_prepare_started if local_prepare_started is not None else request_started
@@ -878,14 +813,6 @@ async def _handle_ai_locked(
         output_strategy_context = build_group_output_strategy_context(group_id, decision=decision)
         if output_strategy_context:
             context_parts.append(output_strategy_context)
-    with prepare_timer.stage("output_mode"):
-        output_mode = store.get_ai_output_mode(group_id=group_id, user_id=user_id)
-        voice_singing = should_use_tts_singing_mode(prompt)
-        voice_output_requested = output_mode == "voice" or force_voice_response
-        context_output_mode = "voice" if voice_output_requested else output_mode
-        voice_context = build_ai_output_mode_context(context_output_mode, singing=voice_singing)
-        if voice_context:
-            context_parts.append(voice_context)
     with prepare_timer.stage("orchestrator_init"):
         restart_scheduler = lambda: AdminService.from_settings(settings).schedule_restart()
         orchestrator = AiOrchestrator(
@@ -1089,29 +1016,6 @@ async def _handle_ai_locked(
     if not response.fallback:
         conversation_store.append_turn(key, prompt, response_text)
 
-    force_voice = voice_singing and voice_output_requested
-    if voice_output_requested and not settings.ai_show_metrics and not force_text_response:
-        should_attempt_voice = should_attempt_ai_voice_response(
-            response_text,
-            force_voice=force_voice,
-        )
-        voice_sent = await try_send_ai_voice_response(
-            bot,
-            settings,
-            profiles,
-            effective_profile,
-            response_text,
-            group_id=group_id,
-            user_id=user_id,
-            singing=voice_singing,
-            force_voice=force_voice,
-        )
-        if voice_sent:
-            await ai_chat_matcher.finish()
-            return
-        if should_attempt_voice:
-            response_text = "语音输出暂时不可用，先用文字回复你：\n" + response_text
-
     response_followup = None
     if pending_task_id and group_id is not None:
         response_followup = build_recent_answer_followup_message(
@@ -1190,22 +1094,6 @@ async def _handle_ai_locked(
         bot=bot,
         title="棉花糖的 AI 回复",
     )
-
-
-async def try_send_ai_voice_response(
-    bot: Bot,
-    settings: RuntimeSettings,
-    profiles: dict[str, object],
-    profile: str,
-    text: str,
-    *,
-    group_id: int | str | None,
-    user_id: int | str,
-    singing: bool = False,
-    force_voice: bool = False,
-) -> bool:
-    # 小米 TTS 已停用；后续如接入 OpenAI TTS，应在这里替换为新的语音 provider。
-    return False
 
 
 def build_ai_reply_scope(event: MessageEvent) -> str:
@@ -1471,49 +1359,6 @@ def is_pure_direct_at(normalized_message: NormalizedMessage) -> bool:
     if not outline:
         return False
     return all(part.startswith("[@") and part.endswith("]") for part in outline.split())
-
-
-def format_ai_output_mode(mode: str) -> str:
-    return "语音" if mode == "voice" else "文字"
-
-
-def build_ai_output_mode_context(mode: str, *, singing: bool = False) -> str:
-    if mode != "voice":
-        return ""
-    context = (
-        "当前用户希望 AI 用语音回复，但小米 TTS 已停用，语音输出暂时不可用；"
-        "本轮请直接给出适合文字发送的简短回复，不要声称自己已经发送语音。"
-    )
-    if singing:
-        context += (
-            "用户这轮在请求唱歌或哼唱；当前没有可用 TTS，"
-            "请用文字说明语音暂不可用，并尽量给出简短替代内容。"
-        )
-    return context
-
-
-def should_use_tts_singing_mode(prompt: str) -> bool:
-    normalized = prompt.strip().lower()
-    if not normalized:
-        return False
-    singing_keywords = (
-        "唱首歌",
-        "唱一首",
-        "唱歌",
-        "唱一下",
-        "唱两句",
-        "哼唱",
-        "哼一段",
-        "sing",
-    )
-    return any(keyword in normalized for keyword in singing_keywords)
-
-
-def should_attempt_ai_voice_response(text: str, *, force_voice: bool = False) -> bool:
-    if not text.strip():
-        return False
-    limit = AI_TTS_FORCE_MAX_CHARS if force_voice else AI_TTS_MAX_CHARS
-    return len(text) <= limit
 
 
 def record_ai_diagnostics(

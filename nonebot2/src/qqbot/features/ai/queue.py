@@ -13,7 +13,6 @@ from qqbot.services.message_normalizer import NormalizedMessage
 from qqbot.services.settings_store import SettingsStore
 
 AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST = 20.0
-AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS = 45.0
 AI_PROACTIVE_BUFFER_QUIET_SECONDS = 10.0
 AI_PROACTIVE_BUFFER_MAX_SECONDS = 30.0
 
@@ -24,7 +23,6 @@ class AiReplyQueueTicket:
     lock: asyncio.Lock
     queue_position: int
     estimated_wait_seconds: float
-    force_text_response: bool
 
 
 @dataclass(frozen=True)
@@ -43,7 +41,6 @@ class AiQueuedRequest:
     user_id: str
     trigger_kind: AiChatTriggerKind
     decision: AiMessageDecision
-    force_voice_response: bool
     quote_first_reply: bool = True
 
 
@@ -154,10 +151,8 @@ class AiReplyQueueManager:
         self,
         *,
         estimated_seconds_per_request: float = AI_QUEUE_ESTIMATED_SECONDS_PER_REQUEST,
-        text_fallback_after_seconds: float = AI_QUEUE_TEXT_FALLBACK_AFTER_SECONDS,
     ) -> None:
         self.estimated_seconds_per_request = estimated_seconds_per_request
-        self.text_fallback_after_seconds = text_fallback_after_seconds
         self._locks: dict[str, asyncio.Lock] = {}
         self._queued_counts: dict[str, int] = {}
         self._pending_batches: dict[str, list[AiQueuedRequest]] = {}
@@ -171,7 +166,6 @@ class AiReplyQueueManager:
             lock=self._locks.setdefault(scope, asyncio.Lock()),
             queue_position=queued_ahead,
             estimated_wait_seconds=estimated_wait,
-            force_text_response=estimated_wait > self.text_fallback_after_seconds,
         )
 
     def leave(self, ticket: AiReplyQueueTicket) -> None:
