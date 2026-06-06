@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from qqbot.config import RuntimeSettings
 from qqbot.services.admin_service import AdminService
-from qqbot.services.fe_artifact_publish_service import (
+from qqbot.features.artifacts.publish_service import (
     LocalArtifactPublishContext,
     LocalArtifactPublishFile,
     publish_local_artifacts,
