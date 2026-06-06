@@ -6,7 +6,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 
 from qqbot.config import load_settings
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.services.shapez_service import render_shape_chart, render_shape_code
+from qqbot.features.shapez.service import render_shape_chart, render_shape_code
 
 shapez_matcher = on_regex(
     r"^(i|view|chart|chart1|chart2|p) .*$",

@@ -66,8 +66,9 @@
 
 ## 架构边界
 
-- `src/qqbot/plugins/` 负责 NoneBot matcher、命令解析、事件入口。
-- `src/qqbot/services/` 负责可测试业务逻辑、持久化和外部服务封装。
+- `src/qqbot/plugins/` 负责 NoneBot matcher、命令解析、事件入口；复杂功能应使用 `plugins/<feature>/` 包目录，不再把实现堆在单个插件文件里。
+- `src/qqbot/features/<feature>/` 是功能自有实现目录，负责该功能的 service、models、store、client、render、migration 等可测试业务代码。
+- `src/qqbot/services/` 保留共享基础设施和迁移期兼容入口；单一功能独占的业务逻辑应迁入对应 `features/<feature>/`。
 - `plugin_registry.py` 是插件元数据唯一入口；菜单、管理端和全局插件开关优先从这里读取。
 - 插件不使用功能序号；菜单入口使用 `菜单+模块名称/别名` 模糊匹配。
 - 新入群默认启用所有未被全局禁用的插件，不再维护每群功能开关。

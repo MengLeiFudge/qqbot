@@ -7,7 +7,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 
 from qqbot.config import load_settings
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.services.sakura_service import SakuraService
+from qqbot.features.sakura.service import SakuraService
 
 sakura_matcher = on_regex(
     r"^(落樱之都|更新日志|玩法|注册.+|改名.+|个人信息|加经验[0-9]+|嘤[0-9]+|恢复|回复|加[0-9]+(力量|智力|体质|敏捷|魅力))$",

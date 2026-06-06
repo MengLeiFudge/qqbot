@@ -6,7 +6,7 @@ from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import MessageEvent
 
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.services.factorio_download_service import (
+from qqbot.features.factorio.service import (
     FactorioDownloadError,
     FactorioDownloadService,
     render_factorio_download_safety_message,

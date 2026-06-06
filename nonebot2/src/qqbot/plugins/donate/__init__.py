@@ -6,7 +6,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 
 from qqbot.config import load_settings
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.services.donate_service import build_donate_caption, locate_donate_image
+from qqbot.features.donate.service import build_donate_caption, locate_donate_image
 
 donate_matcher = on_regex(
     r"(?i)^(/?donate|捐献|支持)$",

@@ -6,7 +6,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 from qqbot.config import load_settings
 from qqbot.services.command_guard import direct_command_rule
 from qqbot.services.group_nick_store import get_group_nick_store
-from qqbot.services.kun_service import KunService
+from qqbot.features.kun.service import KunService
 from qqbot.services.settings_store import get_settings_store
 
 kun_matcher = on_regex(

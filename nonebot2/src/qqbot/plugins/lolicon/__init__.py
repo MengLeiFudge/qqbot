@@ -10,7 +10,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent
 
 from qqbot.services.async_tools import run_blocking
 from qqbot.services.command_guard import direct_command_rule
-from qqbot.services.lolicon_service import LoliconMode, parse_lolicon_command, parse_lolicon_response
+from qqbot.features.lolicon.service import LoliconMode, parse_lolicon_command, parse_lolicon_response
 from qqbot.services.settings_store import get_settings_store
 
 lolicon_admin_matcher = on_regex(
