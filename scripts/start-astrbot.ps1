@@ -14,9 +14,21 @@ catch {
 
 $WorkspaceRoot = Split-Path -Parent $PSScriptRoot
 $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
+$LocalPluginRoot = Join-Path $WorkspaceRoot "astrbot-local-plugins"
+$RuntimePluginRoot = Join-Path $AstrRoot "data\plugins"
 
 New-Item -ItemType Directory -Path $AstrRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $AstrRoot ".astrbot") -Force | Out-Null
+New-Item -ItemType Directory -Path $RuntimePluginRoot -Force | Out-Null
+
+if (Test-Path $LocalPluginRoot) {
+    Get-ChildItem -Path $LocalPluginRoot -Directory | ForEach-Object {
+        $target = Join-Path $RuntimePluginRoot $_.Name
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Copy-Item -Path (Join-Path $_.FullName "*") -Destination $target -Recurse -Force
+    }
+}
+
 $env:ASTRBOT_ROOT = $AstrRoot
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"

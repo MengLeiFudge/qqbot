@@ -4,6 +4,7 @@
 
 - `nonebot2/`：天使棉花糖，原 qqbot / NoneBot2 应用。
 - `astrbot/`：AstrBot 上游源码快照和本机配置示例；实际 bot2 Core 由 `uv tool` 管理。
+- `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码，启动 bot2 前同步到运行态插件目录。
 - `napcat/`：共用 NapCat / QQ 登录端程序包。
 - `data/`：统一运行态数据目录，默认不进 Git。
 - `scripts/`：根级 Windows 启动脚本。
@@ -27,6 +28,8 @@
 不要再使用 `nonebot2/.env`、`nonebot2/.env.example` 或 `nonebot2/config/qqbot.toml` 作为运行配置入口；根级启动脚本会固定读取 `data/nonebot2/config/`。
 
 AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps1` 会调用 `uv tool` 安装的 `astrbot` 命令，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。
+
+`astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、菜单、Factorio 下载链接、复读、入群欢迎、戳一戳响应，以及社交请求日志；群文件清理、Lolicon、养鲲、落樱、Arc、shapez 和 NoneBot2 AI runtime 属于二期适配或使用 AstrBot 原生链路。
 
 ## 启动
 
