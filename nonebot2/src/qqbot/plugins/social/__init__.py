@@ -17,7 +17,7 @@ from nonebot.adapters.onebot.v11 import (
 from qqbot.services.message_delivery import call_split_text_api
 from qqbot.services.feature_catalog import get_feature_by_menu_key
 from qqbot.services.settings_store import get_settings_store
-from qqbot.features.group.social_service import (
+from qqbot.features.social.service import (
     build_group_member_welcome_message,
     plan_poke_response,
     should_auto_approve_request,
@@ -39,9 +39,9 @@ GROUP_MEMBER_WELCOME_SUFFIXES = ("--", "-1", "=群地位-1", "+=-1")
 @request_matcher.handle()
 async def handle_request(bot: Bot, event: RequestEvent) -> None:
     store = get_settings_store()
-    if not _can_trigger_group_assistant(store, getattr(event, "user_id", 0), bot.self_id):
+    if not _is_social_feature_enabled(store, "好友邀请处理"):
         return
-    if not _is_group_assistant_enabled(store):
+    if not _can_trigger_social_action(store, getattr(event, "user_id", 0), bot.self_id):
         return
 
     if isinstance(event, FriendRequestEvent):
@@ -57,6 +57,9 @@ async def handle_request(bot: Bot, event: RequestEvent) -> None:
 @group_increase_matcher.handle()
 async def handle_group_increase(bot: Bot, event) -> None:
     if not isinstance(event, GroupIncreaseNoticeEvent):
+        return
+    store = get_settings_store()
+    if not _is_social_feature_enabled(store, "入群欢迎"):
         return
     group_id = int(getattr(event, "group_id", 0) or 0)
     if str(event.user_id) != str(bot.self_id):
@@ -89,9 +92,9 @@ async def handle_poke(bot: Bot, event: PokeNotifyEvent) -> None:
     if int(event.user_id) == int(bot.self_id):
         return
     store = get_settings_store()
-    if not _is_group_assistant_enabled(store):
+    if not _is_social_feature_enabled(store, "戳一戳响应"):
         return
-    if not _can_trigger_group_assistant(store, event.user_id, bot.self_id):
+    if not _can_trigger_social_action(store, event.user_id, bot.self_id):
         return
 
     plan = plan_poke_response(
@@ -186,12 +189,12 @@ async def _resolve_group_name(bot: Bot, group_id: int) -> str:
     return str(group_id)
 
 
-def _is_group_assistant_enabled(store) -> bool:
-    feature = get_feature_by_menu_key("群管助手")
+def _is_social_feature_enabled(store, name: str) -> bool:
+    feature = get_feature_by_menu_key(name)
     return feature is not None and store.get_group_feature_state(0, feature)
 
 
-def _can_trigger_group_assistant(store, user_id: int | str, self_id: int | str) -> bool:
+def _can_trigger_social_action(store, user_id: int | str, self_id: int | str) -> bool:
     try:
         actor_id = int(user_id)
     except (TypeError, ValueError):

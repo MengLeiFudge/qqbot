@@ -23,7 +23,7 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
     PluginSpec(
         id="group_assistant",
         name="群管助手",
-        aliases=("群管", "群管理", "群功能", "QQ助手", "qq助手", "社交事件"),
+        aliases=("群管", "群管理", "群功能", "QQ助手", "qq助手"),
         menu_lines=(
             "通知清理文件：统计超过一周的外层群文件并按大小禁言上传者",
         ),
@@ -31,6 +31,41 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
             "通知清理文件",
         ),
         scopes=("group",),
+        admin_only=True,
+    ),
+    PluginSpec(
+        id="social_requests",
+        name="好友邀请处理",
+        aliases=("好友申请", "邀请入群", "自动同意", "社交事件"),
+        menu_lines=(
+            "自动处理好友申请和邀请入群；机器人入群后通知邀请者已加入群聊",
+        ),
+        commands=("好友申请", "邀请入群"),
+        scopes=("group", "private"),
+        visible=True,
+        admin_only=True,
+    ),
+    PluginSpec(
+        id="group_welcome",
+        name="入群欢迎",
+        aliases=("欢迎", "新人欢迎", "社交事件"),
+        menu_lines=(
+            "新成员入群时发送欢迎消息；机器人自身入群时发送自我介绍",
+        ),
+        commands=("入群欢迎",),
+        scopes=("group",),
+        requires_direct_at=False,
+    ),
+    PluginSpec(
+        id="poke_response",
+        name="戳一戳响应",
+        aliases=("戳一戳", "反戳", "社交事件"),
+        menu_lines=(
+            "作者戳机器人或群成员时按概率响应和反戳",
+        ),
+        commands=("戳一戳",),
+        scopes=("group", "private"),
+        requires_direct_at=False,
         admin_only=True,
     ),
     PluginSpec(
