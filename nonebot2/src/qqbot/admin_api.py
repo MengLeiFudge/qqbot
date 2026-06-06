@@ -35,10 +35,6 @@ class FeatureToggleRequest(BaseModel):
     enabled: bool
 
 
-class AdminUpdateRequest(BaseModel):
-    qq: int
-
-
 class AiProviderUpdateRequest(BaseModel):
     profile: str
 
@@ -458,28 +454,12 @@ def register_admin_routes(
             "deleted": result.deleted,
         }
 
-    @app.get("/admin/api/admins")
-    async def admin_list_admins(
+    @app.get("/admin/api/author")
+    async def admin_author(
         _: None = Depends(require_local_request),
         admin_service: AdminService = Depends(service),
     ) -> dict[str, object]:
-        return admin_service.list_admins()
-
-    @app.post("/admin/api/admins")
-    async def admin_add_admin(
-        payload: AdminUpdateRequest,
-        _: None = Depends(require_local_request),
-        admin_service: AdminService = Depends(service),
-    ) -> dict[str, object]:
-        return admin_service.set_admin(payload.qq, True)
-
-    @app.delete("/admin/api/admins/{qq}")
-    async def admin_remove_admin(
-        qq: int,
-        _: None = Depends(require_local_request),
-        admin_service: AdminService = Depends(service),
-    ) -> dict[str, object]:
-        return admin_service.set_admin(qq, False)
+        return admin_service.get_author()
 
     @app.get("/admin/api/logs")
     async def admin_list_logs(
@@ -802,11 +782,7 @@ def build_admin_html(settings: RuntimeSettings) -> str:
           <div id="aiDiagnosticsList" class="diagnostic-list"></div>
         </div>
         <div class="panel-block">
-          <h3>Bot 管理员</h3>
-          <div class="row">
-            <input id="adminInput" inputmode="numeric" placeholder="QQ 号">
-            <button onclick="addAdmin()">添加</button>
-          </div>
+          <h3>作者权限</h3>
           <ul id="adminList"></ul>
         </div>
       </section>
@@ -1410,35 +1386,13 @@ def build_admin_html(settings: RuntimeSettings) -> str:
     }}
 
     async function loadAdmins() {{
-      const payload = await api("/admin/api/admins");
+      const payload = await api("/admin/api/author");
       const author = payload.author || {{
         qq: payload.author_qq,
         display_name: payload.author_qq,
       }};
-      const adminItems = payload.admin_items || payload.admins.map(qq => ({{
-        qq,
-        display_name: qq,
-      }}));
-      const admins = adminItems.map(item => {{
-        const qq = Number(item.qq);
-        const displayName = item.display_name || qq;
-        return `<li>${{escapeHtml(displayName)}} <button onclick="removeAdmin(${{qq}})">删除</button></li>`;
-      }}).join("");
-      document.getElementById("adminList").innerHTML = `<li>作者：${{escapeHtml(author.display_name || author.qq)}}（固定管理员）</li>${{admins}}`;
-    }}
-
-    async function addAdmin() {{
-      const input = document.getElementById("adminInput");
-      const qq = Number(input.value.trim());
-      if (!qq) return;
-      await api("/admin/api/admins", {{ method: "POST", body: JSON.stringify({{ qq }}) }});
-      input.value = "";
-      await loadAdmins();
-    }}
-
-    async function removeAdmin(qq) {{
-      await api(`/admin/api/admins/${{qq}}`, {{ method: "DELETE" }});
-      await loadAdmins();
+      document.getElementById("adminList").innerHTML =
+        `<li>作者：${{escapeHtml(author.display_name || author.qq)}}（唯一管理权限）</li>`;
     }}
 
     async function loadLogs() {{

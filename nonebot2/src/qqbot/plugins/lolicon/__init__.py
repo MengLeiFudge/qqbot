@@ -50,7 +50,7 @@ async def fetch_lolicon_items_async(mode: LoliconMode, num: int, tags: list[str]
 async def handle_lolicon_admin(event: MessageEvent) -> None:
     store = get_settings_store()
     if not store.is_bot_admin(int(event.get_user_id())):
-        await lolicon_admin_matcher.finish("只有Bot管理员才能调整美图配置哦！")
+        await lolicon_admin_matcher.finish("只有作者才能调整美图配置哦！")
 
     text = event.get_plaintext().strip()
     group_r18, show_image = store.get_lolicon_config(getattr(event, "group_id", 0))

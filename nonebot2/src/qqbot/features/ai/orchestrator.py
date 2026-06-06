@@ -261,7 +261,7 @@ class AiOrchestrator:
         if not any(keyword in text for keyword in ("记一下这个需求", "记录需求", "生成需求提案")):
             return AiOrchestratorResult(False)
         if not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能记录功能需求。")
+            return AiOrchestratorResult(True, "只有作者才能记录功能需求。")
         summary = re.sub(r"^(记一下这个需求|记录需求|生成需求提案)[：:，,\s]*", "", text).strip()
         if not summary:
             summary = normalized_message.outline or text
@@ -286,7 +286,7 @@ class AiOrchestrator:
         if text.strip() not in {"需求列表", "查看需求", "待处理需求"}:
             return AiOrchestratorResult(False)
         if not context.is_admin:
-            return AiOrchestratorResult(True, "只有作者或 Bot 管理员才能查看需求列表。")
+            return AiOrchestratorResult(True, "只有作者才能查看需求列表。")
         proposals = self.requirements.list_proposals()
         if not proposals:
             return AiOrchestratorResult(True, "当前没有待处理需求。")

@@ -22,15 +22,10 @@ class SettingsStore:
         self.func_state_root = self.settings_root / "func_state"
 
     def set_bot_admin(self, qq: int, is_admin: bool) -> None:
-        admins = self._read_json(self.settings_root / "bot_admin.json", {})
-        admins[str(qq)] = is_admin
-        self._write_json(self.settings_root / "bot_admin.json", admins)
+        return
 
     def is_bot_admin(self, qq: int) -> bool:
-        if qq == self.author_qq:
-            return True
-        admins = self._read_json(self.settings_root / "bot_admin.json", {})
-        return bool(admins.get(str(qq), False))
+        return qq == self.author_qq
 
     def is_bot_admin_or_self(self, qq: int, self_id: int | str | None) -> bool:
         if self_id is not None and str(qq) == str(self_id):
@@ -38,7 +33,7 @@ class SettingsStore:
         return self.is_bot_admin(qq)
 
     def list_bot_admins(self) -> dict[str, bool]:
-        return self._read_json(self.settings_root / "bot_admin.json", {})
+        return {}
 
     def get_group_feature_state(self, group_id: int, feature: FeatureDefinition) -> bool:
         return self.get_plugin_enabled(feature.plugin_id)

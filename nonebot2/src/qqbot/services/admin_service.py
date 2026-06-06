@@ -303,30 +303,17 @@ class AdminService:
         safe_limit = max(1, min(int(limit), 500))
         return AiDiagnosticsStore(self.settings.data_root).summary(limit=safe_limit)
 
-    def list_admins(self) -> dict[str, object]:
-        admins = self.store.list_bot_admins()
-        enabled_admins = sorted(int(qq) for qq, enabled in admins.items() if enabled)
+    def get_author(self) -> dict[str, object]:
         nick_store = GroupNickStore(self.settings.data_root / "settings" / "group_nick.json")
         return {
             "author_qq": self.settings.author_qq,
             "author_name": self.settings.author_name,
-            "admins": enabled_admins,
             "author": self._build_admin_display_item(
                 self.settings.author_qq,
                 self.settings.author_name,
                 nick_store,
             ),
-            "admin_items": [
-                self._build_admin_display_item(qq, nick_store=nick_store)
-                for qq in enabled_admins
-            ],
         }
-
-    def set_admin(self, qq: int, enabled: bool) -> dict[str, object]:
-        if qq == self.settings.author_qq:
-            enabled = True
-        self.store.set_bot_admin(qq, enabled)
-        return self.list_admins()
 
     def get_status(self, connected_bot_count: int) -> dict[str, object]:
         return {

@@ -28,14 +28,6 @@ def load_java_properties_map(path: Path) -> dict[str, str]:
     return result
 
 
-def migrate_bot_admin(legacy_file: Path, target_file: Path) -> None:
-    payload = {
-        key: value.lower() == "true"
-        for key, value in load_java_properties_map(legacy_file).items()
-    }
-    _write_json(target_file, payload)
-
-
 def migrate_func_state(legacy_dir: Path, target_dir: Path) -> int:
     if not legacy_dir.exists():
         return 0
@@ -129,7 +121,6 @@ def run_mirai_data_migration(legacy_run: Path, data_root: Path) -> dict[str, int
     data_root = Path(data_root) / "data"
     shapez_root = Path(data_root).parent / "shapez"
 
-    migrate_bot_admin(legacy_run / "settings" / "botAdmin.txt", settings_root / "bot_admin.json")
     func_state_count = migrate_func_state(
         legacy_run / "settings" / "funcState",
         settings_root / "func_state",

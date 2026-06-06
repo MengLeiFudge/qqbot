@@ -56,7 +56,7 @@ class AiToolRegistry:
     ) -> AiToolResult:
         spec = self._tools[name]
         if spec.permission == "admin" and not context.is_admin:
-            raise AiToolPermissionError(f"AI 工具 {name} 需要 Bot 管理员权限。")
+            raise AiToolPermissionError(f"AI 工具 {name} 需要作者权限。")
         return spec.handler(arguments, context)
 
 

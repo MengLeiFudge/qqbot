@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import re
-
 from nonebot import on_regex
 from nonebot.adapters.onebot.v11 import (
     GroupMessageEvent,
-    Message,
     MessageEvent,
-    MessageSegment,
 )
 
 from qqbot.services.feature_catalog import (
@@ -24,14 +20,6 @@ FEATURE_MENU_PATTERN = r"^菜单(?!\d+$)\S+$"
 
 menu_matcher = on_regex(r"^(菜单|帮助|指令)$", priority=5, block=True, rule=direct_command_rule())
 feature_menu_matcher = on_regex(FEATURE_MENU_PATTERN, priority=5, block=True, rule=direct_command_rule())
-admin_matcher = on_regex(
-    r"^((增加|设置|设|加)(管理|管理员)|(删除|取消|删)(管理|管理员))",
-    priority=5,
-    block=True,
-    rule=direct_command_rule(),
-)
-
-
 @menu_matcher.handle()
 async def handle_menu(event: MessageEvent) -> None:
     if not isinstance(event, GroupMessageEvent):
@@ -64,43 +52,3 @@ async def handle_feature_menu(event: MessageEvent) -> None:
         menu_text,
         group_id=getattr(event, "group_id", None),
     )
-
-
-@admin_matcher.handle()
-async def handle_admin_manage(event: MessageEvent) -> None:
-    store = get_settings_store()
-    if int(event.get_user_id()) != store.author_qq:
-        return
-
-    at_targets = []
-    for segment in event.get_message():
-        if segment.type == "at":
-            qq = segment.data.get("qq")
-            if qq and qq != "all":
-                at_targets.append(int(qq))
-
-    if not at_targets:
-        return
-
-    text = event.get_plaintext().strip()
-    if re.match(r"^(增加|设置|设|加)(管理|管理员)", text):
-        for target in at_targets:
-            store.set_bot_admin(target, True)
-        message = Message("已将 ")
-        for index, target in enumerate(at_targets):
-            if index > 0:
-                message += MessageSegment.text("、")
-            message += MessageSegment.at(target)
-        message += MessageSegment.text(" 设为Bot管理！")
-        await admin_matcher.finish(message)
-
-    if re.match(r"^(删除|取消|删)(管理|管理员)", text):
-        for target in at_targets:
-            store.set_bot_admin(target, False)
-        message = Message("已取消 ")
-        for index, target in enumerate(at_targets):
-            if index > 0:
-                message += MessageSegment.text("、")
-            message += MessageSegment.at(target)
-        message += MessageSegment.text(" 的Bot管理权限！")
-        await admin_matcher.finish(message)

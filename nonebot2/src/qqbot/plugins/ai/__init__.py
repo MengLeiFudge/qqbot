@@ -182,7 +182,7 @@ async def handle_ai_model(event: MessageEvent) -> None:
     settings = load_settings()
     store = get_settings_store()
     if not store.is_bot_admin(int(event.get_user_id())):
-        await ai_model_matcher.finish("只有 Bot 管理员才能切换 AI 模型。")
+        await ai_model_matcher.finish("只有作者才能查看 AI 模型。")
 
     command = parse_ai_model_command(event.get_plaintext())
     if command is None:
@@ -223,7 +223,7 @@ async def handle_ai_output_mode(event: MessageEvent) -> None:
         if group_id is None:
             await ai_output_mode_matcher.finish("群 AI 回复模式只能在群聊中设置。")
         if not store.is_bot_admin(int(user_id)):
-            await ai_output_mode_matcher.finish("只有 Bot 管理员才能设置本群 AI 回复模式。")
+            await ai_output_mode_matcher.finish("只有作者才能设置本群 AI 回复模式。")
         store.set_group_ai_output_mode(group_id, command.mode)
         await ai_output_mode_matcher.finish(
             f"本群 AI 回复模式已切换为：{format_ai_output_mode(command.mode)}"
@@ -2867,25 +2867,9 @@ def build_ai_identity_context(
         nick_store=nick_store,
         fallback_name=settings.author_name,
     )
-    admin_ids = {
-        int(qq)
-        for qq, enabled in settings_store.list_bot_admins().items()
-        if str(qq).isdigit() and enabled
-    }
-    admin_ids.add(author_qq)
-    ordered_admin_ids = [author_qq] + sorted(qq for qq in admin_ids if qq != author_qq)
-    admin_labels = [
-        format_admin_identity_label(qq, nick_store=nick_store)
-        if qq != author_qq
-        else author_label
-        for qq in ordered_admin_ids
-    ]
-
     current_user_id = int(event.get_user_id()) if event.get_user_id().isdigit() else 0
     if current_user_id == author_qq:
         current_identity = "Bot 作者"
-    elif current_user_id and settings_store.is_bot_admin(current_user_id):
-        current_identity = "Bot 管理员"
     else:
         current_identity = "普通用户"
 
@@ -2893,7 +2877,7 @@ def build_ai_identity_context(
     return (
         "机器人身份事实："
         f"\nBot 作者：{author_label}"
-        f"\nBot 管理员列表：{'、'.join(admin_labels)}"
+        "\nBot 管理权限：仅作者拥有"
         f"\n当前发言者身份：{current_identity}"
         "\n这些信息只用于权限、项目归属和管理边界判断；普通亲属梗、挑衅或闲聊里不要主动宣告作者关系，不要使用或确认“主人”这类归属说法。"
     )

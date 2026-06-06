@@ -85,7 +85,7 @@ class AiActionExecutor:
 
     async def _send_group_message(self, request: AiActionRequest) -> AiActionResult:
         if not request.is_admin:
-            return AiActionResult(False, "只有 Bot 管理员才能让 AI 主动向群发送消息。", request.action_type)
+            return AiActionResult(False, "只有作者才能让 AI 主动向群发送消息。", request.action_type)
         target_group_id = (request.target_group_id or "").strip()
         if not target_group_id.isdigit():
             return AiActionResult(False, "群聊目标无效。", request.action_type)
@@ -102,7 +102,7 @@ class AiActionExecutor:
 
     async def _send_group_file(self, request: AiActionRequest) -> AiActionResult:
         if not request.is_admin:
-            return AiActionResult(False, "只有 Bot 管理员才能向群上传文件。", request.action_type)
+            return AiActionResult(False, "只有作者才能向群上传文件。", request.action_type)
         target_group_id = (request.target_group_id or "").strip()
         if not target_group_id.isdigit():
             return AiActionResult(False, "群聊目标无效。", request.action_type)
