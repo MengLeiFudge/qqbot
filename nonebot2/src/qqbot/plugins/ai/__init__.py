@@ -74,6 +74,7 @@ from qqbot.features.ai.memory_retrieval_service import (
     format_evidence_bundle,
     retrieve_memory_evidence,
 )
+from qqbot.features.ai.meme_selector import select_meme_for_reply
 from qqbot.services.nickname_usage_service import (
     NicknameIdentityCandidate,
     NicknameUsageService,
@@ -98,6 +99,7 @@ from qqbot.features.ai.queue import (
 )
 from qqbot.features.ai.reply_pipeline import (
     AI_RECENT_REPLY_NO_QUOTE_MESSAGES,
+    append_ai_reply_meme,
     build_ai_reply_message,
     build_ai_reply_notice_message,
     finish_continuous_group_ai_reply as _finish_continuous_group_ai_reply,
@@ -1195,6 +1197,19 @@ async def _handle_ai_locked(
             quote=quote_reply,
         )
 
+    meme_selection = None
+    if (
+        response_followup is None
+        and group_id is not None
+        and len(response_text) <= COLLAPSIBLE_TEXT_THRESHOLD_CHARS
+    ):
+        meme_selection = select_meme_for_reply(
+            response_text,
+            prompt=prompt,
+            group_id=group_id,
+            data_root=settings.data_root,
+        )
+
     if response_followup is not None:
         if pending_task_id:
             AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
@@ -1217,11 +1232,14 @@ async def _handle_ai_locked(
                 event_time=event_time,
             ),
             bot=bot,
+            meme_path=meme_selection.path if meme_selection is not None else None,
         )
         return
 
     if pending_task_id:
         AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
+    if meme_selection is not None:
+        response_message = append_ai_reply_meme(response_message, meme_selection.path)
     await finish_split_text(
         ai_chat_matcher,
         response_message,
@@ -1922,6 +1940,7 @@ async def finish_continuous_group_ai_reply(
     user_id: int | str,
     quote: bool = True,
     bot: Bot | None = None,
+    meme_path: str | os.PathLike[str] | None = None,
     sleep=asyncio.sleep,
 ) -> None:
     await _finish_continuous_group_ai_reply(
@@ -1931,6 +1950,7 @@ async def finish_continuous_group_ai_reply(
         user_id=user_id,
         quote=quote,
         bot=bot,
+        meme_path=meme_path,
         matcher=ai_chat_matcher,
         sleep=sleep,
         send_func=send_split_text,

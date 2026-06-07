@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
@@ -63,6 +64,25 @@ def build_ai_reply_notice_message(
     )
 
 
+def append_ai_reply_meme(message: str | Message, image_path: Path | str | None) -> str | Message:
+    if image_path is None:
+        return message
+
+    image_segment = MessageSegment.image(Path(image_path).as_posix())
+    if isinstance(message, Message):
+        message += MessageSegment.text("\n")
+        message += image_segment
+        return message
+
+    result = Message()
+    text = str(message).strip()
+    if text:
+        result += MessageSegment.text(text)
+        result += MessageSegment.text("\n")
+    result += image_segment
+    return result
+
+
 async def finish_continuous_group_ai_reply(
     text: str,
     *,
@@ -71,6 +91,7 @@ async def finish_continuous_group_ai_reply(
     user_id: int | str,
     quote: bool = True,
     bot: Any | None = None,
+    meme_path: Path | str | None = None,
     matcher: Any,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     send_func: Callable[..., Awaitable[None]] = send_split_text,
@@ -91,6 +112,9 @@ async def finish_continuous_group_ai_reply(
             )
             continue
         messages.append(part)
+
+    if meme_path is not None:
+        messages[-1] = append_ai_reply_meme(messages[-1], meme_path)
 
     for index, message in enumerate(messages[:-1]):
         if index > 0:

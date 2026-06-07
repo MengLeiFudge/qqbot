@@ -19,6 +19,7 @@
 - 迁移 NoneBot2 功能到 AstrBot 本地插件时，必须明确 bot1/bot2 双开和 AstrBot-only 两种模式下的功能归属。默认使用 `dual` 模式：bot2 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 bot1 负责；只有 AstrBot-only 场景才允许使用 `full` 模式接管已迁移自动事件。
 - bot1/bot2 联动优先用 AstrBot 本地插件桥接，不改 Core。桥接插件只能只读 `data\nonebot2\run\ai\group_context\` 这类公开群上下文，默认不按具体群号限制；星环群 `1035445959` 只能作为领域提示特例，不能作为桥接范围条件。不得读取私聊、token、QQ 登录态、数据库密钥或运行日志作为 LLM prompt 证据。
 - AstrBot 源码知识兜底优先用 `astrbot_plugin_source_knowledge` 这类本地插件实现，不改 Core、不依赖 Embedding。可信依据必须优先来自源码、反编译源码、源码邻近 README/设计文档和配置数据，尤其是戴森球计划本体相关源码和相关 mod 源码；群聊、群文件、攻略和 release notes 只能作为候选或补充。源码检索插件只读明确配置的源码根，必须跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件；不得读取私聊、token、QQ 登录态、数据库密钥、运行日志或本仓库运行态 `data`。
+- bot1/bot2 共用本地表情包索引 `data\memes\mlj_pack\index.json`；`auto_send_enabled=false` 的敏感支付、涩涩慎用、待复核类别不得自动发送。AstrBot 侧通过 `scripts\sync-meme-pack.py` 同步到 `data\astrbot\data\plugin_data\meme_manager\` 和运行态配置，不改 Core、不删除旧图库目录。
 - bot1/bot2 双开时，普通主动接话不得由另一个 bot 的普通输出继续触发；明确 @ 当前 bot 或私聊仍按直接请求处理。两个 bot 的普通回复、主动回复和拒答都不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”等追问式收尾；缺关键信息时陈述缺口，不催用户补充。
 - bot1/bot2 的所有群聊和私聊 LLM 回复都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析。分析不出发言原因时不回答，不编原因，不输出危机干预、急救、报警、健康建议或严肃安慰；凭据泄露等本地硬安全提醒仍按既有规则执行。
 - `napcat/`：共用 NapCat 程序包；更新下载和旧包备份应放在 `data/napcat/`，当前账号 OneBot 配置随一键包放置并由更新脚本迁移。
