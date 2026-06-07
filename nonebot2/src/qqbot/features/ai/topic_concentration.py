@@ -164,7 +164,10 @@ def build_topic_concentration_prompt(
             continue
         speaker = f"用户{message.user_id}" if message.user_id else "群友"
         lines.append(f"{index}. {speaker}: {text}")
-    lines.append("不要解释主动介入机制；低信息闲聊可以 40 字以内，话题讨论或技术排查按信息完整性回复。")
+    lines.append(
+        "不要解释主动介入机制；低信息闲聊可以 40 字以内，话题讨论或技术排查按信息完整性回复。"
+        "不要用反问、不要追问用户、不要以“你要的话/如果你愿意/你把具体名字发我/我可以再帮你”收尾。"
+    )
     return "\n".join(lines)
 
 
@@ -182,6 +185,7 @@ def build_ai_proactive_reply_decision_prompt(
         "只有当前话题确实轮到棉花糖补充、回答、澄清、保护安全或延续已形成讨论时，should_reply 才为 true。",
         "不要因为没有 @ 棉花糖就一律拒绝；如果最近候选已经形成具体话题，且棉花糖能补上关键事实、澄清误解或延续正在进行的技术/配置/问题讨论，可以 should_reply=true。",
         "也不要因为棉花糖能回答就每次都接；如果群友已经说清楚、问题不是问棉花糖、是在评价其他机器人、或只是提到棉花糖这个名字但不是叫棉花糖说话，should_reply 必须为 false。",
+        "版权、盗版、破解、无广告未删减网站、破解软件下载等安全合规引导话题，只有明确 @ 棉花糖或正在追问棉花糖上一条回复时才回答；普通群聊窗口里默认 should_reply=false。",
         "输出字段：should_reply(boolean), topic_key(string), topic_type(string), reason(string), reply_style(casual|topic|technical|safety), max_length(short|normal|detail)。",
         "max_length 含义：short 仅适合低信息闲聊；normal 适合正在聊的话题；detail 只用于技术/配置/报错。不要把话题讨论强行压到 40 字。",
     ]
@@ -367,20 +371,15 @@ def _coerce_should_reply(raw_value: object, reason: str) -> bool:
         "适合接话",
         "适合主动接话",
         "适合继续",
-        "适合补充",
         "可以接话",
-        "可以补充",
-        "可以继续",
         "明确求助",
         "明确的技术求助",
         "具体技术讨论",
         "具体问题",
         "技术话题",
         "需要棉花糖",
-        "棉花糖可以",
         "能补上",
         "补充解释",
-        "补充说明",
         "澄清误解",
         "排查思路",
     )

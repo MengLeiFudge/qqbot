@@ -9,6 +9,7 @@ from qqbot.features.ai.topic_concentration import (
     parse_ai_proactive_reply_decision,
 )
 from qqbot.features.ai.command import looks_like_ai_named_trigger
+from qqbot.features.ai.output_style import sanitize_ai_output_text
 
 
 def test_short_casual_chat_can_be_candidate_for_ai_decision() -> None:
@@ -73,6 +74,7 @@ def test_ai_decision_prompt_defines_topic_concentration_and_interest() -> None:
     assert "某种分馏塔怎么用" in prompt
     assert "当前短期高兴趣话题" in prompt
     assert "无关插话" in prompt
+    assert "普通群聊窗口里默认 should_reply=false" in prompt
 
 
 def test_third_party_named_mentions_do_not_trigger() -> None:
@@ -103,3 +105,23 @@ def test_topic_prompt_keeps_recent_chat_scope() -> None:
     assert "当前短期高兴趣话题" in prompt
     assert "用户1001: GTNH 有连锁吗？" in prompt
     assert "不要解释主动介入机制" in prompt
+    assert "不要用反问" in prompt
+
+
+def test_sanitize_ai_output_text_strips_followup_invitation_tail() -> None:
+    text = (
+        "凡是写着“破解版、VIP破解、去广告、无限看、会员解锁”这类的，基本都该拒绝；"
+        "优先只用应用商店里的官方正版和平台自家客户端喵。"
+        "你把具体名字发我，我帮你看正不正规。"
+    )
+
+    assert sanitize_ai_output_text(text) == (
+        "凡是写着“破解版、VIP破解、去广告、无限看、会员解锁”这类的，基本都该拒绝；"
+        "优先只用应用商店里的官方正版和平台自家客户端喵。"
+    )
+
+
+def test_sanitize_ai_output_text_strips_question_tail() -> None:
+    text = "这个网站看起来不正规，别登录也别下客户端喵。是不是更安全？"
+
+    assert sanitize_ai_output_text(text) == "这个网站看起来不正规，别登录也别下客户端喵。"

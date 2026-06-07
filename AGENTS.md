@@ -18,6 +18,7 @@
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
 - 迁移 NoneBot2 功能到 AstrBot 本地插件时，必须明确 bot1/bot2 双开和 AstrBot-only 两种模式下的功能归属。默认使用 `dual` 模式：bot2 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 bot1 负责；只有 AstrBot-only 场景才允许使用 `full` 模式接管已迁移自动事件。
 - bot1/bot2 联动优先用 AstrBot 本地插件桥接，不改 Core。桥接插件只能只读 `data\nonebot2\run\ai\group_context\` 这类公开群上下文，默认不按具体群号限制；星环群 `1035445959` 只能作为领域提示特例，不能作为桥接范围条件。不得读取私聊、token、QQ 登录态、数据库密钥或运行日志作为 LLM prompt 证据。
+- bot1/bot2 双开时，普通主动接话不得由另一个 bot 的普通输出继续触发；明确 @ 当前 bot 或私聊仍按直接请求处理。两个 bot 的普通回复、主动回复和拒答都不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”等追问式收尾；缺关键信息时陈述缺口，不催用户补充。
 - `napcat/`：共用 NapCat 程序包；更新下载和旧包备份应放在 `data/napcat/`，当前账号 OneBot 配置随一键包放置并由更新脚本迁移。
 - `data/`：统一运行态根目录，默认忽略，不进 Git。
 - `scripts/`：monorepo 根级启动脚本，负责设置各应用运行态路径。

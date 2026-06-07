@@ -15,11 +15,12 @@ from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
 
 WINDOW_SECONDS = 150.0
 MAX_WINDOW_MESSAGES = 10
-COOLDOWN_SECONDS = 240.0
-GROUP_COOLDOWN_SECONDS = 180.0
-INTEREST_SECONDS = 300.0
+COOLDOWN_SECONDS = 480.0
+GROUP_COOLDOWN_SECONDS = 300.0
+INTEREST_SECONDS = 360.0
 MIN_UNPROMPTED_WINDOW_MESSAGES = 2
 BOT_NAMES = ("棉花糖", "萌萌棉花糖", "qqbot")
+OTHER_BOT_IDS = {"1443944862"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +82,12 @@ class TopicConcentrationPlugin(Star):
             if event.is_at_or_wake_command:
                 return False
             if event.get_self_id() == event.get_sender_id():
+                return False
+            if str(event.get_sender_id()) in OTHER_BOT_IDS:
+                logger.debug(
+                    "[TopicConcentration] skip active reply: "
+                    f"group={event.get_group_id()} reason=other_bot_message"
+                )
                 return False
             if cfg["ar_whitelist"] and (
                 event.unified_msg_origin not in cfg["ar_whitelist"]
@@ -217,6 +224,9 @@ def _build_decision_prompt(
         "不要因为棉花糖能回答就接话；如果只是可补充、可总结、可表达看法，但群友没有明显缺口，should_reply 必须为 false。",
         "同一话题几分钟内最多适合偶尔说一次；如果刚刚已经由机器人参与过，或群友正在自然推进，should_reply 必须为 false。",
         "如果群友已经说清楚、问题不是问棉花糖、是在评价其他机器人、或只是提到棉花糖这个名字但不是叫棉花糖说话，should_reply 必须为 false。",
+        "如果最近消息来自另一个机器人，或是在追问/引用另一个机器人，should_reply 必须为 false；不要接另一个 bot 的回复继续说。",
+        "版权、盗版、破解、无广告未删减网站、破解软件下载等安全合规引导话题，只有明确 @ 棉花糖或正在追问棉花糖上一条回复时才回答；普通 active reply 默认 false。",
+        "如果最终放行回复，回复时不要反问、不要追问用户、不要以“你要的话/如果你愿意/你把具体名字发我/我可以再帮你”收尾。",
         "输出字段：should_reply(boolean), topic_key(string), topic_type(string), reason(string), reply_style(casual|topic|technical|safety), max_length(short|normal|detail)。",
         "max_length 含义：short 仅适合低信息闲聊；normal 适合正在聊的话题；detail 只用于技术/配置/报错。不要把话题讨论强行压到 40 字。",
     ]
