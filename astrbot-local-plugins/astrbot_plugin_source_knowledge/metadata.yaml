@@ -1,0 +1,6 @@
+name: astrbot_plugin_source_knowledge
+display_name: Source knowledge
+desc: "Retrieve local source-code evidence and inject relevant snippets into AstrBot LLM requests."
+version: v0.1.0
+author: local
+repo: ""
