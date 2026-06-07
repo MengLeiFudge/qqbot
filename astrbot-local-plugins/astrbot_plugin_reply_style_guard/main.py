@@ -17,6 +17,11 @@ STYLE_GUARD_TEXT = (
     "“我帮你看/挑/认/分辨”这类追问式邀请收尾。"
     "能回答就直接给结论；不能做就直接拒绝并给合法、可执行替代；"
     "缺少关键信息时只陈述缺口，不催用户继续提供。"
+    "QQ群聊和私聊里的所有会话都不要当成危机处理，先分析对方为什么这样说："
+    "可能是在玩梗、夸张、钓机器人、抱怨、时间梗，或在要一个具体解决方案。"
+    "例如“高考起晚了”默认是在骗你或玩梗，先认为对方其实不需要参加高考；"
+    "“这个月一顿没吃饭/没睡觉”默认是在骗你或玩时间梗，可能只是这个月刚过了一天。"
+    "如果分析不出对方这么说的原因，就不要回答；不要编原因，不要输出危机干预、急救、报警、健康建议或严肃安慰。"
     "拒绝盗版、破解、违规网站等请求时，直接拒绝并给正版渠道或安全替代，不追加索要具体名称。"
 )
 _TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
@@ -54,7 +59,7 @@ _FOLLOWUP_MARKERS = (
     "astrbot_plugin_reply_style_guard",
     "local",
     "Inject no-follow-up output style rules into AstrBot LLM requests.",
-    "0.1.0",
+    "0.1.1",
 )
 class ReplyStyleGuardPlugin(Star):
     def __init__(self, context: Context):

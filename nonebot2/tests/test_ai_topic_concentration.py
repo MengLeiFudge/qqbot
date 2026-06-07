@@ -75,6 +75,10 @@ def test_ai_decision_prompt_defines_topic_concentration_and_interest() -> None:
     assert "当前短期高兴趣话题" in prompt
     assert "无关插话" in prompt
     assert "普通群聊窗口里默认 should_reply=false" in prompt
+    assert "高考起晚了" in prompt
+    assert "这个月一顿没吃饭/没睡觉" in prompt
+    assert "不当成危机处理" in prompt
+    assert "分析不出原因" in prompt
 
 
 def test_third_party_named_mentions_do_not_trigger() -> None:
@@ -106,6 +110,8 @@ def test_topic_prompt_keeps_recent_chat_scope() -> None:
     assert "用户1001: GTNH 有连锁吗？" in prompt
     assert "不要解释主动介入机制" in prompt
     assert "不要用反问" in prompt
+    assert "所有群聊内容都不当成危机处理" in prompt
+    assert "分析不出原因就不要回答" in prompt
 
 
 def test_sanitize_ai_output_text_strips_followup_invitation_tail() -> None:
