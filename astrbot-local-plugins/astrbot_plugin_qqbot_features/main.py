@@ -101,10 +101,10 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="Lolicon美图",
         aliases=("Lolicon", "美图", "色图"),
-        status="部分移植",
         lines=(
             "来点美图 / 色图 / 混合：复用 bot1 Lolicon API、图片缓存和元数据存储",
-            "群聊默认只允许非 R18；群色图/图片显示配置仍保留为二期适配",
+            "开群色图 / 关群色图：作者限定，控制当前群是否允许 R18",
+            "开图片显示 / 关图片显示：作者限定，控制 R18 结果是否直接发图",
         ),
     ),
     FeatureSpec(
@@ -175,6 +175,7 @@ class LoliconRenderResult:
     suffix: str
     image_path: Path | None = None
     image_url: str = ""
+    image_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,7 +251,7 @@ class RereadRepeatState:
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.6.0",
+    "0.7.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -323,7 +324,20 @@ class QQBotFeaturesPlugin(Star):
     async def lolicon_admin(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
-        yield event.plain_result("AstrBot 侧暂不在聊天里修改群色图/图片显示配置；当前群聊默认只允许非 R18。")
+        if str(event.get_sender_id()) != get_nonebot2_config_value("bot", "author_qq", "0"):
+            yield event.plain_result("只有作者才能调整美图配置哦！")
+            event.stop_event()
+            return
+        if event.is_private_chat() or not event.get_group_id():
+            yield event.plain_result("这个指令只能在群聊中使用。")
+            event.stop_event()
+            return
+        response = await asyncio.to_thread(
+            handle_lolicon_admin_command,
+            int(event.get_group_id()),
+            event.get_message_str().strip(),
+        )
+        yield event.plain_result(response)
         event.stop_event()
 
     @filter.regex(LOLICON_PATTERN)
@@ -331,7 +345,12 @@ class QQBotFeaturesPlugin(Star):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
         try:
-            results = await asyncio.to_thread(build_lolicon_results, event.get_message_str().strip(), event.is_private_chat())
+            results = await asyncio.to_thread(
+                build_lolicon_results,
+                event.get_message_str().strip(),
+                event.is_private_chat(),
+                int(event.get_group_id() or 0),
+            )
         except Exception as exc:
             yield event.plain_result(f"Lolicon 美图获取失败：{exc}")
             event.stop_event()
@@ -344,6 +363,8 @@ class QQBotFeaturesPlugin(Star):
                 chain.append(Image.fromFileSystem(str(result.image_path)))
             elif result.image_url:
                 chain.append(Image.fromURL(result.image_url))
+            elif result.image_text:
+                chain.append(Plain(result.image_text))
             chain.append(Plain(result.suffix))
             yield event.chain_result(chain)
         event.stop_event()
@@ -960,7 +981,28 @@ def render_shapez_command(command: str, argument: str) -> ShapezRenderResult:
     return ShapezRenderResult(image_path=output, text=f"\n短代码：{shape.short_key}")
 
 
-def build_lolicon_results(text: str, is_private: bool) -> list[LoliconRenderResult]:
+def handle_lolicon_admin_command(group_id: int, text: str) -> str:
+    ensure_nonebot2_services_path()
+    from qqbot.services.settings_store import SettingsStore
+
+    store = SettingsStore(get_nonebot2_data_root(), get_author_qq())
+    group_r18, show_image = store.get_lolicon_config(group_id)
+    if text == "开群色图":
+        store.set_lolicon_config(group_id, True, show_image)
+        return "已开启群色图！"
+    if text == "关群色图":
+        store.set_lolicon_config(group_id, False, show_image)
+        return "已关闭群色图！"
+    if text == "开图片显示":
+        store.set_lolicon_config(group_id, group_r18, True)
+        return "已开启图片显示！\n注意，开启此功能极有可能导致无法接收到消息！\n即使开启，r18图片也不会有缩略图显示~"
+    if text == "关图片显示":
+        store.set_lolicon_config(group_id, group_r18, False)
+        return "已关闭图片显示！"
+    return "未知美图配置指令。"
+
+
+def build_lolicon_results(text: str, is_private: bool, group_id: int = 0) -> list[LoliconRenderResult]:
     ensure_nonebot2_services_path()
     from qqbot.features.lolicon.service import (
         LoliconImageStore,
@@ -968,17 +1010,24 @@ def build_lolicon_results(text: str, is_private: bool) -> list[LoliconRenderResu
         fetch_lolicon_items,
         parse_lolicon_command,
     )
+    from qqbot.services.settings_store import SettingsStore
 
     command = parse_lolicon_command(text)
     if command is None:
         return []
-    if not is_private and command.mode != LoliconMode.NON_R18:
-        return [
-            LoliconRenderResult(
-                prefix="",
-                suffix="本群当前设置为群内只能查看非R18图片！\n请私聊发送指令QwQ",
-            )
-        ]
+    show_image = True
+    if not is_private:
+        group_r18, show_image = SettingsStore(
+            get_nonebot2_data_root(),
+            get_author_qq(),
+        ).get_lolicon_config(group_id)
+        if command.mode != LoliconMode.NON_R18 and not group_r18:
+            return [
+                LoliconRenderResult(
+                    prefix="",
+                    suffix="本群当前设置为群内只能查看非R18图片！\n请私聊发送指令QwQ",
+                )
+            ]
     items = fetch_lolicon_items(command.mode, command.num, command.tags)
     if not items:
         return [
@@ -991,13 +1040,16 @@ def build_lolicon_results(text: str, is_private: bool) -> list[LoliconRenderResu
     results: list[LoliconRenderResult] = []
     for index, item in enumerate(items, start=1):
         prepared = store.prepare_item(item)
-        image_path = prepared.local_path if prepared.local_path is not None else None
-        image_url = "" if image_path is not None else prepared.url
+        should_send_image = show_image or not prepared.r18
+        image_path = prepared.local_path if should_send_image and prepared.local_path is not None else None
+        image_url = prepared.url if should_send_image and image_path is None else ""
+        image_text = "" if should_send_image else prepared.url
         results.append(
             LoliconRenderResult(
                 prefix=f"图片索引：{index} / {len(items)}\n",
                 image_path=image_path,
                 image_url=image_url,
+                image_text=image_text,
                 suffix=(
                     f"\n{prepared.title}(PID {prepared.pid})\nby {prepared.author}(UID {prepared.uid})"
                     f"\nTags: {', '.join(prepared.tags) if prepared.tags else '-'}"
@@ -1005,6 +1057,14 @@ def build_lolicon_results(text: str, is_private: bool) -> list[LoliconRenderResu
             )
         )
     return results
+
+
+def get_author_qq() -> int:
+    raw = get_nonebot2_config_value("bot", "author_qq", OWNER_QQ)
+    try:
+        return int(raw)
+    except ValueError:
+        return int(OWNER_QQ)
 
 
 def handle_kun_command(event: AstrMessageEvent) -> str | None:
