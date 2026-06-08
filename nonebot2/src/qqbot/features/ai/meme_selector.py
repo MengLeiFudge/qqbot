@@ -12,8 +12,10 @@ from typing import Any
 
 
 DEFAULT_GROUP_MEME_PROBABILITY = 0.72
+DEFAULT_MEME_ONLY_PROBABILITY = 0.25
 DEFAULT_MEME_COOLDOWN_SECONDS = 45.0
 MAX_MEME_REPLY_CHARS = 180
+MAX_MEME_ONLY_REPLY_CHARS = 28
 _GROUP_LAST_MEME_AT: dict[str, float] = {}
 
 _DISABLED_CONTEXT_PATTERN = re.compile(
@@ -81,6 +83,7 @@ class MemeSelection:
     category: str
     title: str
     path: Path
+    meme_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +93,12 @@ class MemePack:
 
     def has_category(self, category: str) -> bool:
         return bool(self.images_by_category.get(category))
+
+
+@dataclass(frozen=True, slots=True)
+class CategorySelection:
+    category: str
+    keyword_matched: bool
 
 
 def select_meme_for_reply(
@@ -102,6 +111,7 @@ def select_meme_for_reply(
     now: float | None = None,
     rng: Any | None = None,
     probability: float | None = None,
+    meme_only_probability: float = DEFAULT_MEME_ONLY_PROBABILITY,
     cooldown_seconds: float = DEFAULT_MEME_COOLDOWN_SECONDS,
     cooldowns: dict[str, float] | None = None,
 ) -> MemeSelection | None:
@@ -128,13 +138,24 @@ def select_meme_for_reply(
     if random_source.random() >= threshold:
         return None
 
-    category = _select_category(pack, f"{prompt}\n{text}", random_source)
-    if category is None:
+    category_selection = _select_category(pack, f"{prompt}\n{text}", random_source)
+    if category_selection is None:
         return None
-    image = random_source.choice(pack.images_by_category[category])
+    image = random_source.choice(pack.images_by_category[category_selection.category])
+    meme_only = _should_send_meme_only(
+        text,
+        keyword_matched=category_selection.keyword_matched,
+        rng=random_source,
+        probability=meme_only_probability,
+    )
 
     cooldown_store[group_key] = current_time
-    return MemeSelection(category=image.category, title=image.title, path=image.path)
+    return MemeSelection(
+        category=image.category,
+        title=image.title,
+        path=image.path,
+        meme_only=meme_only,
+    )
 
 
 def resolve_meme_pack_root(
@@ -210,7 +231,7 @@ def _is_meme_disabled_context(reply_text: str, *, prompt: str = "") -> bool:
     return bool(_DISABLED_CONTEXT_PATTERN.search(text))
 
 
-def _select_category(pack: MemePack, text: str, rng: Any) -> str | None:
+def _select_category(pack: MemePack, text: str, rng: Any) -> CategorySelection | None:
     normalized = _normalize_text(text)
     scores: dict[str, int] = {}
     for category, keywords in _CATEGORY_KEYWORDS.items():
@@ -222,14 +243,37 @@ def _select_category(pack: MemePack, text: str, rng: Any) -> str | None:
 
     if scores:
         max_score = max(scores.values())
-        return rng.choice(sorted(category for category, score in scores.items() if score == max_score))
+        return CategorySelection(
+            category=rng.choice(
+                sorted(category for category, score in scores.items() if score == max_score)
+            ),
+            keyword_matched=True,
+        )
 
     fallback_categories = [
         category for category in _DEFAULT_CASUAL_CATEGORIES if pack.has_category(category)
     ]
     if not fallback_categories:
         return None
-    return rng.choice(fallback_categories)
+    return CategorySelection(category=rng.choice(fallback_categories), keyword_matched=False)
+
+
+def _should_send_meme_only(
+    reply_text: str,
+    *,
+    keyword_matched: bool,
+    rng: Any,
+    probability: float,
+) -> bool:
+    if probability <= 0 or not keyword_matched:
+        return False
+
+    normalized = _normalize_text(reply_text)
+    if not normalized or len(normalized) > MAX_MEME_ONLY_REPLY_CHARS:
+        return False
+    if re.search(r"[0-9a-zA-Z_/\\.:=-]", normalized):
+        return False
+    return rng.random() < probability
 
 
 def _normalize_text(text: str) -> str:

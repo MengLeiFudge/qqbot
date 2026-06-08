@@ -156,6 +156,46 @@ def test_group_cooldown_limits_repeated_memes(tmp_path: Path) -> None:
     assert third is not None
 
 
+def test_short_keyword_reply_can_be_meme_only(tmp_path: Path) -> None:
+    pack_root = _write_pack(tmp_path, {"funny_laugh": True})
+
+    selection = select_meme_for_reply(
+        "哈哈笑死",
+        group_id=1001,
+        pack_root=pack_root,
+        rng=FirstRng(),
+        probability=1.0,
+        meme_only_probability=1.0,
+        cooldown_seconds=0,
+        now=1.0,
+        cooldowns={},
+    )
+
+    assert selection is not None
+    assert selection.category == "funny_laugh"
+    assert selection.meme_only
+
+
+def test_fallback_category_does_not_replace_text_with_meme_only(tmp_path: Path) -> None:
+    pack_root = _write_pack(tmp_path, {"funny_laugh": True})
+
+    selection = select_meme_for_reply(
+        "收到啦",
+        group_id=1001,
+        pack_root=pack_root,
+        rng=FirstRng(),
+        probability=1.0,
+        meme_only_probability=1.0,
+        cooldown_seconds=0,
+        now=1.0,
+        cooldowns={},
+    )
+
+    assert selection is not None
+    assert selection.category == "funny_laugh"
+    assert not selection.meme_only
+
+
 def test_append_ai_reply_meme_preserves_text_and_adds_image(tmp_path: Path) -> None:
     image_path = tmp_path / "meme.jpg"
     image_path.write_bytes(b"fake image")
@@ -166,6 +206,18 @@ def test_append_ai_reply_meme_preserves_text_and_adds_image(tmp_path: Path) -> N
     assert "哈哈笑死" in message_text
     assert "CQ:image" in message_text
     assert image_path.as_posix() in message_text
+
+
+def test_append_ai_reply_meme_can_build_image_only_message(tmp_path: Path) -> None:
+    image_path = tmp_path / "meme.jpg"
+    image_path.write_bytes(b"fake image")
+
+    message = append_ai_reply_meme("", image_path)
+
+    message_text = str(message)
+    assert "CQ:image" in message_text
+    assert image_path.as_posix() in message_text
+    assert "text" not in message_text
 
 
 def _write_pack(tmp_path: Path, categories: dict[str, bool]) -> Path:

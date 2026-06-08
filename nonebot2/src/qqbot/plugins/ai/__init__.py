@@ -1150,9 +1150,6 @@ async def _handle_ai_locked(
         response_text = sanitize_group_ai_reply_text(response_text, prompt=prompt, group_id=group_id)
         if not response_text:
             return
-    if not response.fallback:
-        conversation_store.append_turn(key, prompt, response_text)
-
     response_followup = None
     if pending_task_id and group_id is not None:
         response_followup = build_recent_answer_followup_message(
@@ -1210,10 +1207,28 @@ async def _handle_ai_locked(
             data_root=settings.data_root,
         )
 
+    if not response.fallback:
+        conversation_response_text = response_text
+        if meme_selection is not None and meme_selection.meme_only:
+            conversation_response_text = f"（发送了一个表情包：{meme_selection.category}）"
+        conversation_store.append_turn(key, prompt, conversation_response_text)
+
     if response_followup is not None:
         if pending_task_id:
             AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
         await finish_split_text(ai_chat_matcher, response_message, group_id=group_id)
+        return
+
+    if meme_selection is not None and meme_selection.meme_only:
+        if pending_task_id:
+            AiPendingTaskStore(settings.data_root).complete_task(pending_task_id)
+        await finish_split_text(
+            ai_chat_matcher,
+            append_ai_reply_meme("", meme_selection.path),
+            group_id=group_id,
+            bot=bot,
+            title="棉花糖的 AI 回复",
+        )
         return
 
     if group_id is not None and isinstance(response_message, Message):

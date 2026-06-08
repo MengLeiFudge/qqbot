@@ -42,7 +42,7 @@ AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps
 
 `astrbot_plugin_reply_style_guard` 负责给 bot2 的 LLM 请求注入输出风格硬规则，并在发送前清洗末尾问句和追问式邀请：普通回复、主动回复和拒答都不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”这类追问式收尾；能答就直接给结论，不能答就给合法可执行替代。群聊和私聊会话都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析，分析不出发言原因时不回答。
 
-本地表情包由 `data\memes\mlj_pack\index.json` 描述每张图的分类、用途和禁用场景。`scripts\sync-meme-pack.py` 会把可自动发送类别同步到 AstrBot `meme_manager` 运行态目录并提高发送概率；bot1 在普通短 AI 回复发送前按同一索引追加 0-1 张图，技术、报错、安全、群管理和长解释场景不自动附图。
+本地表情包由 `data\memes\mlj_pack\index.json` 描述每张图的分类、用途和禁用场景。`scripts\sync-meme-pack.py` 会把可自动发送类别同步到 AstrBot `meme_manager` 运行态目录并提高发送概率；bot1 在普通短 AI 回复发送前按同一索引追加 0-1 张图，短情绪闲聊允许只发一张表情不带文字，技术、报错、安全、群管理和长解释场景不自动附图。
 
 ## 启动
 

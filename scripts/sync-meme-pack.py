@@ -115,7 +115,10 @@ def _update_astrbot_config(auto_categories: list[str]) -> None:
         prompt = {}
     prompt.update(
         {
-            "prompt_head": "表情规则：轻松日常可最多使用 1 个 &&标签&&，可不用；只从下列标签选择。",
+            "prompt_head": (
+                "表情规则：轻松日常可最多使用 1 个 &&标签&&，可不用；"
+                "也可以只输出 1 个 &&标签&& 作为纯表情回复；只从下列标签选择。"
+            ),
             "prompt_tail_1": (
                 "严肃、技术、报错、安全、群管理、长解释场景不要用表情；"
                 "不要空行；回复仍需短。最多 "
