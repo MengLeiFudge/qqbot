@@ -28,6 +28,7 @@ FACTORIO_DOWNLOAD_PATTERN = (
 )
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单(?!\d+$)\S+$"
+GROUP_FILE_CLEANUP_PATTERN = r"^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
 LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
 LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
 ARC_RECOMMEND_PATTERN = r"^arctj\s*[0-9]+(?:\.[0-9]+)?$"
@@ -70,9 +71,8 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="群管助手",
         aliases=("群管", "群管理", "群功能"),
-        status="二期适配",
         lines=(
-            "通知清理文件：依赖 OneBot 群文件枚举和禁言 API，未在本插件默认启用",
+            "通知清理文件：作者或机器人自身限定，统计超过一周的外层群文件并按大小禁言上传者",
         ),
     ),
     FeatureSpec(
@@ -251,7 +251,7 @@ class RereadRepeatState:
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.7.0",
+    "0.8.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -282,6 +282,25 @@ class QQBotFeaturesPlugin(Star):
             event.stop_event()
             return
         yield event.plain_result(build_feature_menu_text(feature))
+        event.stop_event()
+
+    @filter.platform_adapter_type("aiocqhttp")
+    @filter.regex(GROUP_FILE_CLEANUP_PATTERN)
+    async def group_file_cleanup(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        if event.is_private_chat() or not event.get_group_id():
+            yield event.plain_result("群文件清理只能在群聊中使用。")
+            event.stop_event()
+            return
+        if not is_bot_admin_or_self(event):
+            return
+        if not is_nonebot2_plugin_enabled("group_assistant"):
+            return
+        try:
+            await run_group_file_cleanup(event)
+        except Exception as exc:
+            yield event.plain_result(f"群文件清理失败：{exc}")
         event.stop_event()
 
     @filter.regex(FACTORIO_DOWNLOAD_PATTERN)
@@ -709,6 +728,18 @@ def allow_passive_events(feature_mode: str) -> bool:
     return feature_mode == FEATURE_MODE_FULL
 
 
+def is_bot_admin_or_self(event: AstrMessageEvent) -> bool:
+    sender_id = str(event.get_sender_id())
+    return sender_id == str(get_author_qq()) or sender_id == str(event.get_self_id())
+
+
+def is_nonebot2_plugin_enabled(plugin_id: str) -> bool:
+    ensure_nonebot2_services_path()
+    from qqbot.services.settings_store import SettingsStore
+
+    return SettingsStore(get_nonebot2_data_root(), get_author_qq()).get_plugin_enabled(plugin_id)
+
+
 def is_nonebot2_port_open() -> bool:
     try:
         with socket.create_connection((NONEBOT2_HOST, NONEBOT2_PORT), timeout=1.0):
@@ -751,6 +782,49 @@ def reread_probability(consecutive_count: int) -> float:
     if consecutive_count < 2:
         return 0.0
     return min(0.8, 0.2 + (consecutive_count - 2) * 0.15)
+
+
+class AstrBotOneBotApi:
+    def __init__(self, event: AstrMessageEvent) -> None:
+        self._bot = getattr(event, "bot", None)
+        self.self_id = str(event.get_self_id() or "")
+        if self._bot is None:
+            raise RuntimeError("当前事件没有 aiocqhttp bot 实例")
+
+    async def call_api(self, action: str, **kwargs):
+        return await self._bot.call_action(action, **kwargs)
+
+
+async def run_group_file_cleanup(event: AstrMessageEvent) -> dict[str, object]:
+    ensure_nonebot2_services_path()
+    from qqbot.features.group.file_cleanup_service import (
+        ShapezGroupFileCleanupService,
+        ShapezGroupFileCleanupStore,
+    )
+
+    api = AstrBotOneBotApi(event)
+    group_id = int(event.get_group_id())
+    service = ShapezGroupFileCleanupService(
+        store=ShapezGroupFileCleanupStore(
+            get_nonebot2_data_root() / "data" / "shapez_file_cleanup_state.json"
+        ),
+        group_id=str(group_id),
+        timezone_name=get_nonebot2_config_value("bot", "timezone", "Asia/Shanghai"),
+    )
+    result = await service.scan_and_notify_group(api)
+    if result.get("violating_user_count") == 0:
+        await api.call_api(
+            "send_group_msg",
+            group_id=group_id,
+            message="当前没有超过一周的外层群文件需要清理。",
+        )
+    elif result.get("failed_group_message_count"):
+        await api.call_api(
+            "send_group_msg",
+            group_id=group_id,
+            message="部分文件清理名单没有发出，对应名单已跳过禁言。",
+        )
+    return result
 
 
 def build_arc_recommendation(text: str) -> ArcRecommendationResult:
