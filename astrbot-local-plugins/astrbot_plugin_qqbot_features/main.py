@@ -32,6 +32,10 @@ LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
 LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
 ARC_RECOMMEND_PATTERN = r"^arctj\s*[0-9]+(?:\.[0-9]+)?$"
 ARC_ACTIVITY_PATTERN = r"^arc(?:hd|tz)$"
+ARC_GUESS_START_PATTERN = r"^(?:arczm|zm)(?:\s*[1-9][0-9]*)?$"
+ARC_GUESS_ART_START_PATTERN = r"(?i)^(?:arcqh|qh)(?:\s*(?:[1-9][0-9]*|max))?$"
+ARC_GUESS_ART_TILE_PATTERN = r"^arcqh\s*(?:bt|补图)$"
+ARC_GUESS_REVEAL_PATTERN = r"^(?:arcjx|jx)$"
 SHAPEZ_PATTERN = r"^(?:i|view|chart|chart1|chart2|path|path1|path2|p|puzzle|puzzle1|puzzle2) .*$"
 KUN_PATTERN = (
     r"^(?:养鲲|摸鲲|抓鲲|捕鲲|属性|洗练.+[0-9]+|查看.*|等级排行(?:榜)?|财富排行(?:榜)?|"
@@ -123,7 +127,8 @@ FEATURES: tuple[FeatureSpec, ...] = (
         lines=(
             "arctj10.5：按 PTT 推荐谱面，复用 bot1 本地 Arcaea 曲库和定数缓存",
             "archd / arctz：查看当前活动梯子",
-            "zm / arcqh / jx 猜歌和 xz / arcxz 安装包下载仍为二期适配",
+            "zm / arczm：字母猜歌；qh / arcqh：曲绘猜歌；jx / arcjx：揭晓",
+            "xz / arcxz 安装包下载仍为二期适配",
         ),
     ),
     FeatureSpec(
@@ -244,7 +249,7 @@ class RereadRepeatState:
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.4.0",
+    "0.5.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -374,6 +379,109 @@ class QQBotFeaturesPlugin(Star):
             return
         for message in messages or ["当前没有活动梯子。"]:
             yield event.plain_result(message)
+        event.stop_event()
+
+    @filter.regex(ARC_GUESS_START_PATTERN)
+    async def arc_guess_start(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        if event.is_private_chat() or not event.get_group_id():
+            yield event.plain_result("Arc 猜歌只能在群聊中开始。")
+            event.stop_event()
+            return
+        try:
+            result = await asyncio.to_thread(
+                start_arc_guess_game,
+                int(event.get_group_id()),
+                event.get_message_str().strip(),
+            )
+        except Exception as exc:
+            yield event.plain_result(f"Arc 猜歌开始失败：{exc}")
+            event.stop_event()
+            return
+        yield event.plain_result(str(result))
+        event.stop_event()
+
+    @filter.regex(ARC_GUESS_ART_START_PATTERN)
+    async def arc_guess_art_start(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        if event.is_private_chat() or not event.get_group_id():
+            yield event.plain_result("Arc 猜歌只能在群聊中开始。")
+            event.stop_event()
+            return
+        try:
+            result = await asyncio.to_thread(
+                start_or_open_arc_art_guess,
+                int(event.get_group_id()),
+                event.get_message_str().strip(),
+            )
+        except Exception as exc:
+            yield event.plain_result(f"Arc 曲绘猜歌失败：{exc}")
+            event.stop_event()
+            return
+        yield build_arc_guess_event_result(event, result)
+        event.stop_event()
+
+    @filter.regex(ARC_GUESS_ART_TILE_PATTERN)
+    async def arc_guess_art_tile(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        if event.is_private_chat() or not event.get_group_id():
+            yield event.plain_result("Arc 猜歌只能在群聊中进行。")
+            event.stop_event()
+            return
+        try:
+            result = await asyncio.to_thread(
+                open_arc_art_guess_tile,
+                int(event.get_group_id()),
+            )
+        except Exception as exc:
+            yield event.plain_result(f"Arc 曲绘补图失败：{exc}")
+            event.stop_event()
+            return
+        yield build_arc_guess_event_result(event, result)
+        event.stop_event()
+
+    @filter.regex(ARC_GUESS_REVEAL_PATTERN)
+    async def arc_guess_reveal(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        if event.is_private_chat() or not event.get_group_id():
+            yield event.plain_result("Arc 猜歌只能在群聊中进行。")
+            event.stop_event()
+            return
+        try:
+            result = await asyncio.to_thread(reveal_arc_guess, int(event.get_group_id()))
+        except Exception as exc:
+            yield event.plain_result(f"Arc 猜歌揭晓失败：{exc}")
+            event.stop_event()
+            return
+        yield build_arc_guess_event_result(event, result)
+        event.stop_event()
+
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    async def arc_guess_session_answer(self, event: AstrMessageEvent):
+        if not (allow_passive_events(self._feature_mode) or _is_direct_or_private(event)):
+            return
+        if event.get_sender_id() == event.get_self_id():
+            return
+        text = event.get_message_str().strip()
+        if not text or not event.get_group_id():
+            return
+        try:
+            result = await asyncio.to_thread(
+                handle_arc_guess_session_text,
+                int(event.get_group_id()),
+                text,
+                get_player_name(event),
+            )
+        except Exception as exc:
+            logger.warning("[QQBotFeatures] Arc guess session handling failed: %s", exc)
+            return
+        if result is None:
+            return
+        yield build_arc_guess_event_result(event, result)
         event.stop_event()
 
     @filter.regex(KUN_PATTERN)
@@ -639,11 +747,136 @@ def build_arc_activity_messages() -> list[str]:
     return service.render_event_messages(events)
 
 
+def start_arc_guess_game(room_id: int, text: str):
+    count = parse_arc_guess_start_count(text)
+    if count is None:
+        raise ValueError("用法：arczm5")
+    service = get_arc_guess_service()
+    return service.start_game(room_id, count)
+
+
+def start_or_open_arc_art_guess(room_id: int, text: str):
+    service = get_arc_guess_service()
+    return service.start_or_open_art_tile(room_id, parse_arc_guess_art_grid_size(text))
+
+
+def open_arc_art_guess_tile(room_id: int):
+    service = get_arc_guess_service()
+    return service.start_or_open_art_tile(room_id)
+
+
+def reveal_arc_guess(room_id: int):
+    service = get_arc_guess_service()
+    return service.reveal_answers(room_id)
+
+
+def handle_arc_guess_session_text(room_id: int, text: str, player_name: str):
+    service = get_arc_guess_service()
+    session = service.get_session(room_id)
+    if session is None:
+        return None
+    if session.mode == "letters":
+        letter = parse_arc_open_letter(text)
+        if letter is not None:
+            return service.open_letter(room_id, letter)
+        payload = parse_arc_guess_submission(text)
+        if payload is None:
+            return None
+        question_index, answer = payload
+        return service.guess(room_id, question_index, answer, player_name)
+    if session.mode == "art":
+        answer = parse_arc_guess_art_submission(text)
+        if answer is None:
+            return None
+        if not text.strip().startswith("猜") and not service.is_plausible_answer(answer, session.art_aliases or []):
+            return None
+        return service.guess_art(room_id, answer, player_name)
+    return None
+
+
 def parse_arc_recommend_ptt(text: str) -> float | None:
     match = re.fullmatch(r"arctj\s*([0-9]+(?:\.[0-9]+)?)", text.strip())
     if match is None:
         return None
     return float(match.group(1))
+
+
+def parse_arc_guess_start_count(text: str) -> int | None:
+    match = re.fullmatch(r"(?:arczm|zm)\s*([1-9][0-9]*)?", text.strip())
+    if match is None:
+        return None
+    if not match.group(1):
+        return 10
+    return int(match.group(1))
+
+
+def parse_arc_guess_art_grid_size(text: str) -> int | str | None:
+    match = re.fullmatch(r"(?:arcqh|qh)\s*([1-9][0-9]*|max)", text.strip(), re.IGNORECASE)
+    if match is None:
+        return None
+    raw_value = match.group(1).lower()
+    if raw_value == "max":
+        return "max"
+    return int(raw_value)
+
+
+def parse_arc_open_letter(text: str) -> str | None:
+    match = re.fullmatch(r"开\s*(\S)", text.strip())
+    if match is None:
+        return None
+    return match.group(1).lower()
+
+
+def parse_arc_guess_submission(text: str) -> tuple[int, str] | None:
+    match = re.fullmatch(r"(?:猜\s*)?([1-9][0-9]*)\s*(.+)", text.strip())
+    if match is None:
+        return None
+    return int(match.group(1)), match.group(2).strip()
+
+
+def parse_arc_guess_art_submission(text: str) -> str | None:
+    stripped = text.strip()
+    if re.fullmatch(r"(?:猜\s*)?[1-9][0-9]*\s*.+", stripped):
+        return None
+    match = re.fullmatch(r"猜\s*(.+)", stripped)
+    if match is not None:
+        return match.group(1).strip()
+    if stripped.startswith("猜") or is_arc_guess_control_command(stripped):
+        return None
+    return stripped or None
+
+
+def is_arc_guess_control_command(text: str) -> bool:
+    stripped = text.strip()
+    return (
+        parse_arc_recommend_ptt(stripped) is not None
+        or parse_arc_guess_start_count(stripped) is not None
+        or re.fullmatch(ARC_GUESS_ART_START_PATTERN, stripped) is not None
+        or re.fullmatch(ARC_GUESS_ART_TILE_PATTERN, stripped) is not None
+        or parse_arc_open_letter(stripped) is not None
+        or re.fullmatch(ARC_GUESS_REVEAL_PATTERN, stripped) is not None
+        or re.fullmatch(ARC_ACTIVITY_PATTERN, stripped) is not None
+    )
+
+
+def get_arc_guess_service():
+    ensure_nonebot2_services_path()
+    from qqbot.features.arc.guess_service import ArcGuessService
+
+    data_root = get_nonebot2_data_root()
+    return ArcGuessService(
+        assets_root=get_arc_assets_root(),
+        alias_cache_path=data_root / "data" / "arc" / "guess_aliases.json",
+        state_path=data_root / "data" / "arc" / "guess_sessions.json",
+    )
+
+
+def build_arc_guess_event_result(event: AstrMessageEvent, result):
+    image_path = getattr(result, "image_path", None)
+    text = getattr(result, "text", str(result))
+    if image_path is None:
+        return event.plain_result(text)
+    return event.chain_result([Image.fromFileSystem(str(image_path)), Plain(f"\n{text}")])
 
 
 def get_arc_assets_root() -> Path:
@@ -833,6 +1066,13 @@ def read_event_time_seconds(event: AstrMessageEvent) -> int:
 
 def resolve_display_name(user_id: int, group_id: int = 0) -> str:
     return str(user_id)
+
+
+def get_player_name(event: AstrMessageEvent) -> str:
+    name = str(event.get_sender_name() or "").strip()
+    if name:
+        return name
+    return str(event.get_sender_id() or "")
 
 
 def fetch_factorio_space_age_windows_link() -> FactorioDownloadLink:
