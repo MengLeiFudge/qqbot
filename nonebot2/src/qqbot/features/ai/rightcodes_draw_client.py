@@ -15,6 +15,13 @@ from urllib.request import Request, urlopen
 RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
 RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
 RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 500
+RIGHTCODES_DRAW_MODEL_ORDER = (
+    "gpt-image-2",
+    "gpt-image-2-vip",
+    "nano-banana",
+    "nano-banana-2",
+    "nano-banana-pro",
+)
 RIGHTCODES_DRAW_MODELS = {
     "gpt-image-2-vip",
     "gpt-image-2",
@@ -206,13 +213,7 @@ def format_rightcodes_draw_model_help() -> str:
     lines = [
         "棉花糖现在支持这些生图模型喵：",
     ]
-    for model in (
-        "gpt-image-2",
-        "gpt-image-2-vip",
-        "nano-banana",
-        "nano-banana-2",
-        "nano-banana-pro",
-    ):
+    for model in RIGHTCODES_DRAW_MODEL_ORDER:
         description = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[model]
         price = format_rightcodes_draw_model_price(model)
         default_mark = "（默认）" if model == RIGHTCODES_DRAW_DEFAULT_MODEL else ""

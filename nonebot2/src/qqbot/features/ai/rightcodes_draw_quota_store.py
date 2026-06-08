@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from qqbot.features.ai.rightcodes_draw_client import (
     RIGHTCODES_DRAW_DEFAULT_MODEL,
+    RIGHTCODES_DRAW_MODEL_ORDER,
     RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER,
     calculate_rightcodes_draw_model_points,
     format_rightcodes_draw_model_price,
@@ -17,6 +18,16 @@ from qqbot.features.ai.rightcodes_draw_client import (
 
 RIGHTCODES_DRAW_FREE_DAILY_LIMIT = 1
 _DRAW_POINTS_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True, slots=True)
+class RightCodesDrawPointBalance:
+    user_id: str
+    points: int
+    message_count: int
+    free_available: bool
+    date_key: str
+    multiplier: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +84,37 @@ class RightCodesDrawQuotaStore:
             payload["users"] = users
             self._write(payload)
             return points
+
+    def get_balance(
+        self,
+        user_id: int | str,
+        *,
+        date_key: str | None = None,
+    ) -> RightCodesDrawPointBalance:
+        date_key = date_key or current_draw_quota_date_key()
+        user_key = str(user_id).strip()
+        if not user_key:
+            return RightCodesDrawPointBalance(
+                user_id="",
+                points=0,
+                message_count=0,
+                free_available=False,
+                date_key=date_key,
+                multiplier=self.multiplier,
+            )
+        with _DRAW_POINTS_LOCK:
+            payload = self._read()
+            users = _get_users_payload(payload)
+            user_payload = _get_user_payload(users, user_key)
+        free_date = str(user_payload.get("free_gpt_image_2_date", "") or "")
+        return RightCodesDrawPointBalance(
+            user_id=user_key,
+            points=int(user_payload.get("points", 0) or 0),
+            message_count=int(user_payload.get("message_count", 0) or 0),
+            free_available=free_date != date_key,
+            date_key=date_key,
+            multiplier=self.multiplier,
+        )
 
     def reserve(
         self,
@@ -181,6 +223,28 @@ class RightCodesDrawQuotaStore:
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+
+def format_rightcodes_draw_points_status(balance: RightCodesDrawPointBalance) -> str:
+    free_status = (
+        f"{RIGHTCODES_DRAW_DEFAULT_MODEL} 今日免费次数：可用"
+        if balance.free_available
+        else f"{RIGHTCODES_DRAW_DEFAULT_MODEL} 今日免费次数：已使用"
+    )
+    model_lines = [
+        f"- {model}: {calculate_rightcodes_draw_model_points(model, multiplier=balance.multiplier)} 积分"
+        for model in RIGHTCODES_DRAW_MODEL_ORDER
+    ]
+    return "\n".join(
+        [
+            f"当前生图积分：{balance.points}",
+            f"全群累计消息数：{balance.message_count}",
+            free_status,
+            f"扣费倍率：价格 x {balance.multiplier}",
+            "模型扣费：",
+            *model_lines,
+        ]
+    )
 
 
 def current_draw_quota_date_key() -> str:

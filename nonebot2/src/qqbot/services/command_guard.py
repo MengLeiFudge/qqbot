@@ -9,6 +9,7 @@ from qqbot.services.offline_message_gate import is_before_onebot_connect
 
 COMMAND_PATTERNS = [
     r"^(菜单|帮助|指令)$",
+    r"^\s*(查看)?(生图)?积分\s*$",
     r"^菜单(?!\d+$)\S+$",
     r"(?i)^(AI模型|当前AI)$",
     r"(?i)^切换AI\s+\S+$",

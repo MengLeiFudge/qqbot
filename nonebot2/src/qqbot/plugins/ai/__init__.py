@@ -119,6 +119,7 @@ from qqbot.features.ai.rightcodes_draw_client import (
 from qqbot.features.ai.rightcodes_draw_quota_store import (
     RightCodesDrawQuotaResult,
     RightCodesDrawQuotaStore,
+    format_rightcodes_draw_points_status,
 )
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
@@ -178,6 +179,12 @@ ai_model_matcher = on_regex(
     block=True,
     rule=direct_command_rule(),
 )
+draw_points_matcher = on_regex(
+    r"^\s*(查看)?(生图)?积分\s*$",
+    priority=1,
+    block=True,
+    rule=direct_command_rule(),
+)
 ai_chat_matcher = on_message(
     priority=2,
     block=True,
@@ -207,6 +214,13 @@ async def handle_ai_model(event: MessageEvent) -> None:
     await ai_model_matcher.finish(
         f"当前 AI 模型：{current_profile}\n可用模型：{enabled_profiles}"
     )
+
+
+@draw_points_matcher.handle()
+async def handle_draw_points(event: MessageEvent) -> None:
+    settings = load_settings()
+    balance = RightCodesDrawQuotaStore(settings.data_root).get_balance(event.get_user_id())
+    await draw_points_matcher.finish(format_rightcodes_draw_points_status(balance))
 
 
 def should_handle_ai_event(event: MessageEvent) -> bool:

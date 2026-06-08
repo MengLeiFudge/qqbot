@@ -4,7 +4,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from qqbot.features.ai.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
+from qqbot.features.ai.rightcodes_draw_quota_store import (
+    RightCodesDrawQuotaStore,
+    format_rightcodes_draw_points_status,
+)
 
 
 class RightCodesDrawQuotaStoreTest(unittest.TestCase):
@@ -62,6 +65,38 @@ class RightCodesDrawQuotaStoreTest(unittest.TestCase):
 
             self.assertTrue(paid_again.allowed)
             self.assertEqual(paid_again.balance_before, 20)
+
+    def test_get_balance_defaults_for_new_user(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = RightCodesDrawQuotaStore(Path(temp_dir))
+            balance = store.get_balance("10001", date_key="2026-06-08")
+
+            self.assertEqual(balance.points, 0)
+            self.assertEqual(balance.message_count, 0)
+            self.assertTrue(balance.free_available)
+
+            text = format_rightcodes_draw_points_status(balance)
+            self.assertIn("当前生图积分：0", text)
+            self.assertIn("全群累计消息数：0", text)
+            self.assertIn("gpt-image-2 今日免费次数：可用", text)
+            self.assertIn("gpt-image-2-vip: 65 积分", text)
+
+    def test_get_balance_reports_used_free_and_points(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = RightCodesDrawQuotaStore(Path(temp_dir))
+            store.record_group_message("10001", amount=25)
+            store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
+
+            balance = store.get_balance("10001", date_key="2026-06-08")
+
+            self.assertEqual(balance.points, 25)
+            self.assertEqual(balance.message_count, 25)
+            self.assertFalse(balance.free_available)
+
+            text = format_rightcodes_draw_points_status(balance)
+            self.assertIn("当前生图积分：25", text)
+            self.assertIn("gpt-image-2 今日免费次数：已使用", text)
+            self.assertIn("gpt-image-2: 20 积分", text)
 
 
 if __name__ == "__main__":
