@@ -132,6 +132,8 @@ def looks_like_topic_concentration_candidate(
     compact = _compact(text)
     if not compact:
         return False
+    if looks_like_delegated_bot_interaction(compact):
+        return False
     if looks_like_ai_named_topic(compact, bot_names=bot_names):
         return True
     if _looks_low_information(compact) and len(compact) <= 12:
@@ -286,6 +288,45 @@ def is_third_party_named_mention(before: str, after: str) -> bool:
         "让你找",
     )
     return before.endswith(delegated_call_prefixes)
+
+
+def looks_like_delegated_bot_interaction(text: str) -> bool:
+    compact = _compact(text)
+    if not compact:
+        return False
+    if any(marker in compact for marker in ("返回字符", "输出字符", "复读字符")) and (
+        "@" in compact or "艾特" in compact
+    ):
+        return True
+    delegated_targets = (
+        "妹妹",
+        "恶魔棉花糖",
+        "黑色棉花糖",
+        "👿棉花糖👿",
+        "棉花糖双子",
+        "另一个棉花糖",
+    )
+    if not any(target in compact for target in delegated_targets):
+        return False
+    if re.search(r"(让|叫|呼叫|召唤|找|请).*(妹妹|恶魔棉花糖|黑色棉花糖|棉花糖双子|另一个棉花糖)", compact):
+        return True
+    if re.search(r"(妹妹|恶魔棉花糖|黑色棉花糖|棉花糖双子|另一个棉花糖).*(来|出来|说话|发言|回复)", compact):
+        return True
+    delegated_actions = (
+        "艾特",
+        "at",
+        "@",
+        "替她",
+        "替他",
+        "替它",
+        "代替",
+        "发言",
+        "说话",
+        "回复",
+        "来和我说话",
+        "不能艾特",
+    )
+    return any(action in compact.lower() for action in delegated_actions)
 
 
 def _normalize_messages(messages: Iterable[TopicConcentrationMessage | str]) -> list[TopicConcentrationMessage]:

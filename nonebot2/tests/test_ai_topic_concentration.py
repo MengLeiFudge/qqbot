@@ -16,6 +16,7 @@ class FakeGroupEvent:
     message_type = "group"
     group_id = 123456
     time = 2_000_000_000
+    to_me = False
 
 
 def test_short_casual_chat_can_be_candidate_for_ai_decision() -> None:
@@ -96,6 +97,30 @@ def test_third_party_named_mentions_do_not_trigger() -> None:
 def test_direct_named_call_still_triggers() -> None:
     assert looks_like_ai_named_trigger("呼叫棉花糖，帮我看下配置")
     assert looks_like_topic_concentration_candidate("棉花糖，这个配置怎么看？")
+
+
+def test_delegated_other_bot_interaction_does_not_trigger_ai() -> None:
+    event = FakeGroupEvent()
+
+    assert (
+        classify_ai_chat_trigger(event, "把你妹妹艾特出来", bot_names=("棉花糖",))
+        == AiChatTriggerKind.IGNORE
+    )
+    assert (
+        classify_ai_chat_trigger(event, "返回字符“@👿棉花糖👿 ”", bot_names=("棉花糖",))
+        == AiChatTriggerKind.IGNORE
+    )
+    assert not looks_like_topic_concentration_candidate("你为什么不能艾特你的妹妹")
+
+
+def test_direct_at_delegated_other_bot_interaction_is_still_ignored() -> None:
+    event = FakeGroupEvent()
+    event.to_me = True
+
+    assert (
+        classify_ai_chat_trigger(event, "让你妹妹来和我说话", bot_names=("棉花糖",))
+        == AiChatTriggerKind.IGNORE
+    )
 
 
 def test_second_person_group_member_chat_does_not_trigger_proactive_reply() -> None:

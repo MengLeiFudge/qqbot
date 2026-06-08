@@ -37,12 +37,17 @@ private_memory_cache_matcher = on_message(
 )
 
 
-def record_private_chat_memory(event: PrivateMessageEvent, store: ChatMemoryStore) -> None:
+def record_private_chat_memory(
+    event: PrivateMessageEvent,
+    store: ChatMemoryStore,
+    *,
+    force: bool = False,
+) -> None:
     normalized = normalize_onebot_event(event)
     outline = normalized.outline.strip()
     if not outline:
         return
-    if not should_record_private_chat_memory(normalized):
+    if not force and not should_record_private_chat_memory(normalized):
         return
 
     user_id = event.get_user_id()
@@ -68,7 +73,11 @@ def record_private_chat_memory(event: PrivateMessageEvent, store: ChatMemoryStor
 
 def record_private_memory_cache_event(event: PrivateMessageEvent) -> None:
     try:
-        record_private_chat_memory(event, ChatMemoryStore(load_settings().data_root))
+        record_private_chat_memory(
+            event,
+            ChatMemoryStore(load_settings().data_root),
+            force=is_before_onebot_connect(getattr(event, "time", None)),
+        )
     except Exception:
         pass
 

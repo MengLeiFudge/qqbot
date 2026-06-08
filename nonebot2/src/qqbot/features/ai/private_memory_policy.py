@@ -6,18 +6,16 @@ from qqbot.services.message_normalizer import NormalizedMessage
 
 
 def should_record_private_chat_memory(normalized_message: NormalizedMessage) -> bool:
-    return not is_private_lightweight_chat(normalized_message)
+    return False
 
 
 def should_include_private_memory_context(normalized_message: NormalizedMessage) -> bool:
-    return not is_private_lightweight_chat(normalized_message)
+    return looks_like_private_memory_query(normalized_message)
 
 
-def is_private_lightweight_chat(normalized_message: NormalizedMessage) -> bool:
-    if normalized_message.image_urls or normalized_message.reply is not None:
-        return False
-    compact = re.sub(r"\s+", "", (normalized_message.text or normalized_message.outline).strip())
-    if not compact or len(compact) > 24:
+def looks_like_private_memory_query(normalized_message: NormalizedMessage) -> bool:
+    compact = _compact_private_text(normalized_message)
+    if not compact:
         return False
     memory_markers = (
         "记得",
@@ -36,7 +34,16 @@ def is_private_lightweight_chat(normalized_message: NormalizedMessage) -> bool:
         "你认识",
         "你知道",
     )
-    if any(marker in compact for marker in memory_markers):
+    return any(marker in compact for marker in memory_markers)
+
+
+def is_private_lightweight_chat(normalized_message: NormalizedMessage) -> bool:
+    if normalized_message.image_urls or normalized_message.reply is not None:
+        return False
+    compact = _compact_private_text(normalized_message)
+    if not compact or len(compact) > 24:
+        return False
+    if looks_like_private_memory_query(normalized_message):
         return False
     lightweight_markers = (
         "在吗",
@@ -59,3 +66,7 @@ def is_private_lightweight_chat(normalized_message: NormalizedMessage) -> bool:
         "摸摸",
     )
     return any(marker in compact for marker in lightweight_markers)
+
+
+def _compact_private_text(normalized_message: NormalizedMessage) -> str:
+    return re.sub(r"\s+", "", (normalized_message.text or normalized_message.outline).strip())

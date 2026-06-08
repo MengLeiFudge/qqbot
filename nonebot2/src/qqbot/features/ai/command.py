@@ -13,6 +13,7 @@ from qqbot.features.ai.rightcodes_draw_client import (
 )
 from qqbot.features.ai.topic_concentration import (
     is_third_party_named_mention,
+    looks_like_delegated_bot_interaction,
     looks_like_topic_concentration_candidate,
 )
 from qqbot.features.group.reread_service import DEFAULT_REREAD_STATE, is_plain_text_message
@@ -81,6 +82,8 @@ def classify_ai_chat_trigger(
         return AiChatTriggerKind.IGNORE
     if looks_like_rightcodes_draw_command(prompt) or looks_like_rightcodes_draw_help_command(prompt):
         return AiChatTriggerKind.DRAW
+    if looks_like_delegated_bot_interaction(prompt):
+        return AiChatTriggerKind.IGNORE
     if is_direct_command_event(event):
         return AiChatTriggerKind.DIRECT
     if looks_like_ai_named_trigger(prompt, bot_names=bot_names):
@@ -140,6 +143,8 @@ def looks_like_ai_proactive_trigger(text: str, *, bot_names: tuple[str, ...] = (
         return True
     if looks_like_sensitive_credential_request(compact):
         return True
+    if looks_like_delegated_bot_interaction(compact):
+        return False
     if looks_like_ai_meta_conversation(compact):
         return False
     if looks_like_ambiguous_chat_evaluation(compact):

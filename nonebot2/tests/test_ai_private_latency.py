@@ -61,11 +61,11 @@ def test_private_short_chat_skips_memory_record_and_retrieval(tmp_path: Path) ->
 def test_private_memory_question_keeps_memory_context_enabled() -> None:
     normalized = NormalizedMessage(text="你还记得我之前说过什么吗", outline="你还记得我之前说过什么吗")
 
-    assert should_record_private_chat_memory(normalized)
+    assert not should_record_private_chat_memory(normalized)
     assert should_include_private_memory_context(normalized)
 
 
-def test_private_memory_cache_skips_short_chat(tmp_path: Path, monkeypatch) -> None:
+def test_private_memory_cache_skips_regular_short_chat(tmp_path: Path, monkeypatch) -> None:
     event = FakePrivateEvent()
     monkeypatch.setattr(
         "qqbot.plugins.ai.private_memory_cache.normalize_onebot_event",
@@ -75,6 +75,18 @@ def test_private_memory_cache_skips_short_chat(tmp_path: Path, monkeypatch) -> N
     record_private_chat_memory(event, ChatMemoryStore(tmp_path))
 
     assert ChatMemoryStore(tmp_path).search_messages(f"private:{event.user_id}", "在吗", limit=3) == ()
+
+
+def test_private_memory_cache_can_force_offline_replay_storage(tmp_path: Path, monkeypatch) -> None:
+    event = FakePrivateEvent()
+    monkeypatch.setattr(
+        "qqbot.plugins.ai.private_memory_cache.normalize_onebot_event",
+        lambda _event: NormalizedMessage(text="在吗在吗", outline="在吗在吗"),
+    )
+
+    record_private_chat_memory(event, ChatMemoryStore(tmp_path), force=True)
+
+    assert ChatMemoryStore(tmp_path).search_messages(f"private:{event.user_id}", "在吗", limit=3)
 
 
 def test_private_raw_messages_do_not_extract_rule_facts(tmp_path: Path) -> None:
