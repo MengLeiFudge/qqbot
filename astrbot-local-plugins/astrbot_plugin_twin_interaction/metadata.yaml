@@ -1,0 +1,6 @@
+name: astrbot_plugin_twin_interaction
+display_name: Twin bot interaction
+desc: "Twin-aware prompt injection and explicit interaction handling for angel/demon QQBot profiles."
+version: v0.1.0
+author: local
+repo: ""

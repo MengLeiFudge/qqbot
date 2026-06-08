@@ -42,6 +42,8 @@ AstrBot 启动入口支持显式选择当前 bot 身份：默认 `-AstrBotProfil
 
 `astrbot_plugin_qqbot_context_bridge` 负责 bot1/bot2 的轻量联动：bot2 发起群聊 LLM 请求时，会按当前群号读取 bot1 的公开群上下文 `data\nonebot2\run\ai\group_context\<群号>.json` 并注入本轮请求。默认不限制群号，只要 bot1 有对应公开群上下文文件就桥接；`enabled_groups` 只作为可选 allowlist。星环群 `1035445959` 额外带 OrbitalRing 领域提示，但不作为桥接范围条件。插件不读取私聊、日志、token 或其他敏感运行态。
 
+`astrbot_plugin_twin_interaction` 负责天使/恶魔两个棉花糖的双子互动增强：当用户明确围绕天使、恶魔、姐姐/妹妹、双子关系或另一个 bot 的公开输出发问时，插件会给本轮 LLM 请求注入当前 bot 身份、另一个 bot 身份、互动边界和少量同群公开上下文。它只让当前 bot 用自己的身份回应，不替另一个 bot 发言、认错、解释或承诺修改；另一个 bot 发出的普通消息不会触发当前 bot 自动接话。
+
 `astrbot_plugin_source_knowledge` 负责 bot2 的源码知识兜底：在没有 Embedding 模型、不能使用 AstrBot 原生知识库时，它会按当前群号和问题文本只读检索本机源码树，并把少量相关源码片段临时注入本轮 LLM 请求。默认源码根覆盖 DSPCore、万物分馏、星环、创世之书、shapez 和 Factorio 模组源码；可信依据优先是源码、反编译源码、源码邻近 README/设计文档和配置数据。插件跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件，不读取私聊、运行日志、token、QQ 登录态、运行态 `data` 或数据库密钥。
 
 `astrbot_plugin_topic_concentration` 负责 bot2 的普通群聊主动接话门控：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用短窗口话题判断、弱窗口过滤、组级冷却、同话题冷却和 bot1 消息过滤决定是否放行。它不主动发送消息，只控制 Core active reply 是否继续执行。插件配置 `decision_provider_order` 是主动接话判定专用 provider 回退数组，从上到下依次尝试；留空时使用 AstrBot `provider_settings.default_provider_id` 加 `fallback_chat_models`。
