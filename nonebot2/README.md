@@ -53,6 +53,7 @@
 ```text
 QQBOT_ONEBOT_ACCESS_TOKEN=你的 OneBot token
 QQBOT_NAPCAT_QQ=你的机器人 QQ
+QQBOT_AI_KEY_PACKYAPI=你的 PackyAPI Gemini API Key
 QQBOT_AI_KEY_CODEX_EVERYWHERE=你的 Codex Everywhere API Key
 QQBOT_AI_KEY_OPENROUTER_ICU=你的 OpenRouter ICU API Key
 QQBOT_AI_KEY_RIGHTCODES=你的 RightCodes API Key
@@ -64,11 +65,20 @@ AI provider 示例：
 
 ```toml
 [ai]
-default_profile = "codex-everywhere"
+default_profile = "packyapi-gemini"
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
 bot_name = "QQBot"
+
+[ai.providers.packyapi-gemini]
+enabled = true
+provider = "gemini"
+base_url = "https://www.packyapi.com"
+model = "gemini-3-flash-preview"
+api_key_env = "QQBOT_AI_KEY_PACKYAPI"
+timeout_seconds = 45
+max_output_tokens = 4096
 
 [ai.providers.codex-everywhere]
 enabled = true

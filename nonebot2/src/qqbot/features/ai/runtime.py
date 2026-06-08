@@ -9,6 +9,7 @@ from qqbot.features.ai.profile_registry import (
     load_ai_profiles,
     resolve_ai_profile,
 )
+from qqbot.features.ai.gemini_generate_content_client import GeminiGenerateContentClient
 from qqbot.features.ai.mimo_compatible_client import MimoCompatibleClient
 from qqbot.features.ai.openai_compatible_client import OpenAICompatibleClient
 from qqbot.services.settings_store import SettingsStore
@@ -69,6 +70,14 @@ def build_ai_gateway(settings: RuntimeSettings, profile_name: str) -> AiGateway:
             max_output_tokens=resolved.max_output_tokens,
             supports_vision=resolved.supports_vision,
             extra_body=resolved.extra_body,
+        )
+    elif resolved.provider in {"gemini", "google_gemini"}:
+        client = GeminiGenerateContentClient(
+            base_url=resolved.base_url,
+            api_key=resolved.api_key,
+            model=resolved.model,
+            timeout_seconds=resolved.timeout_seconds,
+            max_output_tokens=resolved.max_output_tokens,
         )
     elif resolved.provider in {"xiaomi_mimo", "mimo_compatible"}:
         client = MimoCompatibleClient(
