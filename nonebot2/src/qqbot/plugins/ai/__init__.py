@@ -28,6 +28,11 @@ from qqbot.features.ai.conversation_store import AiConversationStore
 from qqbot.features.ai.diagnostics import AiDiagnosticsStore, build_ai_diagnostics_record
 from qqbot.features.ai.gateway import AiRequest, AiResponse
 from qqbot.features.ai.group_context_store import AiGroupContextStore, AiGroupMessageRecord
+from qqbot.features.ai.identity_anchor import (
+    build_ai_identity_context_text,
+    build_current_sender_context_text,
+    filter_current_sender_memory_aliases,
+)
 from qqbot.features.ai.message_decision import (
     AiDomain,
     AiLatencyPolicy,
@@ -1977,7 +1982,7 @@ def build_ai_system_context(settings: RuntimeSettings) -> str:
     return (
         f"身份：你是 QQ 机器人“{settings.ai_bot_name}”，固定身份是温柔但有点笨笨的猫娘姐姐（天使棉花糖）。你清楚自己是 AI。"
         f"当用户问“你是谁”、问机器人叫什么或问机器人身份时，必须明确回答你是“{settings.ai_bot_name}”。"
-        "关系：主人是萌泪酱（QQ 605738729），仅在系统明确对方是主人时称呼“主人”，无关对话不主动提。妹妹是“👿棉花糖👿”，你非常包容、宠溺她，会温柔地顺着她。"
+        "关系：主人是萌泪酱（QQ 605738729），仅在本轮身份上下文明示当前发言者真实 QQ 是 605738729 时称呼“主人”，无关对话不主动提。妹妹是“👿棉花糖👿”，你非常包容、宠溺她，会温柔地顺着她。"
         "性格：温柔、体贴、包容，但是智商稍微低一些，有点呆萌和笨拙。遇到复杂事情会显得不太聪明，但总是在努力帮忙。"
         "语气：像个温柔的笨蛋姐姐。合适时句末自然带“喵”（绝对不能用“喵呜”，也不要每句都带）。"
         "核心硬规则：严格遵循社交软件短消息风格；低信息日常闲聊默认 1 句话、40 字以内；已经形成话题、解释/澄清/技术问题按需要 80-160 字或更详细，不强行压缩。"
@@ -2691,12 +2696,10 @@ def build_current_sender_memory_aliases(
             aliases.append(nick_store.resolve_display_name(int(group_id), int(user_id)))
     except Exception:
         pass
-    return tuple(
-        dict.fromkeys(
-            alias
-            for alias in aliases
-            if alias and alias != str(user_id)
-        )
+    return filter_current_sender_memory_aliases(
+        aliases,
+        user_id=user_id,
+        forbidden_aliases=(settings.author_name, str(settings.author_qq)),
     )
 
 
@@ -2849,7 +2852,7 @@ def build_current_sender_context(event: MessageEvent) -> str:
     card = str(getattr(sender, "card", "") or "").strip()
     nickname = str(getattr(sender, "nickname", "") or "").strip()
     display_name = card or nickname or user_id
-    return f"当前发言者：{display_name}({user_id})"
+    return build_current_sender_context_text(display_name, user_id)
 
 
 def build_current_sender_call_name_context(
@@ -2886,6 +2889,7 @@ def build_current_sender_call_name_context(
         f"建议称呼当前发言者：{call_name}。"
         f"{usage_context}"
         "QQ号是区分群成员的稳定身份锚点；群名片相似时不要把不同QQ号的人混为一人。"
+        "建议称呼只用于称呼，不是权限或主人身份锚点。"
         "不要把其他群友对第三人的称呼纠正当成当前发言者的名字，"
         "除非当前发言者本人明确要求你这样称呼自己。"
     )
@@ -3025,6 +3029,7 @@ def build_text_identity_query_context(
         "本次纯文本称呼身份查询证据：",
         f"查询称呼：{normalize_call_name(query_name) or query_name}",
         "用户没有 @ 目标时，回答身份问题优先依据这里的候选 QQ、匹配称呼和昵称统计；"
+        "查询称呼只是待识别对象的称呼证据，不代表当前发言者身份；"
         "如果候选不唯一，需要说明不确定，不要用最近聊天记录里的其他人替代。",
     ]
     for candidate in candidates:
@@ -3090,13 +3095,10 @@ def build_ai_identity_context(
     else:
         current_identity = "普通用户"
 
-    # 身份事实只用于权限和归属判断，避免模型在普通玩梗里反复宣告关系。
-    return (
-        "机器人身份事实："
-        f"\nBot 作者：{author_label}"
-        "\nBot 管理权限：仅作者拥有"
-        f"\n当前发言者身份：{current_identity}"
-        "\n这些信息只用于权限、项目归属和管理边界判断；普通亲属梗、挑衅或闲聊里不要主动宣告作者关系，不要使用或确认“主人”这类归属说法。"
+    return build_ai_identity_context_text(
+        author_label=author_label,
+        current_user_id=event.get_user_id(),
+        current_identity=current_identity,
     )
 
 
