@@ -18,7 +18,7 @@
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
 - 迁移 NoneBot2 功能到 AstrBot 本地插件时，必须明确 bot1/bot2 双开和 AstrBot-only 两种模式下的功能归属。默认使用 `dual` 模式：bot2 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 bot1 负责；只有 AstrBot-only 场景才允许使用 `full` 模式接管已迁移自动事件。
 - AstrBot 本地迁移插件可复用 `nonebot2/src/qqbot/features/**/service.py` 这类纯 Python service，但不得导入 `nonebot`、NoneBot2 plugin 入口或 OneBot adapter。复用服务时数据根仍以 `data\nonebot2\run` 为事实源，保证 bot1 到 bot2 迁移期间存档连续。
-- AstrBot 账号/身份切换通过启动参数显式控制：默认 `-AstrBotProfile demon` 使用恶魔账号 `2629227874`；迁移天使棉花糖 AstrBot-only 时必须使用 `-AstrBotProfile angel -FeatureMode full -Target astrbot`，由启动脚本设置 `QQBOT_ASTRBOT_PROFILE=angel`、同步运行态 `cmd_config.json` 的平台显示名/默认人格/子代理人格，并让 NapCat 天使账号 `1443944862` 连接 AstrBot。不得在 bot1 同时运行时让 AstrBot 使用天使账号。
+- AstrBot 账号/身份切换通过启动参数显式控制：默认 `-AstrBotProfile demon` 使用恶魔账号 `2629227874`；迁移天使棉花糖 AstrBot-only 时必须使用 `-AstrBotProfile angel -FeatureMode full -Target astrbot`，由启动脚本设置 `QQBOT_ASTRBOT_PROFILE=angel`、同步运行态 `cmd_config.json` 的平台显示名/默认人格/子代理人格和 aiocqhttp 反连端口，并让 NapCat 天使账号 `1443944862` 连接 AstrBot。不得在 bot1 同时运行时让 AstrBot 使用天使账号。AstrBot OneBot 反连端口默认 `6200`，可用 `-AstrBotOneBotPort` 覆盖；不要重新硬编码 `6199`。
 - AstrBot 主动接话判定 provider 回退由 `astrbot_plugin_topic_concentration` 的 `decision_provider_order` 数组显式控制；数组从上到下依次尝试，某个 provider 报错只记录日志并继续下一个。该数组留空时才读取 AstrBot `provider_settings.default_provider_id` + `fallback_chat_models`。这属于本地插件行为，不允许为了该 fallback 直接改 AstrBot Core。
 - RightCodes 生图迁移到 AstrBot 时，bot1/bot2 默认共用 `data\nonebot2\run\ai\draw_points.json` 作为积分事实源；`dual` 模式下 bot1 在线时 AstrBot 不重复累计普通群消息积分，`full` 模式或 bot1 离线时 AstrBot 才累计群消息积分。生图失败必须退回已扣积分或当天免费次数。
 - bot1/bot2 联动优先用 AstrBot 本地插件桥接，不改 Core。桥接插件只能只读 `data\nonebot2\run\ai\group_context\` 这类公开群上下文，默认不按具体群号限制；星环群 `1035445959` 只能作为领域提示特例，不能作为桥接范围条件。不得读取私聊、token、QQ 登录态、数据库密钥或运行日志作为 LLM prompt 证据。
@@ -56,7 +56,7 @@
 - 修改会影响正在运行机器人的代码、配置、提示词、运行包或启动脚本后，必须重启对应机器人并做启动验证；不能只停在“已修改/已提交”。若当前环境无法重启，最终回复必须明确写出未重启、原因和应执行的入口。
 - 只影响 `nonebot2/` 或 `data\nonebot2\config` 的改动，重启 bot1：`scripts\start-nonebot2.bat -SkipInstall -RestartBot`。
 - 只影响 AstrBot Core、`data\astrbot\data\cmd_config.json`、AstrBot persona 或 uv tool 运行包的改动，重启 bot2：`scripts\start-astrbot.bat`。
-- 只运行 AstrBot 并希望接管已迁移自动事件时，使用 `scripts\start-astrbot.bat -FeatureMode full`；双开 bot1/bot2 时不要使用 `full`。
+- 只运行 AstrBot 并希望接管已迁移自动事件时，使用 `scripts\start-astrbot.bat -FeatureMode full`；双开 bot1/bot2 时不要使用 `full`。如本机端口冲突，可加 `-AstrBotOneBotPort <端口>` 同步 AstrBot 和 NapCat 反连配置。
 - 同时影响 bot1 和 bot2，使用 `scripts\start-all.bat`；需要 NapCat 重新反连时也使用普通启动入口，不要只重启 Python 进程。
 - 普通启动入口会拉起对应 Bot 和 NapCat 子窗口；子窗口确认端口和反连就绪后退出，全部子窗口完成后入口窗口退出。
 - NapCat 启动脚本必须同时兼容新版 `napcat\onekey\napcat\launcher-user.bat` 和旧版 `NapCat.*.Shell` / `bootmain` 结构；新版 quick login 使用 `NAPCAT_QUICK_ACCOUNT` 环境变量。

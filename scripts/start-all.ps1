@@ -11,7 +11,8 @@ param(
     [ValidateSet("", "dual", "full")]
     [string]$FeatureMode = "",
     [ValidateSet("demon", "angel")]
-    [string]$AstrBotProfile = "demon"
+    [string]$AstrBotProfile = "demon",
+    [int]$AstrBotOneBotPort = 6200
 )
 
 $ErrorActionPreference = "Stop"
@@ -273,27 +274,125 @@ function Stop-ProcessByPort {
     }
 }
 
-function Get-NapCatAccountProcesses {
-    param([string]$Account)
+function Sync-NapCatOneBotClientConfig {
+    param(
+        [string]$Account,
+        [int]$BotPort,
+        [string]$ClientName,
+        [string]$PathSuffix
+    )
 
-    try {
-        return Get-CimInstance Win32_Process |
-            Where-Object {
-                $_.CommandLine -and
-                $_.CommandLine.Contains($Account) -and
-                ($_.CommandLine -match 'NapCatWinBootMain|QQ\.exe') -and
-                ($_.CommandLine -notmatch 'start-all\.ps1|start-napcat-account\.ps1')
-            }
+    $configPath = Join-Path $WorkspaceRoot "napcat\onekey\napcat\config\onebot11_$Account.json"
+    if (-not (Test-Path $configPath)) {
+        return
     }
-    catch {
-        return @()
+
+    $rawConfig = Get-Content -Raw -Path $configPath -Encoding UTF8
+    if (-not $rawConfig.Trim()) {
+        return
+    }
+    $config = $rawConfig | ConvertFrom-Json
+    if (-not $config.network) {
+        return
+    }
+
+    $targetUrl = "ws://127.0.0.1:$BotPort$PathSuffix"
+    $clients = @($config.network.websocketClients)
+    $client = $clients | Where-Object { $_.name -eq $ClientName } | Select-Object -First 1
+    if (-not $client) {
+        if ($clients.Count -gt 0) {
+            $client = $clients[0]
+        }
+        else {
+            return
+        }
+    }
+
+    $changed = $false
+    if ($client.url -ne $targetUrl) {
+        $client.url = $targetUrl
+        $changed = $true
+    }
+    if ($client.enable -ne $true) {
+        $client.enable = $true
+        $changed = $true
+    }
+
+    if ($changed) {
+        $json = $config | ConvertTo-Json -Depth 100
+        Set-Content -Path $configPath -Value $json -Encoding UTF8
     }
 }
 
-function Test-NapCatAccountRunning {
-    param([string]$Account)
-    $processes = @(Get-NapCatAccountProcesses -Account $Account)
-    return $processes.Count -gt 0
+function Get-ProcessTreeIds {
+    param(
+        [int]$RootProcessId,
+        [object[]]$Processes
+    )
+
+    $ids = [System.Collections.Generic.HashSet[int]]::new()
+    $queue = [System.Collections.Generic.Queue[int]]::new()
+    $queue.Enqueue($RootProcessId)
+    while ($queue.Count -gt 0) {
+        $currentId = $queue.Dequeue()
+        if (-not $ids.Add($currentId)) {
+            continue
+        }
+        foreach ($child in @($Processes | Where-Object { $_.ParentProcessId -eq $currentId })) {
+            $queue.Enqueue([int]$child.ProcessId)
+        }
+    }
+    return @($ids)
+}
+
+function Stop-NapCatAccountProcesses {
+    param(
+        [string]$Account,
+        [string]$LogFile
+    )
+
+    try {
+        $allProcesses = @(Get-CimInstance Win32_Process)
+        $accountPattern = "-Account\s+['""]?$([regex]::Escape($Account))['""]?"
+        $roots = @($allProcesses | Where-Object {
+            $_.CommandLine -and
+            $_.CommandLine -match 'start-napcat-account\.ps1' -and
+            $_.CommandLine -match $accountPattern
+        })
+        if ($roots.Count -eq 0) {
+            Write-LauncherLog -LogFile $LogFile -Message "No existing NapCat launcher process found for account $Account."
+            return
+        }
+
+        $targetIds = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($root in $roots) {
+            foreach ($processId in (Get-ProcessTreeIds -RootProcessId ([int]$root.ProcessId) -Processes $allProcesses)) {
+                if ($processId -ne $PID) {
+                    [void]$targetIds.Add([int]$processId)
+                }
+            }
+        }
+        if ($targetIds.Count -eq 0) {
+            Write-LauncherLog -LogFile $LogFile -Message "Existing NapCat launcher process for account $Account only contains current process."
+            return
+        }
+
+        Write-LauncherLog -LogFile $LogFile -Message "Stopping existing NapCat account $Account process tree: $($targetIds -join ', ')."
+        foreach ($processId in @($targetIds)) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
+        foreach ($processId in @($targetIds)) {
+            try {
+                Wait-Process -Id $processId -Timeout 20 -ErrorAction SilentlyContinue
+            }
+            catch {
+            }
+        }
+    }
+    catch {
+        $message = "NapCat account process cleanup failed for {0}: {1}" -f $Account, $_.Exception.Message
+        Write-LauncherLog -LogFile $LogFile -Message $message
+    }
 }
 
 function Get-AstrBotAccount {
@@ -401,11 +500,11 @@ function Start-AstrBotComponent {
 
     Write-LauncherLog -LogFile $launcherLog -Message "Starting AstrBot component."
     Stop-ProcessByPort -Port 6185 -Name "AstrBot" -LogFile $launcherLog
-    Stop-ProcessByPort -Port 6199 -Name "AstrBot" -LogFile $launcherLog
+    Stop-ProcessByPort -Port $AstrBotOneBotPort -Name "AstrBot" -LogFile $launcherLog
 
     $script = Join-Path $ScriptRoot "start-astrbot.ps1"
     $featureModeArg = if ($FeatureMode) { " -FeatureMode '$FeatureMode'" } else { "" }
-    $command = "& '$script'$featureModeArg -BotProfile '$AstrBotProfile'"
+    $command = "& '$script'$featureModeArg -BotProfile '$AstrBotProfile' -AiocqhttpPort $AstrBotOneBotPort"
     $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
     Write-LauncherLog -LogFile $launcherLog -Message "AstrBot stdout log: $stdoutLog"
 
@@ -420,8 +519,8 @@ function Start-AstrBotComponent {
         }
         throw "AstrBot did not open port 6185. Log: $stdoutLog"
     }
-    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 6199 -TimeoutSeconds 360 -LogFile $launcherLog)) {
-        throw "AstrBot did not open port 6199."
+    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $AstrBotOneBotPort -TimeoutSeconds 360 -LogFile $launcherLog)) {
+        throw "AstrBot did not open port $AstrBotOneBotPort."
     }
 }
 
@@ -448,16 +547,18 @@ function Start-NapCatComponent {
         throw "Target bot port $BotPort is not ready for NapCat account $Account."
     }
 
-    if (Test-NapCatAccountRunning -Account $Account) {
-        Write-LauncherLog -LogFile $launcherLog -Message "NapCat account $Account is already running; waiting for connection."
-        $process = $null
+    if ($DoneCheck -eq "nonebot2") {
+        Sync-NapCatOneBotClientConfig -Account $Account -BotPort $BotPort -ClientName "qqbot-reverse-ws" -PathSuffix "/onebot/v11/ws"
     }
     else {
-        $script = Join-Path $ScriptRoot "start-napcat-account.ps1"
-        $command = "& '$script' -Account '$Account'"
-        $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
-        Write-LauncherLog -LogFile $launcherLog -Message "NapCat stdout log: $stdoutLog"
+        Sync-NapCatOneBotClientConfig -Account $Account -BotPort $BotPort -ClientName "astrbot-reverse-ws" -PathSuffix "/ws"
     }
+
+    Stop-NapCatAccountProcesses -Account $Account -LogFile $launcherLog
+    $script = Join-Path $ScriptRoot "start-napcat-account.ps1"
+    $command = "& '$script' -Account '$Account'"
+    $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
+    Write-LauncherLog -LogFile $launcherLog -Message "NapCat stdout log: $stdoutLog"
 
     if ($DoneCheck -eq "nonebot2") {
         if (-not (Wait-NoneBotConnection -TimeoutSeconds 120 -LogFile $launcherLog -Process $process)) {
@@ -524,7 +625,7 @@ function Invoke-Child {
             "nonebot2" { Start-NoneBotComponent -RunId $RunId -NoNapCatWait }
             "astrbot" { Start-AstrBotComponent -RunId $RunId }
             "napcat-nonebot2" { Start-NapCatComponent -RunId $RunId -Account "1443944862" -BotPort 8080 -DoneCheck "nonebot2" }
-            "napcat-astrbot" { Start-NapCatComponent -RunId $RunId -Account (Get-AstrBotAccount) -BotPort 6199 -DoneCheck "astrbot" -ComponentName "napcat-astrbot" }
+            "napcat-astrbot" { Start-NapCatComponent -RunId $RunId -Account (Get-AstrBotAccount) -BotPort $AstrBotOneBotPort -DoneCheck "astrbot" -ComponentName "napcat-astrbot" }
             default { throw "Unknown component: $Component" }
         }
         Complete-Child -RunId $RunId -Component $Component
@@ -570,6 +671,7 @@ function Start-ChildWindow {
     if ($AstrBotProfile) {
         $arguments += @("-AstrBotProfile", $AstrBotProfile)
     }
+    $arguments += @("-AstrBotOneBotPort", $AstrBotOneBotPort)
     Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WorkingDirectory $WorkspaceRoot | Out-Null
 }
 

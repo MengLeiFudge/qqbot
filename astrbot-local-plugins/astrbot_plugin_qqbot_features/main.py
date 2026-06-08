@@ -10,6 +10,7 @@ import re
 import socket
 import sys
 import time
+import tomllib
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -29,6 +30,8 @@ MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单(?!\d+$)\S+$"
 LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
 LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
+ARC_RECOMMEND_PATTERN = r"^arctj\s*[0-9]+(?:\.[0-9]+)?$"
+ARC_ACTIVITY_PATTERN = r"^arc(?:hd|tz)$"
 SHAPEZ_PATTERN = r"^(?:i|view|chart|chart1|chart2|path|path1|path2|p|puzzle|puzzle1|puzzle2) .*$"
 KUN_PATTERN = (
     r"^(?:养鲲|摸鲲|抓鲲|捕鲲|属性|洗练.+[0-9]+|查看.*|等级排行(?:榜)?|财富排行(?:榜)?|"
@@ -116,9 +119,11 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="Arc",
         aliases=("Arc查询", "Arc狼人杀", "Arc吃鸡", "arcaea"),
-        status="二期适配",
+        status="部分移植",
         lines=(
-            "arctj / zm / arcqh / jx / archd / xz 等命令依赖 Arc 服务和资源，暂未迁移到 bot2",
+            "arctj10.5：按 PTT 推荐谱面，复用 bot1 本地 Arcaea 曲库和定数缓存",
+            "archd / arctz：查看当前活动梯子",
+            "zm / arcqh / jx 猜歌和 xz / arcxz 安装包下载仍为二期适配",
         ),
     ),
     FeatureSpec(
@@ -164,6 +169,12 @@ class LoliconRenderResult:
     suffix: str
     image_path: Path | None = None
     image_url: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ArcRecommendationResult:
+    text: str
+    image_path: Path | None = None
 
 
 class FactorioDownloadError(RuntimeError):
@@ -233,7 +244,7 @@ class RereadRepeatState:
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.3.0",
+    "0.4.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -328,6 +339,41 @@ class QQBotFeaturesPlugin(Star):
                 chain.append(Image.fromURL(result.image_url))
             chain.append(Plain(result.suffix))
             yield event.chain_result(chain)
+        event.stop_event()
+
+    @filter.regex(ARC_RECOMMEND_PATTERN)
+    async def arc_recommend(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        try:
+            result = await asyncio.to_thread(
+                build_arc_recommendation,
+                event.get_message_str().strip(),
+            )
+        except Exception as exc:
+            yield event.plain_result(f"Arc 推荐失败：{exc}")
+            event.stop_event()
+            return
+        if result.image_path is not None:
+            yield event.chain_result(
+                [Image.fromFileSystem(str(result.image_path)), Plain(f"\n{result.text}")]
+            )
+        else:
+            yield event.plain_result(result.text)
+        event.stop_event()
+
+    @filter.regex(ARC_ACTIVITY_PATTERN)
+    async def arc_activity(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        try:
+            messages = await asyncio.to_thread(build_arc_activity_messages)
+        except Exception as exc:
+            yield event.plain_result(f"Arc 活动梯子查询失败：{exc}")
+            event.stop_event()
+            return
+        for message in messages or ["当前没有活动梯子。"]:
+            yield event.plain_result(message)
         event.stop_event()
 
     @filter.regex(KUN_PATTERN)
@@ -558,6 +604,55 @@ def reread_probability(consecutive_count: int) -> float:
     return min(0.8, 0.2 + (consecutive_count - 2) * 0.15)
 
 
+def build_arc_recommendation(text: str) -> ArcRecommendationResult:
+    ensure_nonebot2_services_path()
+    from qqbot.features.arc.alias_service import load_song_titles
+    from qqbot.features.arc.constant_service import ArcConstantService
+    from qqbot.features.arc.service import ArcService
+
+    ptt = parse_arc_recommend_ptt(text)
+    if ptt is None:
+        raise ValueError("用法：arctj10.5")
+    assets_root = get_arc_assets_root()
+    service = ArcService(assets_root)
+    constant_service = ArcConstantService(
+        get_nonebot2_data_root() / "data" / "arc" / "constants.json"
+    )
+    song_titles = load_song_titles(assets_root / "官谱" / "songlist")
+    constant_service.sync_missing_constants(song_titles)
+    constant_cache = constant_service.load_constant_cache()
+    chart = service.recommend_chart_by_ptt(ptt, constant_cache)
+    return ArcRecommendationResult(
+        text=service.build_recommendation_text(ptt, chart),
+        image_path=chart.jacket_path,
+    )
+
+
+def build_arc_activity_messages() -> list[str]:
+    ensure_nonebot2_services_path()
+    from qqbot.features.arc.event_service import ArcEventService
+
+    service = ArcEventService(
+        timezone=get_nonebot2_config_value("bot", "timezone", "Asia/Shanghai")
+    )
+    events = service.fetch_active_events()
+    return service.render_event_messages(events)
+
+
+def parse_arc_recommend_ptt(text: str) -> float | None:
+    match = re.fullmatch(r"arctj\s*([0-9]+(?:\.[0-9]+)?)", text.strip())
+    if match is None:
+        return None
+    return float(match.group(1))
+
+
+def get_arc_assets_root() -> Path:
+    raw = get_nonebot2_config_value("paths", "arc_assets_root", "")
+    if raw:
+        return Path(raw)
+    return get_workspace_root() / "data" / "arc"
+
+
 def render_shapez_command(command: str, argument: str) -> ShapezRenderResult:
     ensure_nonebot2_services_path()
     from qqbot.features.shapez.service import render_shape_chart, render_shape_code, render_shape_path
@@ -708,6 +803,24 @@ def get_workspace_root() -> Path:
 
 def get_nonebot2_data_root() -> Path:
     return get_workspace_root() / "data" / "nonebot2" / "run"
+
+
+def get_nonebot2_config_value(section: str, key: str, default: str = "") -> str:
+    config = load_nonebot2_config()
+    raw_section = config.get(section, {})
+    if not isinstance(raw_section, dict):
+        return default
+    value = raw_section.get(key, default)
+    if isinstance(value, (dict, list)):
+        return default
+    return str(value)
+
+
+def load_nonebot2_config() -> dict:
+    config_path = get_workspace_root() / "data" / "nonebot2" / "config" / "qqbot.toml"
+    if not config_path.is_file():
+        return {}
+    return tomllib.loads(config_path.read_text(encoding="utf-8"))
 
 
 def read_event_time_seconds(event: AstrMessageEvent) -> int:

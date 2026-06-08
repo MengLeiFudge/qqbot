@@ -1,5 +1,6 @@
 param(
     [int]$Port = 6185,
+    [int]$AiocqhttpPort = 6200,
     [string]$PythonVersion = "3.14",
     [ValidateSet("", "dual", "full")]
     [string]$FeatureMode = "",
@@ -71,7 +72,8 @@ New-Item -ItemType Directory -Path $RuntimePluginRoot -Force | Out-Null
 function Sync-AstrBotProfileConfig {
     param(
         [string]$ConfigPath,
-        [string]$Profile
+        [string]$Profile,
+        [int]$OneBotPort
     )
 
     if (-not (Test-Path $ConfigPath)) {
@@ -111,6 +113,9 @@ function Sync-AstrBotProfileConfig {
             if ($platform.type -eq "aiocqhttp" -and (Set-JsonObjectProperty -Target $platform -Name "id" -Value $displayName)) {
                 $changed = $true
             }
+            if ($platform.type -eq "aiocqhttp" -and (Set-JsonObjectProperty -Target $platform -Name "ws_reverse_port" -Value $OneBotPort)) {
+                $changed = $true
+            }
         }
     }
 
@@ -140,7 +145,7 @@ function Set-JsonObjectProperty {
     return $true
 }
 
-Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json") -Profile $BotProfile
+Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json") -Profile $BotProfile -OneBotPort $AiocqhttpPort
 
 if (Test-Path $LocalPluginRoot) {
     Get-ChildItem -Path $LocalPluginRoot -Directory | ForEach-Object {
