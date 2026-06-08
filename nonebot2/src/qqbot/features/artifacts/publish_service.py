@@ -44,6 +44,7 @@ class LocalArtifactPublishContext:
 class LocalArtifactPublishResult:
     uploaded: list[dict[str, object]]
     deleted: list[dict[str, object]]
+    skipped: list[dict[str, object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,9 +110,11 @@ async def publish_local_artifacts(
     bot: Any,
     files: list[LocalArtifactPublishFile],
     context: LocalArtifactPublishContext,
+    data_root: str | Path | None = None,
 ) -> LocalArtifactPublishResult:
     uploaded: list[dict[str, object]] = []
     deleted: list[dict[str, object]] = []
+    skipped: list[dict[str, object]] = []
 
     for artifact in files:
         package_path = normalize_local_path(artifact.path)
@@ -122,6 +125,23 @@ async def publish_local_artifacts(
             raise ValueError(f"Artifact sha256 mismatch: {package_path}")
 
         for group_id in artifact.targets:
+            if is_same_as_last_local_artifact_published(
+                group_id,
+                upload_name,
+                actual_sha256,
+                data_root=data_root,
+            ):
+                skipped.append(
+                    {
+                        "group_id": group_id,
+                        "file": str(package_path),
+                        "name": upload_name,
+                        "sha256": actual_sha256,
+                        "reason": "artifact sha256 unchanged.",
+                    }
+                )
+                continue
+
             deleted_names = await delete_same_named_group_files_uploaded_by_bot(bot, group_id, upload_name)
             deleted.extend({"group_id": group_id, "name": name} for name in deleted_names)
 
@@ -149,7 +169,13 @@ async def publish_local_artifacts(
                     "sha256": actual_sha256,
                 }
             )
-    return LocalArtifactPublishResult(uploaded=uploaded, deleted=deleted)
+            save_last_local_artifact_published_sha(
+                group_id,
+                upload_name,
+                actual_sha256,
+                data_root=data_root,
+            )
+    return LocalArtifactPublishResult(uploaded=uploaded, deleted=deleted, skipped=skipped)
 
 
 async def delete_old_fe_group_files(bot: Any, group_id: int) -> list[str]:
@@ -243,6 +269,37 @@ def save_last_published_sha(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({"sha256": sha256}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def is_same_as_last_local_artifact_published(
+    group_id: int,
+    file_name: str,
+    sha256: str,
+    *,
+    data_root: str | Path | None = None,
+) -> bool:
+    return bool(sha256) and _load_last_local_artifact_published_sha(
+        group_id,
+        file_name,
+        data_root=data_root,
+    ) == sha256
+
+
+def save_last_local_artifact_published_sha(
+    group_id: int,
+    file_name: str,
+    sha256: str,
+    *,
+    data_root: str | Path | None = None,
+) -> None:
+    if not sha256:
+        return
+    path = _last_local_artifact_published_sha_path(group_id, file_name, data_root=data_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"name": file_name, "sha256": sha256}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -575,6 +632,36 @@ def _last_published_sha_path(
 ) -> Path:
     root = normalize_local_path(data_root) if data_root is not None else load_settings().data_root
     return root / "fe_artifacts" / f"{group_id}.json"
+
+
+def _load_last_local_artifact_published_sha(
+    group_id: int,
+    file_name: str,
+    *,
+    data_root: str | Path | None = None,
+) -> str:
+    path = _last_local_artifact_published_sha_path(group_id, file_name, data_root=data_root)
+    if not path.is_file():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if payload.get("name") != file_name:
+        return ""
+    sha256 = payload.get("sha256")
+    return sha256.strip().lower() if isinstance(sha256, str) else ""
+
+
+def _last_local_artifact_published_sha_path(
+    group_id: int,
+    file_name: str,
+    *,
+    data_root: str | Path | None = None,
+) -> Path:
+    root = normalize_local_path(data_root) if data_root is not None else load_settings().data_root
+    name_key = hashlib.sha256(file_name.encode("utf-8")).hexdigest()
+    return root / "local_artifacts" / str(group_id) / f"{name_key}.json"
 
 
 def _run_git(repo_path: Path, *args: str) -> str:

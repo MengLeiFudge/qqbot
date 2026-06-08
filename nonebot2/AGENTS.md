@@ -164,7 +164,7 @@ D:\project\qqbot\data\nonebot2\.venv\Scripts\python.exe -m pytest --collect-only
 - 上传已有项目 zip 产物属于固定白名单能力，只能由 localhost-only 白名单构建流程调用管理 API。机器人只接收发布方明确列出的项目仓库内真实存在的 `.zip`，不构建、不改代码、不 push。
 - qqbot 不提供群聊或私聊 Codex 会话模式，不从 QQ 消息启动本地代码修改流程。
 - 直接在本地终端执行的开发任务默认不应主动向 QQ 群发消息；例外是 `AfterBuildEvent.exe 1` 这类本机白名单构建流程，可调用 localhost-only `/admin/api/artifacts/publish-local`，用 JSON 直接提交发布事件。请求体必须包含 `timestamp`、当前 `branch`、当前 `commit_hash`、`commit_subject`、`commit_detail` 和 `files` 数组；每个文件项包含 `path`、可选 `name`、可选 `sha256`、`targets` 群号数组和可选 `message`。qqbot 只校验并上传请求中明确列出的文件，不扫描构建目录，不读取发布方仓库里的结果 JSON，不硬编码 MLJ_DSPmods 的模组取舍。
-- `/admin/api/artifacts/publish-local` 的删除策略是按目标群和上传文件名精确匹配：只删除同一目标群内由当前 bot 上传的完全同名文件，再上传新文件。上传后尽量引用文件消息，并发送分支、提交和 `commit_detail`/文件级 `message` 格式化后的说明。说明内容应聚焦本次原因、修复/改动内容和实现方式，不发送文件级 diff 统计。
+- `/admin/api/artifacts/publish-local` 的发布策略是按目标群、上传文件名和 SHA256 精确匹配：如果同一目标群内同名文件上次成功发布的 SHA256 与本次一致，跳过删除、上传和发群消息；否则只删除同一目标群内由当前 bot 上传的完全同名文件，再上传新文件。上传后尽量引用文件消息，并发送分支、提交和 `commit_detail`/文件级 `message` 格式化后的说明。说明内容应聚焦本次原因、修复/改动内容和实现方式，不发送文件级 diff 统计。
 - 直接在本地 Codex 终端修改 qqbot 时，完成提交和验证后必须调用管理端重启入口，并检查 `onebot_connected=true`、`connected_bot_count>=1`。
 
 ## 运行与重启

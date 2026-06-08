@@ -418,6 +418,7 @@ def register_admin_routes(
             "ok": True,
             "uploaded": result.uploaded,
             "deleted": result.deleted,
+            "skipped": result.skipped,
         }
 
     @app.get("/admin/api/author")
