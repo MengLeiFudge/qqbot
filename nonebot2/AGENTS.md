@@ -86,7 +86,7 @@
 - 群聊显式命令和普通 AI 对话默认必须 direct-at；`command_guard.py` 统一判断 `event.is_tome()` / `event.to_me` / 消息开头 @ 机器人，避免宽泛正则或普通闲聊误触发。RightCodes 生图通过 `ai_command.py` 的关键词白名单进入 AI 链路；AI 主动介入通过候选入窗和 AI 接话判定进入 AI 链路，不扩大到其他群聊命令。@ 机器人、点名机器人和生图命令保持即时处理；即时触发会清理同群尚未发送的主动介入缓冲，避免过时回复。主动接话判定确认某个 `topic_key` 后，会在短时间内作为高兴趣话题传给下一次判定；无关插话、其他 bot 输出、让别人呼叫棉花糖、玩梗和低信息闲聊不能直接抢走接话权。
 - AI 入口先生成 `MessageDecision`，区分是否回复、领域、难度、延迟策略和输出格式。需要知识库、联网、代码分析、图片生成、数学/严密推理、超过 800 字输入，或判定为不能一句话回答的问题，可以使用 `ACK_THEN_ASYNC` 作为内部复杂度/延迟策略，但普通 LLM 回复不再先发送“我先看看”这类用户可见占位消息，也不为占位创建 pending task。速度优先，但复杂问题、数学题和强领域关联问题不能为了快牺牲准确性。绑定领域群里的普通闲聊不能只因“怎么/原理/为什么”等泛疑问词进入重型处理，必须同时命中对应模组术语、领域对象或明确项目别名。
 - 普通 GPT 文本调用按 `data\nonebot2\config\qqbot.toml` 的 `[ai].default_profile` 和 `[ai.providers]` 构建当前 profile 与 fallback 链；不要用 `data\nonebot2\run\settings\ai.json`、私聊“切换AI”命令、管理端保存按钮或硬编码 provider 排序覆盖配置文件。管理端“AI 模型”只能只读展示配置来源。修改模型、默认 profile 或 provider 顺序后必须重启 bot1 并验证真实运行配置；任何情况下都不要使用 `gpt-5.5`。
-- 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。
+- 私聊消息默认可以进入 AI 对话，但以 `/` 开头的命令文本不落入普通 AI 聊天；私聊记忆使用 `space_id=qq:private:<user_id>`、`visibility=private`，不得在群聊中披露。私聊里的短互动、短催促和轻闲聊，例如“在吗”“人呢”“说句话”“太慢了”“笨笨”，不写入或检索长期记忆，避免短句被重型记忆链路拖慢；明确询问“记得/之前/上次/我是谁/你知道”等记忆问题时仍必须保留私聊记忆检索。
 - AI 短期会话按会话隔离：私聊使用 `private:<user_id>:<profile>:stable`，群聊使用 `group:<group_id>:<profile>:stable`。群聊是一个整体会话，发言者身份通过消息记录、sender/user_id、长期记忆 actor_id 和群上下文体现，不再用 `group_user:<group_id>:<user_id>` 拆开同一群的短期上下文。
 - 长期记忆检索先生成 `RetrievalPlan`，再按 `space_id`、`actor_id`、`visibility` 和 `forbidden` 边界取证；群聊查询私聊内容时只返回拒绝披露约束，跨群查询只允许当前发言者的公开群聊记忆。
 - 领域知识库采用可信知识和候选知识两层。可信本地资料、已验证修复和管理员确认内容可以入可信知识；普通群聊讨论只能进入候选知识，冲突知识必须等待用户或管理员确认。

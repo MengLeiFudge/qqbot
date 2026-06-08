@@ -938,7 +938,8 @@ async def _handle_ai_locked(
             group_id,
             message_id,
         )
-    record_private_chat_memory(settings, event, normalized_message)
+    if should_record_private_chat_memory(normalized_message):
+        record_private_chat_memory(settings, event, normalized_message)
 
     prepare_timer = AiPrepareTimer({})
     with prepare_timer.stage("profiles"):
@@ -1921,6 +1922,62 @@ def record_private_chat_memory(
         pass
 
 
+def should_record_private_chat_memory(normalized_message: NormalizedMessage) -> bool:
+    return not is_private_lightweight_chat(normalized_message)
+
+
+def should_include_private_memory_context(normalized_message: NormalizedMessage) -> bool:
+    return not is_private_lightweight_chat(normalized_message)
+
+
+def is_private_lightweight_chat(normalized_message: NormalizedMessage) -> bool:
+    if normalized_message.image_urls or normalized_message.reply is not None:
+        return False
+    compact = re.sub(r"\s+", "", (normalized_message.text or normalized_message.outline).strip())
+    if not compact or len(compact) > 24:
+        return False
+    memory_markers = (
+        "记得",
+        "记不记得",
+        "还记",
+        "之前",
+        "以前",
+        "上次",
+        "刚才",
+        "刚刚",
+        "说过",
+        "提过",
+        "聊过",
+        "私聊",
+        "我是谁",
+        "你认识",
+        "你知道",
+    )
+    if any(marker in compact for marker in memory_markers):
+        return False
+    lightweight_markers = (
+        "在吗",
+        "在嘛",
+        "在不在",
+        "人呢",
+        "说句话",
+        "说话",
+        "看看",
+        "醒着吗",
+        "醒了吗",
+        "睡了吗",
+        "睡了没",
+        "太慢",
+        "慢了",
+        "笨笨",
+        "你好",
+        "早",
+        "晚安",
+        "摸摸",
+    )
+    return any(marker in compact for marker in lightweight_markers)
+
+
 def build_recent_answer_followup_message(
     response_text: str,
     records: tuple[AiGroupMessageRecord, ...],
@@ -2127,9 +2184,10 @@ def build_ai_context(
     if getattr(event, "message_type", "") != "group" and not hasattr(event, "group_id"):
         context.append("当前对话场景：私聊。")
         context.append(build_current_sender_context(event))
-        retrieval_plan_context = build_memory_retrieval_plan_context(event, normalized_message)
-        if retrieval_plan_context:
-            context.append(retrieval_plan_context)
+        if should_include_private_memory_context(normalized_message):
+            retrieval_plan_context = build_memory_retrieval_plan_context(event, normalized_message)
+            if retrieval_plan_context:
+                context.append(retrieval_plan_context)
         if identity_context:
             context.append(identity_context)
         message_context = build_message_structure_context(normalized_message)
@@ -2137,9 +2195,10 @@ def build_ai_context(
             context.append(message_context)
         if normalized_message.reply is not None:
             context.append(build_reply_context(normalized_message))
-        memory_context = build_private_memory_context(settings, normalized_message, event=event)
-        if memory_context:
-            context.append(memory_context)
+        if should_include_private_memory_context(normalized_message):
+            memory_context = build_private_memory_context(settings, normalized_message, event=event)
+            if memory_context:
+                context.append(memory_context)
         return tuple(context)
 
     group_id = getattr(event, "group_id")
