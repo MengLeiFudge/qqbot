@@ -17,6 +17,7 @@ from astrbot_plugin_twin_interaction.logic import (
     is_twin_related_text,
     load_recent_other_bot_records,
     read_profile,
+    read_profile_for_self_id,
     should_handle_direct_twin_request,
 )
 
@@ -64,6 +65,11 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         self.assertTrue(is_bot_sender_id(profile.other_bot_id, "999", profile))
         self.assertTrue(is_bot_sender_id("333", "333", profile))
         self.assertFalse(is_bot_sender_id("333", "999", profile))
+
+    def test_profile_can_be_inferred_from_event_self_id(self) -> None:
+        self.assertEqual(read_profile_for_self_id("1443944862").profile, "angel")
+        self.assertEqual(read_profile_for_self_id("2629227874").profile, "demon")
+        self.assertEqual(read_profile_for_self_id("missing", "angel").profile, "angel")
 
     def test_load_recent_other_bot_records_only_uses_other_bot_public_context(self) -> None:
         profile = read_profile("angel")

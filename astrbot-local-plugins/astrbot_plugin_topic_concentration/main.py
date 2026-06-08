@@ -29,6 +29,10 @@ PROFILE_OTHER_BOT_IDS = {
     "angel": {"2629227874"},
     "demon": {"1443944862"},
 }
+PROFILE_BY_BOT_ID = {
+    "1443944862": "angel",
+    "2629227874": "demon",
+}
 _DECISION_PROVIDER_ORDER: tuple[str, ...] = ()
 
 
@@ -99,7 +103,7 @@ class TopicConcentrationPlugin(Star):
                 return False
             if event.get_self_id() == event.get_sender_id():
                 return False
-            if str(event.get_sender_id()) in get_other_bot_ids():
+            if str(event.get_sender_id()) in get_other_bot_ids(event):
                 logger.debug(
                     "[TopicConcentration] skip active reply: "
                     f"group={event.get_group_id()} reason=other_bot_message"
@@ -330,11 +334,15 @@ def _plain_text(event) -> str:
     return "".join(parts).strip()
 
 
-def get_other_bot_ids() -> set[str]:
-    return PROFILE_OTHER_BOT_IDS.get(read_bot_profile(), PROFILE_OTHER_BOT_IDS["demon"])
+def get_other_bot_ids(event=None) -> set[str]:
+    return PROFILE_OTHER_BOT_IDS.get(read_bot_profile(event), PROFILE_OTHER_BOT_IDS["demon"])
 
 
-def read_bot_profile() -> str:
+def read_bot_profile(event=None) -> str:
+    if event is not None:
+        profile = PROFILE_BY_BOT_ID.get(str(event.get_self_id() or "").strip())
+        if profile:
+            return profile
     profile = os.environ.get(PROFILE_ENV, "demon").strip().lower()
     if profile in PROFILE_OTHER_BOT_IDS:
         return profile

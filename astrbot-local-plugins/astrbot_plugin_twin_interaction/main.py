@@ -21,6 +21,7 @@ from .logic import is_bot_sender_id
 from .logic import parse_group_ids
 from .logic import read_bool
 from .logic import read_profile
+from .logic import read_profile_for_self_id
 from .logic import should_handle_direct_twin_request
 
 
@@ -39,10 +40,11 @@ class TwinInteractionPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         self._config = load_twin_config(config)
-        self._profile = read_profile(os.environ.get(PROFILE_ENV, "demon"))
+        self._fallback_profile = os.environ.get(PROFILE_ENV, "demon")
+        self._profile = read_profile(self._fallback_profile)
         logger.info(
             "[TwinInteraction] loaded: profile=%s groups=%s direct=%s max_messages=%s max_chars=%s",
-            self._profile.profile,
+            self._fallback_profile,
             "*" if not self._config.enabled_groups else ",".join(sorted(self._config.enabled_groups)),
             self._config.direct_handler_enabled,
             self._config.max_context_messages,
@@ -51,7 +53,8 @@ class TwinInteractionPlugin(Star):
 
     @filter.on_llm_request()
     async def inject_twin_context(self, event: AstrMessageEvent, req: ProviderRequest):
-        if is_bot_sender(event, self._profile):
+        profile = self._profile_for_event(event)
+        if is_bot_sender(event, profile):
             return
         group_id = str(event.get_group_id() or "")
         if not event.is_private_chat() and not group_enabled(group_id, self._config.enabled_groups):
@@ -60,7 +63,7 @@ class TwinInteractionPlugin(Star):
         injection = build_twin_injection(
             text=text,
             group_id=group_id,
-            profile=self._profile,
+            profile=profile,
             config=self._config,
         )
         if not injection:
@@ -76,7 +79,8 @@ class TwinInteractionPlugin(Star):
     async def handle_explicit_twin_request(self, event: AstrMessageEvent):
         if not self._config.direct_handler_enabled:
             return
-        if is_bot_sender(event, self._profile):
+        profile = self._profile_for_event(event)
+        if is_bot_sender(event, profile):
             return
         group_id = str(event.get_group_id() or "")
         if not event.is_private_chat() and not group_enabled(group_id, self._config.enabled_groups):
@@ -84,7 +88,7 @@ class TwinInteractionPlugin(Star):
         text = str(event.get_message_str() or "")
         if not should_handle_direct_twin_request(
             text,
-            self._profile,
+            profile,
             is_private=event.is_private_chat(),
             is_at_or_wake_command=bool(getattr(event, "is_at_or_wake_command", False)),
         ):
@@ -92,11 +96,14 @@ class TwinInteractionPlugin(Star):
         prompt = build_direct_twin_prompt(
             text=text,
             group_id=group_id,
-            profile=self._profile,
+            profile=profile,
             config=self._config,
         )
         yield event.request_llm(prompt=prompt, contexts=[])
         event.stop_event()
+
+    def _profile_for_event(self, event: AstrMessageEvent) -> TwinProfile:
+        return read_profile_for_self_id(str(event.get_self_id() or ""), self._fallback_profile)
 
 
 def load_twin_config(config=None) -> TwinInteractionConfig:

@@ -33,6 +33,7 @@ BOT_PROFILES = {
         "tone": "直接、短句、轻微傲娇，但不要替姐姐说话。",
     },
 }
+PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
 
 TWIN_TOPIC_MARKERS = (
     "双子",
@@ -99,6 +100,13 @@ def read_profile(profile: str) -> TwinProfile:
     normalized = str(profile or "").strip().lower()
     data = BOT_PROFILES.get(normalized, BOT_PROFILES["demon"])
     return TwinProfile(profile=normalized if normalized in BOT_PROFILES else "demon", **data)
+
+
+def read_profile_for_self_id(self_id: str, fallback_profile: str = "demon") -> TwinProfile:
+    profile = PROFILE_BY_BOT_ID.get(str(self_id or "").strip())
+    if profile:
+        return read_profile(profile)
+    return read_profile(fallback_profile)
 
 
 def parse_group_ids(raw: object) -> set[str]:

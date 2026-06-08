@@ -1,10 +1,11 @@
 param(
     [int]$Port = 6185,
     [int]$AiocqhttpPort = 6200,
+    [int]$AngelAiocqhttpPort = 6201,
     [string]$PythonVersion = "3.14",
     [ValidateSet("", "dual", "full")]
     [string]$FeatureMode = "",
-    [ValidateSet("demon", "angel")]
+    [ValidateSet("demon", "angel", "both")]
     [string]$BotProfile = "demon"
 )
 
@@ -71,6 +72,11 @@ function Sync-AstrBotProfileConfig {
         return
     }
 
+    if ($Profile -eq "both") {
+        Sync-AstrBotBothProfileConfig -ConfigPath $ConfigPath -DemonOneBotPort $OneBotPort -AngelOneBotPort $AngelAiocqhttpPort
+        return
+    }
+
     $displayName = $ProfileDisplayNames[$Profile]
     $personaName = $ProfilePersonaNames[$Profile]
     if (-not $displayName -or -not $personaName) {
@@ -116,6 +122,78 @@ function Sync-AstrBotProfileConfig {
     }
 }
 
+function Sync-AstrBotBothProfileConfig {
+    param(
+        [string]$ConfigPath,
+        [int]$DemonOneBotPort,
+        [int]$AngelOneBotPort
+    )
+
+    if (-not (Test-Path $ConfigPath)) {
+        return
+    }
+
+    $rawConfig = Get-Content -Raw -Path $ConfigPath -Encoding UTF8
+    if (-not $rawConfig.Trim()) {
+        return
+    }
+
+    $config = $rawConfig | ConvertFrom-Json
+    $changed = $false
+
+    if ($config.provider_settings) {
+        if (Set-JsonObjectProperty -Target $config.provider_settings -Name "default_personality" -Value "default") {
+            $changed = $true
+        }
+    }
+
+    if ($config.subagent_orchestrator -and $config.subagent_orchestrator.agents) {
+        foreach ($agent in @($config.subagent_orchestrator.agents)) {
+            if (Set-JsonObjectProperty -Target $agent -Name "persona_id" -Value "default") {
+                $changed = $true
+            }
+        }
+    }
+
+    $keptPlatforms = @()
+    if ($config.platform) {
+        foreach ($platform in @($config.platform)) {
+            if ($platform.type -ne "aiocqhttp") {
+                $keptPlatforms += $platform
+            }
+        }
+    }
+
+    $angelPlatform = New-AiocqhttpPlatformConfig -Profile "angel" -OneBotPort $AngelOneBotPort
+    $demonPlatform = New-AiocqhttpPlatformConfig -Profile "demon" -OneBotPort $DemonOneBotPort
+    $nextPlatforms = @($keptPlatforms + $angelPlatform + $demonPlatform)
+    if (Set-JsonObjectProperty -Target $config -Name "platform" -Value $nextPlatforms) {
+        $changed = $true
+    }
+
+    if ($changed) {
+        $json = $config | ConvertTo-Json -Depth 100
+        Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
+    }
+}
+
+function New-AiocqhttpPlatformConfig {
+    param(
+        [ValidateSet("demon", "angel")]
+        [string]$Profile,
+        [int]$OneBotPort
+    )
+
+    return [PSCustomObject]@{
+        id = $ProfileDisplayNames[$Profile]
+        type = "aiocqhttp"
+        enable = $true
+        ws_reverse_host = "0.0.0.0"
+        ws_reverse_port = $OneBotPort
+        ws_reverse_token = ""
+    }
+}
+
 function Set-JsonObjectProperty {
     param(
         [object]$Target,
@@ -153,7 +231,12 @@ if ($FeatureMode) {
     $env:QQBOT_ASTRBOT_FEATURE_MODE = $FeatureMode
 }
 $env:QQBOT_ASTRBOT_PROFILE = $BotProfile
-$env:QQBOT_ASTRBOT_ACCOUNT = $ProfileAccounts[$BotProfile]
+if ($BotProfile -eq "both") {
+    $env:QQBOT_ASTRBOT_ACCOUNT = $ProfileAccounts["angel"]
+}
+else {
+    $env:QQBOT_ASTRBOT_ACCOUNT = $ProfileAccounts[$BotProfile]
+}
 
 Set-Location $AstrRoot
 

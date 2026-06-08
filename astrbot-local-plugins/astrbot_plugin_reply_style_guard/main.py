@@ -57,6 +57,7 @@ BOT_PROFILES = {
         "tone": "语气：短句、直接、轻微傲娇；不要把傲娇写成刻薄或攻击。",
     },
 }
+PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
 _TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
 _FOLLOWUP_MARKERS = (
     "如果你愿意",
@@ -105,7 +106,7 @@ class ReplyStyleGuardPlugin(Star):
             sender_id=safe_event_value(event, "get_sender_id"),
             sender_name=safe_event_value(event, "get_sender_name"),
         )
-        bot_profile = build_bot_profile_anchor_text(read_bot_profile())
+        bot_profile = build_bot_profile_anchor_text(read_bot_profile(event))
         req.system_prompt = f"{req.system_prompt or ''}\n# Bot Identity Profile\n\n{bot_profile}\n"
         req.extra_user_content_parts.append(TextPart(text=identity_anchor).mark_as_temp())
         req.extra_user_content_parts.append(TextPart(text=STYLE_GUARD_TEXT).mark_as_temp())
@@ -211,7 +212,12 @@ def build_sender_identity_anchor_text(
     )
 
 
-def read_bot_profile() -> str:
+def read_bot_profile(event: AstrMessageEvent | None = None) -> str:
+    if event is not None:
+        self_id = safe_event_value(event, "get_self_id")
+        profile = PROFILE_BY_BOT_ID.get(self_id)
+        if profile:
+            return profile
     raw = os.environ.get(PROFILE_ENV, DEFAULT_PROFILE).strip().lower()
     if raw in BOT_PROFILES:
         return raw

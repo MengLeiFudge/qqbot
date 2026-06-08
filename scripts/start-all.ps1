@@ -4,15 +4,16 @@ param(
     [switch]$SkipInstall,
     [switch]$RestartBot,
     [switch]$Child,
-    [ValidateSet("", "nonebot2", "astrbot", "napcat-nonebot2", "napcat-astrbot")]
+    [ValidateSet("", "nonebot2", "astrbot", "napcat-nonebot2", "napcat-astrbot", "napcat-astrbot-demon", "napcat-astrbot-angel")]
     [string]$Component = "",
     [string]$RunId = "",
     [string]$WindowTitle = "",
     [ValidateSet("", "dual", "full")]
     [string]$FeatureMode = "",
-    [ValidateSet("demon", "angel")]
+    [ValidateSet("demon", "angel", "both")]
     [string]$AstrBotProfile = "demon",
-    [int]$AstrBotOneBotPort = 6200
+    [int]$AstrBotOneBotPort = 6200,
+    [int]$AstrBotAngelOneBotPort = 6201
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +35,7 @@ function Get-ComponentLogRoot {
         [string]$RunId
     )
 
-    if ($Component -eq "astrbot" -or $Component -eq "napcat-astrbot") {
+    if ($Component -eq "astrbot" -or $Component.StartsWith("napcat-astrbot")) {
         return Join-Path $WorkspaceRoot "data\astrbot\logs\start_all\$RunId\$Component"
     }
     return Join-Path $WorkspaceRoot "data\nonebot2\logs\start_all\$RunId\$Component"
@@ -396,6 +397,9 @@ function Stop-NapCatAccountProcesses {
 }
 
 function Get-AstrBotAccount {
+    if ($AstrBotProfile -eq "both") {
+        return "2629227874"
+    }
     if ($AstrBotProfile -eq "angel") {
         return "1443944862"
     }
@@ -403,6 +407,9 @@ function Get-AstrBotAccount {
 }
 
 function Get-AstrBotTitle {
+    if ($AstrBotProfile -eq "both") {
+        return "AstrBot-both"
+    }
     if ($AstrBotProfile -eq "angel") {
         return "AstrBot-1443944862"
     }
@@ -410,6 +417,9 @@ function Get-AstrBotTitle {
 }
 
 function Get-AstrBotNapCatTitle {
+    if ($AstrBotProfile -eq "both") {
+        return "NapCat-AstrBot-both"
+    }
     if ($AstrBotProfile -eq "angel") {
         return "NapCat-AstrBot-1443944862"
     }
@@ -501,10 +511,13 @@ function Start-AstrBotComponent {
     Write-LauncherLog -LogFile $launcherLog -Message "Starting AstrBot component."
     Stop-ProcessByPort -Port 6185 -Name "AstrBot" -LogFile $launcherLog
     Stop-ProcessByPort -Port $AstrBotOneBotPort -Name "AstrBot" -LogFile $launcherLog
+    if ($AstrBotProfile -eq "both") {
+        Stop-ProcessByPort -Port $AstrBotAngelOneBotPort -Name "AstrBot" -LogFile $launcherLog
+    }
 
     $script = Join-Path $ScriptRoot "start-astrbot.ps1"
     $featureModeArg = if ($FeatureMode) { " -FeatureMode '$FeatureMode'" } else { "" }
-    $command = "& '$script'$featureModeArg -BotProfile '$AstrBotProfile' -AiocqhttpPort $AstrBotOneBotPort"
+    $command = "& '$script'$featureModeArg -BotProfile '$AstrBotProfile' -AiocqhttpPort $AstrBotOneBotPort -AngelAiocqhttpPort $AstrBotAngelOneBotPort"
     $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
     Write-LauncherLog -LogFile $launcherLog -Message "AstrBot stdout log: $stdoutLog"
 
@@ -521,6 +534,9 @@ function Start-AstrBotComponent {
     }
     if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $AstrBotOneBotPort -TimeoutSeconds 360 -LogFile $launcherLog)) {
         throw "AstrBot did not open port $AstrBotOneBotPort."
+    }
+    if ($AstrBotProfile -eq "both" -and -not (Wait-TcpPort -HostName "127.0.0.1" -Port $AstrBotAngelOneBotPort -TimeoutSeconds 360 -LogFile $launcherLog)) {
+        throw "AstrBot did not open port $AstrBotAngelOneBotPort."
     }
 }
 
@@ -626,6 +642,8 @@ function Invoke-Child {
             "astrbot" { Start-AstrBotComponent -RunId $RunId }
             "napcat-nonebot2" { Start-NapCatComponent -RunId $RunId -Account "1443944862" -BotPort 8080 -DoneCheck "nonebot2" }
             "napcat-astrbot" { Start-NapCatComponent -RunId $RunId -Account (Get-AstrBotAccount) -BotPort $AstrBotOneBotPort -DoneCheck "astrbot" -ComponentName "napcat-astrbot" }
+            "napcat-astrbot-demon" { Start-NapCatComponent -RunId $RunId -Account "2629227874" -BotPort $AstrBotOneBotPort -DoneCheck "astrbot" -ComponentName "napcat-astrbot-demon" }
+            "napcat-astrbot-angel" { Start-NapCatComponent -RunId $RunId -Account "1443944862" -BotPort $AstrBotAngelOneBotPort -DoneCheck "astrbot" -ComponentName "napcat-astrbot-angel" }
             default { throw "Unknown component: $Component" }
         }
         Complete-Child -RunId $RunId -Component $Component
@@ -672,6 +690,7 @@ function Start-ChildWindow {
         $arguments += @("-AstrBotProfile", $AstrBotProfile)
     }
     $arguments += @("-AstrBotOneBotPort", $AstrBotOneBotPort)
+    $arguments += @("-AstrBotAngelOneBotPort", $AstrBotAngelOneBotPort)
     Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WorkingDirectory $WorkspaceRoot | Out-Null
 }
 
@@ -686,6 +705,8 @@ function Start-ComponentWindow {
         "astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title (Get-AstrBotTitle) }
         "napcat-nonebot2" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-1443944862" }
         "napcat-astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title (Get-AstrBotNapCatTitle) }
+        "napcat-astrbot-demon" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-AstrBot-2629227874" }
+        "napcat-astrbot-angel" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-AstrBot-1443944862" }
         default { throw "Unknown component: $Component" }
     }
 }
@@ -727,6 +748,12 @@ function Invoke-Parent {
     if ($FeatureMode -eq "full" -and $Target -ne "astrbot") {
         throw "FeatureMode full is only allowed with -Target astrbot. Use dual when NoneBot2 is also running."
     }
+    if ($AstrBotProfile -eq "both" -and $Target -ne "astrbot") {
+        throw "AstrBotProfile both is only allowed with -Target astrbot because account 1443944862 belongs to bot1 outside AstrBot-only mode."
+    }
+    if ($AstrBotProfile -eq "both" -and $FeatureMode -ne "full") {
+        throw "AstrBotProfile both requires -FeatureMode full so AstrBot-only event ownership is explicit."
+    }
     if ($AstrBotProfile -eq "angel" -and $Target -ne "astrbot") {
         throw "AstrBotProfile angel is only allowed with -Target astrbot because account 1443944862 belongs to bot1 in dual mode."
     }
@@ -746,7 +773,13 @@ function Invoke-Parent {
     }
     if ($Target -eq "astrbot" -or $Target -eq "all") {
         $botComponents += "astrbot"
-        $napcatComponents += "napcat-astrbot"
+        if ($AstrBotProfile -eq "both") {
+            $napcatComponents += "napcat-astrbot-demon"
+            $napcatComponents += "napcat-astrbot-angel"
+        }
+        else {
+            $napcatComponents += "napcat-astrbot"
+        }
     }
 
     Write-Host "Starting target: $Target"
