@@ -21,8 +21,26 @@ from astrbot.api.message_components import At, Image, Plain, Poke
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
+from .menu_catalog import MENU_SECTIONS
+from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
 from .menu_image import render_overview_menu_image
+from .rightcodes_draw_logic import RightCodesDrawClient
+from .rightcodes_draw_logic import RightCodesDrawQuotaStore
+from .rightcodes_draw_logic import format_draw_quota_exceeded_message
+from .rightcodes_draw_logic import format_draw_start_message
+from .rightcodes_draw_logic import format_rightcodes_draw_failure
+from .rightcodes_draw_logic import format_rightcodes_draw_model_help
+from .rightcodes_draw_logic import format_rightcodes_draw_points_mutation_denied
+from .rightcodes_draw_logic import format_rightcodes_draw_points_status
+from .rightcodes_draw_logic import format_rightcodes_draw_success
+from .rightcodes_draw_logic import load_api_key
+from .rightcodes_draw_logic import load_rightcodes_config
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_help_command
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_request
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_query
+from .rightcodes_draw_logic import parse_rightcodes_draw_command
+from .rightcodes_draw_logic import should_record_passive_group_points
 from .twin_poke import should_follow_poke_notice
 
 
@@ -273,6 +291,8 @@ class QQBotFeaturesPlugin(Star):
         self._feature_mode = read_feature_mode(config)
         self._reread_state = RereadRepeatState()
         self._arc_apk_update_manager = None
+        self._rightcodes_config = load_rightcodes_config(config)
+        self._rightcodes_draw_lock = asyncio.Semaphore(2)
         logger.info(
             "[QQBotFeatures] migrated feature plugin loaded, mode=%s",
             self._feature_mode,
@@ -284,7 +304,7 @@ class QQBotFeaturesPlugin(Star):
             return
         try:
             image_path = render_overview_menu_image(
-                features=FEATURES,
+                features=MENU_SECTIONS,
                 feature_mode=self._feature_mode,
                 output_dir=get_menu_image_cache_root(),
             )
@@ -299,21 +319,21 @@ class QQBotFeaturesPlugin(Star):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
         key = re.sub(r"^菜单\s*", "", event.get_message_str().strip(), count=1)
-        feature = find_feature(key)
-        if feature is None:
+        menu_item = find_menu_section(key) or find_feature(key)
+        if menu_item is None:
             yield event.plain_result("没有这个模块哦！")
             event.stop_event()
             return
         try:
             image_path = render_feature_menu_image(
-                feature=feature,
+                feature=menu_item,
                 feature_mode=self._feature_mode,
                 output_dir=get_menu_image_cache_root(),
             )
             yield event.chain_result([Image.fromFileSystem(str(image_path))])
         except Exception as exc:
             logger.exception("[QQBotFeatures] failed to render feature menu image: %s", exc)
-            yield event.plain_result(build_feature_menu_text(feature))
+            yield event.plain_result(build_feature_menu_text(menu_item))
         event.stop_event()
 
     @filter.platform_adapter_type("aiocqhttp")
@@ -418,6 +438,85 @@ class QQBotFeaturesPlugin(Star):
                 chain.append(Plain(result.image_text))
             chain.append(Plain(result.suffix))
             yield event.chain_result(chain)
+        event.stop_event()
+
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    async def record_rightcodes_group_message_points(self, event: AstrMessageEvent):
+        if str(event.get_self_id() or "") != read_command_owner_qq():
+            return
+        if not should_record_passive_group_points(
+            feature_mode=self._feature_mode,
+            nonebot2_online=is_nonebot2_port_open(),
+        ):
+            return
+        if str(event.get_sender_id() or "") == str(event.get_self_id() or ""):
+            return
+        if not str(event.get_message_str() or "").strip():
+            return
+        store = RightCodesDrawQuotaStore(
+            self._rightcodes_config.data_root,
+            multiplier=self._rightcodes_config.point_multiplier,
+        )
+        await asyncio.to_thread(store.record_group_message, event.get_sender_id())
+
+    @filter.event_message_type(EventMessageType.ALL)
+    async def rightcodes_draw_command(self, event: AstrMessageEvent):
+        text = str(event.get_message_str() or "").strip()
+        if not text:
+            return
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        store = RightCodesDrawQuotaStore(
+            self._rightcodes_config.data_root,
+            multiplier=self._rightcodes_config.point_multiplier,
+        )
+        user_id = str(event.get_sender_id() or "")
+
+        if looks_like_rightcodes_draw_points_mutation_request(text):
+            yield event.plain_result(format_rightcodes_draw_points_mutation_denied())
+            event.stop_event()
+            return
+        if looks_like_rightcodes_draw_points_query(text):
+            balance = await asyncio.to_thread(store.get_balance, user_id)
+            yield event.plain_result(format_rightcodes_draw_points_status(balance))
+            event.stop_event()
+            return
+        if looks_like_rightcodes_draw_help_command(text):
+            yield event.plain_result(format_rightcodes_draw_model_help())
+            event.stop_event()
+            return
+
+        draw_request = parse_rightcodes_draw_command(text)
+        if draw_request is None:
+            return
+        quota = await asyncio.to_thread(store.reserve, user_id, model=draw_request.model)
+        if not quota.allowed:
+            yield event.plain_result(format_draw_quota_exceeded_message(quota))
+            event.stop_event()
+            return
+
+        yield event.plain_result(format_draw_start_message(quota))
+        api_key = load_api_key(self._rightcodes_config.api_key_env)
+        if not api_key:
+            await asyncio.to_thread(store.refund, quota)
+            yield event.plain_result("RightCodes 生图 API Key 还没配置。")
+            event.stop_event()
+            return
+
+        async with self._rightcodes_draw_lock:
+            try:
+                result = await RightCodesDrawClient(api_key=api_key).draw(draw_request)
+            except Exception as exc:
+                await asyncio.to_thread(store.refund, quota)
+                yield event.plain_result(format_rightcodes_draw_failure(exc))
+                event.stop_event()
+                return
+
+        message = format_rightcodes_draw_success(result, model=draw_request.model)
+        if result.image_url.startswith(("http://", "https://")):
+            yield event.chain_result([Plain(message), Image.fromURL(result.image_url)])
+        else:
+            yield event.plain_result(f"{message}\n{result.image_url}")
         event.stop_event()
 
     @filter.regex(ARC_RECOMMEND_PATTERN)
@@ -723,13 +822,13 @@ def find_feature(key: str) -> FeatureSpec | None:
 
 def build_menu_text(feature_mode: str = FEATURE_MODE_DUAL) -> str:
     lines = ["NoneBot2 已迁移功能清单：", build_feature_mode_text(feature_mode)]
-    for feature in FEATURES:
-        lines.append(f"- {feature.name}：{feature.status}")
-    lines.append("发送 菜单模块名 查看具体命令，例如 菜单Factorio。")
+    for section in MENU_SECTIONS:
+        lines.append(f"- {section.name}：{section.status}")
+    lines.append("发送 菜单模块名 查看具体命令，例如 菜单棉花糖互动 / 菜单Arcaea。")
     return "\n".join(lines)
 
 
-def build_feature_menu_text(feature: FeatureSpec) -> str:
+def build_feature_menu_text(feature) -> str:
     lines = [f"{feature.name}：{feature.status}"]
     lines.extend(feature.lines)
     return "\n".join(lines)

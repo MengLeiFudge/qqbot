@@ -40,7 +40,7 @@ def render_overview_menu_image(
         "kind": "overview",
         "feature_mode": feature_mode,
         "features": [_feature_payload(feature) for feature in features],
-        "version": 1,
+        "version": 2,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
@@ -90,7 +90,7 @@ def render_feature_menu_image(
         "kind": "feature",
         "feature_mode": feature_mode,
         "feature": _feature_payload(feature),
-        "version": 1,
+        "version": 2,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
@@ -207,7 +207,7 @@ def _draw_mode_strip(draw: ImageDraw.ImageDraw, fonts: _Fonts, feature_mode: str
 def _overview_card_height(feature: MenuFeature, fonts: _Fonts) -> int:
     del fonts
     summary = _feature_summary(feature)
-    return 154 + max(0, len(_wrap_text(summary, 25)) - 1) * 30
+    return 154 + max(0, len(_wrap_text(summary, 18)) - 1) * 30
 
 
 def _draw_overview_card(
@@ -224,7 +224,7 @@ def _draw_overview_card(
     _status_badge(draw, fonts, (x + width - 138, y + 22), feature.status)
 
     summary_y = y + 66
-    for line in _wrap_text(_feature_summary(feature), 25)[:3]:
+    for line in _wrap_text(_feature_summary(feature), 18)[:3]:
         draw.text((x + 24, summary_y), line, font=fonts.small, fill=MUTED)
         summary_y += 30
 
@@ -265,7 +265,7 @@ def _badge(draw: ImageDraw.ImageDraw, fonts: _Fonts, pos: tuple[int, int], text:
 
 
 def _draw_footer(draw: ImageDraw.ImageDraw, fonts: _Fonts, y: int) -> None:
-    draw.text((40, y), "发送 菜单模块名 查看详情，例如 菜单Arc / 菜单Factorio。", font=fonts.badge, fill=MUTED)
+    draw.text((40, y), "发送 菜单模块名 查看详情，例如 菜单棉花糖互动 / 菜单Arcaea。", font=fonts.badge, fill=MUTED)
 
 
 def _wrap_text(text: str, width: int) -> list[str]:

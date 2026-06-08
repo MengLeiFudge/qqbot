@@ -1,6 +1,6 @@
 name: astrbot_plugin_rightcodes_draw
 display_name: RightCodes draw
-desc: "Local AstrBot plugin for qqbot RightCodes image generation and draw points."
-version: v0.1.0
+desc: "Deprecated compatibility shell; RightCodes commands are handled by astrbot_plugin_qqbot_features."
+version: v0.1.1
 author: local
 repo: ""

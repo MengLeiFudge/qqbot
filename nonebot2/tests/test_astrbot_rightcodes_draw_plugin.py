@@ -9,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
-from astrbot_plugin_rightcodes_draw.logic import (
+from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     FEATURE_MODE_DUAL,
     FEATURE_MODE_FULL,
     RightCodesDrawClient,

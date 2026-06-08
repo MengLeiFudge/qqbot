@@ -14,6 +14,8 @@ sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_qqbot_features.menu_image import render_feature_menu_image
 from astrbot_plugin_qqbot_features.menu_image import render_overview_menu_image
+from astrbot_plugin_qqbot_features.menu_catalog import MENU_SECTIONS
+from astrbot_plugin_qqbot_features.menu_catalog import find_menu_section
 from astrbot_plugin_qqbot_features.twin_poke import should_follow_poke_notice
 
 
@@ -26,16 +28,22 @@ class StubFeature:
 
 
 class AstrBotMenuImageTest(unittest.TestCase):
-    def test_render_overview_menu_image_creates_cached_png(self) -> None:
-        features = (
-            StubFeature("群管助手", ("群管",), lines=("通知清理文件：统计超过一周的外层群文件",)),
-            StubFeature("Arc", ("arcaea",), status="部分移植", lines=("arctj10.5：按 PTT 推荐谱面",)),
-            StubFeature("Factorio", ("spaceage",), lines=("Factorio下载链接：获取 Space Age 下载链接",)),
+    def test_menu_catalog_groups_user_facing_sections(self) -> None:
+        names = [section.name for section in MENU_SECTIONS]
+
+        self.assertEqual(
+            names,
+            ["群务管理", "棉花糖互动", "养鲲", "落樱之都", "Arcaea", "Factorio", "异形工厂"],
         )
+        self.assertEqual(find_menu_section("Arc").name, "Arcaea")
+        self.assertEqual(find_menu_section("生图").name, "棉花糖互动")
+        self.assertEqual(find_menu_section("群管").name, "群务管理")
+
+    def test_render_overview_menu_image_creates_cached_png(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
-            first = render_overview_menu_image(features=features, feature_mode="full", output_dir=output_dir)
-            second = render_overview_menu_image(features=features, feature_mode="full", output_dir=output_dir)
+            first = render_overview_menu_image(features=MENU_SECTIONS, feature_mode="full", output_dir=output_dir)
+            second = render_overview_menu_image(features=MENU_SECTIONS, feature_mode="full", output_dir=output_dir)
 
             self.assertEqual(first, second)
             self.assertTrue(first.is_file())
