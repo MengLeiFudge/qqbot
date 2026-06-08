@@ -1,0 +1,6 @@
+name: astrbot_plugin_local_artifact_api
+display_name: Local artifact publish API
+desc: "Localhost compatibility API for publishing build artifacts through AstrBot OneBot."
+version: v0.1.0
+author: local
+repo: ""

@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import random
 import re
-import socket
 import sys
 import time
 import tomllib
@@ -741,11 +740,15 @@ def is_nonebot2_plugin_enabled(plugin_id: str) -> bool:
 
 
 def is_nonebot2_port_open() -> bool:
+    request = Request(f"http://{NONEBOT2_HOST}:{NONEBOT2_PORT}/admin/api/status")
     try:
-        with socket.create_connection((NONEBOT2_HOST, NONEBOT2_PORT), timeout=1.0):
-            return True
-    except OSError:
+        with build_opener().open(request, timeout=1.0) as response:
+            if response.status != 200:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
         return False
+    return isinstance(payload, dict) and "connected_bot_count" in payload and "onebot_connected" in payload
 
 
 def build_feature_mode_text(feature_mode: str) -> str:

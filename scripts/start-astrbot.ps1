@@ -35,33 +35,24 @@ $ProfilePersonaNames = @{
     demon = (Join-CodePoints @(0x6076, 0x9B54, 0x68C9, 0x82B1, 0x7CD6))
     angel = (Join-CodePoints @(0x5929, 0x4F7F, 0x68C9, 0x82B1, 0x7CD6))
 }
+$ProfileAccounts = @{
+    demon = "2629227874"
+    angel = "1443944862"
+}
 
-function Test-TcpPort {
-    param(
-        [string]$HostName,
-        [int]$Port
-    )
-
+function Test-NoneBot2AdminStatus {
     try {
-        $client = [System.Net.Sockets.TcpClient]::new()
-        try {
-            $result = $client.BeginConnect($HostName, $Port, $null, $null)
-            if (-not $result.AsyncWaitHandle.WaitOne(1000)) {
-                return $false
-            }
-            $client.EndConnect($result)
-            return $true
-        }
-        finally {
-            $client.Close()
-        }
+        $status = Invoke-RestMethod -Uri "http://127.0.0.1:8080/admin/api/status" -Method Get -TimeoutSec 3
     }
     catch {
         return $false
     }
+    return $null -ne $status -and
+        $null -ne $status.PSObject.Properties["connected_bot_count"] -and
+        $null -ne $status.PSObject.Properties["onebot_connected"]
 }
 
-if ($FeatureMode -eq "full" -and (Test-TcpPort -HostName "127.0.0.1" -Port 8080)) {
+if ($FeatureMode -eq "full" -and (Test-NoneBot2AdminStatus)) {
     throw "QQBot AstrBot feature mode full requires NoneBot2 to be offline. Stop bot1 first or use FeatureMode dual."
 }
 
@@ -162,6 +153,7 @@ if ($FeatureMode) {
     $env:QQBOT_ASTRBOT_FEATURE_MODE = $FeatureMode
 }
 $env:QQBOT_ASTRBOT_PROFILE = $BotProfile
+$env:QQBOT_ASTRBOT_ACCOUNT = $ProfileAccounts[$BotProfile]
 
 Set-Location $AstrRoot
 

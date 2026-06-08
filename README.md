@@ -30,7 +30,9 @@
 
 AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps1` 会调用 `uv tool` 安装的 `astrbot` 命令，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。
 
-`astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、菜单、Factorio 下载链接、复读、入群欢迎、戳一戳响应、社交请求日志、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置；本地 artifact 发布和 NoneBot2 AI runtime 属于二期适配或使用 AstrBot 原生链路。
+`astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、菜单、Factorio 下载链接、复读、入群欢迎、戳一戳响应、社交请求日志、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置；NoneBot2 AI runtime 使用 AstrBot 原生链路替代。
+
+`astrbot_plugin_local_artifact_api` 负责 bot2 的本地构建产物发布兼容入口。AstrBot `full` 模式下会在 `127.0.0.1:8080` 提供 `POST /admin/api/artifacts/publish-local`，保持原 NoneBot2 localhost-only 请求体、Git 上下文校验、SHA 跳过策略和 OneBot 群文件上传行为，供 `AfterBuildEvent.exe 1` 这类本机白名单构建流程继续发布 zip 产物。
 
 `astrbot_plugin_rightcodes_draw` 负责 bot2 的 RightCodes 生图和生图积分命令。默认复用 `data\nonebot2\run\ai\draw_points.json`，保持 bot1/bot2 双开迁移期间积分连续；`dual` 模式下 bot1 在线时不重复累计普通群消息积分，`full` 模式或 bot1 离线时由 AstrBot 累计群消息积分。RightCodes API Key 默认读取 `QQBOT_AI_KEY_RIGHTCODES` 环境变量，也会兜底读取 `data\nonebot2\config\.env` 同名项。插件只迁移生图命令、积分查询和自动扣退分，不接管 NoneBot2 的普通 AI runtime。
 
