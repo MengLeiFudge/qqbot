@@ -17,6 +17,7 @@
 - AstrBot 行为调整硬限制：配置优先，插件其次，绝不直接修改 AstrBot Core 源码。能通过 `data/astrbot/data/` 运行态配置、AstrBot 参数或插件实现的行为，不允许改 `astrbot/` 源码快照或 uv tool 安装目录源码；只有先确认配置和插件都无法实现，并获得用户明确批准后，才允许讨论 Core 补丁。
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
 - 迁移 NoneBot2 功能到 AstrBot 本地插件时，必须明确 bot1/bot2 双开和 AstrBot-only 两种模式下的功能归属。默认使用 `dual` 模式：bot2 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 bot1 负责；只有 AstrBot-only 场景才允许使用 `full` 模式接管已迁移自动事件。
+- RightCodes 生图迁移到 AstrBot 时，bot1/bot2 默认共用 `data\nonebot2\run\ai\draw_points.json` 作为积分事实源；`dual` 模式下 bot1 在线时 AstrBot 不重复累计普通群消息积分，`full` 模式或 bot1 离线时 AstrBot 才累计群消息积分。生图失败必须退回已扣积分或当天免费次数。
 - bot1/bot2 联动优先用 AstrBot 本地插件桥接，不改 Core。桥接插件只能只读 `data\nonebot2\run\ai\group_context\` 这类公开群上下文，默认不按具体群号限制；星环群 `1035445959` 只能作为领域提示特例，不能作为桥接范围条件。不得读取私聊、token、QQ 登录态、数据库密钥或运行日志作为 LLM prompt 证据。
 - AstrBot 源码知识兜底优先用 `astrbot_plugin_source_knowledge` 这类本地插件实现，不改 Core、不依赖 Embedding。可信依据必须优先来自源码、反编译源码、源码邻近 README/设计文档和配置数据，尤其是戴森球计划本体相关源码和相关 mod 源码；群聊、群文件、攻略和 release notes 只能作为候选或补充。源码检索插件只读明确配置的源码根，必须跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件；不得读取私聊、token、QQ 登录态、数据库密钥、运行日志或本仓库运行态 `data`。
 - bot1/bot2 共用本地表情包索引 `data\memes\mlj_pack\index.json`；短情绪闲聊允许纯表情回复，`auto_send_enabled=false` 的敏感支付、涩涩慎用、待复核类别不得自动发送。AstrBot 侧通过 `scripts\sync-meme-pack.py` 同步到 `data\astrbot\data\plugin_data\meme_manager\` 和运行态配置，不改 Core、不删除旧图库目录。

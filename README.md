@@ -32,6 +32,8 @@ AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps
 
 `astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、菜单、Factorio 下载链接、复读、入群欢迎、戳一戳响应，以及社交请求日志；群文件清理、Lolicon、养鲲、落樱、Arc、shapez 和 NoneBot2 AI runtime 属于二期适配或使用 AstrBot 原生链路。
 
+`astrbot_plugin_rightcodes_draw` 负责 bot2 的 RightCodes 生图和生图积分命令。默认复用 `data\nonebot2\run\ai\draw_points.json`，保持 bot1/bot2 双开迁移期间积分连续；`dual` 模式下 bot1 在线时不重复累计普通群消息积分，`full` 模式或 bot1 离线时由 AstrBot 累计群消息积分。RightCodes API Key 默认读取 `QQBOT_AI_KEY_RIGHTCODES` 环境变量，也会兜底读取 `data\nonebot2\config\.env` 同名项。插件只迁移生图命令、积分查询和自动扣退分，不接管 NoneBot2 的普通 AI runtime。
+
 `astrbot_plugin_qqbot_features` 默认使用 `dual` 模式：bot1 和 bot2 同时在线时，AstrBot 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 NoneBot2 负责，避免同一事件双机器人重复回应。以后切换到 AstrBot-only 时，先停用 bot1，再使用 `scripts\start-astrbot.bat -FeatureMode full` 启动 bot2，或在 AstrBot 插件配置中把 `feature_mode` 改为 `full` 后重启 bot2；环境变量 `QQBOT_ASTRBOT_FEATURE_MODE` 会覆盖插件配置。启动脚本会阻止 `full` 模式和 NoneBot2 双开。
 
 `astrbot_plugin_qqbot_context_bridge` 负责 bot1/bot2 的轻量联动：bot2 发起群聊 LLM 请求时，会按当前群号读取 bot1 的公开群上下文 `data\nonebot2\run\ai\group_context\<群号>.json` 并注入本轮请求。默认不限制群号，只要 bot1 有对应公开群上下文文件就桥接；`enabled_groups` 只作为可选 allowlist。星环群 `1035445959` 额外带 OrbitalRing 领域提示，但不作为桥接范围条件。插件不读取私聊、日志、token 或其他敏感运行态。

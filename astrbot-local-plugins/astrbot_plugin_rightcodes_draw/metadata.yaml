@@ -1,0 +1,6 @@
+name: astrbot_plugin_rightcodes_draw
+display_name: RightCodes draw
+desc: "Local AstrBot plugin for qqbot RightCodes image generation and draw points."
+version: v0.1.0
+author: local
+repo: ""
