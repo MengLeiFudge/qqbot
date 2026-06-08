@@ -21,6 +21,20 @@ $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
 $LocalPluginRoot = Join-Path $WorkspaceRoot "astrbot-local-plugins"
 $RuntimePluginRoot = Join-Path $AstrRoot "data\plugins"
 
+function Join-CodePoints {
+    param([int[]]$CodePoints)
+    return -join ($CodePoints | ForEach-Object { [string][char]$_ })
+}
+
+$ProfileDisplayNames = @{
+    demon = ((Join-CodePoints @(0xD83D, 0xDC7F)) + (Join-CodePoints @(0x68C9, 0x82B1, 0x7CD6)) + (Join-CodePoints @(0xD83D, 0xDC7F)))
+    angel = ((Join-CodePoints @(0xD83D, 0xDE07)) + (Join-CodePoints @(0x68C9, 0x82B1, 0x7CD6)) + (Join-CodePoints @(0xD83D, 0xDE07)))
+}
+$ProfilePersonaNames = @{
+    demon = (Join-CodePoints @(0x6076, 0x9B54, 0x68C9, 0x82B1, 0x7CD6))
+    angel = (Join-CodePoints @(0x5929, 0x4F7F, 0x68C9, 0x82B1, 0x7CD6))
+}
+
 function Test-TcpPort {
     param(
         [string]$HostName,
@@ -53,6 +67,80 @@ if ($FeatureMode -eq "full" -and (Test-TcpPort -HostName "127.0.0.1" -Port 8080)
 New-Item -ItemType Directory -Path $AstrRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $AstrRoot ".astrbot") -Force | Out-Null
 New-Item -ItemType Directory -Path $RuntimePluginRoot -Force | Out-Null
+
+function Sync-AstrBotProfileConfig {
+    param(
+        [string]$ConfigPath,
+        [string]$Profile
+    )
+
+    if (-not (Test-Path $ConfigPath)) {
+        return
+    }
+
+    $displayName = $ProfileDisplayNames[$Profile]
+    $personaName = $ProfilePersonaNames[$Profile]
+    if (-not $displayName -or -not $personaName) {
+        throw "Unknown AstrBot profile: $Profile"
+    }
+
+    $rawConfig = Get-Content -Raw -Path $ConfigPath -Encoding UTF8
+    if (-not $rawConfig.Trim()) {
+        return
+    }
+
+    $config = $rawConfig | ConvertFrom-Json
+    $changed = $false
+
+    if ($config.provider_settings) {
+        if (Set-JsonObjectProperty -Target $config.provider_settings -Name "default_personality" -Value $personaName) {
+            $changed = $true
+        }
+    }
+
+    if ($config.subagent_orchestrator -and $config.subagent_orchestrator.agents) {
+        foreach ($agent in @($config.subagent_orchestrator.agents)) {
+            if (Set-JsonObjectProperty -Target $agent -Name "persona_id" -Value $personaName) {
+                $changed = $true
+            }
+        }
+    }
+
+    if ($config.platform) {
+        foreach ($platform in @($config.platform)) {
+            if ($platform.type -eq "aiocqhttp" -and (Set-JsonObjectProperty -Target $platform -Name "id" -Value $displayName)) {
+                $changed = $true
+            }
+        }
+    }
+
+    if ($changed) {
+        $json = $config | ConvertTo-Json -Depth 100
+        Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
+    }
+}
+
+function Set-JsonObjectProperty {
+    param(
+        [object]$Target,
+        [string]$Name,
+        [object]$Value
+    )
+
+    $property = $Target.PSObject.Properties[$Name]
+    if ($property) {
+        if ($property.Value -ne $Value) {
+            $property.Value = $Value
+            return $true
+        }
+        return $false
+    }
+
+    $Target | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    return $true
+}
+
+Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json") -Profile $BotProfile
 
 if (Test-Path $LocalPluginRoot) {
     Get-ChildItem -Path $LocalPluginRoot -Directory | ForEach-Object {
