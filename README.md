@@ -42,7 +42,7 @@ AstrBot 启动入口支持显式选择当前 bot 身份：默认 `-AstrBotProfil
 
 `astrbot_plugin_source_knowledge` 负责 bot2 的源码知识兜底：在没有 Embedding 模型、不能使用 AstrBot 原生知识库时，它会按当前群号和问题文本只读检索本机源码树，并把少量相关源码片段临时注入本轮 LLM 请求。默认源码根覆盖 DSPCore、万物分馏、星环、创世之书、shapez 和 Factorio 模组源码；可信依据优先是源码、反编译源码、源码邻近 README/设计文档和配置数据。插件跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件，不读取私聊、运行日志、token、QQ 登录态、运行态 `data` 或数据库密钥。
 
-`astrbot_plugin_topic_concentration` 负责 bot2 的普通群聊主动接话门控：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用短窗口话题判断、弱窗口过滤、组级冷却、同话题冷却和 bot1 消息过滤决定是否放行。它不主动发送消息，只控制 Core active reply 是否继续执行。
+`astrbot_plugin_topic_concentration` 负责 bot2 的普通群聊主动接话门控：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用短窗口话题判断、弱窗口过滤、组级冷却、同话题冷却和 bot1 消息过滤决定是否放行。它不主动发送消息，只控制 Core active reply 是否继续执行。插件配置 `decision_provider_order` 是主动接话判定专用 provider 回退数组，从上到下依次尝试；留空时使用 AstrBot `provider_settings.default_provider_id` 加 `fallback_chat_models`。
 
 `astrbot_plugin_reply_style_guard` 负责给 bot2 的 LLM 请求注入输出风格硬规则，并在发送前清洗末尾问句和追问式邀请：普通回复、主动回复和拒答都不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”这类追问式收尾；能答就直接给结论，不能答就给合法可执行替代。群聊和私聊会话都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析，分析不出发言原因时不回答。
 

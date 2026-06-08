@@ -13,6 +13,9 @@ from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, register
 from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
 
+from .logic import chat_with_decision_providers
+from .logic import read_decision_provider_order
+
 
 WINDOW_SECONDS = 150.0
 MAX_WINDOW_MESSAGES = 10
@@ -26,6 +29,7 @@ PROFILE_OTHER_BOT_IDS = {
     "angel": {"2629227874"},
     "demon": {"1443944862"},
 }
+_DECISION_PROVIDER_ORDER: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,13 +68,19 @@ _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
     "astrbot_plugin_topic_concentration",
     "local",
     "Gate AstrBot active replies by AI-decided short-window topic interest.",
-    "0.3.1",
+    "0.3.2",
 )
 class TopicConcentrationPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config=None):
         super().__init__(context)
+        set_decision_provider_order(read_decision_provider_order(config))
         self._install_active_reply_gate()
-        logger.info("[TopicConcentration] loaded: profile=%s other_bot_ids=%s", read_bot_profile(), sorted(get_other_bot_ids()))
+        logger.info(
+            "[TopicConcentration] loaded: profile=%s other_bot_ids=%s decision_provider_order=%s",
+            read_bot_profile(),
+            sorted(get_other_bot_ids()),
+            list(_DECISION_PROVIDER_ORDER),
+        )
 
     def _install_active_reply_gate(self) -> None:
         if getattr(GroupChatContext, "_topic_concentration_installed", False):
@@ -192,19 +202,9 @@ def _should_consider_window(window: deque[TopicWindowMessage]) -> bool:
 async def _decide_with_ai(group_context: GroupChatContext, event, window: deque[TopicWindowMessage]) -> TopicDecision | None:
     if not any(_compact(message.text) for message in window):
         return None
-    provider = group_context.context.get_using_provider(event.unified_msg_origin)
-    if provider is None:
-        logger.info("[TopicConcentration] no provider for active reply decision")
-        return None
     prompt = _build_decision_prompt(window, active_interest=_get_interest(event.unified_msg_origin))
-    try:
-        response = await provider.text_chat(
-            prompt=prompt,
-            session_id=f"topic_concentration:{event.unified_msg_origin}",
-            persist=False,
-        )
-    except Exception as exc:
-        logger.warning(f"[TopicConcentration] AI decision failed: {exc}")
+    response = await _chat_with_decision_providers(group_context.context, event, prompt)
+    if response is None:
         return None
     try:
         return _parse_decision(response.completion_text)
@@ -214,6 +214,21 @@ async def _decide_with_ai(group_context: GroupChatContext, event, window: deque[
             f"error={exc} text={str(getattr(response, 'completion_text', ''))[:240]}"
         )
         return None
+
+
+async def _chat_with_decision_providers(context: Context, event, prompt: str):
+    return await chat_with_decision_providers(
+        context=context,
+        event=event,
+        prompt=prompt,
+        configured_order=_DECISION_PROVIDER_ORDER,
+        logger=logger,
+    )
+
+
+def set_decision_provider_order(provider_order: tuple[str, ...]) -> None:
+    global _DECISION_PROVIDER_ORDER
+    _DECISION_PROVIDER_ORDER = provider_order
 
 
 def _build_decision_prompt(

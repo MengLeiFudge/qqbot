@@ -1,0 +1,11 @@
+{
+  "decision_provider_order": {
+    "description": "主动接话判定 provider 回退顺序",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": [],
+    "hint": "从上到下依次尝试。留空时使用 AstrBot provider_settings.default_provider_id + fallback_chat_models。示例：[\"packyapi-gemini/gemini-3-flash-preview\", \"codex-everywhere/gpt-5.4-mini\", \"openrouter_icu/gpt-5.4-mini\"]。"
+  }
+}
