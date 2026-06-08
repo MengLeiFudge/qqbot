@@ -9,6 +9,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent
 from qqbot.config import load_settings
 from qqbot.features.ai.group_context_store import AiGroupContextStore
 from qqbot.features.ai.chat_memory_store import ChatMemoryStore
+from qqbot.features.ai.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
 from qqbot.features.group.message_log_store import GroupMessageLogStore
 from qqbot.features.group.nick_store import GroupNickStore, get_group_nick_store
 from qqbot.services.message_normalizer import normalize_onebot_event
@@ -17,6 +18,14 @@ group_nick_cache_matcher = on_message(priority=1, block=False)
 _GROUP_CACHE_QUEUE: asyncio.Queue[GroupMessageEvent] | None = None
 _GROUP_CACHE_WORKER: asyncio.Task | None = None
 _GROUP_CACHE_QUEUE_MAX_SIZE = 1000
+
+
+def record_group_message_draw_points(event: GroupMessageEvent, store: RightCodesDrawQuotaStore) -> None:
+    user_id = str(event.get_user_id() or "").strip()
+    self_id = str(getattr(event, "self_id", "") or "").strip()
+    if not user_id or user_id == self_id:
+        return
+    store.record_group_message(user_id)
 
 
 def record_group_nick_event(event: GroupMessageEvent, store: GroupNickStore) -> None:
@@ -115,6 +124,20 @@ def record_group_cache_event(event: GroupMessageEvent) -> None:
 
 
 async def handle_group_nick_cache_event(event: GroupMessageEvent) -> None:
+    settings = load_settings()
+    try:
+        record_group_message_draw_points(
+            event,
+            RightCodesDrawQuotaStore(settings.data_root),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Group draw point write failed: group_id={}, user_id={}, message_id={}, error={}",
+            getattr(event, "group_id", None),
+            event.get_user_id() if hasattr(event, "get_user_id") else "",
+            getattr(event, "message_id", ""),
+            exc,
+        )
     # 高频群聊旁路缓存不阻塞消息分发；慢写入交给单 worker 串行落库。
     queue = _ensure_group_cache_queue()
     try:

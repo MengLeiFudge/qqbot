@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_CEILING
 from urllib.error import HTTPError
 from typing import Any, Protocol
 from urllib.request import Request, urlopen
@@ -13,6 +14,7 @@ from urllib.request import Request, urlopen
 
 RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
 RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
+RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 500
 RIGHTCODES_DRAW_MODELS = {
     "gpt-image-2-vip",
     "gpt-image-2",
@@ -20,12 +22,19 @@ RIGHTCODES_DRAW_MODELS = {
     "nano-banana-2",
     "nano-banana-pro",
 }
+RIGHTCODES_DRAW_MODEL_PRICES = {
+    "gpt-image-2": Decimal("0.04"),
+    "gpt-image-2-vip": Decimal("0.13"),
+    "nano-banana": Decimal("0.14"),
+    "nano-banana-2": Decimal("0.12"),
+    "nano-banana-pro": Decimal("0.18"),
+}
 RIGHTCODES_DRAW_MODEL_DESCRIPTIONS = {
-    "gpt-image-2": ("OpenAI 最新的画图模型，特价版，支持分辨率：1K", "0.04r"),
-    "gpt-image-2-vip": ("OpenAI 最新的画图模型，官方直连，支持分辨率：1K、2K、4K", "0.13r"),
-    "nano-banana": ("由 gemini-2.5-flash-image 模型封装而来", "0.14r"),
-    "nano-banana-2": ("nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K", "0.12r"),
-    "nano-banana-pro": ("nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K", "0.18r"),
+    "gpt-image-2": "OpenAI 最新的画图模型，特价版，支持分辨率：1K",
+    "gpt-image-2-vip": "OpenAI 最新的画图模型，官方直连，支持分辨率：1K、2K、4K",
+    "nano-banana": "由 gemini-2.5-flash-image 模型封装而来",
+    "nano-banana-2": "nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K",
+    "nano-banana-pro": "nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K",
 }
 logger = logging.getLogger(__name__)
 
@@ -204,9 +213,14 @@ def format_rightcodes_draw_model_help() -> str:
         "nano-banana-2",
         "nano-banana-pro",
     ):
-        description, price = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[model]
+        description = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[model]
+        price = format_rightcodes_draw_model_price(model)
         default_mark = "（默认）" if model == RIGHTCODES_DRAW_DEFAULT_MODEL else ""
-        lines.append(f"- {model}{default_mark}：{price}/张。{description}")
+        free_mark = "；每天首张免费" if model == RIGHTCODES_DRAW_DEFAULT_MODEL else ""
+        lines.append(
+            f"- {model}{default_mark}：${price}/张"
+            f"（{calculate_rightcodes_draw_model_points(model)} 积分）{free_mark}。{description}"
+        )
     lines.extend(
         [
             "",
@@ -217,6 +231,26 @@ def format_rightcodes_draw_model_help() -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def get_rightcodes_draw_model_price(model: str) -> Decimal:
+    return RIGHTCODES_DRAW_MODEL_PRICES.get(
+        model,
+        RIGHTCODES_DRAW_MODEL_PRICES[RIGHTCODES_DRAW_DEFAULT_MODEL],
+    )
+
+
+def format_rightcodes_draw_model_price(model: str) -> str:
+    return f"{get_rightcodes_draw_model_price(model):.2f}"
+
+
+def calculate_rightcodes_draw_model_points(
+    model: str,
+    *,
+    multiplier: int = RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER,
+) -> int:
+    points = get_rightcodes_draw_model_price(model) * Decimal(str(multiplier))
+    return int(points.to_integral_value(rounding=ROUND_CEILING))
 
 
 def format_rightcodes_draw_success(

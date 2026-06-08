@@ -114,8 +114,12 @@ from qqbot.features.ai.reply_pipeline import (
 from qqbot.features.ai.rightcodes_draw_client import (
     looks_like_rightcodes_draw_command,
     looks_like_rightcodes_draw_help_command,
+    parse_rightcodes_draw_command,
 )
-from qqbot.features.ai.rightcodes_draw_quota_store import RightCodesDrawQuotaStore
+from qqbot.features.ai.rightcodes_draw_quota_store import (
+    RightCodesDrawQuotaResult,
+    RightCodesDrawQuotaStore,
+)
 from qqbot.services.settings_store import SettingsStore, get_settings_store
 
 
@@ -967,7 +971,7 @@ async def _handle_ai_locked(
             ),
             self_restart_scheduler=restart_scheduler,
         )
-    draw_quota_user_id: str | None = None
+    draw_quota: RightCodesDrawQuotaResult | None = None
     if should_handle_as_rightcodes_draw(prompt):
         logger.info(
             "RightCodes draw command detected: user_id={}, group_id={}, message_id={}, local_prepare={:.3f}s",
@@ -976,11 +980,11 @@ async def _handle_ai_locked(
             message_id,
             time.perf_counter() - request_started,
         )
-        quota = RightCodesDrawQuotaStore(settings.data_root).reserve(user_id)
-        if not quota.allowed:
+        draw_request = parse_rightcodes_draw_command(prompt)
+        if draw_request is None:
             await ai_chat_matcher.finish(
                 build_ai_reply_message(
-                    format_draw_quota_exceeded_message(quota.used, quota.limit),
+                    "没有识别到有效的生图提示词。",
                     group_id=group_id,
                     message_id=message_id,
                     user_id=user_id,
@@ -992,8 +996,26 @@ async def _handle_ai_locked(
                     ),
                 )
             )
-        draw_quota_user_id = user_id
-        start_message: str | Message = format_draw_start_message(quota.used, quota.limit)
+            return
+        quota_store = RightCodesDrawQuotaStore(settings.data_root)
+        quota = quota_store.reserve(user_id, model=draw_request.model)
+        if not quota.allowed:
+            await ai_chat_matcher.finish(
+                build_ai_reply_message(
+                    format_draw_quota_exceeded_message(quota),
+                    group_id=group_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                    quote=should_quote_group_ai_reply(
+                        settings,
+                        group_id=group_id,
+                        message_id=message_id,
+                        event_time=event_time,
+                    ),
+                )
+            )
+        draw_quota = quota
+        start_message: str | Message = format_draw_start_message(quota)
         if group_id is not None:
             start_message = build_ai_reply_message(
                 start_message,
@@ -1009,12 +1031,14 @@ async def _handle_ai_locked(
             )
         draw_start_send_started = time.perf_counter()
         logger.info(
-            "RightCodes draw start notice sending: user_id={}, group_id={}, message_id={}, quota={}/{}",
+            "RightCodes draw start notice sending: user_id={}, group_id={}, message_id={}, model={}, cost_points={}, balance_after={}, used_free={}",
             user_id,
             group_id,
             message_id,
-            quota.used,
-            quota.limit,
+            quota.model,
+            quota.cost_points,
+            quota.balance_after,
+            quota.used_free,
         )
         await ai_chat_matcher.send(start_message)
         logger.info(
@@ -1034,8 +1058,8 @@ async def _handle_ai_locked(
             ),
             normalized_message,
         )
-    if draw_quota_user_id is not None and not local_result.image_path:
-        RightCodesDrawQuotaStore(settings.data_root).refund(draw_quota_user_id)
+    if draw_quota is not None and not local_result.image_path:
+        RightCodesDrawQuotaStore(settings.data_root).refund(draw_quota)
     if local_result.handled:
         local_message = format_local_ai_result(local_result)
         if isinstance(local_message, str) and group_id is not None:
@@ -1343,11 +1367,30 @@ async def _handle_rightcodes_draw(
         message_id,
         time.perf_counter() - local_prepare_started,
     )
-    quota = RightCodesDrawQuotaStore(settings.data_root).reserve(user_id)
+    draw_request = parse_rightcodes_draw_command(prompt)
+    if draw_request is None:
+        await ai_chat_matcher.finish(
+            build_ai_reply_message(
+                "没有识别到有效的生图提示词。",
+                group_id=group_id,
+                message_id=message_id,
+                user_id=user_id,
+                quote=should_quote_group_ai_reply(
+                    settings,
+                    group_id=group_id,
+                    message_id=message_id,
+                    event_time=event_time,
+                ),
+            )
+        )
+        return
+
+    quota_store = RightCodesDrawQuotaStore(settings.data_root)
+    quota = quota_store.reserve(user_id, model=draw_request.model)
     if not quota.allowed:
         await ai_chat_matcher.finish(
             build_ai_reply_message(
-                format_draw_quota_exceeded_message(quota.used, quota.limit),
+                format_draw_quota_exceeded_message(quota),
                 group_id=group_id,
                 message_id=message_id,
                 user_id=user_id,
@@ -1360,7 +1403,7 @@ async def _handle_rightcodes_draw(
             )
         )
 
-    start_message: str | Message = format_draw_start_message(quota.used, quota.limit)
+    start_message: str | Message = format_draw_start_message(quota)
     if group_id is not None:
         start_message = build_ai_reply_message(
             start_message,
@@ -1376,12 +1419,14 @@ async def _handle_rightcodes_draw(
         )
     draw_start_send_started = time.perf_counter()
     logger.info(
-        "RightCodes draw start notice sending: user_id={}, group_id={}, message_id={}, quota={}/{}",
+        "RightCodes draw start notice sending: user_id={}, group_id={}, message_id={}, model={}, cost_points={}, balance_after={}, used_free={}",
         user_id,
         group_id,
         message_id,
-        quota.used,
-        quota.limit,
+        quota.model,
+        quota.cost_points,
+        quota.balance_after,
+        quota.used_free,
     )
     await ai_chat_matcher.send(start_message)
     logger.info(
@@ -1413,7 +1458,7 @@ async def _handle_rightcodes_draw(
         normalized_message,
     )
     if not local_result.image_path:
-        RightCodesDrawQuotaStore(settings.data_root).refund(user_id)
+        RightCodesDrawQuotaStore(settings.data_root).refund(quota)
     if not local_result.handled:
         await ai_chat_matcher.finish(
             build_ai_reply_message(
@@ -1776,12 +1821,26 @@ def format_local_ai_result(result) -> str | Message:
     return result.text
 
 
-def format_draw_start_message(used: int, limit: int) -> str:
-    return f"收到，棉花糖开始生图任务啦！这是今天第 {used}/{limit} 次生图。"
+def format_draw_start_message(quota: RightCodesDrawQuotaResult) -> str:
+    if quota.used_free:
+        return (
+            "收到，棉花糖开始生图任务啦！"
+            f"{quota.model} 今天第 1 张免费，当前积分 {quota.balance_after}。"
+        )
+    return (
+        "收到，棉花糖开始生图任务啦！"
+        f"本次使用 {quota.model}，扣 {quota.cost_points} 积分，"
+        f"剩余 {quota.balance_after} 积分。"
+    )
 
 
-def format_draw_quota_exceeded_message(used: int, limit: int) -> str:
-    return f"今天的生图次数已经用完啦（{used}/{limit}）。明天再来找棉花糖画图吧！"
+def format_draw_quota_exceeded_message(quota: RightCodesDrawQuotaResult) -> str:
+    return (
+        f"积分不够啦：{quota.model} 需要 {quota.cost_points} 积分"
+        f"（价格 ${quota.price} x 倍率 {quota.multiplier}），"
+        f"你现在有 {quota.balance_before} 积分。"
+        "gpt-image-2 每天第 1 张免费。"
+    )
 
 
 def record_private_chat_memory(
