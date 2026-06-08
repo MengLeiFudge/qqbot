@@ -17,6 +17,7 @@
 - AstrBot 行为调整硬限制：配置优先，插件其次，绝不直接修改 AstrBot Core 源码。能通过 `data/astrbot/data/` 运行态配置、AstrBot 参数或插件实现的行为，不允许改 `astrbot/` 源码快照或 uv tool 安装目录源码；只有先确认配置和插件都无法实现，并获得用户明确批准后，才允许讨论 Core 补丁。
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
 - 迁移 NoneBot2 功能到 AstrBot 本地插件时，必须明确 bot1/bot2 双开和 AstrBot-only 两种模式下的功能归属。默认使用 `dual` 模式：bot2 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 bot1 负责；只有 AstrBot-only 场景才允许使用 `full` 模式接管已迁移自动事件。
+- AstrBot 本地迁移插件可复用 `nonebot2/src/qqbot/features/**/service.py` 这类纯 Python service，但不得导入 `nonebot`、NoneBot2 plugin 入口或 OneBot adapter。复用服务时数据根仍以 `data\nonebot2\run` 为事实源，保证 bot1 到 bot2 迁移期间存档连续。
 - AstrBot 账号/身份切换通过启动参数显式控制：默认 `-AstrBotProfile demon` 使用恶魔账号 `2629227874`；迁移天使棉花糖 AstrBot-only 时必须使用 `-AstrBotProfile angel -FeatureMode full -Target astrbot`，由启动脚本设置 `QQBOT_ASTRBOT_PROFILE=angel` 并让 NapCat 天使账号 `1443944862` 连接 AstrBot。不得在 bot1 同时运行时让 AstrBot 使用天使账号。
 - AstrBot 主动接话判定 provider 回退由 `astrbot_plugin_topic_concentration` 的 `decision_provider_order` 数组显式控制；数组从上到下依次尝试，某个 provider 报错只记录日志并继续下一个。该数组留空时才读取 AstrBot `provider_settings.default_provider_id` + `fallback_chat_models`。这属于本地插件行为，不允许为了该 fallback 直接改 AstrBot Core。
 - RightCodes 生图迁移到 AstrBot 时，bot1/bot2 默认共用 `data\nonebot2\run\ai\draw_points.json` 作为积分事实源；`dual` 模式下 bot1 在线时 AstrBot 不重复累计普通群消息积分，`full` 模式或 bot1 离线时 AstrBot 才累计群消息积分。生图失败必须退回已扣积分或当天免费次数。

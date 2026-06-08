@@ -8,6 +8,7 @@ from pathlib import Path
 import random
 import re
 import socket
+import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
@@ -16,7 +17,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
-from astrbot.api.message_components import Plain, Poke
+from astrbot.api.message_components import At, Image, Plain, Poke
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
@@ -26,6 +27,19 @@ FACTORIO_DOWNLOAD_PATTERN = (
 )
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单(?!\d+$)\S+$"
+LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
+LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
+SHAPEZ_PATTERN = r"^(?:i|view|chart|chart1|chart2|path|path1|path2|p|puzzle|puzzle1|puzzle2) .*$"
+KUN_PATTERN = (
+    r"^(?:养鲲|摸鲲|抓鲲|捕鲲|属性|洗练.+[0-9]+|查看.*|等级排行(?:榜)?|财富排行(?:榜)?|"
+    r"萌泪币排行(?:榜)?|金钱排行(?:榜)?|道具|背包|命名.+|商城|(?:购买|买|出售|卖).+|签到|"
+    r"设置重置时间 *[0-9]+|[开关]新赛季提示|.*赠送.*|赠送全部 *[0-9]+|boss|Boss|查看boss|"
+    r"查看Boss|查看boss属性|查看Boss属性|挑战|进击.*|(?:更改|修改).+[0-9]+)$"
+)
+SAKURA_PATTERN = (
+    r"^(?:落樱之都|更新日志|玩法|注册.+|改名.+|个人信息|加经验[0-9]+|嘤[0-9]+|"
+    r"恢复|回复|加[0-9]+(?:力量|智力|体质|敏捷|魅力))$"
+)
 REREAD_COOLDOWN_SECONDS = 120.0
 FEATURE_MODE_ENV = "QQBOT_ASTRBOT_FEATURE_MODE"
 FEATURE_MODE_DUAL = "dual"
@@ -33,6 +47,7 @@ FEATURE_MODE_FULL = "full"
 FEATURE_MODES = {FEATURE_MODE_DUAL, FEATURE_MODE_FULL}
 NONEBOT2_HOST = "127.0.0.1"
 NONEBOT2_PORT = 8080
+OWNER_QQ = "605738729"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,20 +93,25 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="Lolicon美图",
         aliases=("Lolicon", "美图", "色图"),
-        status="二期适配",
-        lines=("依赖图片缓存、R18 群配置和 Lolicon 元数据数据库，暂未迁移到 bot2",),
+        status="部分移植",
+        lines=(
+            "来点美图 / 色图 / 混合：复用 bot1 Lolicon API、图片缓存和元数据存储",
+            "群聊默认只允许非 R18；群色图/图片显示配置仍保留为二期适配",
+        ),
     ),
     FeatureSpec(
         name="养鲲",
         aliases=("鲲",),
-        status="二期适配",
-        lines=("依赖 bot1 的养鲲存档和完整命令状态机，暂未迁移到 bot2",),
+        lines=(
+            "摸鲲 / 养鲲 / 抓鲲 / 捕鲲：私聊创建或获取鲲",
+            "属性 / 背包 / 商城 / 签到 / 挑战 / 排行 / 进击 / 赠送：复用 bot1 存档与状态机",
+        ),
     ),
     FeatureSpec(
         name="落樱之都",
         aliases=("樱花", "落樱"),
-        status="二期适配",
-        lines=("依赖 bot1 的落樱存档，暂未迁移到 bot2",),
+        status="基础玩法已移植",
+        lines=("落樱之都 / 注册 / 改名 / 个人信息 / 加经验 / 嘤 / 加点 / 恢复：复用 bot1 存档",),
     ),
     FeatureSpec(
         name="Arc",
@@ -109,8 +129,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="异形工厂",
         aliases=("shapez",),
-        status="二期适配",
-        lines=("i/view/chart/path 渲染依赖 shapez 资源和图片渲染服务，暂未迁移到 bot2",),
+        lines=("i/view/chart/path：渲染 shapez 短代码图片；p/puzzle 在线谜题仍提示未配置 token",),
     ),
     FeatureSpec(
         name="AI对话",
@@ -131,6 +150,20 @@ class FactorioCredentials:
 class FactorioDownloadLink:
     version: str
     url: str
+
+
+@dataclass(frozen=True, slots=True)
+class ShapezRenderResult:
+    image_path: Path
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class LoliconRenderResult:
+    prefix: str
+    suffix: str
+    image_path: Path | None = None
+    image_url: str = ""
 
 
 class FactorioDownloadError(RuntimeError):
@@ -200,7 +233,7 @@ class RereadRepeatState:
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.2.0",
+    "0.3.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -214,14 +247,14 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(MENU_PATTERN)
     async def menu(self, event: AstrMessageEvent):
-        if not _is_direct_or_private(event):
+        if not _should_handle_migrated_command(event, self._feature_mode):
             return
         yield event.plain_result(build_menu_text(self._feature_mode))
         event.stop_event()
 
     @filter.regex(FEATURE_MENU_PATTERN)
     async def feature_menu(self, event: AstrMessageEvent):
-        if not _is_direct_or_private(event):
+        if not _should_handle_migrated_command(event, self._feature_mode):
             return
         key = event.get_message_str().strip().removeprefix("菜单")
         feature = find_feature(key)
@@ -234,7 +267,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(FACTORIO_DOWNLOAD_PATTERN)
     async def factorio_download(self, event: AstrMessageEvent):
-        if not _is_direct_or_private(event):
+        if not _should_handle_migrated_command(event, self._feature_mode):
             return
         try:
             link = await asyncio.to_thread(fetch_factorio_space_age_windows_link)
@@ -245,6 +278,76 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(
             f"Factorio: Space Age Windows {link.version} 下载链接：\n{link.url}"
         )
+        event.stop_event()
+
+    @filter.regex(SHAPEZ_PATTERN)
+    async def shapez_render(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        text = event.get_message_str().strip()
+        command, _, argument = text.partition(" ")
+        command = command.lower()
+        if command in {"p", "puzzle", "puzzle1", "puzzle2"}:
+            yield event.plain_result("没获取到 shapez 谜题：在线谜题下载需要 shapez 登录 token，当前未配置。")
+            event.stop_event()
+            return
+        try:
+            result = await asyncio.to_thread(render_shapez_command, command, argument)
+        except Exception as exc:
+            yield event.plain_result(f"shapez 渲染失败：{exc}")
+            event.stop_event()
+            return
+        chain = [Image.fromFileSystem(str(result.image_path)), Plain(result.text)]
+        yield event.chain_result(chain)
+        event.stop_event()
+
+    @filter.regex(LOLICON_ADMIN_PATTERN)
+    async def lolicon_admin(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        yield event.plain_result("AstrBot 侧暂不在聊天里修改群色图/图片显示配置；当前群聊默认只允许非 R18。")
+        event.stop_event()
+
+    @filter.regex(LOLICON_PATTERN)
+    async def lolicon_image(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        try:
+            results = await asyncio.to_thread(build_lolicon_results, event.get_message_str().strip(), event.is_private_chat())
+        except Exception as exc:
+            yield event.plain_result(f"Lolicon 美图获取失败：{exc}")
+            event.stop_event()
+            return
+        if not results:
+            return
+        for result in results:
+            chain = [Plain(result.prefix)]
+            if result.image_path:
+                chain.append(Image.fromFileSystem(str(result.image_path)))
+            elif result.image_url:
+                chain.append(Image.fromURL(result.image_url))
+            chain.append(Plain(result.suffix))
+            yield event.chain_result(chain)
+        event.stop_event()
+
+    @filter.regex(KUN_PATTERN)
+    async def kun_command(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        response = await asyncio.to_thread(handle_kun_command, event)
+        if response is None:
+            return
+        yield event.plain_result(response)
+        event.stop_event()
+
+    @filter.regex(SAKURA_PATTERN)
+    async def sakura_command(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        response = await asyncio.to_thread(handle_sakura_command, event)
+        if response is None:
+            return
+        yield event.plain_result(response)
         event.stop_event()
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
@@ -334,6 +437,10 @@ def _is_direct_or_private(event: AstrMessageEvent) -> bool:
     return event.is_private_chat() or bool(getattr(event, "is_at_or_wake_command", False))
 
 
+def _should_handle_migrated_command(event: AstrMessageEvent, feature_mode: str) -> bool:
+    return _is_direct_or_private(event) or feature_mode == FEATURE_MODE_FULL
+
+
 def _raw_event_dict(event: AstrMessageEvent) -> dict:
     raw = getattr(event.message_obj, "raw_message", None)
     if isinstance(raw, dict):
@@ -345,8 +452,6 @@ def _raw_event_dict(event: AstrMessageEvent) -> dict:
 
 
 def _at(user_id: str):
-    from astrbot.api.message_components import At
-
     return At(qq=user_id)
 
 
@@ -451,6 +556,170 @@ def reread_probability(consecutive_count: int) -> float:
     if consecutive_count < 2:
         return 0.0
     return min(0.8, 0.2 + (consecutive_count - 2) * 0.15)
+
+
+def render_shapez_command(command: str, argument: str) -> ShapezRenderResult:
+    ensure_nonebot2_services_path()
+    from qqbot.features.shapez.service import render_shape_chart, render_shape_code, render_shape_path
+
+    data_root = get_nonebot2_data_root()
+    if command in {"path", "path1", "path2"}:
+        tree, output, path_text = render_shape_path(data_root, argument)
+        return ShapezRenderResult(
+            image_path=output,
+            text=f"\n短代码：{tree.shortcode}\n{path_text}",
+        )
+    if command in {"chart", "chart1", "chart2"}:
+        shape, output, shape_text = render_shape_chart(data_root, argument)
+        return ShapezRenderResult(
+            image_path=output,
+            text=f"\n短代码：{shape.short_key}\n{shape_text}",
+        )
+    shape, output = render_shape_code(data_root, argument)
+    return ShapezRenderResult(image_path=output, text=f"\n短代码：{shape.short_key}")
+
+
+def build_lolicon_results(text: str, is_private: bool) -> list[LoliconRenderResult]:
+    ensure_nonebot2_services_path()
+    from qqbot.features.lolicon.service import (
+        LoliconImageStore,
+        LoliconMode,
+        fetch_lolicon_items,
+        parse_lolicon_command,
+    )
+
+    command = parse_lolicon_command(text)
+    if command is None:
+        return []
+    if not is_private and command.mode != LoliconMode.NON_R18:
+        return [
+            LoliconRenderResult(
+                prefix="",
+                suffix="本群当前设置为群内只能查看非R18图片！\n请私聊发送指令QwQ",
+            )
+        ]
+    items = fetch_lolicon_items(command.mode, command.num, command.tags)
+    if not items:
+        return [
+            LoliconRenderResult(
+                prefix="",
+                suffix="没有找到符合你要求的图片呢QAQ\n尝试减少一些tag吧！",
+            )
+        ]
+    store = LoliconImageStore(get_nonebot2_data_root())
+    results: list[LoliconRenderResult] = []
+    for index, item in enumerate(items, start=1):
+        prepared = store.prepare_item(item)
+        image_path = prepared.local_path if prepared.local_path is not None else None
+        image_url = "" if image_path is not None else prepared.url
+        results.append(
+            LoliconRenderResult(
+                prefix=f"图片索引：{index} / {len(items)}\n",
+                image_path=image_path,
+                image_url=image_url,
+                suffix=(
+                    f"\n{prepared.title}(PID {prepared.pid})\nby {prepared.author}(UID {prepared.uid})"
+                    f"\nTags: {', '.join(prepared.tags) if prepared.tags else '-'}"
+                ),
+            )
+        )
+    return results
+
+
+def handle_kun_command(event: AstrMessageEvent) -> str | None:
+    ensure_nonebot2_services_path()
+    from qqbot.features.kun.service import KunService
+
+    service = KunService(get_nonebot2_data_root() / "data" / "kun" / "users.json")
+    at_ids = [int(segment.qq) for segment in event.get_messages() if isinstance(segment, At) and str(segment.qq).isdigit()]
+    return service.handle_command(
+        event.get_message_str().strip(),
+        int(event.get_sender_id()),
+        int(read_event_time_seconds(event) * 1000),
+        is_group=not event.is_private_chat(),
+        at_id=at_ids[0] if at_ids else None,
+        is_admin=str(event.get_sender_id()) == OWNER_QQ,
+        group_id=int(event.get_group_id() or 0),
+        resolve_display_name=resolve_display_name,
+    )
+
+
+def handle_sakura_command(event: AstrMessageEvent) -> str | None:
+    ensure_nonebot2_services_path()
+    from qqbot.features.sakura.service import SakuraService
+
+    text = event.get_message_str().strip()
+    user_id = int(event.get_sender_id())
+    service = SakuraService(get_nonebot2_data_root() / "data" / "sakura" / "players.json")
+    player = service.get_player(user_id)
+
+    if text == "落樱之都":
+        return (
+            "-===🌸落樱之都🌸===-\n"
+            "个人信息◇人物加点\n"
+            "我的背包◇我的任务\n"
+            "装备强化◇落樱商城\n"
+            "单人副本◇魔塔挑战\n"
+            "多人副本◇竞技战斗\n"
+            "注册xxx / 改名xxx / 个人信息 / 加点"
+        )
+    if text == "更新日志":
+        return "目前只是做了个框架，需要继续迁移副本、商城、排行等内容。"
+    if text == "玩法":
+        return "当前已迁移角色注册、改名、个人信息、经验、樱币、加点、恢复等基础玩法。"
+    if text.startswith("注册"):
+        name = text[2:].strip()
+        if not name:
+            return "要有名字哦！"
+        if player:
+            return "已有角色，无法创建！"
+        player = service.register_player(user_id, name[:10])
+        return f"已创建角色【{player.name}】！"
+    if player is None:
+        return None
+    if text.startswith("改名"):
+        return service.rename_player(player, text[2:].strip()[:10])
+    if text == "个人信息":
+        return service.build_profile_summary(player)
+    if match := re.match(r"^加经验([0-9]+)$", text):
+        return service.add_exp(player, int(match.group(1)))
+    if match := re.match(r"^嘤([0-9]+)$", text):
+        return service.add_money(player, int(match.group(1)))
+    if text in {"恢复", "回复"}:
+        return service.reset_player(player)
+    if match := re.match(r"^加([0-9]+)(力量|智力|体质|敏捷|魅力)$", text):
+        return service.add_points(player, match.group(2), int(match.group(1)))
+    return None
+
+
+def ensure_nonebot2_services_path() -> None:
+    service_root = get_workspace_root() / "nonebot2" / "src"
+    service_root_text = str(service_root)
+    if service_root_text not in sys.path:
+        sys.path.insert(0, service_root_text)
+
+
+def get_workspace_root() -> Path:
+    astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
+    if astrbot_root:
+        return Path(astrbot_root).resolve().parents[1]
+    return Path.cwd().resolve()
+
+
+def get_nonebot2_data_root() -> Path:
+    return get_workspace_root() / "data" / "nonebot2" / "run"
+
+
+def read_event_time_seconds(event: AstrMessageEvent) -> int:
+    raw = _raw_event_dict(event)
+    value = raw.get("time")
+    if isinstance(value, (int, float)) and value > 0:
+        return int(value)
+    return int(time.time())
+
+
+def resolve_display_name(user_id: int, group_id: int = 0) -> str:
+    return str(user_id)
 
 
 def fetch_factorio_space_age_windows_link() -> FactorioDownloadLink:
