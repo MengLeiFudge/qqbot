@@ -26,7 +26,7 @@ from qqbot.services.plugin_registry import get_plugin_spec_by_id, list_visible_p
 from qqbot.services.settings_store import SettingsStore
 
 STARTUP_LOG_FILES = {"launcher.log", "qqbot_stdout.log", "qqbot_stderr.log"}
-AI_CONFIG_LOCKED_MESSAGE = "AI 模型由 qqbot.toml 控制；请修改 [ai].default_profile / [ai.providers] 后重启 bot1。"
+AI_CONFIG_LOCKED_MESSAGE = "AI 模型由 qqbot.toml 控制；请修改 [ai].fallback_order / [ai.providers] 后重启 bot1。"
 
 
 @dataclass(slots=True)

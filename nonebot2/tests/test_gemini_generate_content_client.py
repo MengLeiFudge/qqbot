@@ -6,7 +6,13 @@ from pathlib import Path
 from qqbot.config import RuntimeSettings
 from qqbot.features.ai.gateway import AiMessage, AiRequest
 from qqbot.features.ai.gemini_generate_content_client import GeminiGenerateContentClient
-from qqbot.features.ai.runtime import build_ai_gateway
+from qqbot.features.ai.profile_registry import load_ai_fallback_order, load_ai_profiles
+from qqbot.features.ai.runtime import (
+    build_ai_gateway,
+    get_current_ai_profile_name,
+    list_ai_profile_fallback_order,
+)
+from qqbot.services.settings_store import SettingsStore
 
 
 class FakeResponse:
@@ -122,3 +128,91 @@ max_output_tokens = 4096
     )
 
     assert isinstance(gateway.client, GeminiGenerateContentClient)
+
+
+def test_runtime_uses_explicit_fallback_order(tmp_path: Path) -> None:
+    profile_file = tmp_path / "qqbot.toml"
+    profile_file.write_text(
+        """
+[ai]
+default_profile = "packyapi-gemini"
+fallback_order = ["packyapi-gemini", "codex-everywhere", "openrouter-icu"]
+
+[ai.providers.codex-everywhere]
+provider = "openai_compatible"
+base_url = "https://codex-everywhere.com/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_CODEX_EVERYWHERE"
+
+[ai.providers.openrouter-icu]
+provider = "openai_compatible"
+base_url = "https://rehdasu.cn/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_OPENROUTER_ICU"
+
+[ai.providers.packyapi-gemini]
+provider = "gemini"
+base_url = "https://www.packyapi.com"
+model = "gemini-3-flash-preview"
+api_key_env = "QQBOT_AI_KEY_PACKYAPI"
+""",
+        encoding="utf-8",
+    )
+    settings = RuntimeSettings(
+        data_root=tmp_path / "run",
+        ai_profile_file=profile_file,
+        ai_default_profile="openrouter-icu",
+    )
+    profiles = load_ai_profiles(profile_file)
+    store = SettingsStore(settings.data_root, settings.author_qq)
+
+    assert load_ai_fallback_order(profile_file) == (
+        "packyapi-gemini",
+        "codex-everywhere",
+        "openrouter-icu",
+    )
+    assert get_current_ai_profile_name(settings, store, profiles) == "packyapi-gemini"
+    assert list_ai_profile_fallback_order(settings, store, profiles) == (
+        "packyapi-gemini",
+        "codex-everywhere",
+        "openrouter-icu",
+    )
+
+
+def test_runtime_filters_disabled_profiles_from_explicit_fallback_order(tmp_path: Path) -> None:
+    profile_file = tmp_path / "qqbot.toml"
+    profile_file.write_text(
+        """
+[ai]
+default_profile = "packyapi-gemini"
+fallback_order = ["sharedchat", "packyapi-gemini", "codex-everywhere"]
+
+[ai.providers.sharedchat]
+enabled = false
+provider = "openai_compatible"
+base_url = "https://new.sharedchat.cc/codex/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_SHAREDCHAT"
+
+[ai.providers.packyapi-gemini]
+provider = "gemini"
+base_url = "https://www.packyapi.com"
+model = "gemini-3-flash-preview"
+api_key_env = "QQBOT_AI_KEY_PACKYAPI"
+
+[ai.providers.codex-everywhere]
+provider = "openai_compatible"
+base_url = "https://codex-everywhere.com/v1"
+model = "gpt-5.4-mini"
+api_key_env = "QQBOT_AI_KEY_CODEX_EVERYWHERE"
+""",
+        encoding="utf-8",
+    )
+    settings = RuntimeSettings(data_root=tmp_path / "run", ai_profile_file=profile_file)
+    profiles = load_ai_profiles(profile_file)
+    store = SettingsStore(settings.data_root, settings.author_qq)
+
+    assert list_ai_profile_fallback_order(settings, store, profiles) == (
+        "packyapi-gemini",
+        "codex-everywhere",
+    )

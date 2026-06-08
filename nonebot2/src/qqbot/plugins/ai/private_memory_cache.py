@@ -16,6 +16,7 @@ from qqbot.features.ai.runtime import (
     get_current_ai_profile_name,
     list_ai_profile_fallback_order,
 )
+from qqbot.features.ai.private_memory_policy import should_record_private_chat_memory
 from qqbot.features.ai.user_style_store import AiUserStyleStore
 from qqbot.features.ai.chat_memory_store import ChatMemoryStore, build_user_actor_id
 from qqbot.services.message_delivery import call_split_text_api
@@ -40,6 +41,8 @@ def record_private_chat_memory(event: PrivateMessageEvent, store: ChatMemoryStor
     normalized = normalize_onebot_event(event)
     outline = normalized.outline.strip()
     if not outline:
+        return
+    if not should_record_private_chat_memory(normalized):
         return
 
     user_id = event.get_user_id()

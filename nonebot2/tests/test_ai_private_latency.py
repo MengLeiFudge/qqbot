@@ -3,14 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from qqbot.config import RuntimeSettings
-from qqbot.plugins.ai import (
-    build_ai_context,
+from qqbot.features.ai.private_memory_policy import (
     should_include_private_memory_context,
     should_record_private_chat_memory,
 )
+from qqbot.plugins.ai import build_ai_context
+from qqbot.plugins.ai.private_memory_cache import record_private_chat_memory
 from qqbot.services.message_normalizer import NormalizedMessage
 from qqbot.services.settings_store import SettingsStore
 from qqbot.features.ai.group_context_store import AiGroupContextStore
+from qqbot.features.ai.chat_memory_store import ChatMemoryStore
 
 
 class FakePrivateEvent:
@@ -61,3 +63,34 @@ def test_private_memory_question_keeps_memory_context_enabled() -> None:
 
     assert should_record_private_chat_memory(normalized)
     assert should_include_private_memory_context(normalized)
+
+
+def test_private_memory_cache_skips_short_chat(tmp_path: Path, monkeypatch) -> None:
+    event = FakePrivateEvent()
+    monkeypatch.setattr(
+        "qqbot.plugins.ai.private_memory_cache.normalize_onebot_event",
+        lambda _event: NormalizedMessage(text="在吗在吗", outline="在吗在吗"),
+    )
+
+    record_private_chat_memory(event, ChatMemoryStore(tmp_path))
+
+    assert ChatMemoryStore(tmp_path).search_messages(f"private:{event.user_id}", "在吗", limit=3) == ()
+
+
+def test_private_raw_messages_do_not_extract_rule_facts(tmp_path: Path) -> None:
+    store = ChatMemoryStore(tmp_path)
+
+    assert store.append_message(
+        group_id="private:605738729",
+        message_id="998620322",
+        direction="incoming",
+        user_id="605738729",
+        sender_name="605738729",
+        text="但是你回复我太慢了。你再说句话看看呢",
+        timestamp=2_000_000_000,
+        space_id="qq:private:605738729",
+        actor_id="qq:user:605738729",
+        visibility="private",
+        memory_type="raw_message",
+    )
+    assert store.search_facts("private:605738729", "太慢", limit=3) == ()

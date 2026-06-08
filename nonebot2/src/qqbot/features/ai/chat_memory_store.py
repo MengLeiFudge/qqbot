@@ -1967,6 +1967,8 @@ def parse_qq_user_actor_id(actor_id: str) -> str:
 
 
 def extract_rule_facts(record: ChatMemoryRecord) -> tuple[ChatMemoryFact, ...]:
+    if record.visibility == "private" and record.memory_type == "raw_message":
+        return ()
     text = record.text.strip().strip("。！？!?.")
     if not text or is_prompt_injection_like(text):
         return ()

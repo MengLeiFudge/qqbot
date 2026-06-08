@@ -83,6 +83,29 @@ def load_ai_default_profile_name(path: Path) -> str | None:
     return raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
 
 
+def load_ai_fallback_order(path: Path) -> tuple[str, ...]:
+    profile_path = Path(path)
+    if not profile_path.exists():
+        return ()
+    data = tomllib.loads(profile_path.read_text(encoding="utf-8"))
+    raw_order = data.get("fallback_order")
+    raw_ai = data.get("ai")
+    if isinstance(raw_ai, dict) and "fallback_order" in raw_ai:
+        raw_order = raw_ai.get("fallback_order")
+    if raw_order is None:
+        return ()
+    if not isinstance(raw_order, list):
+        raise ValueError("AI fallback_order 必须是数组")
+    ordered: list[str] = []
+    for raw_name in raw_order:
+        if not isinstance(raw_name, str):
+            raise ValueError("AI fallback_order 只能包含字符串 profile 名称")
+        name = raw_name.strip()
+        if name and name not in ordered:
+            ordered.append(name)
+    return tuple(ordered)
+
+
 def list_enabled_profiles(profiles: dict[str, AiProfile]) -> list[AiProfile]:
     return [profile for profile in profiles.values() if profile.enabled]
 

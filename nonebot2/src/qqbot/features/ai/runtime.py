@@ -5,6 +5,7 @@ from qqbot.features.ai.gateway import AiGateway
 from qqbot.features.ai.profile_registry import (
     AiProfile,
     list_enabled_profiles,
+    load_ai_fallback_order,
     load_ai_default_profile_name,
     load_ai_profiles,
     resolve_ai_profile,
@@ -29,6 +30,10 @@ def get_current_ai_profile_name(
 ) -> str:
     profiles = profiles if profiles is not None else load_ai_profiles(settings.ai_profile_file)
     enabled_names = {profile.name for profile in list_enabled_profiles(profiles)}
+    fallback_order = load_ai_fallback_order(settings.ai_profile_file)
+    for profile_name in fallback_order:
+        if profile_name in enabled_names:
+            return profile_name
     default_profile = get_default_ai_profile_name(settings)
 
     if default_profile in enabled_names:
@@ -48,8 +53,15 @@ def list_ai_profile_fallback_order(
     profiles = profiles if profiles is not None else load_ai_profiles(settings.ai_profile_file)
     enabled = list_enabled_profiles(profiles)
     enabled_names = {profile.name for profile in enabled}
-    primary = preferred_profile or get_current_ai_profile_name(settings, store, profiles)
     ordered: list[str] = []
+    explicit_order = load_ai_fallback_order(settings.ai_profile_file)
+    if explicit_order:
+        for profile_name in explicit_order:
+            if profile_name in enabled_names and profile_name not in ordered:
+                ordered.append(profile_name)
+        return tuple(ordered)
+
+    primary = preferred_profile or get_current_ai_profile_name(settings, store, profiles)
     if primary in enabled_names:
         ordered.append(primary)
     for profile in enabled:

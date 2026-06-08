@@ -19,6 +19,7 @@ arcaea_record_java_home = "C:/path/to/jdk"
 
 [ai]
 default_profile = "packyapi-gemini"
+fallback_order = ["packyapi-gemini", "codex-everywhere", "openrouter-icu", "rightcodes"]
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false

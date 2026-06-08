@@ -44,6 +44,10 @@ from qqbot.features.ai.message_decision import (
 from qqbot.features.ai.message_flow import AiMessageSource, build_ai_message_source
 from qqbot.features.ai.chat_memory_store import ChatMemoryFact, ChatMemoryRecord, ChatMemoryStore
 from qqbot.features.ai.pending_task_store import AiPendingTaskStore
+from qqbot.features.ai.private_memory_policy import (
+    should_include_private_memory_context,
+    should_record_private_chat_memory,
+)
 from qqbot.features.ai.embedding_vector_store import EmbeddingVectorStore
 from qqbot.features.ai.orchestrator import AiOrchestrator, AiOrchestratorContext
 from qqbot.features.ai.profile_registry import (
@@ -215,7 +219,7 @@ async def handle_ai_model(event: MessageEvent) -> None:
     profiles = load_ai_profiles(settings.ai_profile_file)
     if command.action == "switch" and command.profile is not None:
         await ai_model_matcher.finish(
-            "AI 模型由 qqbot.toml 控制，请修改 [ai].default_profile / [ai.providers] 后重启 bot1。"
+            "AI 模型由 qqbot.toml 控制，请修改 [ai].fallback_order / [ai.providers] 后重启 bot1。"
         )
 
     current_profile = get_current_ai_profile_name(settings, store, profiles)
@@ -1920,62 +1924,6 @@ def record_private_chat_memory(
         )
     except Exception:
         pass
-
-
-def should_record_private_chat_memory(normalized_message: NormalizedMessage) -> bool:
-    return not is_private_lightweight_chat(normalized_message)
-
-
-def should_include_private_memory_context(normalized_message: NormalizedMessage) -> bool:
-    return not is_private_lightweight_chat(normalized_message)
-
-
-def is_private_lightweight_chat(normalized_message: NormalizedMessage) -> bool:
-    if normalized_message.image_urls or normalized_message.reply is not None:
-        return False
-    compact = re.sub(r"\s+", "", (normalized_message.text or normalized_message.outline).strip())
-    if not compact or len(compact) > 24:
-        return False
-    memory_markers = (
-        "记得",
-        "记不记得",
-        "还记",
-        "之前",
-        "以前",
-        "上次",
-        "刚才",
-        "刚刚",
-        "说过",
-        "提过",
-        "聊过",
-        "私聊",
-        "我是谁",
-        "你认识",
-        "你知道",
-    )
-    if any(marker in compact for marker in memory_markers):
-        return False
-    lightweight_markers = (
-        "在吗",
-        "在嘛",
-        "在不在",
-        "人呢",
-        "说句话",
-        "说话",
-        "看看",
-        "醒着吗",
-        "醒了吗",
-        "睡了吗",
-        "睡了没",
-        "太慢",
-        "慢了",
-        "笨笨",
-        "你好",
-        "早",
-        "晚安",
-        "摸摸",
-    )
-    return any(marker in compact for marker in lightweight_markers)
 
 
 def build_recent_answer_followup_message(
