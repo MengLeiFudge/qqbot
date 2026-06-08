@@ -85,6 +85,8 @@ def classify_ai_chat_trigger(
         return AiChatTriggerKind.DIRECT
     if looks_like_ai_named_trigger(prompt, bot_names=bot_names):
         return AiChatTriggerKind.NAMED
+    if looks_like_second_person_message_to_group_member(prompt):
+        return AiChatTriggerKind.IGNORE
     if looks_like_ai_proactive_trigger(prompt, bot_names=bot_names):
         return AiChatTriggerKind.PROACTIVE
     return AiChatTriggerKind.IGNORE
@@ -237,6 +239,42 @@ def looks_like_ambiguous_chat_evaluation(text: str) -> bool:
         "不太对劲",
     )
     return any(marker in compact for marker in fuzzy_markers)
+
+
+def looks_like_second_person_message_to_group_member(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.strip())
+    if not compact:
+        return False
+    if looks_like_sensitive_credential_request(compact):
+        return False
+    if looks_like_ai_meta_conversation(compact):
+        return False
+    if compact.startswith(("你", "妳")):
+        return True
+    return any(
+        marker in compact
+        for marker in (
+            "你的",
+            "你的号",
+            "你账号",
+            "你帐号",
+            "你这边",
+            "你那里",
+            "你那边",
+            "你看到",
+            "你现在",
+            "你前面",
+            "你刚才",
+            "你为什么",
+            "你为啥",
+            "你怎么",
+            "你咋",
+            "让你",
+            "给你",
+            "发你的",
+            "把你",
+        )
+    )
 
 
 def looks_like_ai_meta_conversation(text: str) -> bool:

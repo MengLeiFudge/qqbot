@@ -8,8 +8,14 @@ from qqbot.features.ai.topic_concentration import (
     looks_like_topic_concentration_candidate,
     parse_ai_proactive_reply_decision,
 )
-from qqbot.features.ai.command import looks_like_ai_named_trigger
+from qqbot.features.ai.command import AiChatTriggerKind, classify_ai_chat_trigger, looks_like_ai_named_trigger
 from qqbot.features.ai.output_style import sanitize_ai_output_text
+
+
+class FakeGroupEvent:
+    message_type = "group"
+    group_id = 123456
+    time = 2_000_000_000
 
 
 def test_short_casual_chat_can_be_candidate_for_ai_decision() -> None:
@@ -90,6 +96,26 @@ def test_third_party_named_mentions_do_not_trigger() -> None:
 def test_direct_named_call_still_triggers() -> None:
     assert looks_like_ai_named_trigger("呼叫棉花糖，帮我看下配置")
     assert looks_like_topic_concentration_candidate("棉花糖，这个配置怎么看？")
+
+
+def test_second_person_group_member_chat_does_not_trigger_proactive_reply() -> None:
+    event = FakeGroupEvent()
+
+    assert (
+        classify_ai_chat_trigger(event, "你的右下角好友状态显示什么", bot_names=("棉花糖",))
+        == AiChatTriggerKind.IGNORE
+    )
+    assert (
+        classify_ai_chat_trigger(event, "让你妹妹来和我说话", bot_names=("棉花糖",))
+        == AiChatTriggerKind.IGNORE
+    )
+
+
+def test_direct_named_call_is_not_blocked_by_second_person_filter() -> None:
+    assert (
+        classify_ai_chat_trigger(FakeGroupEvent(), "棉花糖，你怎么看这个配置", bot_names=("棉花糖",))
+        == AiChatTriggerKind.NAMED
+    )
 
 
 def test_topic_prompt_keeps_recent_chat_scope() -> None:
