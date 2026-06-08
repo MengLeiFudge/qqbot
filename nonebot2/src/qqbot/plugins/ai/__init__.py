@@ -1787,10 +1787,19 @@ def build_sensitive_credential_warning_message() -> str:
 
 
 def build_ai_prompt(normalized_message: NormalizedMessage) -> str:
-    prompt = normalized_message.text or normalized_message.outline
     if not normalized_message.text and is_pure_direct_at(normalized_message):
         return "找我什么事情？"
+    prompt = normalized_message.text or normalized_message.outline
+    at_summary = build_at_summary_for_prompt(normalized_message)
+    if prompt and at_summary and at_summary not in prompt:
+        return f"{prompt}\n{at_summary}"
     return prompt
+
+
+def build_at_summary_for_prompt(normalized_message: NormalizedMessage) -> str:
+    if not normalized_message.at_user_ids:
+        return ""
+    return "本消息包含 QQ @: " + ", ".join(dict.fromkeys(normalized_message.at_user_ids))
 
 
 def is_pure_direct_at(normalized_message: NormalizedMessage) -> bool:
