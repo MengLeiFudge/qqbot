@@ -4,12 +4,15 @@ import re
 
 from nonebot.rule import Rule
 
+from qqbot.features.ai.rightcodes_draw_points_command import (
+    looks_like_rightcodes_draw_points_mutation_request,
+    looks_like_rightcodes_draw_points_query,
+)
 from qqbot.services.offline_message_gate import is_before_onebot_connect
 
 
 COMMAND_PATTERNS = [
     r"^(菜单|帮助|指令)$",
-    r"^\s*(查看)?(生图)?积分\s*$",
     r"^菜单(?!\d+$)\S+$",
     r"(?i)^(AI模型|当前AI)$",
     r"(?i)^切换AI\s+\S+$",
@@ -22,13 +25,19 @@ COMMAND_PATTERNS = [
     r"^(通知)?(大家|全员|群友)?(清理|整理)(群)?文件$|^(群)?文件(清理|整理)(通知)?$",
     r"(?i)^.*(?:factorio|异星|太空时代|space\s*age|spaceage).*(?:下载|安装包).*(?:链接|地址)?$",
 ]
+COMMAND_CHECKERS = [
+    looks_like_rightcodes_draw_points_query,
+    looks_like_rightcodes_draw_points_mutation_request,
+]
 
 
 def is_likely_command(text: str) -> bool:
     normalized = text.strip()
     if not normalized:
         return False
-    return any(re.match(pattern, normalized) for pattern in COMMAND_PATTERNS)
+    return any(re.match(pattern, normalized) for pattern in COMMAND_PATTERNS) or any(
+        checker(normalized) for checker in COMMAND_CHECKERS
+    )
 
 
 def is_direct_command_event(event) -> bool:

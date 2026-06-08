@@ -116,6 +116,11 @@ from qqbot.features.ai.rightcodes_draw_client import (
     looks_like_rightcodes_draw_help_command,
     parse_rightcodes_draw_command,
 )
+from qqbot.features.ai.rightcodes_draw_points_command import (
+    format_rightcodes_draw_points_mutation_denied,
+    looks_like_rightcodes_draw_points_mutation_request,
+    looks_like_rightcodes_draw_points_query,
+)
 from qqbot.features.ai.rightcodes_draw_quota_store import (
     RightCodesDrawQuotaResult,
     RightCodesDrawQuotaStore,
@@ -179,11 +184,15 @@ ai_model_matcher = on_regex(
     block=True,
     rule=direct_command_rule(),
 )
-draw_points_matcher = on_regex(
-    r"^\s*(查看)?(生图)?积分\s*$",
+draw_points_matcher = on_message(
     priority=1,
     block=True,
-    rule=direct_command_rule(),
+    rule=direct_command_rule() & Rule(lambda event: _is_draw_points_query_event(event)),
+)
+draw_points_mutation_matcher = on_message(
+    priority=1,
+    block=True,
+    rule=direct_command_rule() & Rule(lambda event: _is_draw_points_mutation_event(event)),
 )
 ai_chat_matcher = on_message(
     priority=2,
@@ -221,6 +230,19 @@ async def handle_draw_points(event: MessageEvent) -> None:
     settings = load_settings()
     balance = RightCodesDrawQuotaStore(settings.data_root).get_balance(event.get_user_id())
     await draw_points_matcher.finish(format_rightcodes_draw_points_status(balance))
+
+
+@draw_points_mutation_matcher.handle()
+async def handle_draw_points_mutation() -> None:
+    await draw_points_mutation_matcher.finish(format_rightcodes_draw_points_mutation_denied())
+
+
+def _is_draw_points_query_event(event: MessageEvent) -> bool:
+    return looks_like_rightcodes_draw_points_query(event.get_plaintext())
+
+
+def _is_draw_points_mutation_event(event: MessageEvent) -> bool:
+    return looks_like_rightcodes_draw_points_mutation_request(event.get_plaintext())
 
 
 def should_handle_ai_event(event: MessageEvent) -> bool:
