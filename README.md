@@ -40,6 +40,8 @@ AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps
 
 AstrBot 启动入口支持显式选择 bot 身份：默认 `-AstrBotProfile demon` 使用恶魔棉花糖账号 `2629227874`；`-AstrBotProfile angel -FeatureMode full` 使用天使账号 `1443944862`；`-AstrBotProfile both -FeatureMode full` 在同一个 AstrBot 管理端里同步两个 `aiocqhttp` 平台，恶魔默认反连 `ws://127.0.0.1:6200/ws`，天使默认反连 `ws://127.0.0.1:6201/ws`。`scripts\start-astrbot.bat` 默认就是 `both/full`。本地插件会按每条消息的 `self_id` 注入天使或恶魔身份；`both` 和 `angel` 只允许 `-Target astrbot` 且必须显式 `-FeatureMode full`，避免和 bot1 同账号双开。
 
+AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参与；固定命令只由一个账号执行。没有明确 @ 或私聊时，固定命令默认由恶魔账号 `2629227874` 处理，可用 `QQBOT_ASTRBOT_COMMAND_OWNER` 覆盖；明确 @ 天使/恶魔或私聊时，由当前被叫到的 bot 处理。`菜单`、`帮助`、`指令` 会发送统一图片菜单，`菜单模块名` 会发送模块详情图。
+
 `astrbot_plugin_qqbot_context_bridge` 负责 bot1/bot2 的轻量联动：bot2 发起群聊 LLM 请求时，会按当前群号读取 bot1 的公开群上下文 `data\nonebot2\run\ai\group_context\<群号>.json` 并注入本轮请求。默认不限制群号，只要 bot1 有对应公开群上下文文件就桥接；`enabled_groups` 只作为可选 allowlist。星环群 `1035445959` 额外带 OrbitalRing 领域提示，但不作为桥接范围条件。插件不读取私聊、日志、token 或其他敏感运行态。
 
 `astrbot_plugin_twin_interaction` 负责天使/恶魔两个棉花糖的双子互动增强：当用户明确围绕天使、恶魔、姐姐/妹妹、双子关系或另一个 bot 的公开输出发问时，插件会给本轮 LLM 请求注入当前 bot 身份、另一个 bot 身份、互动边界和少量同群公开上下文。它只让当前 bot 用自己的身份回应，不替另一个 bot 发言、认错、解释或承诺修改；另一个 bot 发出的普通消息不会触发当前 bot 自动接话。

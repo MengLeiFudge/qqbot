@@ -21,12 +21,16 @@ from astrbot.api.message_components import At, Image, Plain, Poke
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
+from .menu_image import render_feature_menu_image
+from .menu_image import render_overview_menu_image
+from .twin_poke import should_follow_poke_notice
+
 
 FACTORIO_DOWNLOAD_PATTERN = (
     r"(?i)^.*(?:factorio|异星|太空时代|space\s*age|spaceage).*(?:下载|安装包).*(?:链接|地址)?$"
 )
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
-FEATURE_MENU_PATTERN = r"^菜单(?!\d+$)\S+$"
+FEATURE_MENU_PATTERN = r"^菜单\s*(?!\d+$)\S+$"
 GROUP_FILE_CLEANUP_PATTERN = r"^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
 LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
 LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
@@ -50,12 +54,14 @@ SAKURA_PATTERN = (
 )
 REREAD_COOLDOWN_SECONDS = 120.0
 FEATURE_MODE_ENV = "QQBOT_ASTRBOT_FEATURE_MODE"
+COMMAND_OWNER_ENV = "QQBOT_ASTRBOT_COMMAND_OWNER"
 FEATURE_MODE_DUAL = "dual"
 FEATURE_MODE_FULL = "full"
 FEATURE_MODES = {FEATURE_MODE_DUAL, FEATURE_MODE_FULL}
 NONEBOT2_HOST = "127.0.0.1"
 NONEBOT2_PORT = 8080
 OWNER_QQ = "605738729"
+DEFAULT_COMMAND_OWNER_QQ = "2629227874"
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +146,15 @@ FEATURES: tuple[FeatureSpec, ...] = (
         name="异形工厂",
         aliases=("shapez",),
         lines=("i/view/chart/path：渲染 shapez 短代码图片；p/puzzle 在线谜题仍提示未配置 token",),
+    ),
+    FeatureSpec(
+        name="RightCodes生图",
+        aliases=("生图", "画图", "RightCodes"),
+        lines=(
+            "棉花糖生图 [模型名] 提示词：提交 RightCodes 生图任务",
+            "生图模型 / 生图价格：查看模型、价格和积分消耗",
+            "查看积分 / balance / points：查询当前 QQ 的生图积分",
+        ),
     ),
     FeatureSpec(
         name="AI对话",
@@ -267,20 +282,38 @@ class QQBotFeaturesPlugin(Star):
     async def menu(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
-        yield event.plain_result(build_menu_text(self._feature_mode))
+        try:
+            image_path = render_overview_menu_image(
+                features=FEATURES,
+                feature_mode=self._feature_mode,
+                output_dir=get_menu_image_cache_root(),
+            )
+            yield event.chain_result([Image.fromFileSystem(str(image_path))])
+        except Exception as exc:
+            logger.exception("[QQBotFeatures] failed to render overview menu image: %s", exc)
+            yield event.plain_result(build_menu_text(self._feature_mode))
         event.stop_event()
 
     @filter.regex(FEATURE_MENU_PATTERN)
     async def feature_menu(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
-        key = event.get_message_str().strip().removeprefix("菜单")
+        key = re.sub(r"^菜单\s*", "", event.get_message_str().strip(), count=1)
         feature = find_feature(key)
         if feature is None:
             yield event.plain_result("没有这个模块哦！")
             event.stop_event()
             return
-        yield event.plain_result(build_feature_menu_text(feature))
+        try:
+            image_path = render_feature_menu_image(
+                feature=feature,
+                feature_mode=self._feature_mode,
+                output_dir=get_menu_image_cache_root(),
+            )
+            yield event.chain_result([Image.fromFileSystem(str(image_path))])
+        except Exception as exc:
+            logger.exception("[QQBotFeatures] failed to render feature menu image: %s", exc)
+            yield event.plain_result(build_feature_menu_text(feature))
         event.stop_event()
 
     @filter.platform_adapter_type("aiocqhttp")
@@ -612,9 +645,7 @@ class QQBotFeaturesPlugin(Star):
         self_id = str(raw.get("self_id") or event.get_self_id())
         user_id = str(raw.get("user_id") or "")
         target_id = str(raw.get("target_id") or "")
-        if not self_id or not user_id or not target_id:
-            return
-        if user_id == self_id:
+        if not should_follow_poke_notice(self_id=self_id, user_id=user_id, target_id=target_id):
             return
         roll = random.randint(0, 99)
         if roll > 25:
@@ -651,7 +682,15 @@ def _is_direct_or_private(event: AstrMessageEvent) -> bool:
 
 
 def _should_handle_migrated_command(event: AstrMessageEvent, feature_mode: str) -> bool:
-    return _is_direct_or_private(event) or feature_mode == FEATURE_MODE_FULL
+    if _is_direct_or_private(event):
+        return True
+    if feature_mode != FEATURE_MODE_FULL:
+        return False
+    return str(event.get_self_id() or "") == read_command_owner_qq()
+
+
+def read_command_owner_qq() -> str:
+    return str(os.environ.get(COMMAND_OWNER_ENV) or DEFAULT_COMMAND_OWNER_QQ).strip()
 
 
 def _raw_event_dict(event: AstrMessageEvent) -> dict:
@@ -1226,6 +1265,13 @@ def get_workspace_root() -> Path:
 
 def get_nonebot2_data_root() -> Path:
     return get_workspace_root() / "data" / "nonebot2" / "run"
+
+
+def get_menu_image_cache_root() -> Path:
+    astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
+    if astrbot_root:
+        return Path(astrbot_root).resolve() / "data" / "plugin_data" / "qqbot_menu"
+    return get_workspace_root() / "data" / "astrbot" / "data" / "plugin_data" / "qqbot_menu"
 
 
 def get_nonebot2_config_value(section: str, key: str, default: str = "") -> str:
