@@ -32,6 +32,7 @@ LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
 LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
 ARC_RECOMMEND_PATTERN = r"^arctj\s*[0-9]+(?:\.[0-9]+)?$"
 ARC_ACTIVITY_PATTERN = r"^arc(?:hd|tz)$"
+ARC_APK_UPDATE_PATTERN = r"^(?:xz|arcxz)$"
 ARC_GUESS_START_PATTERN = r"^(?:arczm|zm)(?:\s*[1-9][0-9]*)?$"
 ARC_GUESS_ART_START_PATTERN = r"(?i)^(?:arcqh|qh)(?:\s*(?:[1-9][0-9]*|max))?$"
 ARC_GUESS_ART_TILE_PATTERN = r"^arcqh\s*(?:bt|补图)$"
@@ -128,7 +129,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
             "arctj10.5：按 PTT 推荐谱面，复用 bot1 本地 Arcaea 曲库和定数缓存",
             "archd / arctz：查看当前活动梯子",
             "zm / arczm：字母猜歌；qh / arcqh：曲绘猜歌；jx / arcjx：揭晓",
-            "xz / arcxz 安装包下载仍为二期适配",
+            "xz / arcxz：作者限定，查询并下载最新 c 版安装包",
         ),
     ),
     FeatureSpec(
@@ -249,13 +250,14 @@ class RereadRepeatState:
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.5.0",
+    "0.6.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         self._feature_mode = read_feature_mode(config)
         self._reread_state = RereadRepeatState()
+        self._arc_apk_update_manager = None
         logger.info(
             "[QQBotFeatures] migrated feature plugin loaded, mode=%s",
             self._feature_mode,
@@ -379,6 +381,24 @@ class QQBotFeaturesPlugin(Star):
             return
         for message in messages or ["当前没有活动梯子。"]:
             yield event.plain_result(message)
+        event.stop_event()
+
+    @filter.regex(ARC_APK_UPDATE_PATTERN)
+    async def arc_apk_update(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        if str(event.get_sender_id()) != get_nonebot2_config_value("bot", "author_qq", "0"):
+            yield event.plain_result("只有作者可以使用这个指令。")
+            event.stop_event()
+            return
+        try:
+            manager = get_arc_apk_update_manager(self)
+            message = await manager.query_and_update()
+        except Exception as exc:
+            yield event.plain_result(f"Arc 安装包下载查询失败：{exc}")
+            event.stop_event()
+            return
+        yield event.plain_result(message)
         event.stop_event()
 
     @filter.regex(ARC_GUESS_START_PATTERN)
@@ -856,7 +876,33 @@ def is_arc_guess_control_command(text: str) -> bool:
         or parse_arc_open_letter(stripped) is not None
         or re.fullmatch(ARC_GUESS_REVEAL_PATTERN, stripped) is not None
         or re.fullmatch(ARC_ACTIVITY_PATTERN, stripped) is not None
+        or re.fullmatch(ARC_APK_UPDATE_PATTERN, stripped) is not None
     )
+
+
+def get_arc_apk_update_manager(plugin: QQBotFeaturesPlugin):
+    ensure_nonebot2_services_path()
+    from qqbot.features.arc.apk_update_service import ArcApkUpdateManager
+    from qqbot.features.arc.arcaea_record_apk_downloader import ArcaeaRecordApkDownloader
+    from qqbot.features.arc.event_service import _fetch_latest_arc_version
+
+    if plugin._arc_apk_update_manager is None:
+        data_root = get_nonebot2_data_root()
+        plugin._arc_apk_update_manager = ArcApkUpdateManager(
+            state_path=data_root / "data" / "arc" / "background_state.json",
+            version_fetcher=_fetch_latest_arc_version,
+            downloader=ArcaeaRecordApkDownloader(
+                project_root=get_required_nonebot2_config_path(
+                    "paths",
+                    "arcaea_record_root",
+                ),
+                target_dir=get_arc_assets_root(),
+                maven_command=get_nonebot2_config_value("paths", "arcaea_record_maven", ""),
+                java_home=get_nonebot2_config_value("paths", "arcaea_record_java_home", ""),
+            ),
+            timezone_name=get_nonebot2_config_value("bot", "timezone", "Asia/Shanghai"),
+        )
+    return plugin._arc_apk_update_manager
 
 
 def get_arc_guess_service():
@@ -884,6 +930,13 @@ def get_arc_assets_root() -> Path:
     if raw:
         return Path(raw)
     return get_workspace_root() / "data" / "arc"
+
+
+def get_required_nonebot2_config_path(section: str, key: str) -> Path:
+    raw = get_nonebot2_config_value(section, key, "").strip()
+    if not raw:
+        raise RuntimeError(f"缺少 NoneBot2 配置 {section}.{key}")
+    return Path(raw)
 
 
 def render_shapez_command(command: str, argument: str) -> ShapezRenderResult:
