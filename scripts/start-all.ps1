@@ -9,7 +9,9 @@ param(
     [string]$RunId = "",
     [string]$WindowTitle = "",
     [ValidateSet("", "dual", "full")]
-    [string]$FeatureMode = ""
+    [string]$FeatureMode = "",
+    [ValidateSet("demon", "angel")]
+    [string]$AstrBotProfile = "demon"
 )
 
 $ErrorActionPreference = "Stop"
@@ -294,6 +296,27 @@ function Test-NapCatAccountRunning {
     return $processes.Count -gt 0
 }
 
+function Get-AstrBotAccount {
+    if ($AstrBotProfile -eq "angel") {
+        return "1443944862"
+    }
+    return "2629227874"
+}
+
+function Get-AstrBotTitle {
+    if ($AstrBotProfile -eq "angel") {
+        return "AstrBot-1443944862"
+    }
+    return "AstrBot-2629227874"
+}
+
+function Get-AstrBotNapCatTitle {
+    if ($AstrBotProfile -eq "angel") {
+        return "NapCat-AstrBot-1443944862"
+    }
+    return "NapCat-2629227874"
+}
+
 function Start-BackgroundPowerShell {
     param(
         [string]$CommandText,
@@ -382,7 +405,7 @@ function Start-AstrBotComponent {
 
     $script = Join-Path $ScriptRoot "start-astrbot.ps1"
     $featureModeArg = if ($FeatureMode) { " -FeatureMode '$FeatureMode'" } else { "" }
-    $command = "& '$script'$featureModeArg"
+    $command = "& '$script'$featureModeArg -BotProfile '$AstrBotProfile'"
     $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
     Write-LauncherLog -LogFile $launcherLog -Message "AstrBot stdout log: $stdoutLog"
 
@@ -407,10 +430,11 @@ function Start-NapCatComponent {
         [string]$RunId,
         [string]$Account,
         [int]$BotPort,
-        [string]$DoneCheck
+        [string]$DoneCheck,
+        [string]$ComponentName = ""
     )
 
-    $componentName = if ($Account -eq "1443944862") { "napcat-nonebot2" } else { "napcat-astrbot" }
+    $componentName = if ($ComponentName) { $ComponentName } elseif ($Account -eq "1443944862") { "napcat-nonebot2" } else { "napcat-astrbot" }
     $logRoot = Get-ComponentLogRoot -Component $componentName -RunId $RunId
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
     $launcherLog = Join-Path $logRoot "launcher.log"
@@ -500,7 +524,7 @@ function Invoke-Child {
             "nonebot2" { Start-NoneBotComponent -RunId $RunId -NoNapCatWait }
             "astrbot" { Start-AstrBotComponent -RunId $RunId }
             "napcat-nonebot2" { Start-NapCatComponent -RunId $RunId -Account "1443944862" -BotPort 8080 -DoneCheck "nonebot2" }
-            "napcat-astrbot" { Start-NapCatComponent -RunId $RunId -Account "2629227874" -BotPort 6199 -DoneCheck "astrbot" }
+            "napcat-astrbot" { Start-NapCatComponent -RunId $RunId -Account (Get-AstrBotAccount) -BotPort 6199 -DoneCheck "astrbot" -ComponentName "napcat-astrbot" }
             default { throw "Unknown component: $Component" }
         }
         Complete-Child -RunId $RunId -Component $Component
@@ -543,6 +567,9 @@ function Start-ChildWindow {
     if ($FeatureMode) {
         $arguments += @("-FeatureMode", $FeatureMode)
     }
+    if ($AstrBotProfile) {
+        $arguments += @("-AstrBotProfile", $AstrBotProfile)
+    }
     Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WorkingDirectory $WorkspaceRoot | Out-Null
 }
 
@@ -554,9 +581,9 @@ function Start-ComponentWindow {
 
     switch ($Component) {
         "nonebot2" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NoneBot2-1443944862" }
-        "astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title "AstrBot-2629227874" }
+        "astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title (Get-AstrBotTitle) }
         "napcat-nonebot2" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-1443944862" }
-        "napcat-astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-2629227874" }
+        "napcat-astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title (Get-AstrBotNapCatTitle) }
         default { throw "Unknown component: $Component" }
     }
 }
@@ -597,6 +624,12 @@ function Wait-Children {
 function Invoke-Parent {
     if ($FeatureMode -eq "full" -and $Target -ne "astrbot") {
         throw "FeatureMode full is only allowed with -Target astrbot. Use dual when NoneBot2 is also running."
+    }
+    if ($AstrBotProfile -eq "angel" -and $Target -ne "astrbot") {
+        throw "AstrBotProfile angel is only allowed with -Target astrbot because account 1443944862 belongs to bot1 in dual mode."
+    }
+    if ($AstrBotProfile -eq "angel" -and $FeatureMode -ne "full") {
+        throw "AstrBotProfile angel requires -FeatureMode full so AstrBot-only event ownership is explicit."
     }
 
     $runId = New-RunId

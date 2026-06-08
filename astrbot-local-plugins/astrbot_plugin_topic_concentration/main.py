@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass
 import json
+import os
 import re
 import time
 
@@ -20,7 +21,11 @@ GROUP_COOLDOWN_SECONDS = 300.0
 INTEREST_SECONDS = 360.0
 MIN_UNPROMPTED_WINDOW_MESSAGES = 2
 BOT_NAMES = ("棉花糖", "萌萌棉花糖", "qqbot")
-OTHER_BOT_IDS = {"1443944862"}
+PROFILE_ENV = "QQBOT_ASTRBOT_PROFILE"
+PROFILE_OTHER_BOT_IDS = {
+    "angel": {"2629227874"},
+    "demon": {"1443944862"},
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +70,7 @@ class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self._install_active_reply_gate()
+        logger.info("[TopicConcentration] loaded: profile=%s other_bot_ids=%s", read_bot_profile(), sorted(get_other_bot_ids()))
 
     def _install_active_reply_gate(self) -> None:
         if getattr(GroupChatContext, "_topic_concentration_installed", False):
@@ -83,7 +89,7 @@ class TopicConcentrationPlugin(Star):
                 return False
             if event.get_self_id() == event.get_sender_id():
                 return False
-            if str(event.get_sender_id()) in OTHER_BOT_IDS:
+            if str(event.get_sender_id()) in get_other_bot_ids():
                 logger.debug(
                     "[TopicConcentration] skip active reply: "
                     f"group={event.get_group_id()} reason=other_bot_message"
@@ -307,6 +313,17 @@ def _plain_text(event) -> str:
         if isinstance(segment, Plain):
             parts.append(segment.text)
     return "".join(parts).strip()
+
+
+def get_other_bot_ids() -> set[str]:
+    return PROFILE_OTHER_BOT_IDS.get(read_bot_profile(), PROFILE_OTHER_BOT_IDS["demon"])
+
+
+def read_bot_profile() -> str:
+    profile = os.environ.get(PROFILE_ENV, "demon").strip().lower()
+    if profile in PROFILE_OTHER_BOT_IDS:
+        return profile
+    return "demon"
 
 
 def _has_at_bot(event) -> bool:

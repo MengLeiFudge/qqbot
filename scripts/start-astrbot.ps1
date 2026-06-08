@@ -2,7 +2,9 @@ param(
     [int]$Port = 6185,
     [string]$PythonVersion = "3.14",
     [ValidateSet("", "dual", "full")]
-    [string]$FeatureMode = ""
+    [string]$FeatureMode = "",
+    [ValidateSet("demon", "angel")]
+    [string]$BotProfile = "demon"
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,6 +68,7 @@ $env:PYTHONIOENCODING = "utf-8"
 if ($FeatureMode) {
     $env:QQBOT_ASTRBOT_FEATURE_MODE = $FeatureMode
 }
+$env:QQBOT_ASTRBOT_PROFILE = $BotProfile
 
 Set-Location $AstrRoot
 
