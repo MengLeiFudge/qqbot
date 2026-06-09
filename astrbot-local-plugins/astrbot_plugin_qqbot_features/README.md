@@ -125,8 +125,8 @@
 ## 配置项
 
 - `feature_mode`
-  - `dual`：双开 bot1/bot2 时，AstrBot 只响应明确唤醒或私聊命令，自动事件交给 NoneBot2。
   - `full`：AstrBot 接管已迁移自动事件。
+  - `dual`：仅保留为旧配置兼容，运行时也按 `full` 处理。
   - 环境变量 `QQBOT_ASTRBOT_FEATURE_MODE` 优先。
 - `auto_approve_friend_requests`
   - 是否自动同意好友申请，默认开启。
@@ -146,7 +146,7 @@
 
 ## 数据与安全边界
 
-- 复用 `data\nonebot2\run` 的迁移期存档，保证 bot1 到 bot2 数据连续。
+- 复用 `data\nonebot2\run` 的迁移期存档，作为历史数据来源。
 - 群聊记录导出只读取公开群上下文 `data\nonebot2\run\ai\group_context\<群号>.json`，只写固定安全目录，不接受用户传入路径。
 - 不提交运行态数据、QQ 登录态、token、数据库或日志。
-- RightCodes API Key 从环境变量读取，不写入插件源码。
+- RightCodes API Key 直接填写在本插件配置字段 `api_key`，不写入插件源码，也不再读取 NoneBot2 `.env`。

@@ -41,22 +41,6 @@ $ProfileAccounts = @{
     angel = "1443944862"
 }
 
-function Test-NoneBot2AdminStatus {
-    try {
-        $status = Invoke-RestMethod -Uri "http://127.0.0.1:8080/admin/api/status" -Method Get -TimeoutSec 3
-    }
-    catch {
-        return $false
-    }
-    return $null -ne $status -and
-        $null -ne $status.PSObject.Properties["connected_bot_count"] -and
-        $null -ne $status.PSObject.Properties["onebot_connected"]
-}
-
-if ($FeatureMode -eq "full" -and (Test-NoneBot2AdminStatus)) {
-    throw "QQBot AstrBot feature mode full requires NoneBot2 to be offline. Stop bot1 first or use FeatureMode dual."
-}
-
 New-Item -ItemType Directory -Path $AstrRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $AstrRoot ".astrbot") -Force | Out-Null
 New-Item -ItemType Directory -Path $RuntimePluginRoot -Force | Out-Null
@@ -248,17 +232,6 @@ function Invoke-LocalPythonScript {
     throw "No Python runtime is available for $ScriptPath"
 }
 
-function Sync-AstrBotPersonas {
-    $databasePath = Join-Path $AstrRoot "data\data_v4.db"
-    $scriptPath = Join-Path $WorkspaceRoot "scripts\sync-astrbot-personas.py"
-    if (-not (Test-Path $databasePath) -or -not (Test-Path $scriptPath)) {
-        return
-    }
-
-    Invoke-LocalPythonScript -ScriptPath $scriptPath -Arguments @("--database", $databasePath)
-}
-
-Sync-AstrBotPersonas
 Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json") -Profile $BotProfile -OneBotPort $AiocqhttpPort
 
 if (Test-Path $LocalPluginRoot) {

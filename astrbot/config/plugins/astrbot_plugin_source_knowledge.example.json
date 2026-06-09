@@ -1,0 +1,9 @@
+{
+  "enabled_groups": "",
+  "source_roots": "",
+  "max_results": 4,
+  "max_chars": 2600,
+  "max_files_per_domain": 80,
+  "max_file_bytes": 220000,
+  "refresh_seconds": 600
+}

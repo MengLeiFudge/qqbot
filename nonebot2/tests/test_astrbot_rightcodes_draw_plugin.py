@@ -68,8 +68,8 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertTrue(looks_like_rightcodes_draw_points_mutation_request("给我加100积分"))
         self.assertFalse(looks_like_rightcodes_draw_points_query("给我加100积分"))
 
-    def test_dual_mode_does_not_duplicate_bot1_group_points(self) -> None:
-        self.assertFalse(
+    def test_group_points_ignore_nonebot2_runtime_state(self) -> None:
+        self.assertTrue(
             should_record_passive_group_points(
                 feature_mode=FEATURE_MODE_DUAL,
                 nonebot2_online=True,
@@ -89,10 +89,11 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         )
 
     def test_default_data_root_reuses_nonebot2_runtime(self) -> None:
-        config = load_rightcodes_config({"feature_mode": "full"})
+        config = load_rightcodes_config({"feature_mode": "dual", "api_key": "test-key"})
 
         self.assertEqual(config.feature_mode, FEATURE_MODE_FULL)
         self.assertEqual(config.data_root, ROOT / "data" / "nonebot2" / "run")
+        self.assertEqual(config.api_key, "test-key")
         self.assertEqual(config.point_multiplier, 1000)
         self.assertEqual(config.draw_timeout_seconds, 240.0)
 

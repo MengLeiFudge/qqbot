@@ -1,0 +1,9 @@
+{
+  "feature_mode": "full",
+  "auto_approve_friend_requests": true,
+  "auto_approve_group_invites": true,
+  "data_root": "",
+  "point_multiplier": 1000,
+  "draw_timeout_seconds": 240,
+  "api_key": ""
+}

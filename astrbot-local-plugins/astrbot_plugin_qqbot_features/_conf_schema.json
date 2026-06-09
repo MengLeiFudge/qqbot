@@ -2,12 +2,12 @@
   "feature_mode": {
     "description": "迁移功能响应模式",
     "type": "string",
-    "default": "dual",
+    "default": "full",
     "options": [
       "dual",
       "full"
     ],
-    "hint": "dual: bot1/bot2 双开时只响应明确唤醒或私聊命令，自动事件由 NoneBot2 负责；full: AstrBot-only 时接管复读、入群欢迎、戳一戳等已迁移自动事件。环境变量 QQBOT_ASTRBOT_FEATURE_MODE 会覆盖这里。"
+    "hint": "full: AstrBot 接管已迁移自动事件。dual 仅保留为旧配置兼容，运行时也按 full 处理。环境变量 QQBOT_ASTRBOT_FEATURE_MODE 会覆盖这里。"
   },
   "auto_approve_friend_requests": {
     "description": "自动同意好友申请",
@@ -25,18 +25,19 @@
     "description": "RightCodes 生图积分存储根目录",
     "type": "string",
     "default": "",
-    "hint": "留空时自动使用工作区 data/nonebot2/run，与 bot1 共享 draw_points.json。"
+    "hint": "留空时自动使用工作区 data/nonebot2/run 的迁移期存档。"
   },
-  "api_key_env": {
-    "description": "RightCodes API Key 环境变量名",
+  "api_key": {
+    "description": "RightCodes API Key",
     "type": "string",
-    "default": "QQBOT_AI_KEY_RIGHTCODES"
+    "default": "",
+    "hint": "直接填写 RightCodes 生图 API Key；示例导出会脱敏，不再读取 NoneBot2 .env 或 QQBOT_AI_KEY_RIGHTCODES。"
   },
   "point_multiplier": {
     "description": "RightCodes 生图积分倍率",
     "type": "int",
     "default": 1000,
-    "hint": "与 bot1 保持一致：模型美元价格 x 倍率后向上取整。"
+    "hint": "模型美元价格 x 倍率后向上取整。"
   },
   "draw_timeout_seconds": {
     "description": "RightCodes 生图总超时秒数",

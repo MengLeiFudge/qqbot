@@ -19,7 +19,7 @@ arcaea_record_java_home = "C:/path/to/jdk"
 
 [ai]
 default_profile = "packyapi-gemini"
-fallback_order = ["packyapi-gemini", "codex-everywhere", "openrouter-icu", "rightcodes"]
+fallback_order = ["packyapi-gemini", "codex-everywhere", "openrouter-icu"]
 max_context_messages = 12
 group_context_messages = 30
 show_metrics = false
@@ -65,18 +65,6 @@ supports_vision = false
 [ai.providers.openrouter-icu.extra_body]
 reasoning = { effort = "high" }
 
-[ai.providers.rightcodes]
-provider = "openai_compatible"
-base_url = "https://right.codes/codex/v1"
-model = "gpt-5.4-mini"
-api_key_env = "QQBOT_AI_KEY_RIGHTCODES"
-timeout_seconds = 45
-max_output_tokens = 4096
-supports_vision = false
-
-[ai.providers.rightcodes.extra_body]
-reasoning = { effort = "high" }
-
 [ai.providers.hicode]
 provider = "openai_compatible"
 base_url = "https://www.hi-code.cc/v1"
@@ -114,7 +102,4 @@ timeout_seconds = 45
 max_output_tokens = 4096
 supports_vision = true
 
-# RightCodes 生图使用 QQBOT_AI_KEY_RIGHTCODES，命令示例：
-# @机器人 棉花生图 一只糖果猫娘
-# @机器人 棉花糖生图 [nano-banana-pro] 赛博城市
-# 棉花生图一只糖果猫娘
+# RightCodes 生图已迁移到 AstrBot 插件 astrbot_plugin_qqbot_features，API Key 在该插件配置 api_key 中填写。

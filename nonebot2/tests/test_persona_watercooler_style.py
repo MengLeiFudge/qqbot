@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
+import sqlite3
 from pathlib import Path
 
 from qqbot.features.ai.user_style_store import AiUserStyleStore
@@ -8,22 +8,43 @@ from qqbot.plugins.ai import build_ai_system_context
 from qqbot.config import RuntimeSettings
 
 
-ROOT = Path(__file__).resolve().parents[2]
+def test_astrbot_personas_are_exported_from_database_not_sync_script(tmp_path: Path) -> None:
+    database_path = tmp_path / "data_v4.db"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        create table personas (
+            created_at text,
+            updated_at text,
+            id integer primary key,
+            persona_id text unique not null,
+            system_prompt text not null,
+            begin_dialogs text,
+            tools text,
+            skills text,
+            custom_error_message text,
+            folder_id text,
+            sort_order integer not null
+        )
+        """
+    )
+    connection.execute(
+        """
+        insert into personas (created_at, updated_at, persona_id, system_prompt, sort_order)
+        values ('now', 'now', '天使棉花糖', ?, 1)
+        """,
+        (
+            "QQ 水群语气；这个月一顿饭都没吃按玩梗处理；"
+            "技术、代码、报错和配置问题也保持当前人格；频繁艾特和深夜修仙短句接梗。",
+        ),
+    )
+    connection.commit()
+    connection.close()
 
+    from test_export_astrbot_config_examples import load_export_module
 
-def _load_persona_sync_module():
-    module_path = ROOT / "scripts" / "sync-astrbot-personas.py"
-    spec = importlib.util.spec_from_file_location("sync_astrbot_personas", module_path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_astrbot_personas_remove_serious_mode_and_keep_watercooler_style() -> None:
-    module = _load_persona_sync_module()
-    combined = "\n".join(module.PERSONAS.values())
+    personas = load_export_module().export_personas(database_path)
+    combined = "\n".join(persona["system_prompt"] for persona in personas)
 
     assert "严肃模式" not in combined
     assert "哼...喵" not in combined
@@ -34,17 +55,21 @@ def test_astrbot_personas_remove_serious_mode_and_keep_watercooler_style() -> No
     assert "深夜" in combined
 
 
-def test_astrbot_reply_style_guard_keeps_persona_for_technical_help() -> None:
-    combined = (ROOT / "astrbot-local-plugins" / "astrbot_plugin_reply_style_guard" / "main.py").read_text(
-        encoding="utf-8"
+def test_astrbot_plugins_do_not_embed_persona_prompt_text() -> None:
+    root = Path(__file__).resolve().parents[2]
+    combined = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            root / "astrbot-local-plugins" / "astrbot_plugin_reply_style_guard" / "main.py",
+            root / "astrbot-local-plugins" / "astrbot_plugin_twin_interaction" / "logic.py",
+        )
     )
 
     assert "严肃模式" not in combined
     assert "哼...喵" not in combined
-    assert "QQ 水群" in combined
-    assert "技术、代码、报错和配置问题也要保留当前 bot 人设" in combined
-    assert "群聊吹水处理" in combined
-    assert "平时不要主动说“喵”" in combined
+    assert "平时不要主动说“喵”" not in combined
+    assert "QQ 水群语气" not in combined
+    assert "技术、代码、报错和配置问题也要保留当前 bot 人设" not in combined
 
 
 def test_nonebot_persona_keeps_watercooler_style_for_technical_help(tmp_path: Path) -> None:

@@ -56,10 +56,11 @@ QQBOT_NAPCAT_QQ=你的机器人 QQ
 QQBOT_AI_KEY_PACKYAPI=你的 PackyAPI Gemini API Key
 QQBOT_AI_KEY_CODEX_EVERYWHERE=你的 Codex Everywhere API Key
 QQBOT_AI_KEY_OPENROUTER_ICU=你的 OpenRouter ICU API Key
-QQBOT_AI_KEY_RIGHTCODES=你的 RightCodes API Key
 FACTORIO_USERNAME=你的 Factorio 用户名
 FACTORIO_TOKEN=你的 Factorio 官网 token
 ```
+
+RightCodes 生图已迁移到 AstrBot 本地插件 `astrbot_plugin_qqbot_features`，API Key 在 AstrBot 插件配置字段 `api_key` 中填写，不再放进 NoneBot2 `.env`。
 
 AI provider 示例：
 

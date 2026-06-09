@@ -26,5 +26,5 @@
 ## 数据边界
 
 - 生图积分仍复用 `data\nonebot2\run\ai\draw_points.json`。
-- RightCodes API Key 仍从环境变量读取。
+- RightCodes API Key 由 `astrbot_plugin_qqbot_features` 的插件配置字段 `api_key` 管理。
 - 本兼容壳不再直接读写积分或调用 RightCodes API。

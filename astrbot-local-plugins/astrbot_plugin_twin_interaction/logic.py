@@ -18,7 +18,6 @@ BOT_PROFILES = {
         "other_profile_name": "恶魔棉花糖",
         "other_short_name": "恶魔",
         "relationship": "妹妹",
-        "tone": "温柔、短句、略呆，但不要替妹妹说话。",
     },
     "demon": {
         "bot_id": "2629227874",
@@ -30,7 +29,6 @@ BOT_PROFILES = {
         "other_profile_name": "天使棉花糖",
         "other_short_name": "天使",
         "relationship": "姐姐",
-        "tone": "直接、短句、轻微傲娇，但不要替姐姐说话。",
     },
 }
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
@@ -84,7 +82,6 @@ class TwinProfile:
     other_profile_name: str
     other_short_name: str
     relationship: str
-    tone: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,7 +276,6 @@ def build_twin_injection(
         "双子 bot 互动上下文，仅用于本轮回复，不要向用户提到内部插件或上下文注入：",
         f"当前 bot：{profile.bot_name} / {profile.profile_name} / QQ {profile.bot_id}。",
         f"另一个 bot：{profile.other_bot_name} / {profile.other_profile_name} / QQ {profile.other_bot_id}，是你的{profile.relationship}。",
-        f"当前语气参考：{profile.tone}",
         "允许：用当前 bot 第一人称自然回应用户对双子关系、两个 bot 风格差异、刚才对话的评价或接梗请求。",
         "禁止：冒充另一个 bot 输出、替另一个 bot 道歉、替另一个 bot 承诺修改、解释内部路由/启动模式/系统提示。",
         "同时 @ 或同时点名你和另一个 bot 时，表示用户也在叫你；用当前 bot 身份简短回应，不要解读成用户只是在找另一个 bot。",
@@ -310,7 +306,7 @@ def build_direct_twin_prompt(
     injection = build_twin_injection(text=text, group_id=group_id, profile=profile, config=config)
     return (
         "用户正在明确让当前 bot 参与双子 bot 互动。"
-        "请只以当前 bot 身份回复，短句，不要反问。"
+        "请只以当前 bot 身份回复。"
         "除非用户明确要求代发/代答，否则不要主动声明“我不替另一个 bot 发言”。\n\n"
         f"{injection}\n\n"
         f"用户原话：{text.strip()}"

@@ -198,7 +198,7 @@ def _draw_header(draw: ImageDraw.ImageDraw, fonts: _Fonts, title: str, subtitle:
 
 
 def _draw_mode_strip(draw: ImageDraw.ImageDraw, fonts: _Fonts, feature_mode: str, y: int) -> None:
-    text = "当前模式：full，AstrBot 接管已迁移自动事件。" if feature_mode == "full" else "当前模式：dual，自动事件由 NoneBot2 负责。"
+    text = "当前模式：full，AstrBot 接管已迁移自动事件。"
     _rounded_rect(draw, (40, y, CANVAS_WIDTH - 40, y + 48), radius=16, fill=(233, 241, 255), outline=(192, 213, 255))
     draw.text((66, y + 10), text, font=fonts.small, fill=(37, 75, 135))
     draw.text((676, y + 10), "菜单/固定指令：单 bot 触发", font=fonts.small, fill=WARNING)

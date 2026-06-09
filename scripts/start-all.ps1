@@ -541,14 +541,6 @@ function Start-AstrBotComponent {
     New-Item -ItemType File -Path $stderrLog -Force | Out-Null
 
     Write-LauncherLog -LogFile $launcherLog -Message "Starting AstrBot component."
-    if ($FeatureMode -eq "full") {
-        $noneBotStatus = Get-AdminStatus -Url "http://127.0.0.1:8080/admin/api/status"
-        if ($null -ne $noneBotStatus -and
-            $null -ne $noneBotStatus.PSObject.Properties["connected_bot_count"] -and
-            $null -ne $noneBotStatus.PSObject.Properties["onebot_connected"]) {
-            throw "AstrBot full mode requires NoneBot2 to be offline, but 127.0.0.1:8080 is serving NoneBot2 admin status."
-        }
-    }
     Stop-ProcessByPort -Port 6185 -Name "AstrBot" -LogFile $launcherLog
     Stop-ProcessByPort -Port $AstrBotOneBotPort -Name "AstrBot" -LogFile $launcherLog
     if ($AstrBotProfile -eq "both") {
@@ -858,16 +850,16 @@ function Wait-Children {
 
 function Invoke-Parent {
     if ($FeatureMode -eq "full" -and $Target -ne "astrbot") {
-        throw "FeatureMode full is only allowed with -Target astrbot. Use dual when NoneBot2 is also running."
+        throw "FeatureMode full is only allowed with -Target astrbot."
     }
     if ($AstrBotProfile -eq "both" -and $Target -ne "astrbot") {
-        throw "AstrBotProfile both is only allowed with -Target astrbot because account 1443944862 belongs to bot1 outside AstrBot-only mode."
+        throw "AstrBotProfile both is only allowed with -Target astrbot."
     }
     if ($AstrBotProfile -eq "both" -and $FeatureMode -ne "full") {
         throw "AstrBotProfile both requires -FeatureMode full so AstrBot-only event ownership is explicit."
     }
     if ($AstrBotProfile -eq "angel" -and $Target -ne "astrbot") {
-        throw "AstrBotProfile angel is only allowed with -Target astrbot because account 1443944862 belongs to bot1 in dual mode."
+        throw "AstrBotProfile angel is only allowed with -Target astrbot."
     }
     if ($AstrBotProfile -eq "angel" -and $FeatureMode -ne "full") {
         throw "AstrBotProfile angel requires -FeatureMode full so AstrBot-only event ownership is explicit."

@@ -42,14 +42,12 @@ from .rightcodes_draw_logic import format_rightcodes_draw_points_mutation_denied
 from .rightcodes_draw_logic import format_rightcodes_draw_points_status
 from .rightcodes_draw_logic import format_rightcodes_draw_success
 from .rightcodes_draw_logic import format_rightcodes_draw_timeout
-from .rightcodes_draw_logic import load_api_key
 from .rightcodes_draw_logic import load_rightcodes_config
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_help_command
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_invocation
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_request
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_query
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
-from .rightcodes_draw_logic import should_record_passive_group_points
 from .rightcodes_draw_catalog import format_rightcodes_draw_catalog_injection
 from .rightcodes_draw_catalog import should_inject_rightcodes_draw_catalog
 from .reread_state import RereadRepeatState
@@ -453,10 +451,7 @@ class QQBotFeaturesPlugin(Star):
     async def record_rightcodes_group_message_points(self, event: AstrMessageEvent):
         if str(event.get_self_id() or "") != read_command_owner_qq():
             return
-        if not should_record_passive_group_points(
-            feature_mode=self._feature_mode,
-            nonebot2_online=is_nonebot2_port_open(),
-        ):
+        if not allow_passive_events(self._feature_mode):
             return
         if str(event.get_sender_id() or "") == str(event.get_self_id() or ""):
             return
@@ -523,7 +518,7 @@ class QQBotFeaturesPlugin(Star):
             return
 
         yield event.plain_result(format_draw_start_message(quota))
-        api_key = load_api_key(self._rightcodes_config.api_key_env)
+        api_key = self._rightcodes_config.api_key
         if not api_key:
             await asyncio.to_thread(store.refund, quota)
             yield event.plain_result("RightCodes 生图 API Key 还没配置。")
@@ -1043,24 +1038,18 @@ def read_feature_mode(config=None) -> str:
         raw = str(config.get("feature_mode", "") or "").strip().lower()
         source = "plugin_config.feature_mode"
     if not raw:
-        return FEATURE_MODE_DUAL
+        return FEATURE_MODE_FULL
     if raw in FEATURE_MODES:
-        if raw == FEATURE_MODE_FULL and is_nonebot2_port_open():
-            logger.warning(
-                "[QQBotFeatures] requested full mode but NoneBot2 is reachable at %s:%s, fallback to %s",
-                NONEBOT2_HOST,
-                NONEBOT2_PORT,
-                FEATURE_MODE_DUAL,
-            )
-            return FEATURE_MODE_DUAL
-        return raw
+        if raw == FEATURE_MODE_DUAL:
+            logger.warning("[QQBotFeatures] feature_mode=dual is legacy; using %s", FEATURE_MODE_FULL)
+        return FEATURE_MODE_FULL
     logger.warning(
         "[QQBotFeatures] invalid %s=%r, fallback to %s",
         source,
         raw,
-        FEATURE_MODE_DUAL,
+        FEATURE_MODE_FULL,
     )
-    return FEATURE_MODE_DUAL
+    return FEATURE_MODE_FULL
 
 
 def read_bool_config(config, key: str, *, default: bool) -> bool:
@@ -1085,7 +1074,7 @@ def read_bool_config(config, key: str, *, default: bool) -> bool:
 
 
 def allow_passive_events(feature_mode: str) -> bool:
-    return feature_mode == FEATURE_MODE_FULL
+    return True
 
 
 def is_bot_admin_or_self(event: AstrMessageEvent) -> bool:
@@ -1100,22 +1089,8 @@ def is_nonebot2_plugin_enabled(plugin_id: str) -> bool:
     return SettingsStore(get_nonebot2_data_root(), get_author_qq()).get_plugin_enabled(plugin_id)
 
 
-def is_nonebot2_port_open() -> bool:
-    request = Request(f"http://{NONEBOT2_HOST}:{NONEBOT2_PORT}/admin/api/status")
-    try:
-        with build_opener().open(request, timeout=1.0) as response:
-            if response.status != 200:
-                return False
-            payload = json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
-        return False
-    return isinstance(payload, dict) and "connected_bot_count" in payload and "onebot_connected" in payload
-
-
 def build_feature_mode_text(feature_mode: str) -> str:
-    if feature_mode == FEATURE_MODE_FULL:
-        return "当前模式：full，AstrBot 接管已迁移自动事件。"
-    return "当前模式：dual，自动事件由 NoneBot2 负责，AstrBot 只响应明确唤醒/私聊命令。"
+    return "当前模式：full，AstrBot 接管已迁移自动事件。"
 
 
 def should_skip_reread(event: AstrMessageEvent, text: str) -> bool:

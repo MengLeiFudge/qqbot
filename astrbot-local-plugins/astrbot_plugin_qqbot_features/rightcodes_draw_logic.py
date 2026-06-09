@@ -100,7 +100,7 @@ class RightCodesDrawQuotaResult:
 class RightCodesConfig:
     feature_mode: str
     data_root: Path
-    api_key_env: str
+    api_key: str
     point_multiplier: int
     draw_timeout_seconds: float
 
@@ -313,8 +313,7 @@ def load_rightcodes_config(config=None) -> RightCodesConfig:
     return RightCodesConfig(
         feature_mode=feature_mode,
         data_root=data_root,
-        api_key_env=str(get_config_value(config, "api_key_env", "QQBOT_AI_KEY_RIGHTCODES") or "").strip()
-        or "QQBOT_AI_KEY_RIGHTCODES",
+        api_key=str(get_config_value(config, "api_key", "") or "").strip(),
         point_multiplier=max(1, safe_int(get_config_value(config, "point_multiplier", 1000), 1000)),
         draw_timeout_seconds=max(
             30.0,
@@ -331,8 +330,8 @@ def read_feature_mode(config=None) -> str:
         except Exception:
             raw = ""
     if raw in FEATURE_MODES:
-        return raw
-    return FEATURE_MODE_DUAL
+        return FEATURE_MODE_FULL
+    return FEATURE_MODE_FULL
 
 
 def should_record_passive_group_points(
@@ -340,9 +339,7 @@ def should_record_passive_group_points(
     feature_mode: str,
     nonebot2_online: bool,
 ) -> bool:
-    if feature_mode == FEATURE_MODE_FULL:
-        return True
-    return not nonebot2_online
+    return True
 
 
 def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
@@ -642,31 +639,6 @@ def resolve_zone(timezone_name: str):
         if timezone_name == "UTC":
             return timezone.utc
         return datetime.now().astimezone().tzinfo or timezone.utc
-
-
-def load_api_key(api_key_env: str) -> str:
-    key = os.environ.get(api_key_env, "").strip()
-    if key:
-        return key
-    values = load_workspace_env_values()
-    return values.get(api_key_env, "").strip()
-
-
-def load_workspace_env_values() -> dict[str, str]:
-    env_path = resolve_workspace_root() / "data" / "nonebot2" / "config" / ".env"
-    if not env_path.is_file():
-        return {}
-    values: dict[str, str] = {}
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            values[key] = value
-    return values
 
 
 def resolve_default_data_root() -> Path:

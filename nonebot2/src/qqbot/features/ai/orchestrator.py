@@ -4,7 +4,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import logging
-import os
 from pathlib import Path
 import re
 
@@ -16,11 +15,7 @@ from qqbot.features.ai.user_style_store import AiUserStyleStore
 from qqbot.services.feature_catalog import list_visible_features
 from qqbot.services.message_normalizer import NormalizedMessage, NormalizedReply
 from qqbot.features.ai.rightcodes_draw_client import (
-    RightCodesDrawClient,
-    RightCodesDrawRequest,
-    format_rightcodes_draw_failure,
     format_rightcodes_draw_model_help,
-    format_rightcodes_draw_success,
     looks_like_rightcodes_draw_help_command,
     parse_rightcodes_draw_command,
 )
@@ -309,24 +304,9 @@ class AiOrchestrator:
         request = parse_rightcodes_draw_command(text)
         if request is None:
             return AiOrchestratorResult(False)
-        api_key = os.environ.get("QQBOT_AI_KEY_RIGHTCODES", "").strip()
-        if not api_key:
-            return AiOrchestratorResult(True, "RightCodes 生图 API Key 还没配置。")
-        client = RightCodesDrawClient(api_key=api_key)
-        try:
-            result = await client.draw(
-                RightCodesDrawRequest(
-                    prompt=request.prompt,
-                    model=request.model,
-                    image_urls=normalized_message.image_urls,
-                )
-            )
-        except Exception as exc:
-            return AiOrchestratorResult(True, format_rightcodes_draw_failure(exc))
         return AiOrchestratorResult(
             True,
-            format_rightcodes_draw_success(result, model=request.model),
-            image_path=result.image_url,
+            "RightCodes 生图已经迁移到 AstrBot 插件，请在 AstrBot 的 astrbot_plugin_qqbot_features 配置里填写 api_key 后使用。",
         )
 
     def _try_render_shapez(

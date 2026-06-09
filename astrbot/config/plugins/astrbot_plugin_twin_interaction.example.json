@@ -1,0 +1,6 @@
+{
+  "enabled_groups": "",
+  "direct_handler_enabled": true,
+  "max_context_messages": 4,
+  "max_context_chars": 1200
+}
