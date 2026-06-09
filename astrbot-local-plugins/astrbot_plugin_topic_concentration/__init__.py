@@ -1,1 +1,1 @@
-"""Gate AstrBot active replies by short-window topic concentration."""
+"""按短窗口话题集中度控制 AstrBot 主动接话。"""

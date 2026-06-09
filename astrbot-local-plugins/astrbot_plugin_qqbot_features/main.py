@@ -21,6 +21,8 @@ from astrbot.api.message_components import At, Image, Plain
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
+from .command_guard import is_twin_bot_sender_id
+from .command_guard import should_handle_migrated_command_ids
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
@@ -233,9 +235,9 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 
 @register(
     "astrbot_plugin_qqbot_features",
-    "local",
-    "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.9.3",
+    "MengLei",
+    "棉花糖群务、互动、生图、游戏和工具类固定功能合集。",
+    "0.9.4",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -263,7 +265,7 @@ class QQBotFeaturesPlugin(Star):
             self._auto_approve_group_invites,
         )
 
-    @filter.regex(MENU_PATTERN)
+    @filter.regex(MENU_PATTERN, desc="发送总览图片菜单，展示当前 AstrBot 已接管的群务、互动、生图、游戏和工具分类。")
     async def menu(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -279,7 +281,7 @@ class QQBotFeaturesPlugin(Star):
             yield event.plain_result(build_menu_text(self._feature_mode))
         event.stop_event()
 
-    @filter.regex(FEATURE_MENU_PATTERN)
+    @filter.regex(FEATURE_MENU_PATTERN, desc="发送指定分类的图片菜单，例如“菜单棉花糖互动”“菜单Arcaea”。")
     async def feature_menu(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -302,7 +304,7 @@ class QQBotFeaturesPlugin(Star):
         event.stop_event()
 
     @filter.platform_adapter_type("aiocqhttp")
-    @filter.regex(GROUP_FILE_CLEANUP_PATTERN)
+    @filter.regex(GROUP_FILE_CLEANUP_PATTERN, desc="群文件清理通知命令，作者或机器人自身可触发，用于扫描并提醒清理超期外层群文件。")
     async def group_file_cleanup(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -320,7 +322,7 @@ class QQBotFeaturesPlugin(Star):
             yield event.plain_result(f"群文件清理失败：{exc}")
         event.stop_event()
 
-    @filter.regex(FACTORIO_DOWNLOAD_PATTERN)
+    @filter.regex(FACTORIO_DOWNLOAD_PATTERN, desc="获取 Factorio Space Age Windows 安装包下载链接，需要本机已配置 Factorio 凭据。")
     async def factorio_download(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -335,7 +337,7 @@ class QQBotFeaturesPlugin(Star):
         )
         event.stop_event()
 
-    @filter.regex(SHAPEZ_PATTERN)
+    @filter.regex(SHAPEZ_PATTERN, desc="渲染异形工厂 shapez 短代码、结构图或路径图；在线谜题在未配置 token 时给出提示。")
     async def shapez_render(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -356,7 +358,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.chain_result(chain)
         event.stop_event()
 
-    @filter.regex(LOLICON_ADMIN_PATTERN)
+    @filter.regex(LOLICON_ADMIN_PATTERN, desc="作者限定的 Lolicon 群配置命令，用于开关群 R18 和图片直发显示。")
     async def lolicon_admin(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -376,7 +378,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(response)
         event.stop_event()
 
-    @filter.regex(LOLICON_PATTERN)
+    @filter.regex(LOLICON_PATTERN, desc="Lolicon 美图命令，支持美图、色图、混合等关键词，并复用 bot1 图片缓存和群配置。")
     async def lolicon_image(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -405,7 +407,7 @@ class QQBotFeaturesPlugin(Star):
             yield event.chain_result(chain)
         event.stop_event()
 
-    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE, desc="记录 RightCodes 生图积分的普通群消息事件；双 bot 场景只由固定命令 owner 账号累计。")
     async def record_rightcodes_group_message_points(self, event: AstrMessageEvent):
         if str(event.get_self_id() or "") != read_command_owner_qq():
             return
@@ -416,6 +418,8 @@ class QQBotFeaturesPlugin(Star):
             return
         if str(event.get_sender_id() or "") == str(event.get_self_id() or ""):
             return
+        if is_twin_bot_sender(event):
+            return
         if not str(event.get_message_str() or "").strip():
             return
         store = RightCodesDrawQuotaStore(
@@ -424,7 +428,7 @@ class QQBotFeaturesPlugin(Star):
         )
         await asyncio.to_thread(store.record_group_message, event.get_sender_id())
 
-    @filter.event_message_type(EventMessageType.ALL)
+    @filter.event_message_type(EventMessageType.ALL, desc="RightCodes 生图总入口，处理生图、模型价格、积分查询和拒绝手动改分请求。")
     async def rightcodes_draw_command(self, event: AstrMessageEvent):
         text = str(event.get_message_str() or "").strip()
         if not text:
@@ -484,7 +488,7 @@ class QQBotFeaturesPlugin(Star):
             yield event.plain_result(f"{message}\n{result.image_url}")
         event.stop_event()
 
-    @filter.regex(ARC_RECOMMEND_PATTERN)
+    @filter.regex(ARC_RECOMMEND_PATTERN, desc="Arcaea PTT 推荐命令，例如 arctj10.5，按本地曲库和定数缓存推荐谱面。")
     async def arc_recommend(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -505,7 +509,7 @@ class QQBotFeaturesPlugin(Star):
             yield event.plain_result(result.text)
         event.stop_event()
 
-    @filter.regex(ARC_ACTIVITY_PATTERN)
+    @filter.regex(ARC_ACTIVITY_PATTERN, desc="Arcaea 活动梯子查询命令，支持 archd 和 arctz。")
     async def arc_activity(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -519,7 +523,7 @@ class QQBotFeaturesPlugin(Star):
             yield event.plain_result(message)
         event.stop_event()
 
-    @filter.regex(ARC_APK_UPDATE_PATTERN)
+    @filter.regex(ARC_APK_UPDATE_PATTERN, desc="作者限定的 Arcaea 安装包更新命令，支持 xz 和 arcxz。")
     async def arc_apk_update(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -537,7 +541,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(message)
         event.stop_event()
 
-    @filter.regex(ARC_GUESS_START_PATTERN)
+    @filter.regex(ARC_GUESS_START_PATTERN, desc="开始 Arcaea 字母猜歌局，支持 zm 或 arczm 加题目数量。")
     async def arc_guess_start(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -558,7 +562,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(str(result))
         event.stop_event()
 
-    @filter.regex(ARC_GUESS_ART_START_PATTERN)
+    @filter.regex(ARC_GUESS_ART_START_PATTERN, desc="开始或继续 Arcaea 曲绘猜歌局，支持 qh 或 arcqh 加网格大小。")
     async def arc_guess_art_start(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -579,7 +583,7 @@ class QQBotFeaturesPlugin(Star):
         yield build_arc_guess_event_result(event, result)
         event.stop_event()
 
-    @filter.regex(ARC_GUESS_ART_TILE_PATTERN)
+    @filter.regex(ARC_GUESS_ART_TILE_PATTERN, desc="Arcaea 曲绘猜歌补图命令，打开下一块曲绘区域。")
     async def arc_guess_art_tile(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -599,7 +603,7 @@ class QQBotFeaturesPlugin(Star):
         yield build_arc_guess_event_result(event, result)
         event.stop_event()
 
-    @filter.regex(ARC_GUESS_REVEAL_PATTERN)
+    @filter.regex(ARC_GUESS_REVEAL_PATTERN, desc="Arcaea 猜歌揭晓命令，结束当前字母或曲绘猜歌局并公布答案。")
     async def arc_guess_reveal(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -616,11 +620,11 @@ class QQBotFeaturesPlugin(Star):
         yield build_arc_guess_event_result(event, result)
         event.stop_event()
 
-    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE, desc="Arcaea 猜歌局答案监听器，只在已有猜歌会话中处理开字母、猜答案和曲绘答案。")
     async def arc_guess_session_answer(self, event: AstrMessageEvent):
         if not (allow_passive_events(self._feature_mode) or _is_direct_or_private(event)):
             return
-        if event.get_sender_id() == event.get_self_id():
+        if event.get_sender_id() == event.get_self_id() or is_twin_bot_sender(event):
             return
         text = event.get_message_str().strip()
         if not text or not event.get_group_id():
@@ -640,7 +644,7 @@ class QQBotFeaturesPlugin(Star):
         yield build_arc_guess_event_result(event, result)
         event.stop_event()
 
-    @filter.regex(KUN_PATTERN)
+    @filter.regex(KUN_PATTERN, desc="养鲲玩法命令入口，处理摸鲲、属性、背包、商城、签到、排行、挑战、赠送等存档操作。")
     async def kun_command(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -650,7 +654,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(response)
         event.stop_event()
 
-    @filter.regex(SAKURA_PATTERN)
+    @filter.regex(SAKURA_PATTERN, desc="落樱之都基础玩法入口，处理注册、改名、个人信息、经验、樱币、加点和恢复。")
     async def sakura_command(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode):
             return
@@ -660,7 +664,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(response)
         event.stop_event()
 
-    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE, desc="群聊随机复读监听器，连续相同纯文本达到条件后按概率复读并进入冷却。")
     async def reread(self, event: AstrMessageEvent):
         if not allow_passive_events(self._feature_mode):
             return
@@ -679,7 +683,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(text)
 
     @filter.platform_adapter_type("aiocqhttp")
-    @filter.event_message_type(EventMessageType.ALL)
+    @filter.event_message_type(EventMessageType.ALL, desc="OneBot 社交事件监听器，处理好友申请、邀请入群、自身入群私聊通知、新成员欢迎和戳一戳文本回应。")
     async def onebot_social_events(self, event: AstrMessageEvent):
         raw = _raw_event_dict(event)
         if not raw:
@@ -875,15 +879,22 @@ def _is_direct_or_private(event: AstrMessageEvent) -> bool:
 
 
 def _should_handle_migrated_command(event: AstrMessageEvent, feature_mode: str) -> bool:
-    if _is_direct_or_private(event):
-        return True
-    if feature_mode != FEATURE_MODE_FULL:
-        return False
-    return str(event.get_self_id() or "") == read_command_owner_qq()
+    return should_handle_migrated_command_ids(
+        sender_id=event.get_sender_id(),
+        self_id=event.get_self_id(),
+        is_direct_or_private=_is_direct_or_private(event),
+        feature_mode=feature_mode,
+        full_mode=FEATURE_MODE_FULL,
+        command_owner_qq=read_command_owner_qq(),
+    )
 
 
 def read_command_owner_qq() -> str:
     return str(os.environ.get(COMMAND_OWNER_ENV) or DEFAULT_COMMAND_OWNER_QQ).strip()
+
+
+def is_twin_bot_sender(event: AstrMessageEvent) -> bool:
+    return is_twin_bot_sender_id(event.get_sender_id())
 
 
 def _raw_event_dict(event: AstrMessageEvent) -> dict:
@@ -1012,6 +1023,8 @@ def build_feature_mode_text(feature_mode: str) -> str:
 
 def should_skip_reread(event: AstrMessageEvent, text: str) -> bool:
     if not text:
+        return True
+    if is_twin_bot_sender(event):
         return True
     if getattr(event, "is_at_or_wake_command", False):
         return True

@@ -61,16 +61,16 @@ BOT_PROFILES = {
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
 @register(
     "astrbot_plugin_reply_style_guard",
-    "local",
-    "Inject no-follow-up output style rules into AstrBot LLM requests.",
-    "0.1.4",
+    "MengLei",
+    "为棉花糖注入身份和输出风格边界，并清理追问式收尾。",
+    "0.1.5",
 )
 class ReplyStyleGuardPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         logger.info("[ReplyStyleGuard] loaded: profile=%s", read_bot_profile())
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(desc="在 LLM 请求前注入当前 bot 身份、主人识别和不反问不追问的输出硬规则。")
     async def inject_reply_style_guard(self, event: AstrMessageEvent, req: ProviderRequest):
         identity_anchor = build_sender_identity_anchor_text(
             sender_id=safe_event_value(event, "get_sender_id"),
@@ -81,7 +81,7 @@ class ReplyStyleGuardPlugin(Star):
         req.extra_user_content_parts.append(TextPart(text=identity_anchor).mark_as_temp())
         req.extra_user_content_parts.append(TextPart(text=STYLE_GUARD_TEXT).mark_as_temp())
 
-    @filter.on_decorating_result()
+    @filter.on_decorating_result(desc="在消息发送前清理追问式、反问式或空洞邀请式收尾，避免普通回复继续催用户补充。")
     async def strip_reply_style_tail(self, event: AstrMessageEvent):
         result = event.get_result()
         if result is None or not result.chain:

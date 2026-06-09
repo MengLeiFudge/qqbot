@@ -541,10 +541,21 @@ function Start-AstrBotComponent {
     New-Item -ItemType File -Path $stderrLog -Force | Out-Null
 
     Write-LauncherLog -LogFile $launcherLog -Message "Starting AstrBot component."
+    if ($FeatureMode -eq "full") {
+        $noneBotStatus = Get-AdminStatus -Url "http://127.0.0.1:8080/admin/api/status"
+        if ($null -ne $noneBotStatus -and
+            $null -ne $noneBotStatus.PSObject.Properties["connected_bot_count"] -and
+            $null -ne $noneBotStatus.PSObject.Properties["onebot_connected"]) {
+            throw "AstrBot full mode requires NoneBot2 to be offline, but 127.0.0.1:8080 is serving NoneBot2 admin status."
+        }
+    }
     Stop-ProcessByPort -Port 6185 -Name "AstrBot" -LogFile $launcherLog
     Stop-ProcessByPort -Port $AstrBotOneBotPort -Name "AstrBot" -LogFile $launcherLog
     if ($AstrBotProfile -eq "both") {
         Stop-ProcessByPort -Port $AstrBotAngelOneBotPort -Name "AstrBot" -LogFile $launcherLog
+    }
+    if ($FeatureMode -eq "full") {
+        Stop-ProcessByPort -Port 8080 -Name "AstrBot artifact API" -LogFile $launcherLog
     }
     Complete-ChildStage -RunId $RunId -Component "astrbot" -Stage "ports-cleared"
 
@@ -581,6 +592,17 @@ function Start-AstrBotComponent {
             Write-Host $tail
         }
         throw "AstrBot did not open port $AstrBotAngelOneBotPort. Log: $stdoutLog"
+    }
+    if ($FeatureMode -eq "full") {
+        $artifactAbortPatterns = @("LocalArtifactApi.*failed to listen", "WinError 10013", "PermissionError")
+        if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 8080 -TimeoutSeconds 120 -LogFile $launcherLog -Process $process -AbortLogFile $stdoutLog -AbortPatterns $artifactAbortPatterns)) {
+            $tail = Get-LogTailText -Path $stdoutLog
+            if ($tail) {
+                Write-Host "Recent AstrBot output:" -ForegroundColor Yellow
+                Write-Host $tail
+            }
+            throw "AstrBot full mode did not open local artifact API port 8080. Log: $stdoutLog"
+        }
     }
 }
 

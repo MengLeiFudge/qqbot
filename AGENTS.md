@@ -27,6 +27,7 @@
 - AstrBot 源码知识兜底优先用 `astrbot_plugin_source_knowledge` 这类本地插件实现，不改 Core、不依赖 Embedding。可信依据必须优先来自源码、反编译源码、源码邻近 README/设计文档和配置数据，尤其是戴森球计划本体相关源码和相关 mod 源码；群聊、群文件、攻略和 release notes 只能作为候选或补充。源码检索插件只读明确配置的源码根，必须跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件；不得读取私聊、token、QQ 登录态、数据库密钥、运行日志或本仓库运行态 `data`。
 - bot1/bot2 共用本地表情包索引 `data\memes\mlj_pack\index.json`；短情绪闲聊允许纯表情回复，`auto_send_enabled=false` 的敏感支付、涩涩慎用、待复核类别不得自动发送。AstrBot 侧通过 `scripts\sync-meme-pack.py` 同步到 `data\astrbot\data\plugin_data\meme_manager\` 和运行态配置，不改 Core、不删除旧图库目录。
 - 本地 artifact 发布迁移到 `astrbot_plugin_local_artifact_api`，仅在 AstrBot `full` 模式下监听 `127.0.0.1:8080` 的兼容 `POST /admin/api/artifacts/publish-local`；它复用 NoneBot2 纯发布服务和 `data\nonebot2\run` 发布状态，通过 AstrBot aiocqhttp OneBot 上传群文件，不改 AstrBot Core。双开 `dual` 模式下不要让 AstrBot 抢占 bot1 的 `8080`。
+- AstrBot `full` 模式启动验证必须同时覆盖 WebUI `6185`、OneBot `6200/6201` 和 artifact API `8080`；`LocalArtifactApi failed to listen`、`WinError 10013` 或 `PermissionError` 不能被当成 ready 状态忽略。
 - bot1/bot2 双开时，普通主动接话不得由另一个 bot 的普通输出继续触发；明确 @ 当前 bot 或私聊仍按直接请求处理。两个 bot 的普通回复、主动回复和拒答都不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”等追问式收尾；缺关键信息时陈述缺口，不催用户补充。
 - AstrBot 双平台 `both/full` 下，闲聊/主动接话可以由两个 bot 按调度策略共同参与；固定命令默认只由 `QQBOT_ASTRBOT_COMMAND_OWNER` 指定账号执行，未设置时为恶魔账号 `2629227874`。明确 @ 当前 bot 或私聊时仍由当前 bot 处理；菜单、帮助、指令、生图、下载、群文件清理等固定命令不得因双平台重复执行。
 - 普通聊天文本不得在 NoneBot2 插件或 AstrBot 本地插件里按“低信息、在吗、111、真的吗、回复慢、测试、探活”等启发式直接生成本地回复；只要没有命中明确命令、游戏会话答案、协议事件处理或本地硬安全提醒，就必须交给 LLM 链路处理。插件可以做 prompt 注入、上下文桥接、记忆检索、输出清洗和路由门控，但不能凭空补一句固定兜底文本。

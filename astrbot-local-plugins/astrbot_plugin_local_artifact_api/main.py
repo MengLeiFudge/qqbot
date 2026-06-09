@@ -27,9 +27,9 @@ class HttpError(Exception):
 
 @register(
     "astrbot_plugin_local_artifact_api",
-    "local",
-    "Localhost compatibility API for publishing build artifacts through AstrBot OneBot.",
-    "0.1.0",
+    "MengLei",
+    "本机 localhost 构建产物发布兼容接口。",
+    "0.1.1",
 )
 class LocalArtifactApiPlugin(Star):
     def __init__(self, context: Context, config=None):

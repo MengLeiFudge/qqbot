@@ -1,6 +1,6 @@
 name: astrbot_plugin_qqbot_context_bridge
-display_name: QQBot context bridge
-desc: "Inject selected NoneBot2 qqbot public group context into AstrBot LLM requests."
-version: v0.1.1
-author: local
+display_name: QQBot 群上下文桥接
+desc: "把 NoneBot2 侧公开群聊上下文按群号注入 AstrBot 本轮 LLM 请求，帮助 bot2 延续 bot1 的群聊语境。"
+version: v0.1.2
+author: MengLei
 repo: ""

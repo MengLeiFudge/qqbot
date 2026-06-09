@@ -48,9 +48,9 @@ _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
 
 @register(
     "astrbot_plugin_topic_concentration",
-    "local",
-    "Gate AstrBot active replies by AI-decided short-window topic interest.",
-    "0.3.4",
+    "MengLei",
+    "棉花糖普通群聊主动接话门控。",
+    "0.3.5",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):

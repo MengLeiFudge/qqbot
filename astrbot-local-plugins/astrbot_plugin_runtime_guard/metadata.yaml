@@ -1,0 +1,6 @@
+name: astrbot_plugin_runtime_guard
+display_name: AstrBot 运行时泄漏守卫
+desc: "拦截 AstrBot 本地运行中不应直接发给用户的内部错误文本，避免 LLM/Agent 异常泄漏到 QQ。"
+version: v0.1.1
+author: MengLei
+repo: ""

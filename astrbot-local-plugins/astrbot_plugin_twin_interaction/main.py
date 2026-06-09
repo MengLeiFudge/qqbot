@@ -32,9 +32,9 @@ DEFAULT_MAX_CONTEXT_CHARS = 1200
 
 @register(
     "astrbot_plugin_twin_interaction",
-    "local",
-    "Twin-aware prompt injection and explicit interaction handling for angel/demon QQBot profiles.",
-    "0.1.1",
+    "MengLei",
+    "天使棉花糖和恶魔棉花糖的双子关系上下文与明确互动处理。",
+    "0.1.2",
 )
 class TwinInteractionPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -51,7 +51,7 @@ class TwinInteractionPlugin(Star):
             self._config.max_context_chars,
         )
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(desc="在 LLM 请求前注入当前 bot 与另一个棉花糖的双子关系边界，不替对方发言。")
     async def inject_twin_context(self, event: AstrMessageEvent, req: ProviderRequest):
         profile = self._profile_for_event(event)
         if is_bot_sender(event, profile):
@@ -75,7 +75,7 @@ class TwinInteractionPlugin(Star):
             len(injection),
         )
 
-    @filter.event_message_type(EventMessageType.ALL)
+    @filter.event_message_type(EventMessageType.ALL, desc="处理明确询问姐姐、妹妹、天使或恶魔的互动请求，只让当前 bot 以自己身份回应。")
     async def handle_explicit_twin_request(self, event: AstrMessageEvent):
         if not self._config.direct_handler_enabled:
             return

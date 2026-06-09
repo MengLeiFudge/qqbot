@@ -16,6 +16,8 @@ from astrbot_plugin_qqbot_features.menu_image import render_feature_menu_image
 from astrbot_plugin_qqbot_features.menu_image import render_overview_menu_image
 from astrbot_plugin_qqbot_features.menu_catalog import MENU_SECTIONS
 from astrbot_plugin_qqbot_features.menu_catalog import find_menu_section
+from astrbot_plugin_qqbot_features.command_guard import is_twin_bot_sender_id
+from astrbot_plugin_qqbot_features.command_guard import should_handle_migrated_command_ids
 from astrbot_plugin_qqbot_features.twin_poke import should_follow_poke_notice
 
 
@@ -100,6 +102,43 @@ class AstrBotMenuImageTest(unittest.TestCase):
                 target_id="2629227874",
             )
         )
+
+    def test_migrated_commands_ignore_twin_bot_sender(self) -> None:
+        self.assertFalse(
+            should_handle_migrated_command_ids(
+                sender_id="1443944862",
+                self_id="2629227874",
+                is_direct_or_private=True,
+                feature_mode="full",
+                full_mode="full",
+                command_owner_qq="2629227874",
+            )
+        )
+        self.assertFalse(
+            should_handle_migrated_command_ids(
+                sender_id="2629227874",
+                self_id="1443944862",
+                is_direct_or_private=True,
+                feature_mode="full",
+                full_mode="full",
+                command_owner_qq="2629227874",
+            )
+        )
+        self.assertTrue(
+            should_handle_migrated_command_ids(
+                sender_id="3062317151",
+                self_id="2629227874",
+                is_direct_or_private=False,
+                feature_mode="full",
+                full_mode="full",
+                command_owner_qq="2629227874",
+            )
+        )
+
+    def test_reread_ignores_twin_bot_sender(self) -> None:
+        self.assertTrue(is_twin_bot_sender_id("1443944862"))
+        self.assertTrue(is_twin_bot_sender_id("2629227874"))
+        self.assertFalse(is_twin_bot_sender_id("3062317151"))
 
 
 if __name__ == "__main__":

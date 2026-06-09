@@ -37,9 +37,9 @@ class BridgeConfig:
 
 @register(
     "astrbot_plugin_qqbot_context_bridge",
-    "local",
-    "Inject selected NoneBot2 qqbot public group context into AstrBot LLM requests.",
-    "0.1.1",
+    "MengLei",
+    "把 NoneBot2 公开群上下文桥接到 AstrBot 本轮 LLM 请求。",
+    "0.1.2",
 )
 class QQBotContextBridgePlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -53,7 +53,7 @@ class QQBotContextBridgePlugin(Star):
             self._config.context_root,
         )
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(desc="在 AstrBot 调用 LLM 前，按当前群号读取 bot1 公开群上下文并临时注入本轮请求。")
     async def inject_bot1_group_context(self, event: AstrMessageEvent, req: ProviderRequest):
         group_id = str(event.get_group_id() or "")
         if self._config.enabled_groups and group_id not in self._config.enabled_groups:

@@ -6,9 +6,9 @@ from astrbot.api.star import Context, Star, register
 
 @register(
     "astrbot_plugin_rightcodes_draw",
-    "local",
-    "Deprecated compatibility shell; RightCodes commands are handled by astrbot_plugin_qqbot_features.",
-    "0.1.1",
+    "MengLei",
+    "RightCodes 生图旧入口兼容壳，实际命令已迁入棉花糖功能合集。",
+    "0.1.2",
 )
 class RightCodesDrawPlugin(Star):
     def __init__(self, context: Context, config=None):

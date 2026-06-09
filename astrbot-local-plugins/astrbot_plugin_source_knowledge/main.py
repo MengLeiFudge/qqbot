@@ -416,9 +416,9 @@ class SourceIndex:
 
 @register(
     PLUGIN_NAME,
-    "local",
-    "Inject local source-code evidence into AstrBot LLM requests.",
-    "0.1.0",
+    "MengLei",
+    "按问题检索本机源码证据并注入 AstrBot 本轮 LLM 请求。",
+    "0.1.1",
 )
 class SourceKnowledgePlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -433,7 +433,7 @@ class SourceKnowledgePlugin(Star):
             self._config.max_chars,
         )
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(desc="在 LLM 请求前按群号和问题检索本机源码树，把少量可信源码片段临时注入上下文。")
     async def inject_source_knowledge(self, event: AstrMessageEvent, req: ProviderRequest):
         group_id = str(event.get_group_id() or "")
         if self._config.enabled_groups and group_id not in self._config.enabled_groups:
