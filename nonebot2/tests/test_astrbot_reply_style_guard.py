@@ -9,9 +9,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_reply_style_guard.logic import sanitize_reply_plain_text
+from astrbot_plugin_reply_style_guard.logic import is_dangerous_local_tool_name
 from astrbot_plugin_reply_style_guard.logic import split_forward_text
 from astrbot_plugin_reply_style_guard.logic import should_fold_long_reply
 from astrbot_plugin_reply_style_guard.logic import should_disable_segmented_reply_for_text
+from astrbot_plugin_reply_style_guard.logic import strip_permission_escalation_advice
 from astrbot_plugin_reply_style_guard.logic import strip_followup_tail
 from astrbot_plugin_reply_style_guard.logic import strip_markdown_syntax
 
@@ -87,6 +89,28 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
     def test_forward_text_split_falls_back_to_limit(self) -> None:
         chunks = split_forward_text("abcdef", limit=3)
         self.assertEqual(chunks, ["abc", "def"])
+
+    def test_dangerous_local_tool_names_are_detected(self) -> None:
+        self.assertTrue(is_dangerous_local_tool_name("astrbot_execute_shell"))
+        self.assertTrue(is_dangerous_local_tool_name("astrbot_file_write_tool"))
+        self.assertTrue(is_dangerous_local_tool_name("astrbot_execute_browser"))
+        self.assertFalse(is_dangerous_local_tool_name("astrbot_knowledge_base_query"))
+        self.assertFalse(is_dangerous_local_tool_name("qqbot_rightcodes_draw_catalog"))
+
+    def test_permission_escalation_advice_is_stripped(self) -> None:
+        self.assertEqual(
+            strip_permission_escalation_advice(
+                "我这边没有写文件权限。\n"
+                "去 AstrBot WebUI 里把你的 QQ 号加进管理员列表，开了 shell 权限后我再写。"
+            ),
+            "我不能通过聊天申请或开启本机文件、命令执行权限。",
+        )
+
+    def test_sanitize_reply_plain_text_strips_permission_escalation_advice(self) -> None:
+        self.assertEqual(
+            sanitize_reply_plain_text("先说结论：不能写当前目录。\n去 WebUI 添加管理员并开启 shell 权限。"),
+            "先说结论：不能写当前目录。",
+        )
 
 
 if __name__ == "__main__":

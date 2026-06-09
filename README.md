@@ -30,7 +30,7 @@
 
 AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps1` 会优先直调 `uv tool` 安装出的 `astrbot.exe`，再回退到 PATH 中的 `astrbot` / `uv tool run`，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。
 
-`astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、复读、入群欢迎、戳一戳文本响应、按配置自动同意好友申请和邀请入群、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；NoneBot2 AI runtime 使用 AstrBot 原生链路替代。
+`astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、复读、入群欢迎、戳一戳文本响应、按配置自动同意好友申请和邀请入群、群文件清理通知、主人限定群聊记录导出、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；NoneBot2 AI runtime 使用 AstrBot 原生链路替代。
 
 `astrbot_plugin_local_artifact_api` 负责 bot2 的本地构建产物发布兼容入口。AstrBot `full` 模式下会在 `127.0.0.1:8080` 提供 `POST /admin/api/artifacts/publish-local`，保持原 NoneBot2 localhost-only 请求体、Git 上下文校验、SHA 跳过策略和 OneBot 群文件上传行为，供 `AfterBuildEvent.exe 1` 这类本机白名单构建流程继续发布 zip 产物。
 `scripts\start-all.ps1 -Target astrbot -FeatureMode full` 会在启动前确认 `8080` 不是 NoneBot2 管理端，清理旧的 artifact API 占用，并在启动验证中等待 `6185`、`6200/6201` 和 `8080` 都就绪；如果 artifact API 绑定失败，启动入口会失败而不是只报告 AstrBot WebUI ready。
@@ -57,7 +57,7 @@ AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参
 
 `astrbot_plugin_qqbot_features` 负责已迁移的群务、菜单、生图、游戏和固定命令。好友申请和邀请入群默认按配置自动同意；机器人自身入群成功后会优先私聊通知邀请者，文案包含群名和群号，不在群聊里发送“主人”自报。双平台 `both/full` 下，新成员入群欢迎只由固定命令 owner 账号发送，另一个棉花糖入群不会触发欢迎，避免双 bot 在群里互相刷屏。
 
-`astrbot_plugin_reply_style_guard` 负责给 bot2 的 LLM 请求注入输出风格硬规则，并在发送前清洗 Markdown、末尾问句和追问式邀请：普通回复、主动回复和拒答都不要使用 `#` 标题、`**粗体**`、代码块、Markdown 链接或表格，不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”这类追问式收尾；回答 API、JSON、请求体、配置时允许保留换行和缩进，但不使用 Markdown 代码围栏。插件会在本地日志记录 LLM 请求开始、模型返回和发送前装饰耗时，不记录完整 prompt 或回复正文；按当前 AstrBot 分段正则预估会拆成 4 条以上的 LLM 回复不再分段。能答就直接给结论；长作文或慢请求不按固定秒数丢弃，是否失败以 provider timeout/error/fallback 日志为准。群聊和私聊会话都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析，分析不出发言原因时不回答。
+`astrbot_plugin_reply_style_guard` 负责给 bot2 的 LLM 请求注入输出风格硬规则，并在发送前清洗 Markdown、末尾问句和追问式邀请：普通回复、主动回复和拒答都不要使用 `#` 标题、`**粗体**`、代码块、Markdown 链接或表格，不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”这类追问式收尾；回答 API、JSON、请求体、配置时允许保留换行和缩进，但不使用 Markdown 代码围栏。非“主人私聊”时，插件会在 LLM 请求前剔除本机命令、Python、文件读写、grep、浏览器、上传下载等运行态工具，并禁止提示用户去 WebUI 添加管理员或开启 shell/文件权限。插件会在本地日志记录 LLM 请求开始、模型返回和发送前装饰耗时，不记录完整 prompt 或回复正文；按当前 AstrBot 分段正则预估会拆成 4 条以上的 LLM 回复不再分段。能答就直接给结论；长作文或慢请求不按固定秒数丢弃，是否失败以 provider timeout/error/fallback 日志为准。群聊和私聊会话都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析，分析不出发言原因时不回答。
 
 普通聊天文本不会因为 `在吗`、`111`、`真的吗`、`回复慢`、`低信息` 或测试探活这类启发式在本地插件里直接生成固定回复；没有命中明确命令、游戏会话答案、协议事件处理或本地硬安全提醒时，统一交给 LLM 链路。
 

@@ -1,6 +1,6 @@
 name: astrbot_plugin_qqbot_features
 display_name: 棉花糖功能合集
 desc: "承接从 NoneBot2 迁移到 AstrBot 的群务、菜单、生图、美图、复读、戳一戳、养鲲、落樱、Arcaea、Factorio 和异形工厂固定功能。"
-version: v0.9.6
+version: v0.9.7
 author: MengLei
 repo: ""

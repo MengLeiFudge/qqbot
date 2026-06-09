@@ -29,6 +29,8 @@ from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
 from .menu_image import render_overview_menu_image
+from .note_export import GroupNoteExportError
+from .note_export import export_group_notes_markdown
 from .rightcodes_draw_logic import RightCodesDrawClient
 from .rightcodes_draw_logic import RightCodesDrawQuotaStore
 from .rightcodes_draw_logic import format_draw_quota_exceeded_message
@@ -64,6 +66,10 @@ FACTORIO_DOWNLOAD_PATTERN = (
 )
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单\s*(?!\d+$)\S+$"
+NOTE_EXPORT_PATTERN = (
+    r"^(?:棉花(?:记录|导出(?:md|MD)?)(?:\s*[0-9]{1,3})?|"
+    r"(?:记录|导出).*(?:对话|聊天记录|群聊记录).*(?:md|MD|markdown|Markdown|\.md|文件|当前目录).*)$"
+)
 GROUP_FILE_CLEANUP_PATTERN = r"^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
 LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
 LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
@@ -110,6 +116,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         aliases=("群管", "群管理", "群功能"),
         lines=(
             "通知清理文件：作者或机器人自身限定，统计超过一周的外层群文件并按大小禁言上传者",
+            "棉花记录 [数量] / 棉花导出md [数量]：主人限定，导出公开群上下文到固定 md 目录",
         ),
     ),
     FeatureSpec(
@@ -244,7 +251,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏和工具类固定功能合集。",
-    "0.9.6",
+    "0.9.7",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -327,6 +334,34 @@ class QQBotFeaturesPlugin(Star):
             await run_group_file_cleanup(event)
         except Exception as exc:
             yield event.plain_result(f"群文件清理失败：{exc}")
+        event.stop_event()
+
+    @filter.regex(NOTE_EXPORT_PATTERN, desc="主人限定的群聊记录导出命令，只读公开群上下文并写入固定安全目录。")
+    async def group_note_export(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode):
+            return
+        if event.is_private_chat() or not event.get_group_id():
+            yield event.plain_result("群聊记录导出只能在群聊中使用。")
+            event.stop_event()
+            return
+        if str(event.get_sender_id() or "") != OWNER_QQ:
+            yield event.plain_result("这个导出只允许主人使用。")
+            event.stop_event()
+            return
+        try:
+            result = await asyncio.to_thread(
+                export_group_notes_markdown,
+                group_id=str(event.get_group_id()),
+                text=event.get_message_str(),
+            )
+        except GroupNoteExportError as exc:
+            yield _chain_result_with_reply(event, [Plain(str(exc))])
+            event.stop_event()
+            return
+        yield _chain_result_with_reply(
+            event,
+            [Plain(f"已导出最近 {result.count} 条公开群聊记录：\n{result.path}")],
+        )
         event.stop_event()
 
     @filter.regex(FACTORIO_DOWNLOAD_PATTERN, desc="获取 Factorio Space Age Windows 安装包下载链接，需要本机已配置 Factorio 凭据。")

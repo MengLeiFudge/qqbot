@@ -15,6 +15,7 @@ from astrbot.core.message.components import Plain
 
 from .logic import DEFAULT_SEGMENTED_REPLY_REGEX
 from .logic import build_fold_notice
+from .logic import is_dangerous_local_tool_name
 from .logic import normalize_fold_threshold
 from .logic import sanitize_reply_plain_text
 from .logic import should_disable_segmented_reply_for_text
@@ -37,6 +38,12 @@ STYLE_GUARD_TEXT = (
     "“这个月一顿没吃饭/没睡觉”默认是在骗你或玩时间梗，可能只是这个月刚过了一天。"
     "如果分析不出对方这么说的原因，就不要回答；不要编原因，不要输出危机干预、急救、报警、健康建议或严肃安慰。"
     "拒绝盗版、破解、违规网站等请求时，直接拒绝并给正版渠道或安全替代，不追加索要具体名称。"
+)
+LOCAL_TOOL_GUARD_TEXT = (
+    "本轮不是“主人私聊”时，不得使用或建议使用本机命令、Python、文件读写、grep、浏览器或上传下载工具。"
+    "不得建议用户去 AstrBot WebUI 添加管理员、开启 shell 权限、开启文件权限或修改后台权限。"
+    "群聊中如果用户要求记录对话、写文件或导出 md，只能说明需要使用已授权的固定导出命令；"
+    "不要编造自己可以写当前目录，也不要指导普通群友提升权限。"
 )
 OWNER_QQ = "605738729"
 OWNER_NAME = "萌泪酱"
@@ -78,7 +85,7 @@ PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.i
     "astrbot_plugin_reply_style_guard",
     "MengLei",
     "为棉花糖注入身份和输出风格边界，记录 LLM 耗时，并控制过多分段。",
-    "0.1.9",
+    "0.1.10",
 )
 class ReplyStyleGuardPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -114,6 +121,13 @@ class ReplyStyleGuardPlugin(Star):
             len(req.audio_urls or []),
             bool(req.func_tool),
         )
+        removed_tools = remove_forbidden_local_tools(event, req)
+        if removed_tools:
+            logger.info(
+                "[ReplyStyleGuard] removed local tools for non-owner-private request: session=%s tools=%s",
+                getattr(event, "unified_msg_origin", ""),
+                ",".join(removed_tools),
+            )
         identity_anchor = build_sender_identity_anchor_text(
             sender_id=safe_event_value(event, "get_sender_id"),
             sender_name=safe_event_value(event, "get_sender_name"),
@@ -122,6 +136,8 @@ class ReplyStyleGuardPlugin(Star):
         req.system_prompt = f"{req.system_prompt or ''}\n# Bot Identity Profile\n\n{bot_profile}\n"
         req.extra_user_content_parts.append(TextPart(text=identity_anchor).mark_as_temp())
         req.extra_user_content_parts.append(TextPart(text=STYLE_GUARD_TEXT).mark_as_temp())
+        if not allow_local_runtime_tools(event):
+            req.extra_user_content_parts.append(TextPart(text=LOCAL_TOOL_GUARD_TEXT).mark_as_temp())
 
     @filter.on_llm_response(desc="记录 LLM 返回耗时，帮助区分上游仍在处理、已返回或已失败。")
     async def log_llm_response_latency(self, event: AstrMessageEvent, response: LLMResponse):
@@ -374,6 +390,31 @@ def _extract_message_id(value: Any) -> str:
         if raw not in (None, ""):
             return str(raw)
     return ""
+
+
+def allow_local_runtime_tools(event: AstrMessageEvent) -> bool:
+    return event.is_private_chat() and safe_event_value(event, "get_sender_id") == OWNER_QQ
+
+
+def remove_forbidden_local_tools(event: AstrMessageEvent, req: ProviderRequest) -> list[str]:
+    toolset = getattr(req, "func_tool", None)
+    if toolset is None or allow_local_runtime_tools(event):
+        return []
+    tools = list(getattr(toolset, "tools", []) or [])
+    removed: list[str] = []
+    for tool in tools:
+        name = str(getattr(tool, "name", "") or "").strip()
+        if not is_dangerous_local_tool_name(name):
+            continue
+        remover = getattr(toolset, "remove_tool", None)
+        if callable(remover):
+            remover(name)
+        else:
+            toolset.tools = [candidate for candidate in getattr(toolset, "tools", []) if getattr(candidate, "name", "") != name]
+        removed.append(name)
+    if getattr(toolset, "empty", None) and toolset.empty():
+        req.func_tool = None
+    return removed
 
 
 def read_bot_display_name(event: AstrMessageEvent) -> str:

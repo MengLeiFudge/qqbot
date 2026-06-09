@@ -7,6 +7,53 @@ DEFAULT_SEGMENTED_REPLY_REGEX = r".*?[。？！~…]+|.+$"
 MAX_SEGMENTED_REPLY_PARTS = 3
 DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
 FORWARD_NODE_TEXT_CHARS = 4000
+DANGEROUS_LOCAL_TOOL_NAMES = frozenset(
+    {
+        "astrbot_execute_shell",
+        "astrbot_execute_python",
+        "astrbot_execute_ipython",
+        "astrbot_file_read_tool",
+        "astrbot_read_file_tool",
+        "astrbot_file_write_tool",
+        "astrbot_file_edit_tool",
+        "astrbot_grep_tool",
+        "astrbot_upload_file",
+        "astrbot_download_file",
+        "astrbot_cua_screenshot",
+        "astrbot_cua_mouse_click",
+        "astrbot_cua_keyboard_type",
+        "astrbot_execute_browser",
+        "astrbot_execute_browser_batch",
+        "astrbot_run_browser_skill",
+        "execute_shell",
+        "shell",
+        "local_python",
+        "python",
+        "file_read",
+        "file_write",
+        "file_edit",
+        "grep",
+        "upload",
+        "download",
+        "browser",
+        "cua",
+    }
+)
+DANGEROUS_LOCAL_TOOL_KEYWORDS = (
+    "execute_shell",
+    "execute_python",
+    "execute_ipython",
+    "file_read",
+    "read_file",
+    "file_write",
+    "file_edit",
+    "grep",
+    "upload_file",
+    "download_file",
+    "execute_browser",
+    "run_browser",
+    "cua_",
+)
 _TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
 _FOLLOWUP_MARKERS = (
     "如果你愿意",
@@ -36,10 +83,89 @@ _FOLLOWUP_MARKERS = (
     "帮你分辨",
     "教你怎么",
 )
+_PERMISSION_ESCALATION_MARKERS = (
+    "webui",
+    "管理员列表",
+    "管理员",
+    "shell权限",
+    "shell 权限",
+    "文件权限",
+    "写文件权限",
+    "本机权限",
+    "后台权限",
+    "开shell",
+    "开启shell",
+    "开了shell",
+    "添加管理员",
+    "加进管理员",
+    "shell",
+)
+_PERMISSION_ESCALATION_ACTIONS = (
+    "去",
+    "进",
+    "打开",
+    "添加",
+    "加进",
+    "开启",
+    "打开",
+    "配置",
+    "改",
+    "设置",
+    "授权",
+)
 
 
 def sanitize_reply_plain_text(text: str) -> str:
-    return strip_followup_tail(strip_markdown_syntax(text))
+    return strip_followup_tail(strip_permission_escalation_advice(strip_markdown_syntax(text)))
+
+
+def is_dangerous_local_tool_name(name: object) -> bool:
+    normalized = str(name or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in DANGEROUS_LOCAL_TOOL_NAMES:
+        return True
+    if not normalized.startswith("astrbot_"):
+        return False
+    return any(keyword in normalized for keyword in DANGEROUS_LOCAL_TOOL_KEYWORDS)
+
+
+def strip_permission_escalation_advice(text: str) -> str:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return ""
+    lines: list[str] = []
+    stripped_any = False
+    for raw_line in normalized.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if is_permission_escalation_advice_line(line):
+            stripped_any = True
+            continue
+        lines.append(raw_line.rstrip())
+    result = "\n".join(line for line in lines if line.strip()).strip()
+    if result:
+        return result
+    if stripped_any:
+        return "我不能通过聊天申请或开启本机文件、命令执行权限。"
+    return normalized
+
+
+def is_permission_escalation_advice_line(line: str) -> bool:
+    compact = re.sub(r"\s+", "", str(line or "")).lower()
+    if not compact:
+        return False
+    has_marker = any(marker.replace(" ", "").lower() in compact for marker in _PERMISSION_ESCALATION_MARKERS)
+    has_action = any(action.replace(" ", "").lower() in compact for action in _PERMISSION_ESCALATION_ACTIONS)
+    if has_marker and has_action:
+        return True
+    if "写文件权限" in compact and ("没有" in compact or "没" in compact or "无法" in compact):
+        return True
+    return (
+        ("写文件权限" in compact or "shell权限" in compact or "文件权限" in compact)
+        and ("管理员" in compact or "webui" in compact or "授权" in compact)
+    )
 
 
 def normalize_fold_threshold(value: object, *, default: int = DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS) -> int:
