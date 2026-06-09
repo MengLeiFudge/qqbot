@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import os
+import time
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
-from astrbot.api.provider import ProviderRequest
+from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
+from astrbot.core.message.message_event_result import ResultContentType
 from astrbot.core.message.components import Plain
 
+from .logic import DEFAULT_SEGMENTED_REPLY_REGEX
 from .logic import sanitize_reply_plain_text
+from .logic import should_disable_segmented_reply_for_text
 
 
 STYLE_GUARD_TEXT = (
     "输出硬规则：不要反问用户，不要用问句收尾，不要追问用户补充信息。"
     "严格使用纯文本，不要输出 Markdown 语法：不要用 # 标题、- 或 * 列表、**粗体**、"
     "`代码块`、> 引用、Markdown 链接或表格。"
+    "回答 API、JSON、请求体、配置时可以保留换行和缩进，但不要用 Markdown 代码围栏。"
     "不要使用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”"
     "“我帮你看/挑/认/分辨”这类追问式邀请收尾。"
     "能回答就直接给结论；不能做就直接拒绝并给合法、可执行替代；"
@@ -32,6 +37,8 @@ OWNER_QQ = "605738729"
 OWNER_NAME = "萌泪酱"
 PROFILE_ENV = "QQBOT_ASTRBOT_PROFILE"
 DEFAULT_PROFILE = "demon"
+LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
+LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
 BOT_PROFILES = {
     "angel": {
         "bot_id": "1443944862",
@@ -64,8 +71,8 @@ PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.i
 @register(
     "astrbot_plugin_reply_style_guard",
     "MengLei",
-    "为棉花糖注入身份和输出风格边界，并清理 Markdown 和追问式收尾。",
-    "0.1.6",
+    "为棉花糖注入身份和输出风格边界，记录 LLM 耗时，并控制过多分段。",
+    "0.1.8",
 )
 class ReplyStyleGuardPlugin(Star):
     def __init__(self, context: Context):
@@ -74,6 +81,21 @@ class ReplyStyleGuardPlugin(Star):
 
     @filter.on_llm_request(desc="在 LLM 请求前注入当前 bot 身份、主人识别和不反问不追问的输出硬规则。")
     async def inject_reply_style_guard(self, event: AstrMessageEvent, req: ProviderRequest):
+        started = time.monotonic()
+        event.set_extra(LLM_STARTED_AT_EXTRA, started)
+        event.set_extra(LLM_REQUEST_SESSION_EXTRA, req.session_id or "")
+        logger.info(
+            "[ReplyStyleGuard] LLM request started: session=%s message_type=%s "
+            "request_session=%s model=%s prompt_chars=%s image_count=%s audio_count=%s has_tools=%s",
+            getattr(event, "unified_msg_origin", ""),
+            safe_event_value(event, "get_message_type"),
+            req.session_id or "",
+            req.model or "",
+            len(req.prompt or ""),
+            len(req.image_urls or []),
+            len(req.audio_urls or []),
+            bool(req.func_tool),
+        )
         identity_anchor = build_sender_identity_anchor_text(
             sender_id=safe_event_value(event, "get_sender_id"),
             sender_name=safe_event_value(event, "get_sender_name"),
@@ -83,11 +105,38 @@ class ReplyStyleGuardPlugin(Star):
         req.extra_user_content_parts.append(TextPart(text=identity_anchor).mark_as_temp())
         req.extra_user_content_parts.append(TextPart(text=STYLE_GUARD_TEXT).mark_as_temp())
 
+    @filter.on_llm_response(desc="记录 LLM 返回耗时，帮助区分上游仍在处理、已返回或已失败。")
+    async def log_llm_response_latency(self, event: AstrMessageEvent, response: LLMResponse):
+        started = event.get_extra(LLM_STARTED_AT_EXTRA)
+        elapsed = time.monotonic() - started if isinstance(started, (int, float)) else -1.0
+        logger.info(
+            "[ReplyStyleGuard] LLM response returned: session=%s request_session=%s "
+            "elapsed=%.2fs has_text=%s has_chain=%s has_tool_call=%s has_reasoning=%s is_chunk=%s",
+            getattr(event, "unified_msg_origin", ""),
+            event.get_extra(LLM_REQUEST_SESSION_EXTRA, ""),
+            elapsed,
+            bool((getattr(response, "completion_text", "") or "").strip()) if response else False,
+            bool(getattr(response, "result_chain", None)) if response else False,
+            bool(getattr(response, "tools_call_args", None)) if response else False,
+            bool((getattr(response, "reasoning_content", "") or "").strip()) if response else False,
+            bool(getattr(response, "is_chunk", False)) if response else False,
+        )
+
     @filter.on_decorating_result(desc="在消息发送前清理 Markdown、追问式、反问式或空洞邀请式收尾。")
     async def strip_reply_style_tail(self, event: AstrMessageEvent):
         result = event.get_result()
         if result is None or not result.chain:
             return
+        started = event.get_extra(LLM_STARTED_AT_EXTRA)
+        if isinstance(started, (int, float)):
+            logger.info(
+                "[ReplyStyleGuard] decorating reply result: session=%s request_session=%s "
+                "elapsed=%.2fs chain_items=%s",
+                getattr(event, "unified_msg_origin", ""),
+                event.get_extra(LLM_REQUEST_SESSION_EXTRA, ""),
+                time.monotonic() - started,
+                len(result.chain),
+            )
         changed = False
         if hasattr(result, "use_markdown"):
             result.use_markdown(False)
@@ -108,6 +157,12 @@ class ReplyStyleGuardPlugin(Star):
                 "[ReplyStyleGuard] sanitized reply style: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
+        if _should_disable_segmented_reply_for_result(self.context, result):
+            result.set_result_content_type(ResultContentType.GENERAL_RESULT)
+            logger.info(
+                "[ReplyStyleGuard] disabled segmented reply for long multi-part LLM result: session=%s",
+                getattr(event, "unified_msg_origin", ""),
+            )
 
 
 def safe_event_value(event: AstrMessageEvent, method_name: str) -> str:
@@ -118,6 +173,45 @@ def safe_event_value(event: AstrMessageEvent, method_name: str) -> str:
         return str(method() or "").strip()
     except Exception:
         return ""
+
+
+def _should_disable_segmented_reply_for_result(context: Context, result) -> bool:
+    if result is None or not result.is_model_result():
+        return False
+    segmented_reply = _read_segmented_reply_config(context)
+    if segmented_reply.get("enable") is not True:
+        return False
+    if segmented_reply.get("only_llm_result", True) is not True:
+        return False
+    if str(segmented_reply.get("split_mode", "regex")) != "regex":
+        return False
+    regex = str(segmented_reply.get("regex") or DEFAULT_SEGMENTED_REPLY_REGEX)
+    cleanup = str(segmented_reply.get("content_cleanup_rule") or "")
+    for comp in result.chain:
+        if isinstance(comp, Plain) and should_disable_segmented_reply_for_text(
+            comp.text,
+            regex=regex,
+            content_cleanup_rule=cleanup,
+        ):
+            return True
+    return False
+
+
+def _read_segmented_reply_config(context: Context) -> dict:
+    get_config = getattr(context, "get_config", None)
+    config = None
+    if callable(get_config):
+        try:
+            config = get_config()
+        except Exception:
+            config = None
+    if not isinstance(config, dict):
+        return {}
+    platform_settings = config.get("platform_settings")
+    if not isinstance(platform_settings, dict):
+        return {}
+    segmented_reply = platform_settings.get("segmented_reply")
+    return segmented_reply if isinstance(segmented_reply, dict) else {}
 
 
 def build_sender_identity_anchor_text(

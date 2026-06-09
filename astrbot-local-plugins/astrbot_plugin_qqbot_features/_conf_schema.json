@@ -37,5 +37,11 @@
     "type": "int",
     "default": 1000,
     "hint": "与 bot1 保持一致：模型美元价格 x 倍率后向上取整。"
+  },
+  "draw_timeout_seconds": {
+    "description": "RightCodes 生图总超时秒数",
+    "type": "int",
+    "default": 240,
+    "hint": "生图通常超过 1 分钟；超过该时间仍未返回时，插件回复失败并退回本次扣除的积分或免费次数。"
   }
 }

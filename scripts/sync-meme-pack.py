@@ -116,12 +116,13 @@ def _update_astrbot_config(auto_categories: list[str]) -> None:
     prompt.update(
         {
             "prompt_head": (
-                "表情规则：轻松日常可最多使用 1 个 &&标签&&，可不用；"
-                "也可以只输出 1 个 &&标签&& 作为纯表情回复；只从下列标签选择。"
+                "表情规则：轻松日常、玩梗、吐槽、撒娇、短情绪回复应优先使用 1 个 &&标签&&；"
+                "当只需要表达态度、情绪或敷衍短应答时，可以只输出 1 个 &&标签&& 作为纯表情回复，不要再配文字；"
+                "只有从下列标签中选择，不能编造标签。"
             ),
             "prompt_tail_1": (
                 "严肃、技术、报错、安全、群管理、长解释场景不要用表情；"
-                "不要空行；回复仍需短。最多 "
+                "普通问答如需要解释，可以文字后带 1 个表情；短情绪闲聊优先纯表情。不要空行；回复仍需短。最多 "
             ),
             "prompt_tail_2": " 个。",
         }
@@ -129,7 +130,7 @@ def _update_astrbot_config(auto_categories: list[str]) -> None:
     config["prompt"] = prompt
     config["emotion_llm_enabled"] = False
     config["max_emotions_per_message"] = 1
-    config["emotions_probability"] = 70
+    config["emotions_probability"] = 95
     config["strict_max_emotions_per_message"] = True
     config["enable_loose_emotion_matching"] = True
     config["enable_alternative_markup"] = True
@@ -138,7 +139,7 @@ def _update_astrbot_config(auto_categories: list[str]) -> None:
     config["high_confidence_emotions"] = auto_categories
     config["content_cleanup_rule"] = r"&&[a-zA-Z0-9_\-]+&&"
     config["enable_mixed_message"] = True
-    config["mixed_message_probability"] = 80
+    config["mixed_message_probability"] = 95
     config["streaming_compatibility"] = False
 
     ASTRBOT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

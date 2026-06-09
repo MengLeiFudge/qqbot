@@ -6,6 +6,7 @@ import re
 
 
 DUAL_PLATFORM_DUPLICATE_WINDOW_SECONDS = 3.0
+ACTIVE_REPLY_INFLIGHT_LEASE_SECONDS = 600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +111,24 @@ def active_reply_scope_key(event) -> str:
     if group_id:
         return f"group:{group_id}"
     return str(getattr(event, "unified_msg_origin", "") or "")
+
+
+def try_acquire_active_reply_inflight(
+    inflight: dict[str, float],
+    scope_key: str,
+    *,
+    now: float,
+    lease_seconds: float = ACTIVE_REPLY_INFLIGHT_LEASE_SECONDS,
+) -> bool:
+    existing = inflight.get(scope_key)
+    if existing is not None and now - existing < lease_seconds:
+        return False
+    inflight[scope_key] = now
+    return True
+
+
+def release_active_reply_inflight(inflight: dict[str, float], scope_key: str) -> None:
+    inflight.pop(scope_key, None)
 
 
 def is_recent_duplicate_observation(

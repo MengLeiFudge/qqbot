@@ -36,6 +36,10 @@
 - `棉花糖生图 [模型名] <提示词>`
   - 提交 RightCodes 生图任务。
   - 支持积分扣除、失败退回、图片结果发送。
+  - 生图成功、失败或超时失败都会引用原始生图请求；默认 240 秒总超时，超时后回复失败并退回本次扣除的积分或免费次数。
+- RightCodes 生图接口知识库
+  - 用户询问 RightCodes 画图接口、`body`、`size`、`1024x1024`、`/v1/images/generations` 或 `/v1/chat/completions` 时，会在 LLM 请求前注入官方接口资料。
+  - `POST /v1/images/generations` 支持 `size` 字段，形如 `"1024x1024"`；流式防超时建议走 `/v1/chat/completions` 并设置 `stream=true`。
 - `生图模型` / `生图价格`
   - 查看可用模型和消耗说明。
 - `查看积分` / `balance` / `points`

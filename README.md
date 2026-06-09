@@ -35,7 +35,9 @@ AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps
 `astrbot_plugin_local_artifact_api` 负责 bot2 的本地构建产物发布兼容入口。AstrBot `full` 模式下会在 `127.0.0.1:8080` 提供 `POST /admin/api/artifacts/publish-local`，保持原 NoneBot2 localhost-only 请求体、Git 上下文校验、SHA 跳过策略和 OneBot 群文件上传行为，供 `AfterBuildEvent.exe 1` 这类本机白名单构建流程继续发布 zip 产物。
 `scripts\start-all.ps1 -Target astrbot -FeatureMode full` 会在启动前确认 `8080` 不是 NoneBot2 管理端，清理旧的 artifact API 占用，并在启动验证中等待 `6185`、`6200/6201` 和 `8080` 都就绪；如果 artifact API 绑定失败，启动入口会失败而不是只报告 AstrBot WebUI ready。
 
-RightCodes 生图命令已归入 `astrbot_plugin_qqbot_features`。默认复用 `data\nonebot2\run\ai\draw_points.json`，保持 bot1/bot2 双开迁移期间积分连续；`dual` 模式下 bot1 在线时不重复累计普通群消息积分，`full` 模式或 bot1 离线时由 AstrBot 累计群消息积分。双平台 `both/full` 下只有固定命令 owner 账号累计普通群消息积分，避免天使和恶魔同群时同一消息重复记分。RightCodes API Key 默认读取 `QQBOT_AI_KEY_RIGHTCODES` 环境变量，也会兜底读取 `data\nonebot2\config\.env` 同名项。
+RightCodes 生图命令已归入 `astrbot_plugin_qqbot_features`。默认复用 `data\nonebot2\run\ai\draw_points.json`，保持 bot1/bot2 双开迁移期间积分连续；`dual` 模式下 bot1 在线时不重复累计普通群消息积分，`full` 模式或 bot1 离线时由 AstrBot 累计群消息积分。双平台 `both/full` 下只有固定命令 owner 账号累计普通群消息积分，避免天使和恶魔同群时同一消息重复记分。RightCodes API Key 默认读取 `QQBOT_AI_KEY_RIGHTCODES` 环境变量，也会兜底读取 `data\nonebot2\config\.env` 同名项。生图成功、失败或超时失败都会引用原始请求；默认 240 秒总超时，超时失败会退回本次扣除的积分或免费次数。
+
+RightCodes 生图接口问答也归入 `astrbot_plugin_qqbot_features` 的静态知识 catalog。用户问 RightCodes 画图接口、请求体、`size`、`1024x1024`、`/v1/images/generations` 或 `/v1/chat/completions` 时，插件会在 LLM 请求前注入官方文档摘要：`/v1/images/generations` 支持 `size` 字段，`/v1/chat/completions` 适合流式防超时。
 
 `astrbot_plugin_qqbot_features` 默认使用 `dual` 模式：bot1 和 bot2 同时在线时，AstrBot 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 NoneBot2 负责，避免同一事件双机器人重复回应。以后切换到 AstrBot-only 时，先停用 bot1，再使用 `scripts\start-astrbot.bat` 启动同一 AstrBot 管理端内的天使+恶魔双平台，或显式运行 `scripts\start-all.ps1 -Target astrbot -SkipInstall -AstrBotProfile both -FeatureMode full`。环境变量 `QQBOT_ASTRBOT_FEATURE_MODE` 会覆盖插件配置。启动脚本会阻止 `full` 模式和 NoneBot2 双开。
 
@@ -51,15 +53,15 @@ AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参
 
 `astrbot_plugin_source_knowledge` 负责 bot2 的源码知识兜底：在没有 Embedding 模型、不能使用 AstrBot 原生知识库时，它会按当前群号和问题文本只读检索本机源码树，并把少量相关源码片段临时注入本轮 LLM 请求。默认源码根覆盖 DSPCore、万物分馏、星环、创世之书、shapez 和 Factorio 模组源码；可信依据优先是源码、反编译源码、源码邻近 README/设计文档和配置数据。插件跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件，不读取私聊、运行日志、token、QQ 登录态、运行态 `data` 或数据库密钥。
 
-`astrbot_plugin_topic_concentration` 负责 bot2 的普通群聊主动接话门控：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用短窗口话题判断、弱窗口过滤、组级冷却、同话题冷却和 bot1 消息过滤决定是否放行。它不主动发送最终回复，只控制 Core active reply 是否继续执行。provider 选择、模型切换和回退链只使用 AstrBot 当前会话配置；插件不提供独立 provider 顺序或判定专用模型配置，判定失败时静默跳过本次主动接话。
+`astrbot_plugin_topic_concentration` 负责 bot2 的普通群聊主动接话门控：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用短窗口话题判断、弱窗口过滤、同群 in-flight、组级冷却、同话题冷却和 bot1 消息过滤决定是否放行。它不主动发送最终回复，只控制 Core active reply 是否继续执行。provider 选择、模型切换和回退链只使用 AstrBot 当前会话配置；插件不提供独立 provider 顺序或判定专用模型配置，判定失败时静默跳过本次主动接话。明确 @ 和私聊不会被主动接话 in-flight 拦截。
 
 `astrbot_plugin_qqbot_features` 负责已迁移的群务、菜单、生图、游戏和固定命令。好友申请和邀请入群默认按配置自动同意；机器人自身入群成功后会优先私聊通知邀请者，文案包含群名和群号，不在群聊里发送“主人”自报。双平台 `both/full` 下，新成员入群欢迎只由固定命令 owner 账号发送，另一个棉花糖入群不会触发欢迎，避免双 bot 在群里互相刷屏。
 
-`astrbot_plugin_reply_style_guard` 负责给 bot2 的 LLM 请求注入输出风格硬规则，并在发送前清洗 Markdown、末尾问句和追问式邀请：普通回复、主动回复和拒答都不要使用 `#` 标题、`**粗体**`、代码块、Markdown 链接或表格，不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”这类追问式收尾；能答就直接给结论，不能答就给合法可执行替代。群聊和私聊会话都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析，分析不出发言原因时不回答。
+`astrbot_plugin_reply_style_guard` 负责给 bot2 的 LLM 请求注入输出风格硬规则，并在发送前清洗 Markdown、末尾问句和追问式邀请：普通回复、主动回复和拒答都不要使用 `#` 标题、`**粗体**`、代码块、Markdown 链接或表格，不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”这类追问式收尾；回答 API、JSON、请求体、配置时允许保留换行和缩进，但不使用 Markdown 代码围栏。插件会在本地日志记录 LLM 请求开始、模型返回和发送前装饰耗时，不记录完整 prompt 或回复正文；按当前 AstrBot 分段正则预估会拆成 4 条以上的 LLM 回复不再分段。能答就直接给结论；长作文或慢请求不按固定秒数丢弃，是否失败以 provider timeout/error/fallback 日志为准。群聊和私聊会话都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析，分析不出发言原因时不回答。
 
 普通聊天文本不会因为 `在吗`、`111`、`真的吗`、`回复慢`、`低信息` 或测试探活这类启发式在本地插件里直接生成固定回复；没有命中明确命令、游戏会话答案、协议事件处理或本地硬安全提醒时，统一交给 LLM 链路。
 
-本地表情包由 `data\memes\mlj_pack\index.json` 描述每张图的分类、用途和禁用场景。`scripts\sync-meme-pack.py` 会把可自动发送类别同步到 AstrBot `meme_manager` 运行态目录并提高发送概率；bot1 在普通短 AI 回复发送前按同一索引追加 0-1 张图，短情绪闲聊允许只发一张表情不带文字，技术、报错、安全、群管理和长解释场景不自动附图。
+本地表情包由 `data\memes\mlj_pack\index.json` 描述每张图的分类、用途和禁用场景。`scripts\sync-meme-pack.py` 会把可自动发送类别同步到 AstrBot `meme_manager` 运行态目录，并把轻松日常、玩梗、吐槽、撒娇、短情绪回复调成优先使用表情；短情绪闲聊允许只发一张表情不带文字，技术、报错、安全、群管理和长解释场景不自动附图。bot1 在普通短 AI 回复发送前按同一索引追加 0-1 张图。
 
 ## 启动
 

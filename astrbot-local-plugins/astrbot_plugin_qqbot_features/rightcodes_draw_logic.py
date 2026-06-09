@@ -102,6 +102,13 @@ class RightCodesConfig:
     data_root: Path
     api_key_env: str
     point_multiplier: int
+    draw_timeout_seconds: float
+
+
+class RightCodesDrawTimeoutError(TimeoutError):
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"RightCodes 生图超过 {timeout_seconds:.0f} 秒未返回")
 
 
 class AsyncDrawHttpClient(Protocol):
@@ -309,6 +316,10 @@ def load_rightcodes_config(config=None) -> RightCodesConfig:
         api_key_env=str(get_config_value(config, "api_key_env", "QQBOT_AI_KEY_RIGHTCODES") or "").strip()
         or "QQBOT_AI_KEY_RIGHTCODES",
         point_multiplier=max(1, safe_int(get_config_value(config, "point_multiplier", 1000), 1000)),
+        draw_timeout_seconds=max(
+            30.0,
+            float(safe_int(get_config_value(config, "draw_timeout_seconds", 240), 240)),
+        ),
     )
 
 
@@ -504,7 +515,18 @@ def format_rightcodes_draw_failure(exc: Exception) -> str:
     return f"❌ 生成失败: {extract_rightcodes_draw_error_message(exc)}"
 
 
+def format_rightcodes_draw_timeout(timeout_seconds: float) -> str:
+    return (
+        f"❌ 生成失败: RightCodes 生图超过 {timeout_seconds:.0f} 秒还没返回，"
+        "本次扣除的积分或免费次数已退回。"
+    )
+
+
 def extract_rightcodes_draw_error_message(exc: Exception) -> str:
+    if isinstance(exc, RightCodesDrawTimeoutError):
+        return f"RightCodes 生图超过 {exc.timeout_seconds:.0f} 秒未返回"
+    if isinstance(exc, TimeoutError):
+        return "RightCodes 生图请求超时"
     if isinstance(exc, HTTPError):
         detail = read_http_error_detail(exc)
         return detail or f"上游返回 HTTP {exc.code}"

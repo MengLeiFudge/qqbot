@@ -16,12 +16,14 @@ from .logic import TopicDecision
 from .logic import TopicInterest
 from .logic import TopicRecordResult
 from .logic import TopicWindowMessage
+from .logic import release_active_reply_inflight as _release_active_reply_inflight
 from .logic import active_reply_scope_key as _active_reply_scope_key
 from .logic import chat_with_current_provider as _chat_with_current_decision_provider
 from .logic import compact_text as _compact
 from .logic import has_strong_topic_signal as _has_strong_topic_signal
 from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
 from .logic import looks_like_low_information as _looks_like_low_information
+from .logic import try_acquire_active_reply_inflight as _try_acquire_active_reply_inflight
 
 
 WINDOW_SECONDS = 150.0
@@ -44,13 +46,14 @@ _WINDOWS: dict[str, deque[TopicWindowMessage]] = defaultdict(deque)
 _COOLDOWNS: dict[tuple[str, str], float] = {}
 _GROUP_COOLDOWNS: dict[str, float] = {}
 _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
+_ACTIVE_REPLY_INFLIGHT: dict[str, float] = {}
 
 
 @register(
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖普通群聊主动接话门控。",
-    "0.3.5",
+    "0.3.6",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -115,38 +118,56 @@ class TopicConcentrationPlugin(Star):
                     f"group={event.get_group_id()} left={group_cooldown_until - now:.1f}s"
                 )
                 return False
-            decision = await _decide_with_ai(group_context, event, record.window, scope_key=scope_key)
-            if decision is None:
-                logger.info(f"[TopicConcentration] skip active reply: group={event.get_group_id()} reason=decision_failed")
-                return False
-            if not decision.should_reply:
-                logger.debug(
-                    "[TopicConcentration] skip active reply: "
-                    f"group={event.get_group_id()} topic={decision.topic_key} "
-                    f"type={decision.topic_type} reason={decision.reason}"
-                )
-                return False
-
-            cooldown_key = (scope_key, decision.topic_key)
-            cooldown_until = _COOLDOWNS.get(cooldown_key, 0.0)
-            if now < cooldown_until:
+            if not _try_acquire_active_reply_inflight(_ACTIVE_REPLY_INFLIGHT, scope_key, now=now):
                 logger.info(
-                    "[TopicConcentration] cooldown active reply: "
-                    f"group={event.get_group_id()} topic={decision.topic_key} "
-                    f"left={cooldown_until - now:.1f}s"
+                    "[TopicConcentration] skip active reply: "
+                    f"group={event.get_group_id()} reason=inflight"
                 )
                 return False
-
-            _COOLDOWNS[cooldown_key] = now + COOLDOWN_SECONDS
-            _GROUP_COOLDOWNS[scope_key] = now + GROUP_COOLDOWN_SECONDS
-            _set_interest(scope_key, decision)
+            started = time.monotonic()
             logger.info(
-                "[TopicConcentration] allow active reply: "
-                f"group={event.get_group_id()} topic={decision.topic_key} "
-                f"type={decision.topic_type} style={decision.reply_style} "
-                f"max_length={decision.max_length} reason={decision.reason}"
+                "[TopicConcentration] active reply decision started: "
+                f"group={event.get_group_id()} scope={scope_key}"
             )
-            return True
+            try:
+                decision = await _decide_with_ai(group_context, event, record.window, scope_key=scope_key)
+                elapsed = time.monotonic() - started
+                if decision is None:
+                    logger.info(
+                        "[TopicConcentration] skip active reply: "
+                        f"group={event.get_group_id()} reason=decision_failed elapsed={elapsed:.2f}s"
+                    )
+                    return False
+                if not decision.should_reply:
+                    logger.debug(
+                        "[TopicConcentration] skip active reply: "
+                        f"group={event.get_group_id()} topic={decision.topic_key} "
+                        f"type={decision.topic_type} elapsed={elapsed:.2f}s reason={decision.reason}"
+                    )
+                    return False
+
+                cooldown_key = (scope_key, decision.topic_key)
+                cooldown_until = _COOLDOWNS.get(cooldown_key, 0.0)
+                if now < cooldown_until:
+                    logger.info(
+                        "[TopicConcentration] cooldown active reply: "
+                        f"group={event.get_group_id()} topic={decision.topic_key} "
+                        f"left={cooldown_until - now:.1f}s"
+                    )
+                    return False
+
+                _COOLDOWNS[cooldown_key] = now + COOLDOWN_SECONDS
+                _GROUP_COOLDOWNS[scope_key] = now + GROUP_COOLDOWN_SECONDS
+                _set_interest(scope_key, decision)
+                logger.info(
+                    "[TopicConcentration] allow active reply: "
+                    f"group={event.get_group_id()} topic={decision.topic_key} "
+                    f"type={decision.topic_type} style={decision.reply_style} "
+                    f"max_length={decision.max_length} elapsed={elapsed:.2f}s reason={decision.reason}"
+                )
+                return True
+            finally:
+                _release_active_reply_inflight(_ACTIVE_REPLY_INFLIGHT, scope_key)
 
         GroupChatContext._topic_concentration_original_need_active_reply = original_need_active_reply
         GroupChatContext.need_active_reply = patched_need_active_reply

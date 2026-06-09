@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_reply_style_guard.logic import sanitize_reply_plain_text
+from astrbot_plugin_reply_style_guard.logic import should_disable_segmented_reply_for_text
 from astrbot_plugin_reply_style_guard.logic import strip_followup_tail
 from astrbot_plugin_reply_style_guard.logic import strip_markdown_syntax
 
@@ -43,6 +44,34 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             sanitize_reply_plain_text("**结论**：别登录。\n- 原因：不正规。\n你把具体名字发我。"),
             "结论：别登录。\n· 原因：不正规。",
         )
+
+    def test_strip_markdown_syntax_preserves_json_indentation(self) -> None:
+        self.assertEqual(
+            strip_markdown_syntax(
+                "```json\n"
+                "{\n"
+                '  "model": "gpt-image-2",\n'
+                '  "size": "1024x1024"\n'
+                "}\n"
+                "```"
+            ),
+            "{\n"
+            '  "model": "gpt-image-2",\n'
+            '  "size": "1024x1024"\n'
+            "}",
+        )
+
+    def test_segmented_reply_is_disabled_when_it_would_split_more_than_three_parts(self) -> None:
+        self.assertTrue(
+            should_disable_segmented_reply_for_text(
+                "比如：\n"
+                "工资太高税扣好多。\n"
+                "车太大停车麻烦。\n"
+                "随便考又第一。\n"
+                "这就是凡尔赛。"
+            )
+        )
+        self.assertFalse(should_disable_segmented_reply_for_text("懂了吧，低调版炫耀。"))
 
 
 if __name__ == "__main__":

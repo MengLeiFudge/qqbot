@@ -16,6 +16,8 @@ from astrbot_plugin_topic_concentration.logic import (
     has_strong_topic_signal,
     is_recent_duplicate_observation,
     looks_like_low_information,
+    release_active_reply_inflight,
+    try_acquire_active_reply_inflight,
 )
 
 
@@ -173,6 +175,26 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
                 text="把你朋友送我",
                 user_id="1908401664",
                 now=101.0,
+            )
+        )
+
+    def test_active_reply_inflight_blocks_parallel_decisions_but_expires(self) -> None:
+        inflight: dict[str, float] = {}
+
+        self.assertTrue(try_acquire_active_reply_inflight(inflight, "group:10001", now=10.0))
+        self.assertFalse(try_acquire_active_reply_inflight(inflight, "group:10001", now=12.0))
+        self.assertTrue(try_acquire_active_reply_inflight(inflight, "group:10002", now=12.0))
+
+        release_active_reply_inflight(inflight, "group:10001")
+        self.assertTrue(try_acquire_active_reply_inflight(inflight, "group:10001", now=13.0))
+
+        inflight["group:10003"] = 0.0
+        self.assertTrue(
+            try_acquire_active_reply_inflight(
+                inflight,
+                "group:10003",
+                now=700.0,
+                lease_seconds=600.0,
             )
         )
 

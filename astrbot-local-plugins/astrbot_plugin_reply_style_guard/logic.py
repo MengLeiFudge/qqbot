@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 
 
+DEFAULT_SEGMENTED_REPLY_REGEX = r".*?[。？！~…]+|.+$"
+MAX_SEGMENTED_REPLY_PARTS = 3
 _TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
 _FOLLOWUP_MARKERS = (
     "如果你愿意",
@@ -38,12 +40,56 @@ def sanitize_reply_plain_text(text: str) -> str:
     return strip_followup_tail(strip_markdown_syntax(text))
 
 
+def should_disable_segmented_reply_for_text(
+    text: str,
+    *,
+    regex: str = DEFAULT_SEGMENTED_REPLY_REGEX,
+    content_cleanup_rule: str = "",
+    max_parts: int = MAX_SEGMENTED_REPLY_PARTS,
+) -> bool:
+    return (
+        count_segmented_reply_parts(
+            text,
+            regex=regex,
+            content_cleanup_rule=content_cleanup_rule,
+        )
+        > max_parts
+    )
+
+
+def count_segmented_reply_parts(
+    text: str,
+    *,
+    regex: str = DEFAULT_SEGMENTED_REPLY_REGEX,
+    content_cleanup_rule: str = "",
+) -> int:
+    raw_text = str(text or "")
+    if not raw_text.strip():
+        return 0
+    try:
+        segments = re.findall(regex, raw_text, re.DOTALL | re.MULTILINE)
+    except re.error:
+        segments = re.findall(DEFAULT_SEGMENTED_REPLY_REGEX, raw_text, re.DOTALL | re.MULTILINE)
+    count = 0
+    for segment in segments:
+        if isinstance(segment, tuple):
+            segment = "".join(part for part in segment if isinstance(part, str))
+        if content_cleanup_rule:
+            try:
+                segment = re.sub(content_cleanup_rule, "", str(segment))
+            except re.error:
+                pass
+        if str(segment).strip():
+            count += 1
+    return count
+
+
 def strip_markdown_syntax(text: str) -> str:
     lines: list[str] = []
     in_fence = False
     for raw_line in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        line = raw_line.strip()
-        if line.startswith("```"):
+        line = raw_line.rstrip()
+        if line.strip().startswith("```"):
             in_fence = not in_fence
             continue
         if in_fence:
@@ -115,7 +161,7 @@ def _strip_inline_markdown(line: str) -> str:
     line = re.sub(r"`([^`\n]+)`", r"\1", line)
     line = re.sub(r"(?<!\w)\*([^*\n]+)\*(?!\w)", r"\1", line)
     line = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"\1", line)
-    return line.strip()
+    return line.rstrip()
 
 
 def _replace_markdown_link(match: re.Match[str]) -> str:

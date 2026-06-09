@@ -16,6 +16,7 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     RightCodesDrawQuotaStore,
     RightCodesDrawRequest,
     format_draw_start_message,
+    format_rightcodes_draw_timeout,
     format_rightcodes_draw_missing_prompt_message,
     format_rightcodes_draw_points_status,
     load_rightcodes_config,
@@ -24,6 +25,10 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     looks_like_rightcodes_draw_points_query,
     parse_rightcodes_draw_command,
     should_record_passive_group_points,
+)
+from astrbot_plugin_qqbot_features.rightcodes_draw_catalog import (
+    format_rightcodes_draw_catalog_injection,
+    should_inject_rightcodes_draw_catalog,
 )
 
 
@@ -49,6 +54,13 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertTrue(looks_like_rightcodes_draw_invocation("棉花生图"))
         self.assertIsNone(parse_rightcodes_draw_command("棉花生图"))
         self.assertIn("生图需要文字提示词", format_rightcodes_draw_missing_prompt_message())
+
+    def test_rightcodes_draw_catalog_mentions_size_body(self) -> None:
+        self.assertTrue(should_inject_rightcodes_draw_catalog("我要 1024x1024 body 里写什么"))
+        injection = format_rightcodes_draw_catalog_injection("我要 1024x1024 body 里写什么")
+        self.assertIn('"size": "1024x1024"', injection)
+        self.assertIn("/v1/images/generations", injection)
+        self.assertIn("stream=true", injection)
 
     def test_points_query_and_mutation_detection(self) -> None:
         self.assertTrue(looks_like_rightcodes_draw_points_query("查询生图积分"))
@@ -82,6 +94,13 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertEqual(config.feature_mode, FEATURE_MODE_FULL)
         self.assertEqual(config.data_root, ROOT / "data" / "nonebot2" / "run")
         self.assertEqual(config.point_multiplier, 1000)
+        self.assertEqual(config.draw_timeout_seconds, 240.0)
+
+    def test_draw_timeout_message_says_refunded(self) -> None:
+        message = format_rightcodes_draw_timeout(240.0)
+
+        self.assertIn("超过 240 秒", message)
+        self.assertIn("已退回", message)
 
     def test_quota_store_keeps_bot1_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

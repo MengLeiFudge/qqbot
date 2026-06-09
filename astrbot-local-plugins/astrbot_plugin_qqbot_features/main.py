@@ -17,8 +17,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
-from astrbot.api.message_components import At, Image, Plain
+from astrbot.api.message_components import At, Image, Plain, Reply
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
+from astrbot.core.agent.message import TextPart
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
 from .command_guard import is_twin_bot_sender_id
@@ -37,6 +39,7 @@ from .rightcodes_draw_logic import format_rightcodes_draw_model_help
 from .rightcodes_draw_logic import format_rightcodes_draw_points_mutation_denied
 from .rightcodes_draw_logic import format_rightcodes_draw_points_status
 from .rightcodes_draw_logic import format_rightcodes_draw_success
+from .rightcodes_draw_logic import format_rightcodes_draw_timeout
 from .rightcodes_draw_logic import load_api_key
 from .rightcodes_draw_logic import load_rightcodes_config
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_help_command
@@ -45,6 +48,8 @@ from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_re
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_query
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
 from .rightcodes_draw_logic import should_record_passive_group_points
+from .rightcodes_draw_catalog import format_rightcodes_draw_catalog_injection
+from .rightcodes_draw_catalog import should_inject_rightcodes_draw_catalog
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
@@ -239,7 +244,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏和工具类固定功能合集。",
-    "0.9.4",
+    "0.9.6",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -430,6 +435,19 @@ class QQBotFeaturesPlugin(Star):
         )
         await asyncio.to_thread(store.record_group_message, event.get_sender_id())
 
+    @filter.on_llm_request(desc="在 LLM 请求前按关键词注入 RightCodes 生图接口知识库。")
+    async def inject_rightcodes_draw_catalog(self, event: AstrMessageEvent, req: ProviderRequest):
+        query = ((req.prompt or "") or event.get_message_str() or "").strip()
+        if not should_inject_rightcodes_draw_catalog(query):
+            return
+        req.extra_user_content_parts.append(
+            TextPart(text=format_rightcodes_draw_catalog_injection(query)).mark_as_temp()
+        )
+        logger.info(
+            "[QQBotFeatures] injected RightCodes draw catalog: session=%s",
+            getattr(event, "unified_msg_origin", ""),
+        )
+
     @filter.event_message_type(EventMessageType.ALL, desc="RightCodes 生图总入口，处理生图、模型价格、积分查询和拒绝手动改分请求。")
     async def rightcodes_draw_command(self, event: AstrMessageEvent):
         text = extract_plain_text(event).strip()
@@ -479,18 +497,33 @@ class QQBotFeaturesPlugin(Star):
 
         async with self._rightcodes_draw_lock:
             try:
-                result = await RightCodesDrawClient(api_key=api_key).draw(draw_request)
+                timeout_seconds = self._rightcodes_config.draw_timeout_seconds
+                result = await asyncio.wait_for(
+                    RightCodesDrawClient(
+                        api_key=api_key,
+                        timeout_seconds=timeout_seconds,
+                    ).draw(draw_request),
+                    timeout=timeout_seconds + 5.0,
+                )
+            except asyncio.TimeoutError:
+                await asyncio.to_thread(store.refund, quota)
+                yield _chain_result_with_reply(
+                    event,
+                    [Plain(format_rightcodes_draw_timeout(self._rightcodes_config.draw_timeout_seconds))],
+                )
+                event.stop_event()
+                return
             except Exception as exc:
                 await asyncio.to_thread(store.refund, quota)
-                yield event.plain_result(format_rightcodes_draw_failure(exc))
+                yield _chain_result_with_reply(event, [Plain(format_rightcodes_draw_failure(exc))])
                 event.stop_event()
                 return
 
         message = format_rightcodes_draw_success(result, model=draw_request.model)
         if result.image_url.startswith(("http://", "https://")):
-            yield event.chain_result([Plain(message), Image.fromURL(result.image_url)])
+            yield _chain_result_with_reply(event, [Plain(message), Image.fromURL(result.image_url)])
         else:
-            yield event.plain_result(f"{message}\n{result.image_url}")
+            yield _chain_result_with_reply(event, [Plain(f"{message}\n{result.image_url}")])
         event.stop_event()
 
     @filter.regex(ARC_RECOMMEND_PATTERN, desc="Arcaea PTT 推荐命令，例如 arctj10.5，按本地曲库和定数缓存推荐谱面。")
@@ -910,6 +943,20 @@ def read_command_owner_qq() -> str:
 
 def is_twin_bot_sender(event: AstrMessageEvent) -> bool:
     return is_twin_bot_sender_id(event.get_sender_id())
+
+
+def _chain_result_with_reply(event: AstrMessageEvent, chain: list[object]):
+    reply = _reply_to_event_message(event)
+    if reply is not None:
+        return event.chain_result([reply, *chain])
+    return event.chain_result(chain)
+
+
+def _reply_to_event_message(event: AstrMessageEvent) -> Reply | None:
+    message_id = getattr(getattr(event, "message_obj", None), "message_id", None)
+    if message_id in (None, ""):
+        return None
+    return Reply(id=message_id)
 
 
 def _raw_event_dict(event: AstrMessageEvent) -> dict:
