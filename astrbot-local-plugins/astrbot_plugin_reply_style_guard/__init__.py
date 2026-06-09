@@ -1,3 +1,1 @@
-from .main import ReplyStyleGuardPlugin
-
-__all__ = ["ReplyStyleGuardPlugin"]
+"""Inject no-follow-up output style rules into AstrBot LLM requests."""

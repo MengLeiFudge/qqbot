@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass
 import json
 import os
 import re
@@ -13,7 +12,16 @@ from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, register
 from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
 
+from .logic import TopicDecision
+from .logic import TopicInterest
+from .logic import TopicRecordResult
+from .logic import TopicWindowMessage
+from .logic import active_reply_scope_key as _active_reply_scope_key
 from .logic import chat_with_decision_providers
+from .logic import compact_text as _compact
+from .logic import has_strong_topic_signal as _has_strong_topic_signal
+from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
+from .logic import looks_like_low_information as _looks_like_low_information
 from .logic import read_decision_provider_order
 
 
@@ -35,33 +43,6 @@ PROFILE_BY_BOT_ID = {
 }
 _DECISION_PROVIDER_ORDER: tuple[str, ...] = ()
 
-
-@dataclass(frozen=True, slots=True)
-class TopicWindowMessage:
-    text: str
-    user_id: str
-    at_bot: bool
-    reply_bot: bool
-    created_at: float
-
-
-@dataclass(frozen=True, slots=True)
-class TopicInterest:
-    topic_key: str
-    topic_type: str
-    reason: str
-
-
-@dataclass(frozen=True, slots=True)
-class TopicDecision:
-    should_reply: bool
-    topic_key: str
-    topic_type: str
-    reason: str
-    reply_style: str
-    max_length: str
-
-
 _WINDOWS: dict[str, deque[TopicWindowMessage]] = defaultdict(deque)
 _COOLDOWNS: dict[tuple[str, str], float] = {}
 _GROUP_COOLDOWNS: dict[str, float] = {}
@@ -72,7 +53,7 @@ _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
     "astrbot_plugin_topic_concentration",
     "local",
     "Gate AstrBot active replies by AI-decided short-window topic interest.",
-    "0.3.2",
+    "0.3.3",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -117,22 +98,29 @@ class TopicConcentrationPlugin(Star):
             if cfg["ar_method"] != "possibility_reply":
                 return await original_need_active_reply(group_context, event)
 
-            window = _record_message(event)
-            if not _should_consider_window(window):
+            scope_key = _active_reply_scope_key(event)
+            record = _record_message(event, scope_key=scope_key)
+            if record.duplicate:
+                logger.debug(
+                    "[TopicConcentration] skip active reply: "
+                    f"group={event.get_group_id()} reason=duplicate_dual_platform_event"
+                )
+                return False
+            if not _should_consider_window(record.window):
                 logger.debug(
                     "[TopicConcentration] skip active reply: "
                     f"group={event.get_group_id()} reason=weak_window"
                 )
                 return False
             now = time.monotonic()
-            group_cooldown_until = _GROUP_COOLDOWNS.get(event.unified_msg_origin, 0.0)
+            group_cooldown_until = _GROUP_COOLDOWNS.get(scope_key, 0.0)
             if now < group_cooldown_until:
                 logger.info(
                     "[TopicConcentration] group cooldown active reply: "
                     f"group={event.get_group_id()} left={group_cooldown_until - now:.1f}s"
                 )
                 return False
-            decision = await _decide_with_ai(group_context, event, window)
+            decision = await _decide_with_ai(group_context, event, record.window, scope_key=scope_key)
             if decision is None:
                 logger.info(f"[TopicConcentration] skip active reply: group={event.get_group_id()} reason=decision_failed")
                 return False
@@ -144,7 +132,7 @@ class TopicConcentrationPlugin(Star):
                 )
                 return False
 
-            cooldown_key = (event.unified_msg_origin, decision.topic_key)
+            cooldown_key = (scope_key, decision.topic_key)
             cooldown_until = _COOLDOWNS.get(cooldown_key, 0.0)
             if now < cooldown_until:
                 logger.info(
@@ -155,8 +143,8 @@ class TopicConcentrationPlugin(Star):
                 return False
 
             _COOLDOWNS[cooldown_key] = now + COOLDOWN_SECONDS
-            _GROUP_COOLDOWNS[event.unified_msg_origin] = now + GROUP_COOLDOWN_SECONDS
-            _set_interest(event.unified_msg_origin, decision)
+            _GROUP_COOLDOWNS[scope_key] = now + GROUP_COOLDOWN_SECONDS
+            _set_interest(scope_key, decision)
             logger.info(
                 "[TopicConcentration] allow active reply: "
                 f"group={event.get_group_id()} topic={decision.topic_key} "
@@ -171,16 +159,20 @@ class TopicConcentrationPlugin(Star):
         logger.info("[TopicConcentration] active reply gate installed")
 
 
-def _record_message(event) -> deque[TopicWindowMessage]:
-    window = _WINDOWS[event.unified_msg_origin]
+def _record_message(event, *, scope_key: str | None = None) -> TopicRecordResult:
+    scope_key = scope_key or _active_reply_scope_key(event)
+    window = _WINDOWS[scope_key]
     now = time.monotonic()
     while window and now - window[0].created_at > WINDOW_SECONDS:
         window.popleft()
     text = _plain_text(event)
+    user_id = str(event.get_sender_id())
+    if _is_recent_duplicate_observation(window, text=text, user_id=user_id, now=now):
+        return TopicRecordResult(window=window, duplicate=True)
     window.append(
         TopicWindowMessage(
             text=text,
-            user_id=str(event.get_sender_id()),
+            user_id=user_id,
             at_bot=_has_at_bot(event),
             reply_bot=_has_reply_bot(event),
             created_at=now,
@@ -188,7 +180,7 @@ def _record_message(event) -> deque[TopicWindowMessage]:
     )
     while len(window) > MAX_WINDOW_MESSAGES:
         window.popleft()
-    return window
+    return TopicRecordResult(window=window, duplicate=False)
 
 
 def _should_consider_window(window: deque[TopicWindowMessage]) -> bool:
@@ -203,11 +195,17 @@ def _should_consider_window(window: deque[TopicWindowMessage]) -> bool:
     return len(messages) >= MIN_UNPROMPTED_WINDOW_MESSAGES
 
 
-async def _decide_with_ai(group_context: GroupChatContext, event, window: deque[TopicWindowMessage]) -> TopicDecision | None:
+async def _decide_with_ai(
+    group_context: GroupChatContext,
+    event,
+    window: deque[TopicWindowMessage],
+    *,
+    scope_key: str,
+) -> TopicDecision | None:
     if not any(_compact(message.text) for message in window):
         return None
-    prompt = _build_decision_prompt(window, active_interest=_get_interest(event.unified_msg_origin))
-    response = await _chat_with_decision_providers(group_context.context, event, prompt)
+    prompt = _build_decision_prompt(window, active_interest=_get_interest(scope_key))
+    response = await _chat_with_decision_providers(group_context.context, event, prompt, scope_key=scope_key)
     if response is None:
         return None
     try:
@@ -220,12 +218,13 @@ async def _decide_with_ai(group_context: GroupChatContext, event, window: deque[
         return None
 
 
-async def _chat_with_decision_providers(context: Context, event, prompt: str):
+async def _chat_with_decision_providers(context: Context, event, prompt: str, *, scope_key: str):
     return await chat_with_decision_providers(
         context=context,
         event=event,
         prompt=prompt,
         configured_order=_DECISION_PROVIDER_ORDER,
+        session_id=f"topic_concentration:{scope_key}",
         logger=logger,
     )
 
@@ -379,51 +378,3 @@ def _extract_json_object(text: str) -> dict[str, object]:
 
 def _clean_json_string(value: object) -> str:
     return str(value or "").strip()
-
-
-def _compact(text: str) -> str:
-    return re.sub(r"\s+", "", text.strip())
-
-
-def _has_strong_topic_signal(text: str) -> bool:
-    compact = _compact(text).lower()
-    if not compact:
-        return False
-    strong_markers = (
-        "?",
-        "？",
-        "请问",
-        "求助",
-        "有人知道",
-        "谁知道",
-        "怎么",
-        "咋",
-        "为啥",
-        "为什么",
-        "报错",
-        "错误",
-        "异常",
-        "配置",
-        "代码",
-        "接口",
-        "日志",
-        "打不开",
-        "不生效",
-        "mod",
-        "模组",
-        "星环",
-        "factorio",
-        "shapez",
-        "astrbot",
-        "nonebot",
-        "napcat",
-    )
-    return any(marker in compact for marker in strong_markers)
-
-
-def _looks_like_low_information(text: str) -> bool:
-    compact = _compact(text).lower()
-    if not compact:
-        return True
-    low_markers = ("哈哈", "草", "笑死", "乐", "确实", "对啊", "是吧", "好耶", "离谱")
-    return len(compact) <= 12 and any(marker in compact for marker in low_markers)

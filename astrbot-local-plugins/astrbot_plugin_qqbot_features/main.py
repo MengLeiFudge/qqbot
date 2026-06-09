@@ -41,6 +41,9 @@ from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_re
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_query
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
 from .rightcodes_draw_logic import should_record_passive_group_points
+from .reread_state import RereadRepeatState
+from .reread_state import normalize_reread_key
+from .reread_state import reread_probability
 from .twin_poke import should_follow_poke_notice
 
 
@@ -70,7 +73,6 @@ SAKURA_PATTERN = (
     r"^(?:落樱之都|更新日志|玩法|注册.+|改名.+|个人信息|加经验[0-9]+|嘤[0-9]+|"
     r"恢复|回复|加[0-9]+(?:力量|智力|体质|敏捷|魅力))$"
 )
-REREAD_COOLDOWN_SECONDS = 120.0
 FEATURE_MODE_ENV = "QQBOT_ASTRBOT_FEATURE_MODE"
 COMMAND_OWNER_ENV = "QQBOT_ASTRBOT_COMMAND_OWNER"
 FEATURE_MODE_DUAL = "dual"
@@ -225,65 +227,11 @@ class _NoRedirectHandler(HTTPRedirectHandler):
         return None
 
 
-class RereadRepeatState:
-    def __init__(
-        self,
-        *,
-        cooldown_seconds: float = REREAD_COOLDOWN_SECONDS,
-        rng: random.Random | None = None,
-    ) -> None:
-        self._groups: dict[str, dict[str, object]] = {}
-        self._cooldown_seconds = max(0.0, float(cooldown_seconds))
-        self._rng = rng or random.Random()
-
-    def observe(self, group_id: str, text: str, *, message_id: str = "") -> bool:
-        normalized = normalize_reread_key(text)
-        if not normalized:
-            return False
-        state = self._groups.setdefault(
-            group_id,
-            {
-                "last_key": "",
-                "consecutive_count": 0,
-                "repeated_current_run": False,
-                "cooldown_key": "",
-                "cooldown_until": 0.0,
-                "last_message_id": "",
-            },
-        )
-        if message_id and state.get("last_message_id") == message_id:
-            return False
-        state["last_message_id"] = message_id
-
-        if state.get("last_key") != normalized:
-            state["last_key"] = normalized
-            state["consecutive_count"] = 1
-            state["repeated_current_run"] = False
-            return False
-
-        consecutive_count = int(state.get("consecutive_count") or 0) + 1
-        state["consecutive_count"] = consecutive_count
-        now = time.monotonic()
-        in_cooldown = (
-            state.get("cooldown_key") == normalized
-            and now < float(state.get("cooldown_until") or 0.0)
-        )
-        if bool(state.get("repeated_current_run")) or in_cooldown:
-            return False
-        if self._rng.random() >= reread_probability(consecutive_count):
-            return False
-
-        state["repeated_current_run"] = True
-        state["cooldown_key"] = normalized
-        state["cooldown_until"] = now + self._cooldown_seconds
-        return True
-
-
 @register(
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.8.0",
+    "0.9.1",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -703,7 +651,13 @@ class QQBotFeaturesPlugin(Star):
         if should_skip_reread(event, text):
             return
         message_id = str(getattr(event.message_obj, "message_id", "") or "")
-        if not self._reread_state.observe(event.get_group_id(), text, message_id=message_id):
+        sender_id = str(event.get_sender_id() or "")
+        if not self._reread_state.observe(
+            event.get_group_id(),
+            text,
+            message_id=message_id,
+            sender_id=sender_id,
+        ):
             return
         yield event.plain_result(text)
 
@@ -915,14 +869,6 @@ def looks_like_command(text: str) -> bool:
     )
 
 
-def normalize_reread_key(text: str) -> str:
-    return " ".join(str(text).split()).strip()
-
-
-def reread_probability(consecutive_count: int) -> float:
-    if consecutive_count < 2:
-        return 0.0
-    return min(0.8, 0.2 + (consecutive_count - 2) * 0.15)
 
 
 class AstrBotOneBotApi:

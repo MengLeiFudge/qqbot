@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -10,6 +9,8 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
 from astrbot.core.message.components import Plain
+
+from .logic import strip_followup_tail
 
 
 STYLE_GUARD_TEXT = (
@@ -58,42 +59,11 @@ BOT_PROFILES = {
     },
 }
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
-_TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
-_FOLLOWUP_MARKERS = (
-    "如果你愿意",
-    "如果愿意",
-    "你如果愿意",
-    "你要是愿意",
-    "要是你",
-    "要的话",
-    "需要的话",
-    "想要的话",
-    "愿意的话",
-    "你把",
-    "把具体",
-    "具体名字发",
-    "具体软件名发",
-    "发我",
-    "告诉我",
-    "我可以再",
-    "我也可以",
-    "我还能",
-    "我可以帮",
-    "我能帮",
-    "我帮你",
-    "帮你挑",
-    "帮你看",
-    "帮你认",
-    "帮你分辨",
-    "教你怎么",
-)
-
-
 @register(
     "astrbot_plugin_reply_style_guard",
     "local",
     "Inject no-follow-up output style rules into AstrBot LLM requests.",
-    "0.1.2",
+    "0.1.3",
 )
 class ReplyStyleGuardPlugin(Star):
     def __init__(self, context: Context):
@@ -117,60 +87,23 @@ class ReplyStyleGuardPlugin(Star):
         if result is None or not result.chain:
             return
         changed = False
+        cleaned_chain = []
         for comp in result.chain:
             if not isinstance(comp, Plain):
+                cleaned_chain.append(comp)
                 continue
             cleaned = strip_followup_tail(comp.text)
             if cleaned != comp.text:
                 comp.text = cleaned
                 changed = True
+            if cleaned:
+                cleaned_chain.append(comp)
         if changed:
+            result.chain = cleaned_chain
             logger.info(
                 "[ReplyStyleGuard] stripped follow-up/question tail: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
-
-
-def strip_followup_tail(text: str) -> str:
-    current = text.strip()
-    if not current:
-        return ""
-    lines = current.split("\n")
-    stripped_any = False
-    while lines:
-        line = lines[-1].strip()
-        stripped = strip_followup_from_line(line)
-        if stripped == line:
-            break
-        stripped_any = True
-        if stripped:
-            lines[-1] = stripped
-            break
-        lines.pop()
-    result = "\n".join(line for line in lines if line.strip()).strip()
-    if result:
-        return result
-    return "信息不够，先按上面的结论处理。" if stripped_any else current
-
-
-def strip_followup_from_line(line: str) -> str:
-    parts = [part.strip() for part in _TAIL_BOUNDARY.split(line) if part.strip()]
-    if not parts:
-        return ""
-    while parts and is_followup_sentence(parts[-1]):
-        parts.pop()
-    return "".join(parts).strip()
-
-
-def is_followup_sentence(sentence: str) -> bool:
-    compact = re.sub(r"\s+", "", sentence)
-    if not compact:
-        return False
-    if any(marker in compact for marker in _FOLLOWUP_MARKERS):
-        return True
-    if compact.endswith(("?", "？")):
-        return True
-    return False
 
 
 def safe_event_value(event: AstrMessageEvent, method_name: str) -> str:
