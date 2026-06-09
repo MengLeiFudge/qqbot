@@ -24,7 +24,6 @@ _DRAW_POINTS_LOCK = threading.Lock()
 class RightCodesDrawPointBalance:
     user_id: str
     points: int
-    message_count: int
     free_available: bool
     date_key: str
     multiplier: int
@@ -77,9 +76,7 @@ class RightCodesDrawQuotaStore:
             users = _get_users_payload(payload)
             user_payload = _get_user_payload(users, user_key)
             points = int(user_payload.get("points", 0) or 0) + int(amount)
-            message_count = int(user_payload.get("message_count", 0) or 0) + int(amount)
             user_payload["points"] = points
-            user_payload["message_count"] = message_count
             users[user_key] = user_payload
             payload["users"] = users
             self._write(payload)
@@ -97,7 +94,6 @@ class RightCodesDrawQuotaStore:
             return RightCodesDrawPointBalance(
                 user_id="",
                 points=0,
-                message_count=0,
                 free_available=False,
                 date_key=date_key,
                 multiplier=self.multiplier,
@@ -110,7 +106,6 @@ class RightCodesDrawQuotaStore:
         return RightCodesDrawPointBalance(
             user_id=user_key,
             points=int(user_payload.get("points", 0) or 0),
-            message_count=int(user_payload.get("message_count", 0) or 0),
             free_available=free_date != date_key,
             date_key=date_key,
             multiplier=self.multiplier,
@@ -219,6 +214,7 @@ class RightCodesDrawQuotaStore:
 
     def _write(self, payload: dict[str, object]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = _normalize_draw_points_payload(payload)
         self.path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -238,7 +234,6 @@ def format_rightcodes_draw_points_status(balance: RightCodesDrawPointBalance) ->
     return "\n".join(
         [
             f"当前生图积分：{balance.points}",
-            f"全群累计消息数：{balance.message_count}",
             free_status,
             f"扣费倍率：价格 x {balance.multiplier}",
             "模型扣费：",
@@ -280,13 +275,25 @@ def _get_user_payload(
 ) -> dict[str, object]:
     raw = users.get(user_key)
     if not isinstance(raw, dict):
-        return {"points": 0, "message_count": 0}
+        return {"points": 0}
     points = _safe_int(raw.get("points"))
-    message_count = _safe_int(raw.get("message_count"))
-    payload = dict(raw)
-    payload["points"] = points
-    payload["message_count"] = message_count
+    payload: dict[str, object] = {"points": points}
+    free_date = str(raw.get("free_gpt_image_2_date", "") or "").strip()
+    if free_date:
+        payload["free_gpt_image_2_date"] = free_date
     return payload
+
+
+def _normalize_draw_points_payload(payload: dict[str, object]) -> dict[str, object]:
+    normalized: dict[str, object] = {
+        "schema_version": max(1, _safe_int(payload.get("schema_version")) or 1),
+        "users": {},
+    }
+    users: dict[str, dict[str, object]] = {}
+    for user_id, raw_user in _get_users_payload(payload).items():
+        users[user_id] = _get_user_payload({user_id: raw_user}, user_id)
+    normalized["users"] = users
+    return normalized
 
 
 def _safe_int(value: object) -> int:

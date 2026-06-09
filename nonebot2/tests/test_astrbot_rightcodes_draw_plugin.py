@@ -74,17 +74,18 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
 
         self.assertEqual(config.feature_mode, FEATURE_MODE_FULL)
         self.assertEqual(config.data_root, ROOT / "data" / "nonebot2" / "run")
+        self.assertEqual(config.point_multiplier, 1000)
 
     def test_quota_store_keeps_bot1_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = RightCodesDrawQuotaStore(Path(temp_dir))
-            store.record_group_message("10001", amount=25)
+            store.record_group_message("10001", amount=45)
             free = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
             paid = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
 
             self.assertTrue(free.allowed)
             self.assertTrue(free.used_free)
-            self.assertEqual(paid.cost_points, 20)
+            self.assertEqual(paid.cost_points, 40)
             self.assertEqual(paid.balance_after, 5)
             self.assertIn("今天第 1 张免费", format_draw_start_message(free))
             self.assertIn("当前生图积分：5", format_rightcodes_draw_points_status(store.get_balance("10001", date_key="2026-06-08")))
@@ -99,12 +100,12 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
             self.assertTrue(free_again.allowed)
             self.assertTrue(free_again.used_free)
 
-            store.record_group_message("10001", amount=20)
+            store.record_group_message("10001", amount=40)
             paid = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
             store.refund(paid)
             balance = store.get_balance("10001", date_key="2026-06-08")
 
-            self.assertEqual(balance.points, 20)
+            self.assertEqual(balance.points, 40)
 
     def test_draw_client_uses_rightcodes_image_generation_payload(self) -> None:
         stub = StubDrawHttpClient()

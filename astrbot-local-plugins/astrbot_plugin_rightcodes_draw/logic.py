@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
 RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
-RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 500
+RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 1000
 RIGHTCODES_DRAW_FREE_DAILY_LIMIT = 1
 RIGHTCODES_DRAW_MODEL_ORDER = (
     "gpt-image-2",
@@ -76,7 +76,6 @@ class RightCodesDrawResult:
 class RightCodesDrawPointBalance:
     user_id: str
     points: int
-    message_count: int
     free_available: bool
     date_key: str
     multiplier: int
@@ -191,9 +190,7 @@ class RightCodesDrawQuotaStore:
             users = get_users_payload(payload)
             user_payload = get_user_payload(users, user_key)
             points = int(user_payload.get("points", 0) or 0) + int(amount)
-            message_count = int(user_payload.get("message_count", 0) or 0) + int(amount)
             user_payload["points"] = points
-            user_payload["message_count"] = message_count
             users[user_key] = user_payload
             payload["users"] = users
             self._write(payload)
@@ -208,7 +205,7 @@ class RightCodesDrawQuotaStore:
         date_key = date_key or current_draw_quota_date_key()
         user_key = str(user_id).strip()
         if not user_key:
-            return RightCodesDrawPointBalance("", 0, 0, False, date_key, self.multiplier)
+            return RightCodesDrawPointBalance("", 0, False, date_key, self.multiplier)
         with _DRAW_POINTS_LOCK:
             payload = self._read()
             users = get_users_payload(payload)
@@ -217,7 +214,6 @@ class RightCodesDrawQuotaStore:
         return RightCodesDrawPointBalance(
             user_id=user_key,
             points=int(user_payload.get("points", 0) or 0),
-            message_count=int(user_payload.get("message_count", 0) or 0),
             free_available=free_date != date_key,
             date_key=date_key,
             multiplier=self.multiplier,
@@ -299,6 +295,7 @@ class RightCodesDrawQuotaStore:
 
     def _write(self, payload: dict[str, object]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = normalize_draw_points_payload(payload)
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -311,7 +308,7 @@ def load_rightcodes_config(config=None) -> RightCodesConfig:
         data_root=data_root,
         api_key_env=str(get_config_value(config, "api_key_env", "QQBOT_AI_KEY_RIGHTCODES") or "").strip()
         or "QQBOT_AI_KEY_RIGHTCODES",
-        point_multiplier=max(1, safe_int(get_config_value(config, "point_multiplier", 500), 500)),
+        point_multiplier=max(1, safe_int(get_config_value(config, "point_multiplier", 1000), 1000)),
     )
 
 
@@ -447,7 +444,6 @@ def format_rightcodes_draw_points_status(balance: RightCodesDrawPointBalance) ->
     return "\n".join(
         [
             f"当前生图积分：{balance.points}",
-            f"全群累计消息数：{balance.message_count}",
             free_status,
             f"扣费倍率：价格 x {balance.multiplier}",
             "模型扣费：",
@@ -676,11 +672,24 @@ def get_users_payload(payload: dict[str, object]) -> dict[str, dict[str, object]
 def get_user_payload(users: dict[str, dict[str, object]], user_key: str) -> dict[str, object]:
     raw = users.get(user_key)
     if not isinstance(raw, dict):
-        return {"points": 0, "message_count": 0}
-    payload = dict(raw)
-    payload["points"] = safe_int(payload.get("points"), 0)
-    payload["message_count"] = safe_int(payload.get("message_count"), 0)
+        return {"points": 0}
+    payload: dict[str, object] = {"points": safe_int(raw.get("points"), 0)}
+    free_date = str(raw.get("free_gpt_image_2_date", "") or "").strip()
+    if free_date:
+        payload["free_gpt_image_2_date"] = free_date
     return payload
+
+
+def normalize_draw_points_payload(payload: dict[str, object]) -> dict[str, object]:
+    normalized: dict[str, object] = {
+        "schema_version": max(1, safe_int(payload.get("schema_version"), 1)),
+        "users": {},
+    }
+    users: dict[str, dict[str, object]] = {}
+    for user_id, raw_user in get_users_payload(payload).items():
+        users[user_id] = get_user_payload({user_id: raw_user}, user_id)
+    normalized["users"] = users
+    return normalized
 
 
 def get_config_value(config, key: str, default):

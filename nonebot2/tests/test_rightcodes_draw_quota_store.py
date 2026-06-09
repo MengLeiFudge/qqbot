@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -67,32 +68,32 @@ class RightCodesDrawQuotaStoreTest(unittest.TestCase):
             self.assertTrue(first.used_free)
             self.assertEqual(first.cost_points, 0)
             self.assertFalse(second.allowed)
-            self.assertEqual(second.cost_points, 20)
+            self.assertEqual(second.cost_points, 40)
             self.assertEqual(second.balance_before, 0)
 
     def test_paid_draw_uses_message_points_by_model_price(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = RightCodesDrawQuotaStore(Path(temp_dir))
-            store.record_group_message("10001", amount=80)
+            store.record_group_message("10001", amount=150)
 
             vip = store.reserve("10001", model="gpt-image-2-vip", date_key="2026-06-08")
 
             self.assertTrue(vip.allowed)
             self.assertFalse(vip.used_free)
-            self.assertEqual(vip.cost_points, 65)
-            self.assertEqual(vip.balance_before, 80)
-            self.assertEqual(vip.balance_after, 15)
+            self.assertEqual(vip.cost_points, 130)
+            self.assertEqual(vip.balance_before, 150)
+            self.assertEqual(vip.balance_after, 20)
 
-    def test_second_gpt_image_2_draw_costs_twenty_points(self) -> None:
+    def test_second_gpt_image_2_draw_costs_forty_points(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = RightCodesDrawQuotaStore(Path(temp_dir))
-            store.record_group_message("10001", amount=25)
+            store.record_group_message("10001", amount=45)
             first = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
             second = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
 
             self.assertTrue(first.used_free)
             self.assertTrue(second.allowed)
-            self.assertEqual(second.cost_points, 20)
+            self.assertEqual(second.cost_points, 40)
             self.assertEqual(second.balance_after, 5)
 
     def test_refund_restores_paid_points_and_free_use(self) -> None:
@@ -104,13 +105,13 @@ class RightCodesDrawQuotaStoreTest(unittest.TestCase):
 
             self.assertTrue(free_again.used_free)
 
-            store.record_group_message("10001", amount=20)
+            store.record_group_message("10001", amount=40)
             paid = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
             store.refund(paid)
             paid_again = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
 
             self.assertTrue(paid_again.allowed)
-            self.assertEqual(paid_again.balance_before, 20)
+            self.assertEqual(paid_again.balance_before, 40)
 
     def test_get_balance_defaults_for_new_user(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -118,14 +119,13 @@ class RightCodesDrawQuotaStoreTest(unittest.TestCase):
             balance = store.get_balance("10001", date_key="2026-06-08")
 
             self.assertEqual(balance.points, 0)
-            self.assertEqual(balance.message_count, 0)
             self.assertTrue(balance.free_available)
 
             text = format_rightcodes_draw_points_status(balance)
             self.assertIn("当前生图积分：0", text)
-            self.assertIn("全群累计消息数：0", text)
+            self.assertNotIn("累计消息", text)
             self.assertIn("gpt-image-2 今日免费次数：可用", text)
-            self.assertIn("gpt-image-2-vip: 65 积分", text)
+            self.assertIn("gpt-image-2-vip: 130 积分", text)
 
     def test_get_balance_reports_used_free_and_points(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -136,13 +136,42 @@ class RightCodesDrawQuotaStoreTest(unittest.TestCase):
             balance = store.get_balance("10001", date_key="2026-06-08")
 
             self.assertEqual(balance.points, 25)
-            self.assertEqual(balance.message_count, 25)
             self.assertFalse(balance.free_available)
 
             text = format_rightcodes_draw_points_status(balance)
             self.assertIn("当前生图积分：25", text)
             self.assertIn("gpt-image-2 今日免费次数：已使用", text)
-            self.assertIn("gpt-image-2: 20 积分", text)
+            self.assertIn("gpt-image-2: 40 积分", text)
+
+    def test_write_drops_legacy_message_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_root = Path(temp_dir)
+            points_path = data_root / "ai" / "draw_points.json"
+            points_path.parent.mkdir(parents=True)
+            points_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "users": {
+                            "10001": {
+                                "points": 10,
+                                "message_count": 10,
+                                "free_gpt_image_2_date": "2026-06-08",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = RightCodesDrawQuotaStore(data_root)
+
+            store.record_group_message("10001")
+
+            payload = json.loads(points_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["users"]["10001"],
+                {"points": 11, "free_gpt_image_2_date": "2026-06-08"},
+            )
 
 
 if __name__ == "__main__":

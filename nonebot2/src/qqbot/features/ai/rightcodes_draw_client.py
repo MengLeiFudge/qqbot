@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
 RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
-RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 500
+RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 1000
 RIGHTCODES_DRAW_MODEL_ORDER = (
     "gpt-image-2",
     "gpt-image-2-vip",

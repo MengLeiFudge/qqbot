@@ -23,7 +23,7 @@
   "point_multiplier": {
     "description": "积分倍率",
     "type": "int",
-    "default": 500,
+    "default": 1000,
     "hint": "与 bot1 保持一致：模型美元价格 x 倍率后向上取整。"
   }
 }
