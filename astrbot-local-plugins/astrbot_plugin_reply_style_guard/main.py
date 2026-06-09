@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -13,8 +14,12 @@ from astrbot.core.message.message_event_result import ResultContentType
 from astrbot.core.message.components import Plain
 
 from .logic import DEFAULT_SEGMENTED_REPLY_REGEX
+from .logic import build_fold_notice
+from .logic import normalize_fold_threshold
 from .logic import sanitize_reply_plain_text
 from .logic import should_disable_segmented_reply_for_text
+from .logic import should_fold_long_reply
+from .logic import split_forward_text
 
 
 STYLE_GUARD_TEXT = (
@@ -37,6 +42,7 @@ OWNER_QQ = "605738729"
 OWNER_NAME = "萌泪酱"
 PROFILE_ENV = "QQBOT_ASTRBOT_PROFILE"
 DEFAULT_PROFILE = "demon"
+DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
 LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
 LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
 BOT_PROFILES = {
@@ -72,12 +78,24 @@ PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.i
     "astrbot_plugin_reply_style_guard",
     "MengLei",
     "为棉花糖注入身份和输出风格边界，记录 LLM 耗时，并控制过多分段。",
-    "0.1.8",
+    "0.1.9",
 )
 class ReplyStyleGuardPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config=None):
         super().__init__(context)
-        logger.info("[ReplyStyleGuard] loaded: profile=%s", read_bot_profile())
+        self._long_reply_fold_threshold_chars = normalize_fold_threshold(
+            get_config_value(
+                config,
+                "long_reply_fold_threshold_chars",
+                DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS,
+            ),
+            default=DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS,
+        )
+        logger.info(
+            "[ReplyStyleGuard] loaded: profile=%s long_reply_fold_threshold_chars=%s",
+            read_bot_profile(),
+            self._long_reply_fold_threshold_chars,
+        )
 
     @filter.on_llm_request(desc="在 LLM 请求前注入当前 bot 身份、主人识别和不反问不追问的输出硬规则。")
     async def inject_reply_style_guard(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -157,12 +175,76 @@ class ReplyStyleGuardPlugin(Star):
                 "[ReplyStyleGuard] sanitized reply style: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
+        folded = await self._try_send_folded_long_reply(event, result)
+        if folded:
+            event.clear_result()
+            event.stop_event()
+            return
         if _should_disable_segmented_reply_for_result(self.context, result):
             result.set_result_content_type(ResultContentType.GENERAL_RESULT)
             logger.info(
                 "[ReplyStyleGuard] disabled segmented reply for long multi-part LLM result: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
+
+    async def _try_send_folded_long_reply(self, event: AstrMessageEvent, result) -> bool:
+        if self._long_reply_fold_threshold_chars <= 0:
+            return False
+        if event.get_platform_name() != "aiocqhttp":
+            return False
+        group_id = str(event.get_group_id() or "").strip()
+        if not group_id:
+            return False
+        if result is None or not result.is_model_result():
+            return False
+        text = _plain_result_text(result.chain)
+        if not should_fold_long_reply(
+            text,
+            threshold=self._long_reply_fold_threshold_chars,
+        ):
+            return False
+        bot = getattr(event, "bot", None)
+        call_action = getattr(bot, "call_action", None)
+        if not callable(call_action):
+            return False
+        chunks = split_forward_text(text)
+        if not chunks:
+            return False
+        try:
+            forward_result = await call_action(
+                "send_group_forward_msg",
+                group_id=int(group_id) if group_id.isdigit() else group_id,
+                messages=_build_onebot_forward_nodes(
+                    chunks,
+                    uin=safe_event_value(event, "get_self_id") or "10000",
+                    name=read_bot_display_name(event),
+                ),
+            )
+            message_id = _extract_message_id(forward_result)
+            notice_message = _build_fold_notice_message(
+                build_fold_notice(len(chunks)),
+                reply_message_id=message_id,
+            )
+            await call_action(
+                "send_group_msg",
+                group_id=int(group_id) if group_id.isdigit() else group_id,
+                message=notice_message,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[ReplyStyleGuard] folded long reply send failed: session=%s error=%s",
+                getattr(event, "unified_msg_origin", ""),
+                exc,
+            )
+            return False
+        logger.info(
+            "[ReplyStyleGuard] folded long reply: session=%s chars=%s nodes=%s quoted=%s",
+            getattr(event, "unified_msg_origin", ""),
+            len(text),
+            len(chunks),
+            bool(_extract_message_id(forward_result)),
+        )
+        return True
 
 
 def safe_event_value(event: AstrMessageEvent, method_name: str) -> str:
@@ -212,6 +294,92 @@ def _read_segmented_reply_config(context: Context) -> dict:
         return {}
     segmented_reply = platform_settings.get("segmented_reply")
     return segmented_reply if isinstance(segmented_reply, dict) else {}
+
+
+def get_config_value(config, key: str, default=None):
+    if config is None:
+        return default
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            return getter(key, default)
+        except TypeError:
+            try:
+                value = getter(key)
+            except Exception:
+                return default
+            return default if value is None else value
+        except Exception:
+            return default
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return getattr(config, key, default)
+
+
+def _plain_result_text(chain) -> str:
+    if not chain:
+        return ""
+    texts: list[str] = []
+    for comp in chain:
+        if not isinstance(comp, Plain):
+            return ""
+        texts.append(comp.text)
+    return "".join(texts).strip()
+
+
+def _build_onebot_forward_nodes(
+    chunks: list[str],
+    *,
+    uin: str,
+    name: str,
+) -> list[dict[str, Any]]:
+    node_name = name.strip() or "棉花糖"
+    node_uin = str(uin or "10000")
+    return [
+        {
+            "type": "node",
+            "data": {
+                "name": node_name,
+                "uin": node_uin,
+                "content": [{"type": "text", "data": {"text": chunk}}],
+            },
+        }
+        for chunk in chunks
+    ]
+
+
+def _build_fold_notice_message(
+    text: str,
+    *,
+    reply_message_id: str,
+) -> list[dict[str, Any]]:
+    message: list[dict[str, Any]] = []
+    if reply_message_id:
+        message.append({"type": "reply", "data": {"id": reply_message_id}})
+    message.append({"type": "text", "data": {"text": text}})
+    return message
+
+
+def _extract_message_id(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("message_id", "id"):
+            raw = value.get(key)
+            if raw not in (None, ""):
+                return str(raw)
+        data = value.get("data")
+        if isinstance(data, dict):
+            return _extract_message_id(data)
+    for key in ("message_id", "id"):
+        raw = getattr(value, key, None)
+        if raw not in (None, ""):
+            return str(raw)
+    return ""
+
+
+def read_bot_display_name(event: AstrMessageEvent) -> str:
+    profile = read_bot_profile(event)
+    data = BOT_PROFILES.get(profile, BOT_PROFILES[DEFAULT_PROFILE])
+    return data["bot_name"]
 
 
 def build_sender_identity_anchor_text(

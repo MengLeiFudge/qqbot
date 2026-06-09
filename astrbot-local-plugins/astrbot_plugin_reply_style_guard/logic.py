@@ -5,6 +5,8 @@ import re
 
 DEFAULT_SEGMENTED_REPLY_REGEX = r".*?[。？！~…]+|.+$"
 MAX_SEGMENTED_REPLY_PARTS = 3
+DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
+FORWARD_NODE_TEXT_CHARS = 4000
 _TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
 _FOLLOWUP_MARKERS = (
     "如果你愿意",
@@ -38,6 +40,51 @@ _FOLLOWUP_MARKERS = (
 
 def sanitize_reply_plain_text(text: str) -> str:
     return strip_followup_tail(strip_markdown_syntax(text))
+
+
+def normalize_fold_threshold(value: object, *, default: int = DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS) -> int:
+    try:
+        threshold = int(value)
+    except (TypeError, ValueError):
+        return default
+    if threshold <= 0:
+        return 0
+    return max(80, min(threshold, 10000))
+
+
+def should_fold_long_reply(
+    text: str,
+    *,
+    threshold: int = DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS,
+) -> bool:
+    threshold = normalize_fold_threshold(threshold)
+    if threshold <= 0:
+        return False
+    return len(str(text or "").strip()) > threshold
+
+
+def split_forward_text(text: str, *, limit: int = FORWARD_NODE_TEXT_CHARS) -> list[str]:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return []
+    limit = max(1, int(limit or FORWARD_NODE_TEXT_CHARS))
+    chunks: list[str] = []
+    remaining = normalized
+    while len(remaining) > limit:
+        split_at = _find_split_index(remaining, limit)
+        chunk = remaining[:split_at].strip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def build_fold_notice(node_count: int = 1) -> str:
+    if node_count > 1:
+        return f"内容比较长，已经折叠成 {node_count} 段。"
+    return "内容比较长，已经折叠起来了。"
 
 
 def should_disable_segmented_reply_for_text(
@@ -82,6 +129,15 @@ def count_segmented_reply_parts(
         if str(segment).strip():
             count += 1
     return count
+
+
+def _find_split_index(text: str, limit: int) -> int:
+    window = text[:limit]
+    for separator in ("\n\n", "\n", "。", "！", "？", "；", "，", " "):
+        index = window.rfind(separator)
+        if index >= max(1, limit // 2):
+            return index + len(separator)
+    return limit
 
 
 def strip_markdown_syntax(text: str) -> str:

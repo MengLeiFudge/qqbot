@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_reply_style_guard.logic import sanitize_reply_plain_text
+from astrbot_plugin_reply_style_guard.logic import split_forward_text
+from astrbot_plugin_reply_style_guard.logic import should_fold_long_reply
 from astrbot_plugin_reply_style_guard.logic import should_disable_segmented_reply_for_text
 from astrbot_plugin_reply_style_guard.logic import strip_followup_tail
 from astrbot_plugin_reply_style_guard.logic import strip_markdown_syntax
@@ -72,6 +74,19 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             )
         )
         self.assertFalse(should_disable_segmented_reply_for_text("懂了吧，低调版炫耀。"))
+
+    def test_long_reply_fold_threshold_can_be_disabled(self) -> None:
+        self.assertTrue(should_fold_long_reply("a" * 301, threshold=300))
+        self.assertFalse(should_fold_long_reply("a" * 301, threshold=0))
+        self.assertFalse(should_fold_long_reply("a" * 300, threshold=300))
+
+    def test_forward_text_split_prefers_natural_boundary(self) -> None:
+        chunks = split_forward_text("第一段。\n第二段很长很长。\n第三段。", limit=14)
+        self.assertEqual(chunks, ["第一段。\n第二段很长很长。", "第三段。"])
+
+    def test_forward_text_split_falls_back_to_limit(self) -> None:
+        chunks = split_forward_text("abcdef", limit=3)
+        self.assertEqual(chunks, ["abc", "def"])
 
 
 if __name__ == "__main__":
