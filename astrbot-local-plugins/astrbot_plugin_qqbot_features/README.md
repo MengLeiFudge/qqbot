@@ -41,6 +41,7 @@
   - 提交 RightCodes 生图任务。
   - 支持积分扣除、失败退回、图片结果发送。
   - 生图成功、失败或超时失败都会引用原始生图请求；默认 240 秒总超时，超时后回复失败并退回本次扣除的积分或免费次数。
+  - “生成一张 xxx 图片”这类自然语言请求只提示生图指令和积分消耗，不直接执行扣费生图。
 - RightCodes 生图接口知识库
   - 用户询问 RightCodes 画图接口、`body`、`size`、`1024x1024`、`/v1/images/generations` 或 `/v1/chat/completions` 时，会在 LLM 请求前注入官方接口资料。
   - `POST /v1/images/generations` 支持 `size` 字段，形如 `"1024x1024"`；流式防超时建议走 `/v1/chat/completions` 并设置 `stream=true`。
@@ -142,7 +143,8 @@
 - 主人账号：`605738729`。
 - 天使和恶魔发出的消息不会触发本插件固定命令。
 - 生图积分、养鲲、落樱、Arcaea 会话等用户数据按用户 QQ 共用，不按 bot 风格拆分。
-- 菜单、生图、群务等固定命令只能由唯一 owner 或明确被唤醒的当前 bot 处理；闲聊仍交给 AstrBot LLM 链路。
+- 菜单、生图、群务等固定命令不参与 LLM worker 负载均衡；双平台同一消息按目标 @、固定命令 owner 和 message_id claim 只执行一次。
+- 闲聊、普通问答和可代班的普通 LLM 回复交给 AstrBot LLM 链路，由主动接话/worker 调度层决定当前由哪个棉花糖处理。
 
 ## 数据与安全边界
 

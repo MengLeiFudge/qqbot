@@ -9,8 +9,10 @@ import time
 from astrbot.api import logger
 from astrbot.api.message_components import At, Plain, Reply
 from astrbot.api.platform import MessageType
+from astrbot.api.event import filter
 from astrbot.api.star import Context, Star, register
 from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
+from astrbot.core.star.filter.event_message_type import EventMessageType
 
 from .logic import TopicDecision
 from .logic import TopicInterest
@@ -22,8 +24,13 @@ from .logic import chat_with_current_provider as _chat_with_current_decision_pro
 from .logic import compact_text as _compact
 from .logic import has_strong_topic_signal as _has_strong_topic_signal
 from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
+from .logic import looks_like_qqbot_fixed_command
 from .logic import looks_like_low_information as _looks_like_low_information
 from .logic import try_acquire_active_reply_inflight as _try_acquire_active_reply_inflight
+from .twin_scheduler import decide_llm_worker
+from .twin_scheduler import mark_worker_busy
+from .twin_scheduler import release_worker
+from .twin_scheduler import targeted_twin_ids
 
 
 WINDOW_SECONDS = 150.0
@@ -47,6 +54,7 @@ _COOLDOWNS: dict[tuple[str, str], float] = {}
 _GROUP_COOLDOWNS: dict[str, float] = {}
 _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
 _ACTIVE_REPLY_INFLIGHT: dict[str, float] = {}
+LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
 
 
 @register(
@@ -63,6 +71,71 @@ class TopicConcentrationPlugin(Star):
             "[TopicConcentration] loaded: profile=%s other_bot_ids=%s",
             read_bot_profile(),
             sorted(get_other_bot_ids()),
+        )
+
+    @filter.event_message_type(EventMessageType.ALL, priority=1000, desc="双棉花糖普通 LLM worker 调度；固定命令不参与负载均衡。")
+    async def schedule_direct_llm_worker(self, event):
+        if not _is_llm_schedulable_event(event):
+            return
+        text = _plain_text(event) or str(event.get_message_str() or "")
+        if looks_like_qqbot_fixed_command(text):
+            return
+        decision = decide_llm_worker(
+            self_id=event.get_self_id(),
+            at_ids=_at_target_ids(event),
+            reply_sender_id=_reply_target_id(event),
+            message_key=_llm_message_key(event),
+        )
+        if not decision.should_handle:
+            event.should_call_llm(True)
+            event.stop_event()
+            logger.info(
+                "[TopicConcentration] skip direct LLM: self=%s selected=%s reason=%s",
+                event.get_self_id(),
+                decision.worker_id,
+                decision.reason,
+            )
+            return
+        event.is_wake = True
+        event.is_at_or_wake_command = True
+        event.set_extra(LLM_WORKER_SELECTED_EXTRA, decision.worker_id)
+        if decision.delegated_from:
+            event.set_extra("_qqbot_twin_llm_delegated_from", decision.delegated_from)
+        logger.info(
+            "[TopicConcentration] allow direct LLM: self=%s selected=%s reason=%s delegated_from=%s",
+            event.get_self_id(),
+            decision.worker_id,
+            decision.reason,
+            decision.delegated_from,
+        )
+
+    @filter.on_llm_request(desc="标记当前双棉花糖 worker 正在等待普通 LLM 返回。")
+    async def mark_direct_llm_worker_busy(self, event, req):
+        selected = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "")
+        if not selected:
+            return
+        if selected != str(event.get_self_id() or ""):
+            event.should_call_llm(True)
+            event.stop_event()
+            return
+        mark_worker_busy(selected)
+        logger.info(
+            "[TopicConcentration] mark direct LLM worker busy: worker=%s session=%s request_session=%s",
+            selected,
+            getattr(event, "unified_msg_origin", ""),
+            getattr(req, "session_id", ""),
+        )
+
+    @filter.on_llm_response(desc="释放当前双棉花糖普通 LLM worker。")
+    async def release_direct_llm_worker(self, event, response):
+        selected = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "")
+        if not selected:
+            return
+        release_worker(selected)
+        logger.info(
+            "[TopicConcentration] release direct LLM worker: worker=%s session=%s",
+            selected,
+            getattr(event, "unified_msg_origin", ""),
         )
 
     def _install_active_reply_gate(self) -> None:
@@ -97,6 +170,21 @@ class TopicConcentrationPlugin(Star):
                 return await original_need_active_reply(group_context, event)
 
             scope_key = _active_reply_scope_key(event)
+            now = time.monotonic()
+            worker_decision = decide_llm_worker(
+                self_id=event.get_self_id(),
+                at_ids=(),
+                message_key=f"active:{_llm_message_key(event)}",
+                now=now,
+            )
+            if not worker_decision.should_handle:
+                logger.info(
+                    "[TopicConcentration] skip active reply: "
+                    f"group={event.get_group_id()} reason={worker_decision.reason} "
+                    f"selected={worker_decision.worker_id}"
+                )
+                return False
+            event.set_extra(LLM_WORKER_SELECTED_EXTRA, worker_decision.worker_id)
             record = _record_message(event, scope_key=scope_key)
             if record.duplicate:
                 logger.debug(
@@ -110,7 +198,6 @@ class TopicConcentrationPlugin(Star):
                     f"group={event.get_group_id()} reason=weak_window"
                 )
                 return False
-            now = time.monotonic()
             group_cooldown_until = _GROUP_COOLDOWNS.get(scope_key, 0.0)
             if now < group_cooldown_until:
                 logger.info(
@@ -163,7 +250,8 @@ class TopicConcentrationPlugin(Star):
                     "[TopicConcentration] allow active reply: "
                     f"group={event.get_group_id()} topic={decision.topic_key} "
                     f"type={decision.topic_type} style={decision.reply_style} "
-                    f"max_length={decision.max_length} elapsed={elapsed:.2f}s reason={decision.reason}"
+                    f"max_length={decision.max_length} worker={worker_decision.worker_id} "
+                    f"elapsed={elapsed:.2f}s reason={decision.reason}"
                 )
                 return True
             finally:
@@ -342,6 +430,41 @@ def _plain_text(event) -> str:
         if isinstance(segment, Plain):
             parts.append(segment.text)
     return "".join(parts).strip()
+
+
+def _is_llm_schedulable_event(event) -> bool:
+    if str(event.get_sender_id() or "") in get_other_bot_ids(event):
+        return False
+    if event.get_self_id() == event.get_sender_id():
+        return False
+    if event.is_private_chat():
+        return True
+    if getattr(event, "is_at_or_wake_command", False):
+        return True
+    if targeted_twin_ids(_at_target_ids(event)):
+        return True
+    return bool(_reply_target_id(event) in targeted_twin_ids(_reply_target_id(event)))
+
+
+def _at_target_ids(event) -> tuple[str, ...]:
+    return tuple(str(segment.qq) for segment in event.get_messages() if isinstance(segment, At))
+
+
+def _reply_target_id(event) -> str:
+    for segment in event.get_messages():
+        if isinstance(segment, Reply):
+            return str(segment.sender_id or "")
+    return ""
+
+
+def _llm_message_key(event) -> str:
+    message_id = str(getattr(getattr(event, "message_obj", None), "message_id", "") or "").strip()
+    if message_id:
+        return f"message:{message_id}:llm"
+    group_id = str(event.get_group_id() or "private").strip() or "private"
+    sender_id = str(event.get_sender_id() or "unknown").strip() or "unknown"
+    text = re.sub(r"\s+", "", (_plain_text(event) or str(event.get_message_str() or "")))[:120]
+    return f"fallback:{group_id}:{sender_id}:llm:{text}"
 
 
 def get_other_bot_ids(event=None) -> set[str]:

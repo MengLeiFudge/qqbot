@@ -19,10 +19,12 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     format_rightcodes_draw_timeout,
     format_rightcodes_draw_missing_prompt_message,
     format_rightcodes_draw_points_status,
+    format_rightcodes_draw_suggestion_message,
     load_rightcodes_config,
     looks_like_rightcodes_draw_invocation,
     looks_like_rightcodes_draw_points_mutation_request,
     looks_like_rightcodes_draw_points_query,
+    looks_like_rightcodes_draw_suggestion,
     parse_rightcodes_draw_command,
     should_record_passive_group_points,
 )
@@ -54,6 +56,13 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertTrue(looks_like_rightcodes_draw_invocation("棉花生图"))
         self.assertIsNone(parse_rightcodes_draw_command("棉花生图"))
         self.assertIn("生图需要文字提示词", format_rightcodes_draw_missing_prompt_message())
+
+    def test_natural_draw_request_only_gets_command_suggestion(self) -> None:
+        self.assertIsNone(parse_rightcodes_draw_command("生成一张白猫图片"))
+        self.assertFalse(looks_like_rightcodes_draw_invocation("生成一张白猫图片"))
+        self.assertTrue(looks_like_rightcodes_draw_suggestion("生成一张白猫图片"))
+        self.assertIn("棉花糖生图 提示词", format_rightcodes_draw_suggestion_message())
+        self.assertIn("消耗生图积分", format_rightcodes_draw_suggestion_message())
 
     def test_rightcodes_draw_catalog_mentions_size_body(self) -> None:
         self.assertTrue(should_inject_rightcodes_draw_catalog("我要 1024x1024 body 里写什么"))

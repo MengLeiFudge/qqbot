@@ -371,14 +371,26 @@ def looks_like_rightcodes_draw_invocation(text: str) -> bool:
     return extract_rightcodes_draw_prompt(text.strip()) is not None
 
 
+def looks_like_rightcodes_draw_suggestion(text: str) -> bool:
+    return extract_natural_draw_prompt(text.strip()) is not None
+
+
 def extract_rightcodes_draw_prompt(text: str) -> str | None:
     command_match = re.match(r"^(?:棉花糖|棉花)\s*生图([\s\S]*)$", text)
     if command_match is not None:
         return command_match.group(1).strip()
+    return None
+
+
+def extract_natural_draw_prompt(text: str) -> str | None:
     natural_match = re.match(r"^生成\s*(.+?)(?:的)?(?:图片|图像|图)\s*$", text)
     if natural_match is not None:
         return natural_match.group(1).strip()
     return None
+
+
+def format_rightcodes_draw_suggestion_message() -> str:
+    return "你是不是想用生图功能？指令是：棉花糖生图 提示词。这个功能会消耗生图积分。"
 
 
 def looks_like_rightcodes_draw_command(text: str) -> bool:

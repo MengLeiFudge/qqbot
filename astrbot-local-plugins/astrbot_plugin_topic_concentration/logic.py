@@ -7,6 +7,18 @@ import re
 
 DUAL_PLATFORM_DUPLICATE_WINDOW_SECONDS = 3.0
 ACTIVE_REPLY_INFLIGHT_LEASE_SECONDS = 600.0
+FIXED_COMMAND_PREFIX_RE = re.compile(
+    r"^(?:棉花糖|棉花)\s*生图|^(?:查|查询|查看|看)(?:一下)?(?:我(?:的)?|当前)?(?:生图)?积分"
+    r"|^(?:生图模型|生图价格|draw\s*models|draw\s*help|balance|points?)$"
+    r"|^(?:菜单|帮助|指令)(?:\s*\S+)?$|^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
+    r"|^(?:棉花(?:记录|导出(?:md|MD)?)(?:\s*[0-9]{1,3})?|(?:记录|导出).*(?:对话|聊天记录|群聊记录).*(?:md|MD|markdown|Markdown|\.md|文件|当前目录).*)$"
+    r"|^[开关](?:群色图|图片显示)$|^(?:来点)?(?:[美色涩蛇]图|混合).*$"
+    r"|^arctj\s*[0-9]+(?:\.[0-9]+)?$|^arc(?:hd|tz)$|^(?:xz|arcxz)$|^(?:arczm|zm)(?:\s*[1-9][0-9]*)?$"
+    r"|^(?:arcqh|qh)(?:\s*(?:[1-9][0-9]*|max))?$|^arcqh\s*(?:bt|补图)$|^(?:arcjx|jx)$"
+    r"|^(?:i|view|chart|chart1|chart2|path|path1|path2|p|puzzle|puzzle1|puzzle2) .*$"
+    r"|^(?:养鲲|摸鲲|抓鲲|捕鲲|属性|道具|背包|商城|签到|boss|Boss|查看boss|查看Boss|挑战|落樱之都|更新日志|玩法|个人信息|恢复|回复).*$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,3 +237,7 @@ def looks_like_low_information(text: str) -> bool:
         return True
     low_markers = ("哈哈", "草", "笑死", "乐", "确实", "对啊", "是吧", "好耶", "离谱")
     return len(compact) <= 12 and any(marker in compact for marker in low_markers)
+
+
+def looks_like_qqbot_fixed_command(text: str) -> bool:
+    return FIXED_COMMAND_PREFIX_RE.search(str(text or "").strip()) is not None

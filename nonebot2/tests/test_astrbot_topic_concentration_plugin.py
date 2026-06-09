@@ -15,9 +15,18 @@ from astrbot_plugin_topic_concentration.logic import (
     chat_with_current_provider,
     has_strong_topic_signal,
     is_recent_duplicate_observation,
+    looks_like_qqbot_fixed_command,
     looks_like_low_information,
     release_active_reply_inflight,
     try_acquire_active_reply_inflight,
+)
+from astrbot_plugin_topic_concentration.twin_scheduler import (
+    clear_scheduler_state,
+    decide_llm_worker,
+    is_worker_busy,
+    mark_worker_busy,
+    release_worker,
+    targeted_twin_ids,
 )
 
 
@@ -81,6 +90,9 @@ class StubGroupMessageEvent:
 
 
 class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
+    def tearDown(self) -> None:
+        clear_scheduler_state()
+
     def test_decision_uses_only_astrbot_current_provider(self) -> None:
         current = StubProvider("current/provider")
         fallback = StubProvider("fallback/provider")
@@ -197,6 +209,64 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
                 lease_seconds=600.0,
             )
         )
+
+    def test_twin_scheduler_claims_same_message_for_one_worker(self) -> None:
+        first = decide_llm_worker(
+            self_id="1443944862",
+            at_ids=("1443944862",),
+            message_key="message:abc:llm",
+            now=10.0,
+        )
+        second = decide_llm_worker(
+            self_id="2629227874",
+            at_ids=("1443944862",),
+            message_key="message:abc:llm",
+            now=11.0,
+        )
+
+        self.assertTrue(first.should_handle)
+        self.assertEqual(first.worker_id, "1443944862")
+        self.assertFalse(second.should_handle)
+        self.assertEqual(second.reason, "message_claimed_by_other_worker")
+
+    def test_twin_scheduler_delegates_when_target_worker_busy(self) -> None:
+        mark_worker_busy("1443944862", now=10.0, lease_seconds=600.0)
+
+        target = decide_llm_worker(
+            self_id="1443944862",
+            at_ids=("1443944862",),
+            message_key="message:def:llm",
+            now=20.0,
+        )
+        delegated = decide_llm_worker(
+            self_id="2629227874",
+            at_ids=("1443944862",),
+            message_key="message:def:llm",
+            now=21.0,
+        )
+
+        self.assertFalse(target.should_handle)
+        self.assertEqual(target.worker_id, "2629227874")
+        self.assertTrue(delegated.should_handle)
+        self.assertEqual(delegated.reason, "message_claim_owner")
+        self.assertEqual(delegated.worker_id, "2629227874")
+
+    def test_twin_scheduler_releases_busy_worker(self) -> None:
+        mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
+        self.assertTrue(is_worker_busy("2629227874", now=20.0))
+        release_worker("2629227874")
+        self.assertFalse(is_worker_busy("2629227874", now=20.0))
+
+    def test_fixed_command_detection_skips_llm_worker_gate(self) -> None:
+        self.assertTrue(looks_like_qqbot_fixed_command("棉花生图 一只白猫"))
+        self.assertTrue(looks_like_qqbot_fixed_command("查询生图积分"))
+        self.assertTrue(looks_like_qqbot_fixed_command("菜单Arcaea"))
+        self.assertFalse(looks_like_qqbot_fixed_command("生成一张白猫图片"))
+        self.assertFalse(looks_like_qqbot_fixed_command("你怎么看这个报错"))
+
+    def test_twin_target_detection_ignores_normal_group_member_mentions(self) -> None:
+        self.assertEqual(targeted_twin_ids(["1443944862", "10001"]), {"1443944862"})
+        self.assertEqual(targeted_twin_ids(["10001", "10002"]), set())
 
 
 class StubLogger:

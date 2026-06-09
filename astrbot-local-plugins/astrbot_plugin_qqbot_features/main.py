@@ -23,8 +23,9 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
+from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
-from .command_guard import should_handle_migrated_command_ids
+from .command_guard import try_claim_command
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
@@ -40,6 +41,7 @@ from .rightcodes_draw_logic import format_rightcodes_draw_missing_prompt_message
 from .rightcodes_draw_logic import format_rightcodes_draw_model_help
 from .rightcodes_draw_logic import format_rightcodes_draw_points_mutation_denied
 from .rightcodes_draw_logic import format_rightcodes_draw_points_status
+from .rightcodes_draw_logic import format_rightcodes_draw_suggestion_message
 from .rightcodes_draw_logic import format_rightcodes_draw_success
 from .rightcodes_draw_logic import format_rightcodes_draw_timeout
 from .rightcodes_draw_logic import load_rightcodes_config
@@ -47,6 +49,7 @@ from .rightcodes_draw_logic import looks_like_rightcodes_draw_help_command
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_invocation
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_request
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_query
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_suggestion
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
 from .rightcodes_draw_catalog import format_rightcodes_draw_catalog_injection
 from .rightcodes_draw_catalog import should_inject_rightcodes_draw_catalog
@@ -89,6 +92,28 @@ SAKURA_PATTERN = (
     r"^(?:落樱之都|更新日志|玩法|注册.+|改名.+|个人信息|加经验[0-9]+|嘤[0-9]+|"
     r"恢复|回复|加[0-9]+(?:力量|智力|体质|敏捷|魅力))$"
 )
+FIXED_COMMAND_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        MENU_PATTERN,
+        FEATURE_MENU_PATTERN,
+        NOTE_EXPORT_PATTERN,
+        GROUP_FILE_CLEANUP_PATTERN,
+        FACTORIO_DOWNLOAD_PATTERN,
+        SHAPEZ_PATTERN,
+        LOLICON_ADMIN_PATTERN,
+        LOLICON_PATTERN,
+        ARC_RECOMMEND_PATTERN,
+        ARC_ACTIVITY_PATTERN,
+        ARC_APK_UPDATE_PATTERN,
+        ARC_GUESS_START_PATTERN,
+        ARC_GUESS_ART_START_PATTERN,
+        ARC_GUESS_ART_TILE_PATTERN,
+        ARC_GUESS_REVEAL_PATTERN,
+        KUN_PATTERN,
+        SAKURA_PATTERN,
+    )
+)
 FEATURE_MODE_ENV = "QQBOT_ASTRBOT_FEATURE_MODE"
 COMMAND_OWNER_ENV = "QQBOT_ASTRBOT_COMMAND_OWNER"
 FEATURE_MODE_DUAL = "dual"
@@ -98,6 +123,7 @@ NONEBOT2_HOST = "127.0.0.1"
 NONEBOT2_PORT = 8080
 OWNER_QQ = "605738729"
 DEFAULT_COMMAND_OWNER_QQ = "2629227874"
+LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,7 +305,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(MENU_PATTERN, desc="发送总览图片菜单，展示当前 AstrBot 已接管的群务、互动、生图、游戏和工具分类。")
     async def menu(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="menu_overview"):
             return
         try:
             image_path = render_overview_menu_image(
@@ -295,7 +321,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(FEATURE_MENU_PATTERN, desc="发送指定分类的图片菜单，例如“菜单棉花糖互动”“菜单Arcaea”。")
     async def feature_menu(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="menu_feature"):
             return
         key = re.sub(r"^菜单\s*", "", event.get_message_str().strip(), count=1)
         menu_item = find_menu_section(key) or find_feature(key)
@@ -318,7 +344,7 @@ class QQBotFeaturesPlugin(Star):
     @filter.platform_adapter_type("aiocqhttp")
     @filter.regex(GROUP_FILE_CLEANUP_PATTERN, desc="群文件清理通知命令，作者或机器人自身可触发，用于扫描并提醒清理超期外层群文件。")
     async def group_file_cleanup(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="group_cleanup"):
             return
         if event.is_private_chat() or not event.get_group_id():
             yield event.plain_result("群文件清理只能在群聊中使用。")
@@ -336,7 +362,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(NOTE_EXPORT_PATTERN, desc="主人限定的群聊记录导出命令，只读公开群上下文并写入固定安全目录。")
     async def group_note_export(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="note_export"):
             return
         if event.is_private_chat() or not event.get_group_id():
             yield event.plain_result("群聊记录导出只能在群聊中使用。")
@@ -364,7 +390,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(FACTORIO_DOWNLOAD_PATTERN, desc="获取 Factorio Space Age Windows 安装包下载链接，需要本机已配置 Factorio 凭据。")
     async def factorio_download(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="factorio_download"):
             return
         try:
             link = await asyncio.to_thread(fetch_factorio_space_age_windows_link)
@@ -379,7 +405,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(SHAPEZ_PATTERN, desc="渲染异形工厂 shapez 短代码、结构图或路径图；在线谜题在未配置 token 时给出提示。")
     async def shapez_render(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="shapez_render"):
             return
         text = event.get_message_str().strip()
         command, _, argument = text.partition(" ")
@@ -400,7 +426,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(LOLICON_ADMIN_PATTERN, desc="作者限定的 Lolicon 群配置命令，用于开关群 R18 和图片直发显示。")
     async def lolicon_admin(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="lolicon_admin"):
             return
         if str(event.get_sender_id()) != get_nonebot2_config_value("bot", "author_qq", "0"):
             yield event.plain_result("只有作者才能调整美图配置哦！")
@@ -420,7 +446,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(LOLICON_PATTERN, desc="Lolicon 美图命令，支持美图、色图、混合等关键词，并复用 bot1 图片缓存和群配置。")
     async def lolicon_image(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="lolicon_image"):
             return
         try:
             results = await asyncio.to_thread(
@@ -483,7 +509,17 @@ class QQBotFeaturesPlugin(Star):
         text = extract_plain_text(event).strip()
         if not text:
             return
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if looks_like_rightcodes_draw_suggestion(text) and _is_direct_or_private(event):
+            if not _should_handle_scheduled_or_migrated_command(
+                event,
+                self._feature_mode,
+                command_type="rightcodes_draw_suggestion",
+            ):
+                return
+            yield event.plain_result(format_rightcodes_draw_suggestion_message())
+            event.stop_event()
+            return
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="rightcodes_draw"):
             return
         store = RightCodesDrawQuotaStore(
             self._rightcodes_config.data_root,
@@ -510,6 +546,7 @@ class QQBotFeaturesPlugin(Star):
             if looks_like_rightcodes_draw_invocation(text):
                 yield event.plain_result(format_rightcodes_draw_missing_prompt_message())
                 event.stop_event()
+                return
             return
         quota = await asyncio.to_thread(store.reserve, user_id, model=draw_request.model)
         if not quota.allowed:
@@ -558,7 +595,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(ARC_RECOMMEND_PATTERN, desc="Arcaea PTT 推荐命令，例如 arctj10.5，按本地曲库和定数缓存推荐谱面。")
     async def arc_recommend(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_recommend"):
             return
         try:
             result = await asyncio.to_thread(
@@ -579,7 +616,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(ARC_ACTIVITY_PATTERN, desc="Arcaea 活动梯子查询命令，支持 archd 和 arctz。")
     async def arc_activity(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_activity"):
             return
         try:
             messages = await asyncio.to_thread(build_arc_activity_messages)
@@ -593,7 +630,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(ARC_APK_UPDATE_PATTERN, desc="作者限定的 Arcaea 安装包更新命令，支持 xz 和 arcxz。")
     async def arc_apk_update(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_apk_update"):
             return
         if str(event.get_sender_id()) != get_nonebot2_config_value("bot", "author_qq", "0"):
             yield event.plain_result("只有作者可以使用这个指令。")
@@ -611,7 +648,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(ARC_GUESS_START_PATTERN, desc="开始 Arcaea 字母猜歌局，支持 zm 或 arczm 加题目数量。")
     async def arc_guess_start(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_guess_song"):
             return
         if event.is_private_chat() or not event.get_group_id():
             yield event.plain_result("Arc 猜歌只能在群聊中开始。")
@@ -632,7 +669,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(ARC_GUESS_ART_START_PATTERN, desc="开始或继续 Arcaea 曲绘猜歌局，支持 qh 或 arcqh 加网格大小。")
     async def arc_guess_art_start(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_guess_art"):
             return
         if event.is_private_chat() or not event.get_group_id():
             yield event.plain_result("Arc 猜歌只能在群聊中开始。")
@@ -653,7 +690,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(ARC_GUESS_ART_TILE_PATTERN, desc="Arcaea 曲绘猜歌补图命令，打开下一块曲绘区域。")
     async def arc_guess_art_tile(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_guess_art_tile"):
             return
         if event.is_private_chat() or not event.get_group_id():
             yield event.plain_result("Arc 猜歌只能在群聊中进行。")
@@ -673,7 +710,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(ARC_GUESS_REVEAL_PATTERN, desc="Arcaea 猜歌揭晓命令，结束当前字母或曲绘猜歌局并公布答案。")
     async def arc_guess_reveal(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_guess_art_reveal"):
             return
         if event.is_private_chat() or not event.get_group_id():
             yield event.plain_result("Arc 猜歌只能在群聊中进行。")
@@ -714,7 +751,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(KUN_PATTERN, desc="养鲲玩法命令入口，处理摸鲲、属性、背包、商城、签到、排行、挑战、赠送等存档操作。")
     async def kun_command(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="kun_game"):
             return
         response = await asyncio.to_thread(handle_kun_command, event)
         if response is None:
@@ -724,7 +761,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.regex(SAKURA_PATTERN, desc="落樱之都基础玩法入口，处理注册、改名、个人信息、经验、樱币、加点和恢复。")
     async def sakura_command(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="sakura_game"):
             return
         response = await asyncio.to_thread(handle_sakura_command, event)
         if response is None:
@@ -956,15 +993,98 @@ def extract_plain_text(event: AstrMessageEvent) -> str:
     return str(event.get_message_str() or "")
 
 
-def _should_handle_migrated_command(event: AstrMessageEvent, feature_mode: str) -> bool:
-    return should_handle_migrated_command_ids(
+def _should_handle_migrated_command(
+    event: AstrMessageEvent,
+    feature_mode: str,
+    *,
+    command_type: str = "generic",
+) -> bool:
+    decision = decide_migrated_command_route(
         sender_id=event.get_sender_id(),
         self_id=event.get_self_id(),
+        at_ids=_at_target_ids(event),
+        is_private=event.is_private_chat(),
         is_direct_or_private=_is_direct_or_private(event),
         feature_mode=feature_mode,
         full_mode=FEATURE_MODE_FULL,
         command_owner_qq=read_command_owner_qq(),
     )
+    if not decision.should_handle:
+        logger.debug(
+            "[QQBotFeatures] skip migrated command: type=%s self=%s reason=%s message_id=%s",
+            command_type,
+            event.get_self_id(),
+            decision.reason,
+            _event_message_id(event),
+        )
+        return False
+    claim_key = _command_claim_key(event, command_type=command_type)
+    if not try_claim_command(claim_key):
+        logger.info(
+            "[QQBotFeatures] skip duplicated migrated command: type=%s self=%s claim=%s",
+            command_type,
+            event.get_self_id(),
+            claim_key,
+        )
+        return False
+    return True
+
+
+def _should_handle_scheduled_or_migrated_command(
+    event: AstrMessageEvent,
+    feature_mode: str,
+    *,
+    command_type: str,
+) -> bool:
+    selected_worker = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "").strip()
+    if selected_worker and selected_worker == str(event.get_self_id() or "").strip():
+        claim_key = _command_claim_key(event, command_type=command_type)
+        if not try_claim_command(claim_key):
+            logger.info(
+                "[QQBotFeatures] skip duplicated scheduled command hint: type=%s self=%s claim=%s",
+                command_type,
+                event.get_self_id(),
+                claim_key,
+            )
+            return False
+        return True
+    return _should_handle_migrated_command(event, feature_mode, command_type=command_type)
+
+
+def _at_target_ids(event: AstrMessageEvent) -> tuple[str, ...]:
+    return tuple(str(segment.qq) for segment in event.get_messages() if isinstance(segment, At))
+
+
+def _event_message_id(event: AstrMessageEvent) -> str:
+    message_id = getattr(getattr(event, "message_obj", None), "message_id", None)
+    return str(message_id or "").strip()
+
+
+def _command_claim_key(event: AstrMessageEvent, *, command_type: str) -> str:
+    message_id = _event_message_id(event)
+    if message_id:
+        return f"message:{message_id}:{command_type}"
+    group_id = str(event.get_group_id() or "private").strip() or "private"
+    sender_id = str(event.get_sender_id() or "unknown").strip() or "unknown"
+    text = re.sub(r"\s+", "", extract_plain_text(event))[:120]
+    return f"fallback:{group_id}:{sender_id}:{command_type}:{text}"
+
+
+def looks_like_qqbot_fixed_command(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if parse_rightcodes_draw_command(normalized) is not None:
+        return True
+    if looks_like_rightcodes_draw_invocation(normalized):
+        return True
+    if looks_like_rightcodes_draw_points_mutation_request(normalized):
+        return True
+    if looks_like_rightcodes_draw_points_query(normalized):
+        return True
+    if looks_like_rightcodes_draw_help_command(normalized):
+        return True
+    return any(pattern.search(normalized) for pattern in FIXED_COMMAND_PATTERNS)
 
 
 def read_command_owner_qq() -> str:
