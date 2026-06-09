@@ -12,7 +12,6 @@ MESSAGE_CLAIM_LEASE_SECONDS = 60.0
 
 _BUSY_UNTIL: dict[str, float] = {}
 _MESSAGE_CLAIMS: dict[str, tuple[str, float]] = {}
-_ROUND_ROBIN_INDEX = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,14 +105,10 @@ def select_worker(
 
 
 def choose_idle_worker(worker_ids: list[str], *, rng: random.Random | None = None) -> str:
-    global _ROUND_ROBIN_INDEX
     if len(worker_ids) == 1:
         return worker_ids[0]
-    if rng is not None:
-        return rng.choice(worker_ids)
-    worker = worker_ids[_ROUND_ROBIN_INDEX % len(worker_ids)]
-    _ROUND_ROBIN_INDEX += 1
-    return worker
+    chooser = rng or random.SystemRandom()
+    return chooser.choice(worker_ids)
 
 
 def mark_worker_busy(
@@ -149,10 +144,8 @@ def cleanup_scheduler_state(*, now: float | None = None) -> None:
 
 
 def clear_scheduler_state() -> None:
-    global _ROUND_ROBIN_INDEX
     _BUSY_UNTIL.clear()
     _MESSAGE_CLAIMS.clear()
-    _ROUND_ROBIN_INDEX = 0
 
 
 def targeted_twin_ids(at_ids: object, *, worker_ids: tuple[str, ...] = TWIN_WORKER_IDS) -> set[str]:

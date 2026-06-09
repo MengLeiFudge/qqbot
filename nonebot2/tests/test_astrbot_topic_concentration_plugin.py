@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from pathlib import Path
+import random
 import sys
 import unittest
 
@@ -256,6 +257,23 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertTrue(is_worker_busy("2629227874", now=20.0))
         release_worker("2629227874")
         self.assertFalse(is_worker_busy("2629227874", now=20.0))
+
+    def test_twin_scheduler_uses_random_choice_when_no_worker_targeted(self) -> None:
+        rng = random.Random(0)
+        choices = [
+            decide_llm_worker(
+                self_id="1443944862",
+                message_key=f"message:random-{index}:llm",
+                now=10.0 + index,
+                rng=rng,
+            ).worker_id
+            for index in range(6)
+        ]
+
+        self.assertEqual(
+            choices,
+            ["2629227874", "2629227874", "1443944862", "2629227874", "2629227874", "2629227874"],
+        )
 
     def test_fixed_command_detection_skips_llm_worker_gate(self) -> None:
         self.assertTrue(looks_like_qqbot_fixed_command("棉花生图 一只白猫"))
