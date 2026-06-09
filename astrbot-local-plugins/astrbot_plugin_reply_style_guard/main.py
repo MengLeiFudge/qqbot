@@ -10,11 +10,13 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
 from astrbot.core.message.components import Plain
 
-from .logic import strip_followup_tail
+from .logic import sanitize_reply_plain_text
 
 
 STYLE_GUARD_TEXT = (
     "输出硬规则：不要反问用户，不要用问句收尾，不要追问用户补充信息。"
+    "严格使用纯文本，不要输出 Markdown 语法：不要用 # 标题、- 或 * 列表、**粗体**、"
+    "`代码块`、> 引用、Markdown 链接或表格。"
     "不要使用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”"
     "“我帮你看/挑/认/分辨”这类追问式邀请收尾。"
     "能回答就直接给结论；不能做就直接拒绝并给合法、可执行替代；"
@@ -62,8 +64,8 @@ PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.i
 @register(
     "astrbot_plugin_reply_style_guard",
     "MengLei",
-    "为棉花糖注入身份和输出风格边界，并清理追问式收尾。",
-    "0.1.5",
+    "为棉花糖注入身份和输出风格边界，并清理 Markdown 和追问式收尾。",
+    "0.1.6",
 )
 class ReplyStyleGuardPlugin(Star):
     def __init__(self, context: Context):
@@ -81,18 +83,20 @@ class ReplyStyleGuardPlugin(Star):
         req.extra_user_content_parts.append(TextPart(text=identity_anchor).mark_as_temp())
         req.extra_user_content_parts.append(TextPart(text=STYLE_GUARD_TEXT).mark_as_temp())
 
-    @filter.on_decorating_result(desc="在消息发送前清理追问式、反问式或空洞邀请式收尾，避免普通回复继续催用户补充。")
+    @filter.on_decorating_result(desc="在消息发送前清理 Markdown、追问式、反问式或空洞邀请式收尾。")
     async def strip_reply_style_tail(self, event: AstrMessageEvent):
         result = event.get_result()
         if result is None or not result.chain:
             return
         changed = False
+        if hasattr(result, "use_markdown"):
+            result.use_markdown(False)
         cleaned_chain = []
         for comp in result.chain:
             if not isinstance(comp, Plain):
                 cleaned_chain.append(comp)
                 continue
-            cleaned = strip_followup_tail(comp.text)
+            cleaned = sanitize_reply_plain_text(comp.text)
             if cleaned != comp.text:
                 comp.text = cleaned
                 changed = True
@@ -101,7 +105,7 @@ class ReplyStyleGuardPlugin(Star):
         if changed:
             result.chain = cleaned_chain
             logger.info(
-                "[ReplyStyleGuard] stripped follow-up/question tail: session=%s",
+                "[ReplyStyleGuard] sanitized reply style: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
 

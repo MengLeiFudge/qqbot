@@ -359,6 +359,10 @@ def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
     return RightCodesDrawRequest(prompt=prompt, model=model)
 
 
+def looks_like_rightcodes_draw_invocation(text: str) -> bool:
+    return extract_rightcodes_draw_prompt(text.strip()) is not None
+
+
 def extract_rightcodes_draw_prompt(text: str) -> str | None:
     command_match = re.match(r"^(?:棉花糖|棉花)\s*生图([\s\S]*)$", text)
     if command_match is not None:
@@ -371,6 +375,10 @@ def extract_rightcodes_draw_prompt(text: str) -> str | None:
 
 def looks_like_rightcodes_draw_command(text: str) -> bool:
     return parse_rightcodes_draw_command(text) is not None
+
+
+def format_rightcodes_draw_missing_prompt_message() -> str:
+    return "生图需要文字提示词。用法：棉花糖生图 提示词；也可以写：棉花糖生图 模型名 提示词。"
 
 
 def looks_like_rightcodes_draw_help_command(text: str) -> bool:

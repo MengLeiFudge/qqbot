@@ -32,6 +32,7 @@ from .rightcodes_draw_logic import RightCodesDrawQuotaStore
 from .rightcodes_draw_logic import format_draw_quota_exceeded_message
 from .rightcodes_draw_logic import format_draw_start_message
 from .rightcodes_draw_logic import format_rightcodes_draw_failure
+from .rightcodes_draw_logic import format_rightcodes_draw_missing_prompt_message
 from .rightcodes_draw_logic import format_rightcodes_draw_model_help
 from .rightcodes_draw_logic import format_rightcodes_draw_points_mutation_denied
 from .rightcodes_draw_logic import format_rightcodes_draw_points_status
@@ -39,6 +40,7 @@ from .rightcodes_draw_logic import format_rightcodes_draw_success
 from .rightcodes_draw_logic import load_api_key
 from .rightcodes_draw_logic import load_rightcodes_config
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_help_command
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_invocation
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_request
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_query
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
@@ -430,7 +432,7 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.event_message_type(EventMessageType.ALL, desc="RightCodes 生图总入口，处理生图、模型价格、积分查询和拒绝手动改分请求。")
     async def rightcodes_draw_command(self, event: AstrMessageEvent):
-        text = str(event.get_message_str() or "").strip()
+        text = extract_plain_text(event).strip()
         if not text:
             return
         if not _should_handle_migrated_command(event, self._feature_mode):
@@ -457,6 +459,9 @@ class QQBotFeaturesPlugin(Star):
 
         draw_request = parse_rightcodes_draw_command(text)
         if draw_request is None:
+            if looks_like_rightcodes_draw_invocation(text):
+                yield event.plain_result(format_rightcodes_draw_missing_prompt_message())
+                event.stop_event()
             return
         quota = await asyncio.to_thread(store.reserve, user_id, model=draw_request.model)
         if not quota.allowed:
@@ -876,6 +881,16 @@ class QQBotFeaturesPlugin(Star):
 
 def _is_direct_or_private(event: AstrMessageEvent) -> bool:
     return event.is_private_chat() or bool(getattr(event, "is_at_or_wake_command", False))
+
+
+def extract_plain_text(event: AstrMessageEvent) -> str:
+    parts: list[str] = []
+    for segment in event.get_messages():
+        if isinstance(segment, Plain):
+            parts.append(segment.text)
+    if parts:
+        return "".join(parts)
+    return str(event.get_message_str() or "")
 
 
 def _should_handle_migrated_command(event: AstrMessageEvent, feature_mode: str) -> bool:

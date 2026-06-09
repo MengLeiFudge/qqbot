@@ -16,8 +16,10 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     RightCodesDrawQuotaStore,
     RightCodesDrawRequest,
     format_draw_start_message,
+    format_rightcodes_draw_missing_prompt_message,
     format_rightcodes_draw_points_status,
     load_rightcodes_config,
+    looks_like_rightcodes_draw_invocation,
     looks_like_rightcodes_draw_points_mutation_request,
     looks_like_rightcodes_draw_points_query,
     parse_rightcodes_draw_command,
@@ -42,6 +44,11 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         assert request is not None
         self.assertEqual(request.model, "nano-banana-pro")
         self.assertEqual(request.prompt, "一只白猫")
+
+    def test_draw_invocation_without_prompt_gets_fixed_hint(self) -> None:
+        self.assertTrue(looks_like_rightcodes_draw_invocation("棉花生图"))
+        self.assertIsNone(parse_rightcodes_draw_command("棉花生图"))
+        self.assertIn("生图需要文字提示词", format_rightcodes_draw_missing_prompt_message())
 
     def test_points_query_and_mutation_detection(self) -> None:
         self.assertTrue(looks_like_rightcodes_draw_points_query("查询生图积分"))

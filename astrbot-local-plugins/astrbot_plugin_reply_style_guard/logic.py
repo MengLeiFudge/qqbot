@@ -34,6 +34,28 @@ _FOLLOWUP_MARKERS = (
 )
 
 
+def sanitize_reply_plain_text(text: str) -> str:
+    return strip_followup_tail(strip_markdown_syntax(text))
+
+
+def strip_markdown_syntax(text: str) -> str:
+    lines: list[str] = []
+    in_fence = False
+    for raw_line in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            lines.append(line)
+            continue
+        line = _strip_block_markdown(line)
+        line = _strip_inline_markdown(line)
+        if line:
+            lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def strip_followup_tail(text: str) -> str:
     current = text.strip()
     if not current:
@@ -74,3 +96,31 @@ def is_followup_sentence(sentence: str) -> bool:
     if compact.endswith(("?", "？")):
         return True
     return False
+
+
+def _strip_block_markdown(line: str) -> str:
+    line = re.sub(r"^#{1,6}\s*", "", line)
+    line = re.sub(r"^>\s*", "", line)
+    line = re.sub(r"^\s*[-*+]\s+", "· ", line)
+    line = re.sub(r"^\s*(\d+)\.\s+", r"\1、", line)
+    return line
+
+
+def _strip_inline_markdown(line: str) -> str:
+    line = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _replace_markdown_link, line)
+    line = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _replace_markdown_link, line)
+    line = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", line)
+    line = re.sub(r"__([^_\n]+)__", r"\1", line)
+    line = re.sub(r"~~([^~\n]+)~~", r"\1", line)
+    line = re.sub(r"`([^`\n]+)`", r"\1", line)
+    line = re.sub(r"(?<!\w)\*([^*\n]+)\*(?!\w)", r"\1", line)
+    line = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"\1", line)
+    return line.strip()
+
+
+def _replace_markdown_link(match: re.Match[str]) -> str:
+    label = match.group(1).strip()
+    url = match.group(2).strip()
+    if label and url:
+        return f"{label} {url}"
+    return label or url

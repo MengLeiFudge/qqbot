@@ -1,6 +1,6 @@
 name: astrbot_plugin_reply_style_guard
 display_name: 棉花糖回复风格守卫
-desc: "为 AstrBot LLM 请求注入棉花糖身份和输出边界，并在发送前清理追问式、反问式收尾。"
-version: v0.1.5
+desc: "为 AstrBot LLM 请求注入棉花糖身份和输出边界，并在发送前清理 Markdown、追问式、反问式收尾。"
+version: v0.1.6
 author: MengLei
 repo: ""
