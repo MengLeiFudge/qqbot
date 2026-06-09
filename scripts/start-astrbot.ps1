@@ -264,8 +264,10 @@ Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json
 if (Test-Path $LocalPluginRoot) {
     Get-ChildItem -Path $LocalPluginRoot -Directory | ForEach-Object {
         $target = Join-Path $RuntimePluginRoot $_.Name
-        New-Item -ItemType Directory -Path $target -Force | Out-Null
-        Copy-Item -Path (Join-Path $_.FullName "*") -Destination $target -Recurse -Force
+        if (Test-Path $target) {
+            Remove-Item -Path $target -Recurse -Force
+        }
+        Copy-Item -Path $_.FullName -Destination $RuntimePluginRoot -Recurse -Force
     }
 }
 

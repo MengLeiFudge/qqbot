@@ -17,12 +17,11 @@ from .logic import TopicInterest
 from .logic import TopicRecordResult
 from .logic import TopicWindowMessage
 from .logic import active_reply_scope_key as _active_reply_scope_key
-from .logic import chat_with_decision_providers
+from .logic import chat_with_current_provider as _chat_with_current_decision_provider
 from .logic import compact_text as _compact
 from .logic import has_strong_topic_signal as _has_strong_topic_signal
 from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
 from .logic import looks_like_low_information as _looks_like_low_information
-from .logic import read_decision_provider_order
 
 
 WINDOW_SECONDS = 150.0
@@ -41,8 +40,6 @@ PROFILE_BY_BOT_ID = {
     "1443944862": "angel",
     "2629227874": "demon",
 }
-_DECISION_PROVIDER_ORDER: tuple[str, ...] = ()
-
 _WINDOWS: dict[str, deque[TopicWindowMessage]] = defaultdict(deque)
 _COOLDOWNS: dict[tuple[str, str], float] = {}
 _GROUP_COOLDOWNS: dict[str, float] = {}
@@ -53,18 +50,16 @@ _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
     "astrbot_plugin_topic_concentration",
     "local",
     "Gate AstrBot active replies by AI-decided short-window topic interest.",
-    "0.3.3",
+    "0.3.4",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
-        set_decision_provider_order(read_decision_provider_order(config))
         self._install_active_reply_gate()
         logger.info(
-            "[TopicConcentration] loaded: profile=%s other_bot_ids=%s decision_provider_order=%s",
+            "[TopicConcentration] loaded: profile=%s other_bot_ids=%s",
             read_bot_profile(),
             sorted(get_other_bot_ids()),
-            list(_DECISION_PROVIDER_ORDER),
         )
 
     def _install_active_reply_gate(self) -> None:
@@ -205,7 +200,7 @@ async def _decide_with_ai(
     if not any(_compact(message.text) for message in window):
         return None
     prompt = _build_decision_prompt(window, active_interest=_get_interest(scope_key))
-    response = await _chat_with_decision_providers(group_context.context, event, prompt, scope_key=scope_key)
+    response = await _chat_with_current_provider(group_context.context, event, prompt, scope_key=scope_key)
     if response is None:
         return None
     try:
@@ -218,20 +213,14 @@ async def _decide_with_ai(
         return None
 
 
-async def _chat_with_decision_providers(context: Context, event, prompt: str, *, scope_key: str):
-    return await chat_with_decision_providers(
+async def _chat_with_current_provider(context: Context, event, prompt: str, *, scope_key: str):
+    return await _chat_with_current_decision_provider(
         context=context,
         event=event,
         prompt=prompt,
-        configured_order=_DECISION_PROVIDER_ORDER,
         session_id=f"topic_concentration:{scope_key}",
         logger=logger,
     )
-
-
-def set_decision_provider_order(provider_order: tuple[str, ...]) -> None:
-    global _DECISION_PROVIDER_ORDER
-    _DECISION_PROVIDER_ORDER = provider_order
 
 
 def _build_decision_prompt(

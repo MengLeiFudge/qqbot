@@ -12,13 +12,10 @@ sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 from astrbot_plugin_topic_concentration.logic import (
     TopicWindowMessage,
     active_reply_scope_key,
-    build_decision_provider_ids,
-    chat_with_decision_providers,
+    chat_with_current_provider,
     has_strong_topic_signal,
     is_recent_duplicate_observation,
     looks_like_low_information,
-    normalize_provider_order,
-    read_decision_provider_order,
 )
 
 
@@ -41,9 +38,8 @@ class StubProvider:
 
 
 class StubContext:
-    def __init__(self, providers: dict[str, StubProvider], config: dict, current_provider_id: str = "") -> None:
+    def __init__(self, providers: dict[str, StubProvider], current_provider_id: str = "") -> None:
         self.providers = providers
-        self.config = config
         self.current_provider_id = current_provider_id
 
     def get_provider_by_id(self, provider_id: str):
@@ -51,10 +47,6 @@ class StubContext:
 
     def get_using_provider(self, umo: str):
         return self.providers.get(self.current_provider_id)
-
-    def get_config(self, umo: str | None = None):
-        return self.config
-
 
 class StubEvent:
     unified_msg_origin = "aiocqhttp:GroupMessage:10001"
@@ -87,82 +79,48 @@ class StubGroupMessageEvent:
 
 
 class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
-    def test_explicit_decision_provider_order_is_array_and_deduplicated(self) -> None:
-        order = read_decision_provider_order(
-            {
-                "decision_provider_order": [
-                    "packyapi-gemini/gemini-3-flash-preview",
-                    "",
-                    "codex-everywhere/gpt-5.4-mini",
-                    "packyapi-gemini/gemini-3-flash-preview",
-                ]
-            }
-        )
-
-        self.assertEqual(
-            order,
-            (
-                "packyapi-gemini/gemini-3-flash-preview",
-                "codex-everywhere/gpt-5.4-mini",
-            ),
-        )
-
-    def test_default_order_uses_current_default_and_fallback_models(self) -> None:
-        provider_ids = build_decision_provider_ids(
-            configured_order=(),
-            current_provider_id="packyapi-gemini/gemini-3-flash-preview",
-            provider_settings={
-                "default_provider_id": "packyapi-gemini/gemini-3-flash-preview",
-                "fallback_chat_models": [
-                    "codex-everywhere/gpt-5.4-mini",
-                    "openrouter_icu/gpt-5.4-mini",
-                ],
-            },
-        )
-
-        self.assertEqual(
-            provider_ids,
-            (
-                "packyapi-gemini/gemini-3-flash-preview",
-                "codex-everywhere/gpt-5.4-mini",
-                "openrouter_icu/gpt-5.4-mini",
-            ),
-        )
-
-    def test_string_order_is_only_backward_compatible_input(self) -> None:
-        self.assertEqual(
-            normalize_provider_order("a/b, c/d\n a/b"),
-            ("a/b", "c/d"),
-        )
-
-    def test_chat_tries_configured_providers_top_down_until_success(self) -> None:
-        bad = StubProvider("bad/provider", fail=True)
-        good = StubProvider("good/provider")
-        skipped = StubProvider("skipped/provider")
+    def test_decision_uses_only_astrbot_current_provider(self) -> None:
+        current = StubProvider("current/provider")
+        fallback = StubProvider("fallback/provider")
         context = StubContext(
-            {
-                "bad/provider": bad,
-                "good/provider": good,
-                "skipped/provider": skipped,
-            },
-            config={"provider_settings": {}},
+            {"current/provider": current, "fallback/provider": fallback},
+            current_provider_id="current/provider",
         )
 
         response = asyncio.run(
-            chat_with_decision_providers(
+            chat_with_current_provider(
                 context=context,
                 event=StubEvent(),
                 prompt="prompt",
-                configured_order=("bad/provider", "good/provider", "skipped/provider"),
                 logger=StubLogger(),
             )
         )
 
         self.assertIsNotNone(response)
         self.assertEqual(response.completion_text, '{"should_reply": false}')
-        self.assertEqual(bad.prompts, ["prompt"])
-        self.assertEqual(good.prompts, ["prompt"])
-        self.assertEqual(skipped.prompts, [])
+        self.assertEqual(current.prompts, ["prompt"])
+        self.assertEqual(fallback.prompts, [])
+
+    def test_decision_does_not_fallback_when_current_provider_fails(self) -> None:
+        current = StubProvider("current/provider", fail=True)
+        fallback = StubProvider("fallback/provider")
+        context = StubContext(
+            {"current/provider": current, "fallback/provider": fallback},
+            current_provider_id="current/provider",
+        )
+
+        response = asyncio.run(
+            chat_with_current_provider(
+                context=context,
+                event=StubEvent(),
+                prompt="prompt",
+                logger=StubLogger(),
+            )
+        )
+
+        self.assertIsNone(response)
+        self.assertEqual(current.prompts, ["prompt"])
+        self.assertEqual(fallback.prompts, [])
 
     def test_short_interjection_question_is_low_information_not_strong_topic(self) -> None:
         self.assertTrue(looks_like_low_information("咪？"))

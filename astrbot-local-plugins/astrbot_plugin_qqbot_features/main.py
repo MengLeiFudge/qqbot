@@ -44,6 +44,9 @@ from .rightcodes_draw_logic import should_record_passive_group_points
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
+from .social_events import format_self_join_private_notice
+from .social_events import should_send_member_welcome
+from .twin_poke import TWIN_BOT_QQ_IDS
 from .twin_poke import should_follow_poke_notice
 
 
@@ -106,12 +109,13 @@ FEATURES: tuple[FeatureSpec, ...] = (
         status="已移植",
         lines=(
             "收到好友申请或入群邀请时按配置自动同意，并记录处理结果",
+            "机器人自身入群后私聊通知邀请者，群内不发自报消息",
         ),
     ),
     FeatureSpec(
         name="入群欢迎",
         aliases=("欢迎", "新人欢迎", "社交事件"),
-        lines=("新成员入群时发送欢迎消息；机器人自身入群时发送自我介绍",),
+        lines=("新成员入群时由固定命令 owner 账号发送欢迎；双 bot 互相入群不欢迎",),
     ),
     FeatureSpec(
         name="戳一戳响应",
@@ -231,7 +235,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.9.2",
+    "0.9.3",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -251,6 +255,7 @@ class QQBotFeaturesPlugin(Star):
         self._arc_apk_update_manager = None
         self._rightcodes_config = load_rightcodes_config(config)
         self._rightcodes_draw_lock = asyncio.Semaphore(2)
+        self._group_inviter_by_group_id: dict[str, str] = {}
         logger.info(
             "[QQBotFeatures] migrated feature plugin loaded, mode=%s auto_approve_friend=%s auto_approve_group_invite=%s",
             self._feature_mode,
@@ -698,8 +703,13 @@ class QQBotFeaturesPlugin(Star):
             if not event.get_group_id() or not user_id:
                 return
             if user_id == self_id:
-                yield event.plain_result("棉花糖已经加入群聊啦，主人喵！")
-            else:
+                await self._notify_self_joined_group(event, str(event.get_group_id()))
+            elif should_send_member_welcome(
+                user_id=user_id,
+                self_id=self_id,
+                command_owner_id=read_command_owner_qq(),
+                twin_bot_ids=TWIN_BOT_QQ_IDS,
+            ):
                 yield event.chain_result([_at(user_id), Plain(" 欢迎大佬喵！群地位+1")])
             return
         if notice_type == "notify" and sub_type == "poke":
@@ -754,7 +764,7 @@ class QQBotFeaturesPlugin(Star):
                     user_id,
                 )
                 return
-            await self._approve_onebot_request(
+            approved = await self._approve_onebot_request(
                 event,
                 action="set_group_add_request",
                 payload={"flag": flag, "sub_type": sub_type, "approve": True},
@@ -764,6 +774,8 @@ class QQBotFeaturesPlugin(Star):
                 sub_type=sub_type,
                 flag=flag,
             )
+            if approved and group_id and user_id:
+                self._group_inviter_by_group_id[group_id] = user_id
 
     async def _approve_onebot_request(
         self,
@@ -776,7 +788,7 @@ class QQBotFeaturesPlugin(Star):
         user_id: str,
         sub_type: str,
         flag: str,
-    ) -> None:
+    ) -> bool:
         if not flag:
             logger.warning(
                 "[QQBotFeatures] cannot approve %s without flag: group_id=%s user_id=%s sub_type=%s",
@@ -785,7 +797,7 @@ class QQBotFeaturesPlugin(Star):
                 user_id,
                 sub_type,
             )
-            return
+            return False
         try:
             api = AstrBotOneBotApi(event)
             await api.call_api(action, **payload)
@@ -800,7 +812,7 @@ class QQBotFeaturesPlugin(Star):
                 flag,
                 exc,
             )
-            return
+            return False
         logger.info(
             "[QQBotFeatures] approved %s: action=%s group_id=%s user_id=%s sub_type=%s flag=%s",
             log_label,
@@ -810,6 +822,52 @@ class QQBotFeaturesPlugin(Star):
             sub_type,
             flag,
         )
+        return True
+
+    async def _notify_self_joined_group(self, event: AstrMessageEvent, group_id: str) -> None:
+        inviter_id = self._group_inviter_by_group_id.pop(group_id, "")
+        target_user_id = inviter_id or OWNER_QQ
+        group_name = await self._get_group_name(event, group_id)
+        message = format_self_join_private_notice(group_name, group_id)
+        try:
+            await AstrBotOneBotApi(event).call_api(
+                "send_private_msg",
+                user_id=int(target_user_id),
+                message=message,
+            )
+        except Exception as exc:
+            logger.exception(
+                "[QQBotFeatures] failed to notify self group join: group_id=%s target_user_id=%s error=%s",
+                group_id,
+                target_user_id,
+                exc,
+            )
+            return
+        logger.info(
+            "[QQBotFeatures] notified self group join privately: group_id=%s target_user_id=%s inviter_id=%s",
+            group_id,
+            target_user_id,
+            inviter_id,
+        )
+
+    async def _get_group_name(self, event: AstrMessageEvent, group_id: str) -> str:
+        try:
+            result = await AstrBotOneBotApi(event).call_api(
+                "get_group_info",
+                group_id=int(group_id),
+                no_cache=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[QQBotFeatures] failed to read group info for self join notice: group_id=%s error=%s",
+                group_id,
+                exc,
+            )
+            return ""
+        if isinstance(result, dict):
+            data = result.get("data") if isinstance(result.get("data"), dict) else result
+            return str(data.get("group_name") or "").strip()
+        return ""
 
 
 def _is_direct_or_private(event: AstrMessageEvent) -> bool:

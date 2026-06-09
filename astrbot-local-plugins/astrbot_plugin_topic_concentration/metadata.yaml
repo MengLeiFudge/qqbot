@@ -1,6 +1,6 @@
 name: astrbot_plugin_topic_concentration
 display_name: AstrBot topic concentration
 desc: "Gate AstrBot active replies by AI-decided short-window topic interest."
-version: v0.3.3
+version: v0.3.4
 author: local
 repo: ""
