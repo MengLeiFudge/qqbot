@@ -86,6 +86,8 @@ def test_ai_decision_prompt_defines_topic_concentration_and_interest() -> None:
     assert "这个月一顿没吃饭/没睡觉" in prompt
     assert "不当成危机处理" in prompt
     assert "分析不出原因" in prompt
+    assert "水群行为" in prompt
+    assert "普通主动窗口里不要因此刷屏" in prompt
 
 
 def test_third_party_named_mentions_do_not_trigger() -> None:
