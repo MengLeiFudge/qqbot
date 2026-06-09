@@ -17,7 +17,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
-from astrbot.api.message_components import At, Image, Plain, Poke
+from astrbot.api.message_components import At, Image, Plain
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
@@ -116,7 +116,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="戳一戳响应",
         aliases=("戳一戳", "反戳", "社交事件"),
-        lines=("戳机器人时按概率回复和反戳；戳群成员时小概率跟戳",),
+        lines=("戳机器人时按概率文本回应；双 bot 之间不互戳",),
     ),
     FeatureSpec(
         name="复读",
@@ -704,15 +704,14 @@ class QQBotFeaturesPlugin(Star):
         if roll > 25:
             return
         if target_id == self_id:
-            yield event.plain_result("谁让你戳我的？我戳！")
+            yield event.plain_result("谁让你戳我的？")
             if roll <= 5:
                 await asyncio.sleep(1.0)
-                yield event.chain_result([Plain("我再戳！"), Poke(id=user_id)])
+                yield event.plain_result("我记下来了。")
                 if roll <= 1:
                     await asyncio.sleep(1.0)
-                    yield event.chain_result([Plain("我还戳！"), Poke(id=user_id)])
+                    yield event.plain_result("还戳？")
             return
-        yield event.chain_result([Poke(id=target_id)])
 
     def _log_onebot_request(self, raw: dict) -> None:
         request_type = str(raw.get("request_type") or "")

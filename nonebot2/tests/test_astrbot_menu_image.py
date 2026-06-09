@@ -71,7 +71,7 @@ class AstrBotMenuImageTest(unittest.TestCase):
                 self.assertEqual(image.width, 1120)
                 self.assertGreater(image.height, 300)
 
-    def test_poke_notice_does_not_follow_twin_bot_targets(self) -> None:
+    def test_poke_notice_only_responds_when_current_bot_is_target(self) -> None:
         self.assertFalse(
             should_follow_poke_notice(
                 self_id="2629227874",
@@ -84,6 +84,13 @@ class AstrBotMenuImageTest(unittest.TestCase):
                 self_id="2629227874",
                 user_id="1443944862",
                 target_id="2629227874",
+            )
+        )
+        self.assertFalse(
+            should_follow_poke_notice(
+                self_id="2629227874",
+                user_id="3062317151",
+                target_id="3045271450",
             )
         )
         self.assertTrue(

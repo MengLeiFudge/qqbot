@@ -13,4 +13,4 @@ def should_follow_poke_notice(*, self_id: str, user_id: str, target_id: str) -> 
         return False
     if target_id == self_id:
         return True
-    return target_id not in TWIN_BOT_QQ_IDS
+    return False
