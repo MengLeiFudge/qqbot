@@ -28,7 +28,7 @@
 
 不要再使用 `nonebot2/.env`、`nonebot2/.env.example` 或 `nonebot2/config/qqbot.toml` 作为运行配置入口；根级启动脚本会固定读取 `data/nonebot2/config/`。
 
-AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps1` 会调用 `uv tool` 安装的 `astrbot` 命令，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。
+AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps1` 会优先直调 `uv tool` 安装出的 `astrbot.exe`，再回退到 PATH 中的 `astrbot` / `uv tool run`，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。
 
 `astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、复读、入群欢迎、戳一戳文本响应、社交请求日志、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；NoneBot2 AI runtime 使用 AstrBot 原生链路替代。
 
@@ -39,6 +39,8 @@ RightCodes 生图命令已归入 `astrbot_plugin_qqbot_features`。默认复用 
 `astrbot_plugin_qqbot_features` 默认使用 `dual` 模式：bot1 和 bot2 同时在线时，AstrBot 只响应明确唤醒或私聊命令，复读、入群欢迎、戳一戳等自动事件仍由 NoneBot2 负责，避免同一事件双机器人重复回应。以后切换到 AstrBot-only 时，先停用 bot1，再使用 `scripts\start-astrbot.bat` 启动同一 AstrBot 管理端内的天使+恶魔双平台，或显式运行 `scripts\start-all.ps1 -Target astrbot -SkipInstall -AstrBotProfile both -FeatureMode full`。环境变量 `QQBOT_ASTRBOT_FEATURE_MODE` 会覆盖插件配置。启动脚本会阻止 `full` 模式和 NoneBot2 双开。
 
 AstrBot 启动入口支持显式选择 bot 身份：默认 `-AstrBotProfile demon` 使用恶魔棉花糖账号 `2629227874`；`-AstrBotProfile angel -FeatureMode full` 使用天使账号 `1443944862`；`-AstrBotProfile both -FeatureMode full` 在同一个 AstrBot 管理端里同步两个 `aiocqhttp` 平台，恶魔默认反连 `ws://127.0.0.1:6200/ws`，天使默认反连 `ws://127.0.0.1:6201/ws`。`scripts\start-astrbot.bat` 默认就是 `both/full`。本地插件会按每条消息的 `self_id` 注入天使或恶魔身份；`both` 和 `angel` 只允许 `-Target astrbot` 且必须显式 `-FeatureMode full`，避免和 bot1 同账号双开。
+
+`scripts\start-all.ps1` 会先让 bot 子流程完成旧端口清理，再提前启动对应 NapCat 子流程；NapCat 子流程等待目标 OneBot 端口监听后立即连接，不再等 AstrBot 全部 ready 后才开始准备。AstrBot 反向 WebSocket 端口如果出现 `WinError 10013`、`PermissionError` 等平台绑定错误，启动器会从日志中快速识别并失败，不再等满长超时。
 
 AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参与；固定命令只由一个账号执行。没有明确 @ 或私聊时，固定命令默认由恶魔账号 `2629227874` 处理，可用 `QQBOT_ASTRBOT_COMMAND_OWNER` 覆盖；明确 @ 天使/恶魔或私聊时，由当前被叫到的 bot 处理。`菜单`、`帮助`、`指令` 会发送统一图片菜单，总览按 `群务管理`、`棉花糖互动`、`养鲲`、`落樱之都`、`Arcaea`、`Factorio`、`异形工厂` 分组；`菜单模块名` 会发送模块详情图。
 

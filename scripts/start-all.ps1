@@ -106,7 +106,9 @@ function Wait-TcpPort {
         [int]$Port,
         [int]$TimeoutSeconds,
         [string]$LogFile,
-        [System.Diagnostics.Process]$Process = $null
+        [System.Diagnostics.Process]$Process = $null,
+        [string]$AbortLogFile = "",
+        [string[]]$AbortPatterns = @()
     )
 
     Write-LauncherLog -LogFile $LogFile -Message "Waiting for port ${HostName}:$Port for up to $TimeoutSeconds seconds."
@@ -119,6 +121,15 @@ function Wait-TcpPort {
         if ($Process -and $Process.HasExited) {
             Write-LauncherLog -LogFile $LogFile -Message "Background process pid=$($Process.Id) exited before port ${HostName}:$Port was ready. exit_code=$($Process.ExitCode)"
             return $false
+        }
+        if ($AbortLogFile -and $AbortPatterns.Count -gt 0 -and (Test-Path $AbortLogFile)) {
+            $tail = Get-LogTailText -Path $AbortLogFile -Count 80
+            foreach ($pattern in $AbortPatterns) {
+                if ($tail -match $pattern) {
+                    Write-LauncherLog -LogFile $LogFile -Message "Aborting wait for port ${HostName}:$Port because log matched: $pattern"
+                    return $false
+                }
+            }
         }
         Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $deadline)
@@ -267,6 +278,26 @@ function Stop-ProcessByPort {
                 Write-LauncherLog -LogFile $LogFile -Message "Stopping existing $Name pid=$owner by port $Port."
                 Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
             }
+        }
+        foreach ($owner in $owners) {
+            if ($owner -and $owner -ne $PID) {
+                try {
+                    Wait-Process -Id $owner -Timeout 20 -ErrorAction SilentlyContinue
+                }
+                catch {
+                }
+            }
+        }
+        if ($owners.Count -gt 0) {
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Get-Date) -lt $deadline) {
+                if (-not (Test-TcpPort -HostName "127.0.0.1" -Port $Port)) {
+                    Write-LauncherLog -LogFile $LogFile -Message "Port $Port is released."
+                    return
+                }
+                Start-Sleep -Seconds 1
+            }
+            Write-LauncherLog -LogFile $LogFile -Message "Port $Port still accepts TCP after stopping $Name owners; continuing with startup."
         }
     }
     catch {
@@ -474,6 +505,7 @@ function Start-NoneBotComponent {
     Write-LauncherLog -LogFile $launcherLog -Message "Starting NoneBot2 component."
     Stop-ProcessByPidFile -PidFile (Join-Path $WorkspaceRoot "data\nonebot2\run\qqbot.pid") -Name "NoneBot2" -LogFile $launcherLog
     Stop-ProcessByPort -Port 8080 -Name "NoneBot2" -LogFile $launcherLog
+    Complete-ChildStage -RunId $RunId -Component "nonebot2" -Stage "ports-cleared"
 
     $script = Join-Path $ScriptRoot "start-nonebot2.ps1"
     $extra = if ($SkipInstall) { "-SkipInstall" } else { "" }
@@ -514,6 +546,7 @@ function Start-AstrBotComponent {
     if ($AstrBotProfile -eq "both") {
         Stop-ProcessByPort -Port $AstrBotAngelOneBotPort -Name "AstrBot" -LogFile $launcherLog
     }
+    Complete-ChildStage -RunId $RunId -Component "astrbot" -Stage "ports-cleared"
 
     $script = Join-Path $ScriptRoot "start-astrbot.ps1"
     $featureModeArg = if ($FeatureMode) { " -FeatureMode '$FeatureMode'" } else { "" }
@@ -532,11 +565,22 @@ function Start-AstrBotComponent {
         }
         throw "AstrBot did not open port 6185. Log: $stdoutLog"
     }
-    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $AstrBotOneBotPort -TimeoutSeconds 360 -LogFile $launcherLog)) {
-        throw "AstrBot did not open port $AstrBotOneBotPort."
+    $platformAbortPatterns = @("platform_aiocqhttp_.*发生错误", "WinError 10013", "PermissionError")
+    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $AstrBotOneBotPort -TimeoutSeconds 120 -LogFile $launcherLog -Process $process -AbortLogFile $stdoutLog -AbortPatterns $platformAbortPatterns)) {
+        $tail = Get-LogTailText -Path $stdoutLog
+        if ($tail) {
+            Write-Host "Recent AstrBot output:" -ForegroundColor Yellow
+            Write-Host $tail
+        }
+        throw "AstrBot did not open port $AstrBotOneBotPort. Log: $stdoutLog"
     }
-    if ($AstrBotProfile -eq "both" -and -not (Wait-TcpPort -HostName "127.0.0.1" -Port $AstrBotAngelOneBotPort -TimeoutSeconds 360 -LogFile $launcherLog)) {
-        throw "AstrBot did not open port $AstrBotAngelOneBotPort."
+    if ($AstrBotProfile -eq "both" -and -not (Wait-TcpPort -HostName "127.0.0.1" -Port $AstrBotAngelOneBotPort -TimeoutSeconds 120 -LogFile $launcherLog -Process $process -AbortLogFile $stdoutLog -AbortPatterns $platformAbortPatterns)) {
+        $tail = Get-LogTailText -Path $stdoutLog
+        if ($tail) {
+            Write-Host "Recent AstrBot output:" -ForegroundColor Yellow
+            Write-Host $tail
+        }
+        throw "AstrBot did not open port $AstrBotAngelOneBotPort. Log: $stdoutLog"
     }
 }
 
@@ -559,9 +603,6 @@ function Start-NapCatComponent {
     New-Item -ItemType File -Path $stderrLog -Force | Out-Null
 
     Write-LauncherLog -LogFile $launcherLog -Message "Starting NapCat account $Account."
-    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $BotPort -TimeoutSeconds 120 -LogFile $launcherLog)) {
-        throw "Target bot port $BotPort is not ready for NapCat account $Account."
-    }
 
     if ($DoneCheck -eq "nonebot2") {
         Sync-NapCatOneBotClientConfig -Account $Account -BotPort $BotPort -ClientName "qqbot-reverse-ws" -PathSuffix "/onebot/v11/ws"
@@ -571,6 +612,9 @@ function Start-NapCatComponent {
     }
 
     Stop-NapCatAccountProcesses -Account $Account -LogFile $launcherLog
+    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $BotPort -TimeoutSeconds 120 -LogFile $launcherLog)) {
+        throw "Target bot port $BotPort is not ready for NapCat account $Account."
+    }
     $script = Join-Path $ScriptRoot "start-napcat-account.ps1"
     $command = "& '$script' -Account '$Account'"
     $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
@@ -609,6 +653,18 @@ function Complete-Child {
     Set-Content -Path (Join-Path $controlRoot "$Component.done") -Value "done" -Encoding UTF8
 }
 
+function Complete-ChildStage {
+    param(
+        [string]$RunId,
+        [string]$Component,
+        [string]$Stage
+    )
+
+    $controlRoot = Get-ControlRoot -RunId $RunId
+    New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null
+    Set-Content -Path (Join-Path $controlRoot "$Component.$Stage") -Value "done" -Encoding UTF8
+}
+
 function Fail-Child {
     param(
         [string]$RunId,
@@ -619,6 +675,40 @@ function Fail-Child {
     $controlRoot = Get-ControlRoot -RunId $RunId
     New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null
     Set-Content -Path (Join-Path $controlRoot "$Component.failed") -Value $Message -Encoding UTF8
+}
+
+function Wait-ChildStages {
+    param(
+        [string]$RunId,
+        [string[]]$Components,
+        [string]$Stage,
+        [int]$TimeoutSeconds
+    )
+
+    $controlRoot = Get-ControlRoot -RunId $RunId
+    New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null
+    $pending = [System.Collections.Generic.HashSet[string]]::new([string[]]$Components)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($pending.Count -gt 0) {
+        foreach ($componentName in @($pending)) {
+            $failedPath = Join-Path $controlRoot "$componentName.failed"
+            if (Test-Path $failedPath) {
+                $message = Get-Content -Raw -Path $failedPath
+                throw "$componentName failed: $message"
+            }
+            $stagePath = Join-Path $controlRoot "$componentName.$Stage"
+            if (Test-Path $stagePath) {
+                [void]$pending.Remove($componentName)
+            }
+        }
+        if ($pending.Count -eq 0) {
+            return
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw "Timed out waiting for stage '$Stage': $($pending -join ', ')"
+        }
+        Start-Sleep -Seconds 1
+    }
 }
 
 function Invoke-Child {
@@ -787,13 +877,14 @@ function Invoke-Parent {
     foreach ($componentName in $botComponents) {
         Start-ComponentWindow -RunId $runId -Component $componentName
     }
-    Wait-Children -RunId $runId -Components $botComponents
-
-    Write-Host "Starting NapCat accounts: $($napcatComponents -join ', ')"
-    foreach ($componentName in $napcatComponents) {
-        Start-ComponentWindow -RunId $runId -Component $componentName
+    if ($napcatComponents.Count -gt 0) {
+        Wait-ChildStages -RunId $runId -Components $botComponents -Stage "ports-cleared" -TimeoutSeconds 90
+        Write-Host "Starting NapCat accounts: $($napcatComponents -join ', ')"
+        foreach ($componentName in $napcatComponents) {
+            Start-ComponentWindow -RunId $runId -Component $componentName
+        }
     }
-    Wait-Children -RunId $runId -Components $napcatComponents
+    Wait-Children -RunId $runId -Components @($botComponents + $napcatComponents)
     Write-Host "All targets are ready."
 }
 

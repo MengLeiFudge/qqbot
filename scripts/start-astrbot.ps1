@@ -285,6 +285,12 @@ else {
 
 Set-Location $AstrRoot
 
+$directAstrBot = Join-Path $env:APPDATA "uv\tools\astrbot\Scripts\astrbot.exe"
+if (Test-Path $directAstrBot) {
+    & $directAstrBot run -p $Port
+    exit $LASTEXITCODE
+}
+
 if (Get-Command astrbot -ErrorAction SilentlyContinue) {
     & astrbot run -p $Port
     exit $LASTEXITCODE
