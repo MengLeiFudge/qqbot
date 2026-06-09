@@ -34,7 +34,7 @@ DEFAULT_MAX_CONTEXT_CHARS = 1200
     "astrbot_plugin_twin_interaction",
     "local",
     "Twin-aware prompt injection and explicit interaction handling for angel/demon QQBot profiles.",
-    "0.1.0",
+    "0.1.1",
 )
 class TwinInteractionPlugin(Star):
     def __init__(self, context: Context, config=None):

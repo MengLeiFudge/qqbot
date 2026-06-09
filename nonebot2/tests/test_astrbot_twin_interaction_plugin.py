@@ -13,6 +13,7 @@ from astrbot_plugin_twin_interaction.logic import (
     TwinInteractionConfig,
     build_direct_twin_prompt,
     build_twin_injection,
+    is_bare_dual_bot_call,
     is_bot_sender_id,
     is_twin_related_text,
     load_recent_other_bot_records,
@@ -57,6 +58,30 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
                 is_at_or_wake_command=False,
             )
         )
+
+    def test_bare_dual_bot_call_is_treated_as_calling_current_bot(self) -> None:
+        profile = read_profile("angel")
+
+        self.assertTrue(is_bare_dual_bot_call("@😇棉花糖😇 @👿棉花糖👿", profile))
+        self.assertTrue(is_bare_dual_bot_call("[At:1443944862] [At:2629227874]", profile))
+        self.assertFalse(is_bare_dual_bot_call("😇棉花糖😇 👿棉花糖👿 说句话", profile))
+
+        config = TwinInteractionConfig(
+            enabled_groups=set(),
+            direct_handler_enabled=True,
+            max_context_messages=2,
+            max_context_chars=2000,
+            context_root=Path("/tmp/missing"),
+        )
+        injection = build_twin_injection(
+            text="[At:1443944862] [At:2629227874]",
+            group_id="123",
+            profile=profile,
+            config=config,
+        )
+
+        self.assertIn("当前消息没有实质文本，只是在同时叫两个 bot", injection)
+        self.assertIn("不要解读成用户只是在找另一个 bot", injection)
 
     def test_bot_sender_ids_are_never_eligible_for_direct_handling(self) -> None:
         profile = read_profile("angel")
@@ -119,7 +144,7 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         self.assertIn("当前 bot：😇棉花糖😇", injection)
         self.assertIn("另一个 bot：👿棉花糖👿", injection)
         self.assertIn("禁止：冒充另一个 bot 输出", injection)
-        self.assertIn("不要替另一个 bot 发言", prompt)
+        self.assertIn("除非用户明确要求代发/代答", prompt)
         self.assertIn("用户原话：天使棉花糖让你妹妹说句话", prompt)
 
 
