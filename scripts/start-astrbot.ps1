@@ -214,6 +214,51 @@ function Set-JsonObjectProperty {
     return $true
 }
 
+function Invoke-LocalPythonScript {
+    param(
+        [string]$ScriptPath,
+        [string[]]$Arguments
+    )
+
+    $venvPython = Join-Path $AstrRoot ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        & $venvPython $ScriptPath @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python script failed: $ScriptPath"
+        }
+        return
+    }
+
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        & python $ScriptPath @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python script failed: $ScriptPath"
+        }
+        return
+    }
+
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        & py "-$PythonVersion" $ScriptPath @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python script failed: $ScriptPath"
+        }
+        return
+    }
+
+    throw "No Python runtime is available for $ScriptPath"
+}
+
+function Sync-AstrBotPersonas {
+    $databasePath = Join-Path $AstrRoot "data\data_v4.db"
+    $scriptPath = Join-Path $WorkspaceRoot "scripts\sync-astrbot-personas.py"
+    if (-not (Test-Path $databasePath) -or -not (Test-Path $scriptPath)) {
+        return
+    }
+
+    Invoke-LocalPythonScript -ScriptPath $scriptPath -Arguments @("--database", $databasePath)
+}
+
+Sync-AstrBotPersonas
 Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json") -Profile $BotProfile -OneBotPort $AiocqhttpPort
 
 if (Test-Path $LocalPluginRoot) {
