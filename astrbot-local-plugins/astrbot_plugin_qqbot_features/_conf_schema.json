@@ -9,6 +9,18 @@
     ],
     "hint": "dual: bot1/bot2 双开时只响应明确唤醒或私聊命令，自动事件由 NoneBot2 负责；full: AstrBot-only 时接管复读、入群欢迎、戳一戳等已迁移自动事件。环境变量 QQBOT_ASTRBOT_FEATURE_MODE 会覆盖这里。"
   },
+  "auto_approve_friend_requests": {
+    "description": "自动同意好友申请",
+    "type": "bool",
+    "default": true,
+    "hint": "收到 OneBot friend request 后调用 set_friend_add_request。"
+  },
+  "auto_approve_group_invites": {
+    "description": "自动同意邀请入群",
+    "type": "bool",
+    "default": true,
+    "hint": "只处理 request_type=group 且 sub_type=invite 的邀请入群事件，不处理普通加群申请。"
+  },
   "data_root": {
     "description": "RightCodes 生图积分存储根目录",
     "type": "string",

@@ -310,7 +310,7 @@ def _strip_followup_invitation_tail(text: str) -> str:
     result = "\n".join(line for line in lines if line.strip()).strip()
     if result:
         return result
-    return "信息不够，先按上面的结论处理。" if stripped_any else current
+    return "" if stripped_any else current
 
 
 def _strip_followup_invitation_from_line(line: str) -> str:

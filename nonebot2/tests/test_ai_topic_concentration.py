@@ -182,3 +182,7 @@ def test_sanitize_ai_output_text_strips_question_tail() -> None:
     text = "这个网站看起来不正规，别登录也别下客户端喵。是不是更安全？"
 
     assert sanitize_ai_output_text(text) == "这个网站看起来不正规，别登录也别下客户端喵。"
+
+
+def test_sanitize_ai_output_text_does_not_invent_fallback_when_all_stripped() -> None:
+    assert sanitize_ai_output_text("你把具体名字发我。") == ""

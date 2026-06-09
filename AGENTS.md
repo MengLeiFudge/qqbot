@@ -20,6 +20,7 @@
 - AstrBot 本地迁移插件可复用 `nonebot2/src/qqbot/features/**/service.py` 这类纯 Python service，但不得导入 `nonebot`、NoneBot2 plugin 入口或 OneBot adapter。复用服务时数据根仍以 `data\nonebot2\run` 为事实源，保证 bot1 到 bot2 迁移期间存档连续。
 - AstrBot 账号/身份切换通过启动参数显式控制：默认 `-AstrBotProfile demon` 使用恶魔账号 `2629227874`；`-AstrBotProfile angel -FeatureMode full -Target astrbot` 使用天使账号 `1443944862`；`-AstrBotProfile both -FeatureMode full -Target astrbot` 在同一个 AstrBot 管理端内同步两个 `aiocqhttp` 平台，恶魔默认反连 `6200`，天使默认反连 `6201`，并分别拉起两个 NapCat 账号。`angel` 和 `both` 都不得在 bot1 同时运行时使用。本地插件必须按事件 `self_id` 区分天使/恶魔身份，不能把 `QQBOT_ASTRBOT_PROFILE` 当成双平台模式下的单一身份事实源。AstrBot OneBot 恶魔端口可用 `-AstrBotOneBotPort` 覆盖，天使端口可用 `-AstrBotAngelOneBotPort` 覆盖；不要重新硬编码 `6199`。
 - AstrBot 主动接话判定 provider 回退由 `astrbot_plugin_topic_concentration` 的 `decision_provider_order` 数组显式控制；数组从上到下依次尝试，某个 provider 报错只记录日志并继续下一个。该数组留空时才读取 AstrBot `provider_settings.default_provider_id` + `fallback_chat_models`。这属于本地插件行为，不允许为了该 fallback 直接改 AstrBot Core。
+- AstrBot 好友申请和邀请入群由 `astrbot_plugin_qqbot_features` 处理：默认通过 `auto_approve_friend_requests` 和 `auto_approve_group_invites` 自动同意 OneBot `friend` 请求与 `group/invite` 请求，并记录 action、flag、sub_type 和失败原因；不允许把邀请入群问题交给 LLM 解释成“机器人不能自己加群”。
 - RightCodes 生图迁移到 AstrBot 时，命令入口归入 `astrbot_plugin_qqbot_features`，不再新增独立固定命令插件；bot1/bot2 默认共用 `data\nonebot2\run\ai\draw_points.json` 作为积分事实源。`dual` 模式下 bot1 在线时 AstrBot 不重复累计普通群消息积分，`full` 模式或 bot1 离线时 AstrBot 才累计群消息积分；双平台 `both/full` 下只有固定命令 owner 账号累计普通群消息积分，避免同一群消息被天使和恶魔重复记分。生图失败必须退回已扣积分或当天免费次数。
 - bot1/bot2 联动优先用 AstrBot 本地插件桥接，不改 Core。桥接插件只能只读 `data\nonebot2\run\ai\group_context\` 这类公开群上下文，默认不按具体群号限制；星环群 `1035445959` 只能作为领域提示特例，不能作为桥接范围条件。不得读取私聊、token、QQ 登录态、数据库密钥或运行日志作为 LLM prompt 证据。
 - 双子 bot 互动由 `astrbot_plugin_twin_interaction` 负责，只在用户明确围绕天使/恶魔/双子关系或另一个 bot 公开输出发问时增强当前 bot 的 LLM 上下文或接管明确请求。它不得响应另一个 bot 发出的普通消息，不得替另一个 bot 发言、认错、解释或承诺修改；近期上下文只能只读公开群上下文文件，不得读取私聊、日志、token、QQ 登录态或数据库密钥。
@@ -28,6 +29,7 @@
 - 本地 artifact 发布迁移到 `astrbot_plugin_local_artifact_api`，仅在 AstrBot `full` 模式下监听 `127.0.0.1:8080` 的兼容 `POST /admin/api/artifacts/publish-local`；它复用 NoneBot2 纯发布服务和 `data\nonebot2\run` 发布状态，通过 AstrBot aiocqhttp OneBot 上传群文件，不改 AstrBot Core。双开 `dual` 模式下不要让 AstrBot 抢占 bot1 的 `8080`。
 - bot1/bot2 双开时，普通主动接话不得由另一个 bot 的普通输出继续触发；明确 @ 当前 bot 或私聊仍按直接请求处理。两个 bot 的普通回复、主动回复和拒答都不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”等追问式收尾；缺关键信息时陈述缺口，不催用户补充。
 - AstrBot 双平台 `both/full` 下，闲聊/主动接话可以由两个 bot 按调度策略共同参与；固定命令默认只由 `QQBOT_ASTRBOT_COMMAND_OWNER` 指定账号执行，未设置时为恶魔账号 `2629227874`。明确 @ 当前 bot 或私聊时仍由当前 bot 处理；菜单、帮助、指令、生图、下载、群文件清理等固定命令不得因双平台重复执行。
+- 普通聊天文本不得在 NoneBot2 插件或 AstrBot 本地插件里按“低信息、在吗、111、真的吗、回复慢、测试、探活”等启发式直接生成本地回复；只要没有命中明确命令、游戏会话答案、协议事件处理或本地硬安全提醒，就必须交给 LLM 链路处理。插件可以做 prompt 注入、上下文桥接、记忆检索、输出清洗和路由门控，但不能凭空补一句固定兜底文本。
 - bot1/bot2 的所有群聊和私聊 LLM 回复都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析。分析不出发言原因时不回答，不编原因，不输出危机干预、急救、报警、健康建议或严肃安慰；凭据泄露等本地硬安全提醒仍按既有规则执行。
 - `napcat/`：共用 NapCat 程序包；更新下载和旧包备份应放在 `data/napcat/`，当前账号 OneBot 配置随一键包放置并由更新脚本迁移。
 - `data/`：统一运行态根目录，默认忽略，不进 Git。

@@ -1,6 +1,6 @@
 name: astrbot_plugin_qqbot_features
 display_name: QQBot migrated features
 desc: "Local AstrBot plugin bundle for selected features migrated from NoneBot2 qqbot."
-version: v0.9.1
+version: v0.9.2
 author: local
 repo: ""

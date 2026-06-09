@@ -103,9 +103,9 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="好友邀请处理",
         aliases=("好友申请", "邀请入群", "社交事件"),
-        status="部分移植",
+        status="已移植",
         lines=(
-            "收到好友申请或入群邀请时记录日志；自动同意属于副作用动作，未默认启用",
+            "收到好友申请或入群邀请时按配置自动同意，并记录处理结果",
         ),
     ),
     FeatureSpec(
@@ -231,19 +231,31 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "local",
     "Selected qqbot NoneBot2 features migrated as local AstrBot plugin handlers.",
-    "0.9.1",
+    "0.9.2",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         self._feature_mode = read_feature_mode(config)
+        self._auto_approve_friend_requests = read_bool_config(
+            config,
+            "auto_approve_friend_requests",
+            default=True,
+        )
+        self._auto_approve_group_invites = read_bool_config(
+            config,
+            "auto_approve_group_invites",
+            default=True,
+        )
         self._reread_state = RereadRepeatState()
         self._arc_apk_update_manager = None
         self._rightcodes_config = load_rightcodes_config(config)
         self._rightcodes_draw_lock = asyncio.Semaphore(2)
         logger.info(
-            "[QQBotFeatures] migrated feature plugin loaded, mode=%s",
+            "[QQBotFeatures] migrated feature plugin loaded, mode=%s auto_approve_friend=%s auto_approve_group_invite=%s",
             self._feature_mode,
+            self._auto_approve_friend_requests,
+            self._auto_approve_group_invites,
         )
 
     @filter.regex(MENU_PATTERN)
@@ -675,7 +687,7 @@ class QQBotFeaturesPlugin(Star):
                 yield result
             return
         if post_type == "request":
-            self._log_onebot_request(raw)
+            await self._handle_onebot_request(event, raw)
 
     async def _handle_onebot_notice(self, event: AstrMessageEvent, raw: dict):
         notice_type = str(raw.get("notice_type") or "")
@@ -713,20 +725,91 @@ class QQBotFeaturesPlugin(Star):
                     yield event.plain_result("还戳？")
             return
 
-    def _log_onebot_request(self, raw: dict) -> None:
+    async def _handle_onebot_request(self, event: AstrMessageEvent, raw: dict) -> None:
         request_type = str(raw.get("request_type") or "")
         sub_type = str(raw.get("sub_type") or "")
         user_id = str(raw.get("user_id") or "")
         group_id = str(raw.get("group_id") or "")
+        flag = str(raw.get("flag") or "")
         if request_type == "friend":
-            logger.info("[QQBotFeatures] friend request observed: user_id=%s", user_id)
+            if not self._auto_approve_friend_requests:
+                logger.info("[QQBotFeatures] friend request observed: user_id=%s", user_id)
+                return
+            await self._approve_onebot_request(
+                event,
+                action="set_friend_add_request",
+                payload={"flag": flag, "approve": True},
+                log_label="friend request",
+                group_id=group_id,
+                user_id=user_id,
+                sub_type=sub_type,
+                flag=flag,
+            )
             return
         if request_type == "group" and sub_type == "invite":
-            logger.info(
-                "[QQBotFeatures] group invite request observed: group_id=%s user_id=%s",
+            if not self._auto_approve_group_invites:
+                logger.info(
+                    "[QQBotFeatures] group invite request observed: group_id=%s user_id=%s",
+                    group_id,
+                    user_id,
+                )
+                return
+            await self._approve_onebot_request(
+                event,
+                action="set_group_add_request",
+                payload={"flag": flag, "sub_type": sub_type, "approve": True},
+                log_label="group invite request",
+                group_id=group_id,
+                user_id=user_id,
+                sub_type=sub_type,
+                flag=flag,
+            )
+
+    async def _approve_onebot_request(
+        self,
+        event: AstrMessageEvent,
+        *,
+        action: str,
+        payload: dict[str, object],
+        log_label: str,
+        group_id: str,
+        user_id: str,
+        sub_type: str,
+        flag: str,
+    ) -> None:
+        if not flag:
+            logger.warning(
+                "[QQBotFeatures] cannot approve %s without flag: group_id=%s user_id=%s sub_type=%s",
+                log_label,
                 group_id,
                 user_id,
+                sub_type,
             )
+            return
+        try:
+            api = AstrBotOneBotApi(event)
+            await api.call_api(action, **payload)
+        except Exception as exc:
+            logger.exception(
+                "[QQBotFeatures] failed to approve %s: action=%s group_id=%s user_id=%s sub_type=%s flag=%s error=%s",
+                log_label,
+                action,
+                group_id,
+                user_id,
+                sub_type,
+                flag,
+                exc,
+            )
+            return
+        logger.info(
+            "[QQBotFeatures] approved %s: action=%s group_id=%s user_id=%s sub_type=%s flag=%s",
+            log_label,
+            action,
+            group_id,
+            user_id,
+            sub_type,
+            flag,
+        )
 
 
 def _is_direct_or_private(event: AstrMessageEvent) -> bool:
@@ -812,6 +895,27 @@ def read_feature_mode(config=None) -> str:
         FEATURE_MODE_DUAL,
     )
     return FEATURE_MODE_DUAL
+
+
+def read_bool_config(config, key: str, *, default: bool) -> bool:
+    if config is None:
+        return default
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on", "启用", "开启"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "禁用", "关闭"}:
+            return False
+    logger.warning(
+        "[QQBotFeatures] invalid boolean config %s=%r, fallback to %s",
+        key,
+        value,
+        default,
+    )
+    return default
 
 
 def allow_passive_events(feature_mode: str) -> bool:

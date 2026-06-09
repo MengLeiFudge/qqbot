@@ -1776,14 +1776,6 @@ def build_local_quick_ai_reply(normalized_message: NormalizedMessage, prompt: st
     compact = re.sub(r"\s+", "", prompt.strip())
     if looks_like_sensitive_credential_request(compact):
         return build_sensitive_credential_warning_message()
-    if is_pure_direct_at(normalized_message):
-        return "在"
-    if not compact or len(compact) > 16:
-        return ""
-    if compact in {"在吗", "在嘛", "在不在", "睡了吗", "睡了没", "醒着吗", "醒了吗", "棉花糖在吗"}:
-        return "在"
-    if compact in {"棉花糖", "棉花糖棉花糖", "棉花糖棉花糖棉花糖"}:
-        return "在呢"
     return ""
 
 

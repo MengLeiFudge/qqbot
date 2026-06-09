@@ -37,36 +37,5 @@ def looks_like_private_memory_query(normalized_message: NormalizedMessage) -> bo
     return any(marker in compact for marker in memory_markers)
 
 
-def is_private_lightweight_chat(normalized_message: NormalizedMessage) -> bool:
-    if normalized_message.image_urls or normalized_message.reply is not None:
-        return False
-    compact = _compact_private_text(normalized_message)
-    if not compact or len(compact) > 24:
-        return False
-    if looks_like_private_memory_query(normalized_message):
-        return False
-    lightweight_markers = (
-        "在吗",
-        "在嘛",
-        "在不在",
-        "人呢",
-        "说句话",
-        "说话",
-        "看看",
-        "醒着吗",
-        "醒了吗",
-        "睡了吗",
-        "睡了没",
-        "太慢",
-        "慢了",
-        "笨笨",
-        "你好",
-        "早",
-        "晚安",
-        "摸摸",
-    )
-    return any(marker in compact for marker in lightweight_markers)
-
-
 def _compact_private_text(normalized_message: NormalizedMessage) -> str:
     return re.sub(r"\s+", "", (normalized_message.text or normalized_message.outline).strip())
