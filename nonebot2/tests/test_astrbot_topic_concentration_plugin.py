@@ -13,12 +13,14 @@ sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 from astrbot_plugin_topic_concentration.logic import (
     TopicWindowMessage,
     active_reply_scope_key,
+    build_active_reply_decision_prompt,
     chat_with_current_provider,
     has_strong_topic_signal,
     is_recent_duplicate_observation,
     looks_like_qqbot_fixed_command,
     looks_like_low_information,
     release_active_reply_inflight,
+    should_consider_active_window,
     try_acquire_active_reply_inflight,
 )
 from astrbot_plugin_topic_concentration.twin_scheduler import (
@@ -62,6 +64,15 @@ class StubContext:
 
 class StubEvent:
     unified_msg_origin = "aiocqhttp:GroupMessage:10001"
+
+    def __init__(self, text: str = "") -> None:
+        self._text = text
+
+    def get_group_id(self) -> str:
+        return "10001"
+
+    def get_sender_id(self) -> str:
+        return "3062317151"
 
 
 class StubGroupMessageEvent:
@@ -141,6 +152,51 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertTrue(looks_like_low_information("咪？"))
         self.assertFalse(has_strong_topic_signal("咪？"))
         self.assertTrue(has_strong_topic_signal("矿物利用怎么只有11级？"))
+
+    def test_named_call_allows_llm_to_decide_even_when_low_information(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="呼叫棉花糖",
+                    user_id="3062317151",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=10.0,
+                )
+            ]
+        )
+
+        self.assertTrue(should_consider_active_window(window, named_call=True))
+
+    def test_active_reply_prompt_uses_group_history_and_quoted_source(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="回答一下",
+                    user_id="3062317151",
+                    at_bot=False,
+                    reply_bot=True,
+                    created_at=10.0,
+                )
+            ]
+        )
+        prompt = build_active_reply_decision_prompt(
+            window,
+            current_query="被引用消息1：如何生成画图支持分辨率：1K、2K、4K\n当前消息：回答一下",
+            named_call=False,
+            has_reply_source=True,
+            latest_text="回答一下",
+            history_lines=[
+                "[san ji/12:37:37]: 如何生成画图支持分辨率：1K、2K、4K",
+                "[萌泪酱/12:38:55]: 回答一下",
+            ],
+            active_interest=None,
+        )
+
+        self.assertIn("插件只提供上下文", prompt)
+        self.assertIn("被引用消息1：如何生成画图支持分辨率：1K、2K、4K", prompt)
+        self.assertIn("AstrBot 群聊上下文节选", prompt)
+        self.assertIn("[san ji/12:37:37]", prompt)
 
     def test_dual_platform_events_share_group_scope_and_deduplicate_same_message(self) -> None:
         group_id = "746497406"

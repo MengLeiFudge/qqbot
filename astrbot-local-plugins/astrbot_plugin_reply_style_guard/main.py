@@ -8,15 +8,16 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, register
+from astrbot.core.agent.message import TextPart
 from astrbot.core.message.message_event_result import ResultContentType
 from astrbot.core.message.components import Plain
 
-from .logic import DEFAULT_SEGMENTED_REPLY_REGEX
 from .logic import build_fold_notice
+from .logic import build_delegated_reply_instruction_text
 from .logic import is_dangerous_local_tool_name
 from .logic import normalize_fold_threshold
 from .logic import sanitize_reply_plain_text
-from .logic import should_disable_segmented_reply_for_text
+from .logic import should_disable_model_regex_segmenting
 from .logic import should_fold_long_reply
 from .logic import split_forward_text
 
@@ -37,6 +38,15 @@ BOT_PROFILES = {
     },
 }
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
+DELEGATED_FROM_EXTRA = "_qqbot_twin_llm_delegated_from"
+
+
+PLAIN_TEXT_REPLY_INSTRUCTION = (
+    "本轮回复必须使用 QQ 纯文本聊天格式，不要使用 Markdown。"
+    "禁止使用 # 标题、Markdown 列表符号、粗体、反引号代码块、引用块、Markdown 链接和表格。"
+    "普通聊天优先短句自然表达，不要主动列项目符号；需要给 API、JSON、配置示例时允许保留换行和缩进，但不要包代码围栏。"
+    "不要用“如果你愿意”“要的话”“你把具体内容发我”“我可以再帮你”等追问式收尾。"
+)
 @register(
     "astrbot_plugin_reply_style_guard",
     "MengLei",
@@ -82,6 +92,12 @@ class ReplyStyleGuardPlugin(Star):
                 "[ReplyStyleGuard] removed local tools for non-owner-private request: session=%s tools=%s",
                 getattr(event, "unified_msg_origin", ""),
                 ",".join(removed_tools),
+            )
+        req.extra_user_content_parts.append(TextPart(text=PLAIN_TEXT_REPLY_INSTRUCTION).mark_as_temp())
+        delegated_from = str(event.get_extra(DELEGATED_FROM_EXTRA, "") or "").strip()
+        if delegated_from:
+            req.extra_user_content_parts.append(
+                TextPart(text=build_delegated_reply_instruction(event, delegated_from)).mark_as_temp()
             )
 
     @filter.on_llm_response(desc="记录 LLM 返回耗时，帮助区分上游仍在处理、已返回或已失败。")
@@ -228,16 +244,15 @@ def _should_disable_segmented_reply_for_result(context: Context, result) -> bool
         return False
     if str(segmented_reply.get("split_mode", "regex")) != "regex":
         return False
-    regex = str(segmented_reply.get("regex") or DEFAULT_SEGMENTED_REPLY_REGEX)
-    cleanup = str(segmented_reply.get("content_cleanup_rule") or "")
-    for comp in result.chain:
-        if isinstance(comp, Plain) and should_disable_segmented_reply_for_text(
-            comp.text,
-            regex=regex,
-            content_cleanup_rule=cleanup,
-        ):
-            return True
-    return False
+    return should_disable_model_regex_segmenting(segmented_reply, is_model_result=True)
+
+
+def build_delegated_reply_instruction(event: AstrMessageEvent, delegated_from: str) -> str:
+    return build_delegated_reply_instruction_text(
+        current_id=safe_event_value(event, "get_self_id"),
+        current_name=read_bot_display_name(event),
+        delegated_from=delegated_from,
+    )
 
 
 def _read_segmented_reply_config(context: Context) -> dict:

@@ -54,6 +54,10 @@ DANGEROUS_LOCAL_TOOL_KEYWORDS = (
     "run_browser",
     "cua_",
 )
+BOT_DISPLAY_NAMES = {
+    "1443944862": "😇棉花糖😇",
+    "2629227874": "👿棉花糖👿",
+}
 _TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
 _FOLLOWUP_MARKERS = (
     "如果你愿意",
@@ -228,6 +232,36 @@ def should_disable_segmented_reply_for_text(
         )
         > max_parts
     )
+
+
+def should_disable_model_regex_segmenting(segmented_reply: dict, *, is_model_result: bool) -> bool:
+    if not is_model_result:
+        return False
+    if segmented_reply.get("enable") is not True:
+        return False
+    if segmented_reply.get("only_llm_result", True) is not True:
+        return False
+    return str(segmented_reply.get("split_mode", "regex")) == "regex"
+
+
+def build_delegated_reply_instruction_text(
+    *,
+    current_id: str,
+    current_name: str,
+    delegated_from: str,
+) -> str:
+    delegated_names = ",".join(
+        BOT_DISPLAY_NAMES.get(bot_id.strip(), bot_id.strip())
+        for bot_id in str(delegated_from or "").split(",")
+        if bot_id.strip()
+    )
+    if not delegated_names:
+        delegated_names = "另一个棉花糖"
+    if str(current_id or "").strip() == "1443944862":
+        opener = f"这是代班接力请求：{delegated_names} 那边在忙，请用 {current_name} 自己的身份先温柔接一下。"
+    else:
+        opener = f"这是代班接力请求：{delegated_names} 那边忙着呢，请用 {current_name} 自己的身份先顶上。"
+    return opener + "开头用一句很短的话说明正在接力，不要冒充对方，不要替对方认错、解释或承诺修改。"
 
 
 def count_segmented_reply_parts(

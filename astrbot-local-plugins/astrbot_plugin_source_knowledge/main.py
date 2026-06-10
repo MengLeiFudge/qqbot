@@ -17,6 +17,11 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
 
+try:
+    from astrbot_plugin_qqbot_features.request_context import build_current_request_context
+except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<name>.
+    from data.plugins.astrbot_plugin_qqbot_features.request_context import build_current_request_context
+
 
 PLUGIN_NAME = "astrbot_plugin_source_knowledge"
 DEFAULT_MAX_RESULTS = 4
@@ -438,7 +443,8 @@ class SourceKnowledgePlugin(Star):
         group_id = str(event.get_group_id() or "")
         if self._config.enabled_groups and group_id not in self._config.enabled_groups:
             return
-        query = ((req.prompt or "") or event.get_message_str() or "").strip()
+        request_context = build_current_request_context(event, req.prompt or "")
+        query = request_context.combined_query or request_context.current_text
         if not query:
             return
         domains = resolve_domains(group_id, query)

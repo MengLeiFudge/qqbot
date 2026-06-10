@@ -16,6 +16,8 @@ from astrbot_plugin_reply_style_guard.logic import should_disable_segmented_repl
 from astrbot_plugin_reply_style_guard.logic import strip_permission_escalation_advice
 from astrbot_plugin_reply_style_guard.logic import strip_followup_tail
 from astrbot_plugin_reply_style_guard.logic import strip_markdown_syntax
+from astrbot_plugin_reply_style_guard.logic import should_disable_model_regex_segmenting
+from astrbot_plugin_reply_style_guard.logic import build_delegated_reply_instruction_text
 
 
 class AstrBotReplyStyleGuardTest(unittest.TestCase):
@@ -76,6 +78,25 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             )
         )
         self.assertFalse(should_disable_segmented_reply_for_text("懂了吧，低调版炫耀。"))
+
+    def test_model_result_always_disables_astrbot_regex_segmenting(self) -> None:
+        self.assertTrue(
+            should_disable_model_regex_segmenting(
+                {"enable": True, "only_llm_result": True, "split_mode": "regex"},
+                is_model_result=True,
+            )
+        )
+
+    def test_delegated_reply_instruction_mentions_busy_target(self) -> None:
+        instruction = build_delegated_reply_instruction_text(
+            current_id="1443944862",
+            current_name="😇棉花糖😇",
+            delegated_from="2629227874",
+        )
+
+        self.assertIn("👿棉花糖👿 那边在忙", instruction)
+        self.assertIn("😇棉花糖😇 自己的身份", instruction)
+        self.assertIn("不要冒充对方", instruction)
 
     def test_long_reply_fold_threshold_can_be_disabled(self) -> None:
         self.assertTrue(should_fold_long_reply("a" * 301, threshold=300))

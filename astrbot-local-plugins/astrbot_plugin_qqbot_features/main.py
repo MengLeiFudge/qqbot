@@ -53,6 +53,10 @@ from .rightcodes_draw_logic import looks_like_rightcodes_draw_suggestion
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
 from .rightcodes_draw_catalog import format_rightcodes_draw_catalog_injection
 from .rightcodes_draw_catalog import should_inject_rightcodes_draw_catalog
+from .request_context import build_current_request_context
+from .request_context import canonical_event_claim_key
+from .request_context import extract_at_ids
+from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
@@ -493,7 +497,8 @@ class QQBotFeaturesPlugin(Star):
 
     @filter.on_llm_request(desc="在 LLM 请求前按关键词注入 RightCodes 生图接口知识库。")
     async def inject_rightcodes_draw_catalog(self, event: AstrMessageEvent, req: ProviderRequest):
-        query = ((req.prompt or "") or event.get_message_str() or "").strip()
+        request_context = build_current_request_context(event, req.prompt or "")
+        query = request_context.combined_query or request_context.current_text
         if not should_inject_rightcodes_draw_catalog(query):
             return
         req.extra_user_content_parts.append(
@@ -502,6 +507,27 @@ class QQBotFeaturesPlugin(Star):
         logger.info(
             "[QQBotFeatures] injected RightCodes draw catalog: session=%s",
             getattr(event, "unified_msg_origin", ""),
+        )
+
+    @filter.on_llm_request(desc="在 LLM 请求前把被引用消息作为当前请求原文补入上下文。")
+    async def inject_quoted_request_source(self, event: AstrMessageEvent, req: ProviderRequest):
+        request_context = build_current_request_context(event, req.prompt or "")
+        if not request_context.reply_texts or not request_context.combined_query:
+            return
+        req.extra_user_content_parts.append(
+            TextPart(
+                text=(
+                    "用户当前请求包含引用/接力语境。下面是本轮请求原文，回答时必须把被引用消息当作用户正在问的内容，"
+                    "不要只按当前短句理解：\n"
+                    f"{request_context.combined_query}"
+                )
+            ).mark_as_temp()
+        )
+        logger.info(
+            "[QQBotFeatures] injected quoted request source: session=%s replies=%s chars=%s",
+            getattr(event, "unified_msg_origin", ""),
+            len(request_context.reply_texts),
+            len(request_context.combined_query),
         )
 
     @filter.event_message_type(EventMessageType.ALL, desc="RightCodes 生图总入口，处理生图、模型价格、积分查询和拒绝手动改分请求。")
@@ -984,13 +1010,7 @@ def _is_direct_or_private(event: AstrMessageEvent) -> bool:
 
 
 def extract_plain_text(event: AstrMessageEvent) -> str:
-    parts: list[str] = []
-    for segment in event.get_messages():
-        if isinstance(segment, Plain):
-            parts.append(segment.text)
-    if parts:
-        return "".join(parts)
-    return str(event.get_message_str() or "")
+    return extract_event_plain_text(event)
 
 
 def _should_handle_migrated_command(
@@ -1052,7 +1072,7 @@ def _should_handle_scheduled_or_migrated_command(
 
 
 def _at_target_ids(event: AstrMessageEvent) -> tuple[str, ...]:
-    return tuple(str(segment.qq) for segment in event.get_messages() if isinstance(segment, At))
+    return extract_at_ids(event)
 
 
 def _event_message_id(event: AstrMessageEvent) -> str:
@@ -1061,13 +1081,7 @@ def _event_message_id(event: AstrMessageEvent) -> str:
 
 
 def _command_claim_key(event: AstrMessageEvent, *, command_type: str) -> str:
-    message_id = _event_message_id(event)
-    if message_id:
-        return f"message:{message_id}:{command_type}"
-    group_id = str(event.get_group_id() or "private").strip() or "private"
-    sender_id = str(event.get_sender_id() or "unknown").strip() or "unknown"
-    text = re.sub(r"\s+", "", extract_plain_text(event))[:120]
-    return f"fallback:{group_id}:{sender_id}:{command_type}:{text}"
+    return canonical_event_claim_key(event, purpose=f"command:{command_type}")
 
 
 def looks_like_qqbot_fixed_command(text: str) -> bool:

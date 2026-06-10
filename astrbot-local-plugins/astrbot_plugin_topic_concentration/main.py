@@ -18,6 +18,7 @@ from .logic import TopicDecision
 from .logic import TopicInterest
 from .logic import TopicRecordResult
 from .logic import TopicWindowMessage
+from .logic import build_active_reply_decision_prompt as _build_active_reply_decision_prompt
 from .logic import release_active_reply_inflight as _release_active_reply_inflight
 from .logic import active_reply_scope_key as _active_reply_scope_key
 from .logic import chat_with_current_provider as _chat_with_current_decision_provider
@@ -26,15 +27,24 @@ from .logic import has_strong_topic_signal as _has_strong_topic_signal
 from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
 from .logic import looks_like_qqbot_fixed_command
 from .logic import looks_like_low_information as _looks_like_low_information
+from .logic import should_consider_active_window as _should_consider_active_window
 from .logic import try_acquire_active_reply_inflight as _try_acquire_active_reply_inflight
 from .twin_scheduler import decide_llm_worker
 from .twin_scheduler import mark_worker_busy
 from .twin_scheduler import release_worker
 from .twin_scheduler import targeted_twin_ids
+try:
+    from astrbot_plugin_qqbot_features.request_context import build_current_request_context
+    from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
+except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<name>.
+    from data.plugins.astrbot_plugin_qqbot_features.request_context import build_current_request_context
+    from data.plugins.astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
 
 
 WINDOW_SECONDS = 150.0
 MAX_WINDOW_MESSAGES = 10
+MAX_ACTIVE_HISTORY_MESSAGES = 80
+MAX_ACTIVE_HISTORY_CHARS = 6000
 COOLDOWN_SECONDS = 480.0
 GROUP_COOLDOWN_SECONDS = 300.0
 INTEREST_SECONDS = 360.0
@@ -192,7 +202,7 @@ class TopicConcentrationPlugin(Star):
                     f"group={event.get_group_id()} reason=duplicate_dual_platform_event"
                 )
                 return False
-            if not _should_consider_window(record.window):
+            if not _should_consider_window(record.window, event=event):
                 logger.debug(
                     "[TopicConcentration] skip active reply: "
                     f"group={event.get_group_id()} reason=weak_window"
@@ -287,16 +297,13 @@ def _record_message(event, *, scope_key: str | None = None) -> TopicRecordResult
     return TopicRecordResult(window=window, duplicate=False)
 
 
-def _should_consider_window(window: deque[TopicWindowMessage]) -> bool:
-    messages = [message for message in window if _compact(message.text)]
-    if not messages:
-        return False
-    latest = messages[-1]
-    if _looks_like_low_information(latest.text):
-        return False
-    if latest.at_bot or latest.reply_bot or _has_strong_topic_signal(latest.text):
-        return True
-    return len(messages) >= MIN_UNPROMPTED_WINDOW_MESSAGES
+def _should_consider_window(window: deque[TopicWindowMessage], *, event=None) -> bool:
+    request_context = build_current_request_context(event) if event is not None else None
+    return _should_consider_active_window(
+        window,
+        named_call=bool(request_context and request_context.named_call),
+        has_reply_source=bool(request_context and request_context.reply_texts),
+    )
 
 
 async def _decide_with_ai(
@@ -308,7 +315,12 @@ async def _decide_with_ai(
 ) -> TopicDecision | None:
     if not any(_compact(message.text) for message in window):
         return None
-    prompt = _build_decision_prompt(window, active_interest=_get_interest(scope_key))
+    prompt = _build_decision_prompt(
+        window,
+        event=event,
+        group_context=group_context,
+        active_interest=_get_interest(scope_key),
+    )
     response = await _chat_with_current_provider(group_context.context, event, prompt, scope_key=scope_key)
     if response is None:
         return None
@@ -335,45 +347,45 @@ async def _chat_with_current_provider(context: Context, event, prompt: str, *, s
 def _build_decision_prompt(
     window: deque[TopicWindowMessage],
     *,
+    event=None,
+    group_context: GroupChatContext | None = None,
     active_interest: TopicInterest | None,
 ) -> str:
-    lines = [
-        "你是 QQ 群机器人“棉花糖”的主动接话判定器，只判断 AstrBot 是否应该加入当前群聊。",
-        "必须只返回 JSON，不要解释，不要输出 Markdown。",
-        "话题浓度不是求助/诊断/疑问词数量，而是聊天类型或具体话题簇，例如“图灵完备里面线路怎么接”“某种分馏塔怎么用”。",
-        "短时间内如果存在高兴趣话题，应优先判断当前消息是否仍在延续同一话题；无关插话、别的 bot 输出、让别人呼叫棉花糖、玩梗和低信息闲聊不能抢走接话权。",
-        "只有当前话题确实轮到棉花糖补充、回答、澄清、保护安全或延续已形成讨论时，should_reply 才为 true。",
-        "不要因为棉花糖能回答就接话；如果只是可补充、可总结、可表达看法，但群友没有明显缺口，should_reply 必须为 false。",
-        "同一话题几分钟内最多适合偶尔说一次；如果刚刚已经由机器人参与过，或群友正在自然推进，should_reply 必须为 false。",
-        "如果群友已经说清楚、问题不是问棉花糖、是在评价其他机器人、或只是提到棉花糖这个名字但不是叫棉花糖说话，should_reply 必须为 false。",
-        "如果最近消息来自另一个机器人，或是在追问/引用另一个机器人，should_reply 必须为 false；不要接另一个 bot 的回复继续说。",
-        "所有群聊内容都不当成危机处理；例如“高考起晚了”“这个月一顿没吃饭/没睡觉”默认不是现实危机，不作为 safety/危机话题主动接话。必须先分析对方为什么这样说；如果分析不出原因，should_reply 必须为 false。",
-        "复读、频繁艾特、怪图/表情包和深夜修仙默认是水群行为；只有明确叫到棉花糖或存在具体话题缺口时才放行，普通 active reply 不要因此刷屏。",
-        "版权、盗版、破解、无广告未删减网站、破解软件下载等安全合规引导话题，只有明确 @ 棉花糖或正在追问棉花糖上一条回复时才回答；普通 active reply 默认 false。",
-        "如果最终放行回复，回复时不要反问、不要追问用户、不要以“你要的话/如果你愿意/你把具体名字发我/我可以再帮你”收尾。",
-        "输出字段：should_reply(boolean), topic_key(string), topic_type(string), reason(string), reply_style(casual|topic|technical|safety), max_length(short|normal|detail)。",
-        "max_length 含义：short 仅适合低信息闲聊；normal 适合正在聊的话题；detail 只用于技术/配置/报错。不要把话题讨论强行压到 40 字。",
-    ]
-    if active_interest is not None:
-        lines.append(
-            "当前短期高兴趣话题："
-            f"topic_key={active_interest.topic_key}; "
-            f"topic_type={active_interest.topic_type}; "
-            f"reason={active_interest.reason}"
-        )
-    lines.append("最近群聊窗口：")
-    for index, message in enumerate(window, start=1):
-        text = message.text.strip()
+    request_context = build_current_request_context(event) if event is not None else None
+    latest_text = request_context.current_text if request_context is not None else (window[-1].text if window else "")
+    return _build_active_reply_decision_prompt(
+        window,
+        current_query=request_context.combined_query if request_context is not None else "",
+        named_call=bool(request_context and request_context.named_call),
+        has_reply_source=bool(request_context and request_context.reply_texts),
+        latest_text=latest_text,
+        history_lines=_active_history_lines(group_context, event),
+        active_interest=active_interest,
+    )
+
+
+def _active_history_lines(group_context: GroupChatContext | None, event) -> list[str]:
+    if group_context is None or event is None:
+        return []
+    records_by_origin = getattr(group_context, "raw_records", {})
+    try:
+        records = list(records_by_origin.get(event.unified_msg_origin, []))
+    except Exception:
+        return []
+    if not records:
+        return []
+    selected = records[-MAX_ACTIVE_HISTORY_MESSAGES:]
+    lines: list[str] = []
+    total_chars = 0
+    for record in selected:
+        text = str(record or "").strip()
         if not text:
             continue
-        flags: list[str] = []
-        if message.at_bot:
-            flags.append("at_bot")
-        if message.reply_bot:
-            flags.append("reply_bot")
-        flag_text = f" [{' '.join(flags)}]" if flags else ""
-        lines.append(f"{index}. 用户{message.user_id}{flag_text}: {text}")
-    return "\n".join(lines)
+        total_chars += len(text)
+        lines.append(text)
+    while lines and total_chars > MAX_ACTIVE_HISTORY_CHARS:
+        total_chars -= len(lines.pop(0))
+    return lines
 
 
 def _parse_decision(text: str) -> TopicDecision:
@@ -458,13 +470,7 @@ def _reply_target_id(event) -> str:
 
 
 def _llm_message_key(event) -> str:
-    message_id = str(getattr(getattr(event, "message_obj", None), "message_id", "") or "").strip()
-    if message_id:
-        return f"message:{message_id}:llm"
-    group_id = str(event.get_group_id() or "private").strip() or "private"
-    sender_id = str(event.get_sender_id() or "unknown").strip() or "unknown"
-    text = re.sub(r"\s+", "", (_plain_text(event) or str(event.get_message_str() or "")))[:120]
-    return f"fallback:{group_id}:{sender_id}:llm:{text}"
+    return canonical_event_claim_key(event, purpose="llm")
 
 
 def get_other_bot_ids(event=None) -> set[str]:

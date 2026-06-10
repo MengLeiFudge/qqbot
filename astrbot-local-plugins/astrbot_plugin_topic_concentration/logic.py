@@ -53,6 +53,89 @@ class TopicDecision:
     max_length: str
 
 
+def should_consider_active_window(
+    window: deque[TopicWindowMessage],
+    *,
+    named_call: bool = False,
+    has_reply_source: bool = False,
+) -> bool:
+    messages = [message for message in window if compact_text(message.text)]
+    if not messages:
+        return False
+    latest = messages[-1]
+    if named_call:
+        return True
+    if looks_like_low_information(latest.text):
+        return has_reply_source
+    if latest.at_bot or latest.reply_bot or has_strong_topic_signal(latest.text):
+        return True
+    return len(messages) >= 2
+
+
+def build_active_reply_decision_prompt(
+    window: deque[TopicWindowMessage],
+    *,
+    current_query: str = "",
+    named_call: bool = False,
+    has_reply_source: bool = False,
+    latest_text: str = "",
+    history_lines: list[str] | None = None,
+    active_interest: TopicInterest | None = None,
+) -> str:
+    latest = latest_text or (window[-1].text if window else "")
+    lines = [
+        "你是 QQ 群机器人“棉花糖”的主动接话判定器，只判断 AstrBot 是否应该加入当前群聊。",
+        "必须只返回 JSON，不要解释，不要输出 Markdown。",
+        "插件只提供上下文、接话意愿信号、话题候选和知识提示；是否应该接话必须由你根据群聊语境判断。",
+        "话题浓度不是求助/诊断/疑问词数量，而是聊天类型或具体话题簇，例如“图灵完备里面线路怎么接”“某种分馏塔怎么用”。",
+        "短时间内如果存在高兴趣话题，应优先判断当前消息是否仍在延续同一话题；无关插话、别的 bot 输出、让别人呼叫棉花糖、玩梗和低信息闲聊不能抢走接话权。",
+        "只有当前话题确实轮到棉花糖补充、回答、澄清、保护安全或延续已形成讨论时，should_reply 才为 true。",
+        "不要因为棉花糖能回答就接话；如果只是可补充、可总结、可表达看法，但群友没有明显缺口，should_reply 必须为 false。",
+        "同一话题几分钟内最多适合偶尔说一次；如果刚刚已经由机器人参与过，或群友正在自然推进，should_reply 必须为 false。",
+        "如果群友已经说清楚、问题不是问棉花糖、是在评价其他机器人、或只是提到棉花糖这个名字但不是叫棉花糖说话，should_reply 必须为 false。",
+        "如果当前消息明确呼叫棉花糖，例如“呼叫棉花糖”“棉花糖回答一下”“棉花糖在吗”，接话意愿很高；但仍要结合被引用消息和群聊上下文自然回应，缺少可回应内容时可以 false。",
+        "如果最近消息来自另一个机器人，或是在追问/引用另一个机器人，should_reply 必须为 false；不要接另一个 bot 的回复继续说。",
+        "所有群聊内容都不当成危机处理；例如“高考起晚了”“这个月一顿没吃饭/没睡觉”默认不是现实危机，不作为 safety/危机话题主动接话。必须先分析对方为什么这样说；如果分析不出原因，should_reply 必须为 false。",
+        "复读、频繁艾特、怪图/表情包和深夜修仙默认是水群行为；只有明确叫到棉花糖或存在具体话题缺口时才放行，普通 active reply 不要因此刷屏。",
+        "群友说“我们在说你”“太 AI 了”“没看懂还硬接”时，通常是在评价棉花糖乱接话；不要继续长篇解释别人，应倾向 false，或只允许非常短的自我收住。",
+        "版权、盗版、破解、无广告未删减网站、破解软件下载等安全合规引导话题，只有明确 @ 棉花糖或正在追问棉花糖上一条回复时才回答；普通 active reply 默认 false。",
+        "如果最终放行回复，回复时不要反问、不要追问用户、不要以“你要的话/如果你愿意/你把具体名字发我/我可以再帮你”收尾。",
+        "输出字段：should_reply(boolean), topic_key(string), topic_type(string), reason(string), reply_style(casual|topic|technical|safety), max_length(short|normal|detail)。",
+        "max_length 含义：short 仅适合低信息闲聊；normal 适合正在聊的话题；detail 只用于技术/配置/报错。不要把话题讨论强行压到 40 字。",
+        "插件信号：",
+        f"named_call={named_call}",
+        f"has_reply_source={has_reply_source}",
+        f"latest_low_information={looks_like_low_information(latest)}",
+        f"latest_strong_topic_signal={has_strong_topic_signal(latest)}",
+    ]
+    if active_interest is not None:
+        lines.append(
+            "当前短期高兴趣话题："
+            f"topic_key={active_interest.topic_key}; "
+            f"topic_type={active_interest.topic_type}; "
+            f"reason={active_interest.reason}"
+        )
+    if current_query:
+        lines.append("当前请求原文：")
+        lines.append(current_query)
+    if history_lines:
+        lines.append("AstrBot 群聊上下文节选：")
+        lines.extend(history_lines)
+    lines.append("最近群聊窗口：")
+    for index, message in enumerate(window, start=1):
+        text = message.text.strip()
+        if not text:
+            continue
+        flags: list[str] = []
+        if message.at_bot:
+            flags.append("at_bot")
+        if message.reply_bot:
+            flags.append("reply_bot")
+        flag_text = f" [{' '.join(flags)}]" if flags else ""
+        lines.append(f"{index}. 用户{message.user_id}{flag_text}: {text}")
+    return "\n".join(lines)
+
+
 async def chat_with_current_provider(
     *,
     context,
