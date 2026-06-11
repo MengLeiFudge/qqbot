@@ -60,6 +60,8 @@ from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
+from .social_events import GROUP_MEMBER_WELCOME_SUFFIXES
+from .social_events import format_group_member_welcome
 from .social_events import format_self_join_private_notice
 from .social_events import should_send_member_welcome
 from .twin_poke import TWIN_BOT_QQ_IDS
@@ -159,7 +161,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="入群欢迎",
         aliases=("欢迎", "新人欢迎", "社交事件"),
-        lines=("新成员入群时由固定命令 owner 账号发送欢迎；双 bot 互相入群不欢迎",),
+        lines=("新成员入群时天使和恶魔各自按身份发送欢迎；双 bot 互相入群不欢迎",),
     ),
     FeatureSpec(
         name="戳一戳响应",
@@ -279,7 +281,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏和工具类固定功能合集。",
-    "0.9.7",
+    "0.9.8",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -842,10 +844,19 @@ class QQBotFeaturesPlugin(Star):
             elif should_send_member_welcome(
                 user_id=user_id,
                 self_id=self_id,
-                command_owner_id=read_command_owner_qq(),
                 twin_bot_ids=TWIN_BOT_QQ_IDS,
             ):
-                yield event.chain_result([_at(user_id), Plain(" 欢迎大佬喵！群地位+1")])
+                yield event.chain_result(
+                    [
+                        _at(user_id),
+                        Plain(
+                            format_group_member_welcome(
+                                self_id,
+                                random.choice(GROUP_MEMBER_WELCOME_SUFFIXES),
+                            )
+                        ),
+                    ]
+                )
             return
         if notice_type == "notify" and sub_type == "poke":
             async for result in self._handle_poke_notice(event, raw):
