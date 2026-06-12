@@ -62,7 +62,7 @@ from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
-from .social_events import GROUP_MEMBER_WELCOME_SUFFIXES
+from .social_events import GROUP_MEMBER_WELCOME_EXPRESSIONS
 from .social_events import format_group_member_welcome
 from .social_events import format_self_join_private_notice
 from .social_events import should_send_member_welcome
@@ -973,7 +973,7 @@ class QQBotFeaturesPlugin(Star):
                         Plain(
                             format_group_member_welcome(
                                 self_id,
-                                random.choice(GROUP_MEMBER_WELCOME_SUFFIXES),
+                                random.choice(GROUP_MEMBER_WELCOME_EXPRESSIONS),
                             )
                         ),
                     ]

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_qqbot_features.social_events import (
-    GROUP_MEMBER_WELCOME_SUFFIXES,
+    GROUP_MEMBER_WELCOME_EXPRESSIONS,
     format_group_member_welcome,
     format_self_join_private_notice,
     should_send_member_welcome,
@@ -48,14 +48,34 @@ class AstrBotQQBotFeaturesSocialEventsTest(unittest.TestCase):
             )
         )
 
-    def test_member_welcome_uses_legacy_suffixes_and_profile_text(self) -> None:
-        self.assertEqual(GROUP_MEMBER_WELCOME_SUFFIXES, ("--", "-1", "=群地位-1", "+=-1"))
+    def test_member_welcome_uses_expanded_suffixes_and_profile_text(self) -> None:
         self.assertEqual(
-            format_group_member_welcome("1443944862", "-1"),
+            GROUP_MEMBER_WELCOME_EXPRESSIONS,
+            (
+                "群地位-1",
+                "群地位--",
+                "群地位=群地位-1",
+                "群地位+=-1",
+                "群地位-=1",
+                "群地位=群地位+(-1)",
+                "群地位=群地位+i²",
+                "群地位+=i²",
+                "群地位-=-i²",
+                "群地位(t+1)=群地位(t)-1",
+                "群地位=群地位+e^(iπ)",
+                "群地位+=e^(iπ)",
+                "群地位-=(-e^(iπ))",
+                "群地位=群地位+cos(π)",
+                "群地位+=cos(π)",
+            ),
+        )
+        self.assertTrue(all(" " not in expression for expression in GROUP_MEMBER_WELCOME_EXPRESSIONS))
+        self.assertEqual(
+            format_group_member_welcome("1443944862", "群地位-1"),
             " 欢迎大佬喵！群地位-1",
         )
         self.assertEqual(
-            format_group_member_welcome("2629227874", "-1"),
+            format_group_member_welcome("2629227874", "群地位-1"),
             " 来了个大佬，群地位-1",
         )
 

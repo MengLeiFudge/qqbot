@@ -5,7 +5,23 @@ from .twin_poke import TWIN_BOT_QQ_IDS
 
 ANGEL_BOT_QQ = "1443944862"
 DEMON_BOT_QQ = "2629227874"
-GROUP_MEMBER_WELCOME_SUFFIXES = ("--", "-1", "=群地位-1", "+=-1")
+GROUP_MEMBER_WELCOME_EXPRESSIONS = (
+    "群地位-1",
+    "群地位--",
+    "群地位=群地位-1",
+    "群地位+=-1",
+    "群地位-=1",
+    "群地位=群地位+(-1)",
+    "群地位=群地位+i²",
+    "群地位+=i²",
+    "群地位-=-i²",
+    "群地位(t+1)=群地位(t)-1",
+    "群地位=群地位+e^(iπ)",
+    "群地位+=e^(iπ)",
+    "群地位-=(-e^(iπ))",
+    "群地位=群地位+cos(π)",
+    "群地位+=cos(π)",
+)
 
 
 def format_self_join_private_notice(group_name: str | None, group_id: str | int) -> str:
@@ -27,11 +43,11 @@ def should_send_member_welcome(
     return self_id in twin_bot_ids
 
 
-def format_group_member_welcome(self_id: str, suffix: str) -> str:
+def format_group_member_welcome(self_id: str, expression: str) -> str:
     normalized_self_id = str(self_id or "").strip()
-    normalized_suffix = str(suffix or "").strip() or GROUP_MEMBER_WELCOME_SUFFIXES[0]
+    normalized_expression = str(expression or "").strip() or GROUP_MEMBER_WELCOME_EXPRESSIONS[0]
     if normalized_self_id == DEMON_BOT_QQ:
-        return f" 来了个大佬，群地位{normalized_suffix}"
+        return f" 来了个大佬，{normalized_expression}"
     if normalized_self_id == ANGEL_BOT_QQ:
-        return f" 欢迎大佬喵！群地位{normalized_suffix}"
-    return f" 欢迎大佬，群地位{normalized_suffix}"
+        return f" 欢迎大佬喵！{normalized_expression}"
+    return f" 欢迎大佬，{normalized_expression}"

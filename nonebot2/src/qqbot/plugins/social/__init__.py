@@ -33,7 +33,23 @@ BOT_GROUP_INTRO_MESSAGE = (
     "虽然我是一只猫娘，但我不会乱叫别人主人的喵！只有萌泪酱才是我最伟大的主人喵！\n"
     "Ciallo～(∠・ω< )⌒☆"
 )
-GROUP_MEMBER_WELCOME_SUFFIXES = ("--", "-1", "=群地位-1", "+=-1")
+GROUP_MEMBER_WELCOME_EXPRESSIONS = (
+    "群地位-1",
+    "群地位--",
+    "群地位=群地位-1",
+    "群地位+=-1",
+    "群地位-=1",
+    "群地位=群地位+(-1)",
+    "群地位=群地位+i²",
+    "群地位+=i²",
+    "群地位-=-i²",
+    "群地位(t+1)=群地位(t)-1",
+    "群地位=群地位+e^(iπ)",
+    "群地位+=e^(iπ)",
+    "群地位-=(-e^(iπ))",
+    "群地位=群地位+cos(π)",
+    "群地位+=cos(π)",
+)
 
 
 @request_matcher.handle()
@@ -68,7 +84,7 @@ async def handle_group_increase(bot: Bot, event) -> None:
             group_id=group_id,
             message=build_group_member_welcome_message(
                 event.user_id,
-                random.choice(GROUP_MEMBER_WELCOME_SUFFIXES),
+                random.choice(GROUP_MEMBER_WELCOME_EXPRESSIONS),
             ),
         )
         return
