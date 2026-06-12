@@ -388,6 +388,31 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             ["2629227874", "2629227874", "1443944862", "2629227874", "2629227874", "2629227874"],
         )
 
+    def test_twin_scheduler_private_chat_always_uses_current_worker(self) -> None:
+        rng = random.Random(0)
+
+        angel = decide_llm_worker(
+            self_id="1443944862",
+            message_key="private:605738729:摸摸头喵",
+            private_chat=True,
+            now=10.0,
+            rng=rng,
+        )
+        demon = decide_llm_worker(
+            self_id="2629227874",
+            message_key="private:605738729:摸摸头喵",
+            private_chat=True,
+            now=11.0,
+            rng=rng,
+        )
+
+        self.assertTrue(angel.should_handle)
+        self.assertEqual(angel.worker_id, "1443944862")
+        self.assertEqual(angel.reason, "private_chat_current_worker")
+        self.assertTrue(demon.should_handle)
+        self.assertEqual(demon.worker_id, "2629227874")
+        self.assertEqual(demon.reason, "private_chat_current_worker")
+
     def test_fixed_command_detection_skips_llm_worker_gate(self) -> None:
         self.assertTrue(looks_like_qqbot_fixed_command("棉花生图 一只白猫"))
         self.assertTrue(looks_like_qqbot_fixed_command("查询生图积分"))

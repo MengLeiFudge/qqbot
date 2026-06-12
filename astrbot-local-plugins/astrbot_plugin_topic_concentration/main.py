@@ -70,7 +70,7 @@ LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖普通群聊主动接话门控。",
-    "0.3.7",
+    "0.3.8",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -94,6 +94,7 @@ class TopicConcentrationPlugin(Star):
             at_ids=_at_target_ids(event),
             reply_sender_id=_reply_target_id(event),
             message_key=_llm_message_key(event),
+            private_chat=event.is_private_chat(),
         )
         if not decision.should_handle:
             event.should_call_llm(True)

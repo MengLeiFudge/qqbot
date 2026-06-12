@@ -28,6 +28,7 @@ def decide_llm_worker(
     at_ids: object = (),
     reply_sender_id: object = "",
     message_key: str = "",
+    private_chat: bool = False,
     now: float | None = None,
     worker_ids: tuple[str, ...] = TWIN_WORKER_IDS,
     rng: random.Random | None = None,
@@ -37,6 +38,8 @@ def decide_llm_worker(
     self_key = normalize_id(self_id)
     if self_key not in worker_ids:
         return WorkerScheduleDecision(True, self_key, "non_twin_worker")
+    if private_chat:
+        return WorkerScheduleDecision(True, self_key, "private_chat_current_worker")
 
     claim_key = normalize_claim_key(message_key)
     if claim_key:
