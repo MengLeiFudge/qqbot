@@ -51,6 +51,7 @@ class LocalArtifactPublishFileRequest(BaseModel):
     path: str
     name: str = ""
     sha256: str = ""
+    content_sha256: str = ""
     targets: list[int]
     message: str = ""
 
@@ -1315,6 +1316,7 @@ def _build_local_artifact_publish_file(
         name=payload.name.strip() or artifact.name,
         targets=targets,
         sha256=payload.sha256.strip(),
+        content_sha256=payload.content_sha256.strip(),
         message=payload.message.strip(),
     )
 

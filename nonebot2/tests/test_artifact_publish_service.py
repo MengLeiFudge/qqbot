@@ -63,6 +63,7 @@ def test_publish_local_artifacts_skips_same_group_name_sha(tmp_path: Path) -> No
             "file": str(package),
             "name": "mod.zip",
             "sha256": sha256,
+            "content_sha256": sha256,
         }
     ]
     assert not first.skipped
@@ -79,7 +80,56 @@ def test_publish_local_artifacts_skips_same_group_name_sha(tmp_path: Path) -> No
             "file": str(package),
             "name": "mod.zip",
             "sha256": sha256,
-            "reason": "artifact sha256 unchanged.",
+            "content_sha256": sha256,
+            "reason": "artifact content sha256 unchanged.",
+        }
+    ]
+    assert bot.calls == []
+
+
+def test_publish_local_artifacts_skips_by_content_sha_when_zip_sha_changes(tmp_path: Path) -> None:
+    first_package = tmp_path / "first.zip"
+    second_package = tmp_path / "second.zip"
+    first_package.write_bytes(b"zip bytes 1")
+    second_package.write_bytes(b"zip bytes 2")
+    first_sha256 = calculate_sha256(first_package)
+    second_sha256 = calculate_sha256(second_package)
+    content_sha256 = "abc123content"
+    bot = FakeBot()
+    context = LocalArtifactPublishContext(project_id="mlj_dspmods", branch="master", commit_hash="abcdef1")
+
+    first_artifact = LocalArtifactPublishFile(
+        path=first_package,
+        name="mod.zip",
+        targets=(319567534,),
+        sha256=first_sha256,
+        content_sha256=content_sha256,
+    )
+    second_artifact = LocalArtifactPublishFile(
+        path=second_package,
+        name="mod.zip",
+        targets=(319567534,),
+        sha256=second_sha256,
+        content_sha256=content_sha256,
+    )
+
+    first = asyncio.run(publish_local_artifacts(bot, [first_artifact], context, data_root=tmp_path))
+    assert first.uploaded[0]["sha256"] == first_sha256
+    assert first.uploaded[0]["content_sha256"] == content_sha256
+
+    bot.calls.clear()
+    second = asyncio.run(publish_local_artifacts(bot, [second_artifact], context, data_root=tmp_path))
+
+    assert second.uploaded == []
+    assert second.deleted == []
+    assert second.skipped == [
+        {
+            "group_id": 319567534,
+            "file": str(second_package),
+            "name": "mod.zip",
+            "sha256": second_sha256,
+            "content_sha256": content_sha256,
+            "reason": "artifact content sha256 unchanged.",
         }
     ]
     assert bot.calls == []

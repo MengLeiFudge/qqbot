@@ -13,6 +13,7 @@
 - `POST /admin/api/artifacts/publish-local`
   - 只监听 `127.0.0.1` / `::1` / `localhost`。
   - 校验请求时间、Git 上下文、文件路径和发布元数据。
+  - `sha256` 校验 zip 文件本身，`content_sha256` 判断 zip 内部内容是否变化。
   - 通过当前 AstrBot `aiocqhttp` OneBot 连接上传群文件。
 
 ## 配置项

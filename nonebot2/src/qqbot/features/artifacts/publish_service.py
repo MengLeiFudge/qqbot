@@ -28,6 +28,7 @@ class LocalArtifactPublishFile:
     name: str
     targets: tuple[int, ...]
     sha256: str = ""
+    content_sha256: str = ""
     message: str = ""
 
 
@@ -123,12 +124,13 @@ async def publish_local_artifacts(
         actual_sha256 = calculate_sha256(package_path)
         if expected_sha256 and expected_sha256 != actual_sha256:
             raise ValueError(f"Artifact sha256 mismatch: {package_path}")
+        publish_sha256 = artifact.content_sha256.strip().lower() or actual_sha256
 
         for group_id in artifact.targets:
             if is_same_as_last_local_artifact_published(
                 group_id,
                 upload_name,
-                actual_sha256,
+                publish_sha256,
                 data_root=data_root,
             ):
                 skipped.append(
@@ -137,7 +139,8 @@ async def publish_local_artifacts(
                         "file": str(package_path),
                         "name": upload_name,
                         "sha256": actual_sha256,
-                        "reason": "artifact sha256 unchanged.",
+                        "content_sha256": publish_sha256,
+                        "reason": "artifact content sha256 unchanged.",
                     }
                 )
                 continue
@@ -167,12 +170,13 @@ async def publish_local_artifacts(
                     "file": str(package_path),
                     "name": upload_name,
                     "sha256": actual_sha256,
+                    "content_sha256": publish_sha256,
                 }
             )
             save_last_local_artifact_published_sha(
                 group_id,
                 upload_name,
-                actual_sha256,
+                publish_sha256,
                 data_root=data_root,
             )
     return LocalArtifactPublishResult(uploaded=uploaded, deleted=deleted, skipped=skipped)
@@ -299,7 +303,7 @@ def save_last_local_artifact_published_sha(
     path = _last_local_artifact_published_sha_path(group_id, file_name, data_root=data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"name": file_name, "sha256": sha256}, ensure_ascii=False, indent=2),
+        json.dumps({"name": file_name, "content_sha256": sha256, "sha256": sha256}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -649,7 +653,7 @@ def _load_last_local_artifact_published_sha(
         return ""
     if payload.get("name") != file_name:
         return ""
-    sha256 = payload.get("sha256")
+    sha256 = payload.get("content_sha256") or payload.get("sha256")
     return sha256.strip().lower() if isinstance(sha256, str) else ""
 
 

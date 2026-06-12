@@ -165,6 +165,7 @@ def _build_local_artifact_publish_file(payload: dict[str, Any], repo_path: Path)
         name=str(payload.get("name") or "").strip() or artifact.name,
         targets=tuple(targets),
         sha256=str(payload.get("sha256") or "").strip(),
+        content_sha256=str(payload.get("content_sha256") or "").strip(),
         message=str(payload.get("message") or "").strip(),
     )
 
