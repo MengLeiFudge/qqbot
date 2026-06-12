@@ -50,6 +50,12 @@
   - 查看可用模型和消耗说明。
 - `查看积分` / `balance` / `points`
   - 查询当前 QQ 的生图当前积分和今日免费状态，不展示历史累计消息数。
+- `用量`
+  - 查询插件配置的默认 Sub2API 账号 5h / 7d 用量窗口。
+  - 该缓存按 Sub2API 账号名全局共享，不按 QQ 用户、群或 bot 身份拆分；所有 QQ 查询的都是同一个默认账号结果。
+  - 插件启动后后台定时使用 Sub2API `source=active&force=true` 主动刷新，默认每 300 秒一次；群里发送 `用量` 时只返回最近一次成功缓存，不等待刷新请求。
+  - 可配置一个或多个提醒群号；5h 用量首次跨过 80%、90%、95% 时自动提醒，回落到阈值以下后才会再次触发同一阈值。
+  - 如果 Sub2API 只返回一个匹配账号，机器人只返回这一条；如果返回多个匹配账号，机器人按接口顺序逐个列出。
 - `来点美图` / `色图` / `混合`
   - 调用 Lolicon 图片能力，复用 bot1 缓存和群配置。
 - `开群色图` / `关群色图`
@@ -134,6 +140,18 @@
   - 是否自动同意好友申请，默认开启。
 - `auto_approve_group_invites`
   - 是否自动同意邀请入群，默认开启。
+- `sub2api_base_url`
+  - Sub2API 根地址，例如 `https://ai.example.com`。
+- `sub2api_admin_api_key`
+  - Sub2API 设置页生成的 `admin-` 开头 Admin API Key，只填写在运行态插件配置，不写入源码或示例配置。
+- `sub2api_default_account_name`
+  - `用量` 默认查询的 Sub2API 账号名，默认 `Pro`。所有 QQ 和所有群共用这个账号名的后台刷新缓存；若接口返回多个同名或搜索匹配账号，会逐个列出。
+- `sub2api_timeout_seconds`
+  - Sub2API 主动刷新查询超时秒数，默认 90 秒。
+- `sub2api_refresh_interval_seconds`
+  - Sub2API 后台刷新间隔秒数，默认 300 秒；最低按 60 秒处理。
+- `sub2api_alert_group_ids`
+  - Sub2API 5h 用量提醒目标 QQ 群号，英文逗号分隔；留空则不主动提醒。
 - `QQBOT_ASTRBOT_COMMAND_OWNER`
   - 双平台 full 模式下固定命令 owner 账号，默认恶魔棉花糖 `2629227874`。
 
@@ -154,3 +172,4 @@
 - 群聊记录导出只读取公开群上下文 `data\nonebot2\run\ai\group_context\<群号>.json`，只写固定安全目录，不接受用户传入路径。
 - 不提交运行态数据、QQ 登录态、token、数据库或日志。
 - RightCodes API Key 直接填写在本插件配置字段 `api_key`，不写入插件源码，也不再读取 NoneBot2 `.env`。
+- Sub2API Admin API Key 直接填写在本插件运行态配置字段 `sub2api_admin_api_key`，不写入插件源码、示例配置、群消息或日志。

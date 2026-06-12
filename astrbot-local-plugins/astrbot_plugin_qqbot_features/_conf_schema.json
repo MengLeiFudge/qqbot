@@ -44,5 +44,41 @@
     "type": "int",
     "default": 240,
     "hint": "生图通常超过 1 分钟；超过该时间仍未返回时，插件回复失败并退回本次扣除的积分或免费次数。"
+  },
+  "sub2api_base_url": {
+    "description": "Sub2API 管理端地址",
+    "type": "string",
+    "default": "",
+    "hint": "填写 Sub2API 根地址，例如 https://ai.example.com；不要带 /admin/accounts。"
+  },
+  "sub2api_admin_api_key": {
+    "description": "Sub2API Admin API Key",
+    "type": "string",
+    "default": "",
+    "hint": "填写 Sub2API 设置页生成的 admin- 开头 API Key；只保存在运行态配置，不要写入源码或示例配置。"
+  },
+  "sub2api_default_account_name": {
+    "description": "Sub2API 默认查询账号名",
+    "type": "string",
+    "default": "Pro",
+    "hint": "群里发送 用量 时默认查询这个账号；所有 QQ 共用该账号的 60 秒插件缓存。"
+  },
+  "sub2api_timeout_seconds": {
+    "description": "Sub2API 查询超时秒数",
+    "type": "int",
+    "default": 90,
+    "hint": "缓存超过 60 秒时使用 source=active&force=true 主动刷新 Sub2API 用量后返回；Cloudflare 前置站点或主动刷新较慢时建议不低于 90 秒。"
+  },
+  "sub2api_refresh_interval_seconds": {
+    "description": "Sub2API 后台刷新间隔秒数",
+    "type": "int",
+    "default": 300,
+    "hint": "插件启动后后台定时使用 source=active&force=true 刷新用量；群里发送 用量 时只返回最近一次成功缓存，不等待刷新请求。"
+  },
+  "sub2api_alert_group_ids": {
+    "description": "Sub2API 用量提醒目标群号",
+    "type": "string",
+    "default": "",
+    "hint": "英文逗号分隔一个或多个 QQ 群号。5h 用量首次跨过 80%、90%、95% 时自动提醒；回落到阈值以下后才会再次触发同一阈值。"
   }
 }

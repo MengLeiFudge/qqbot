@@ -416,8 +416,11 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
     def test_fixed_command_detection_skips_llm_worker_gate(self) -> None:
         self.assertTrue(looks_like_qqbot_fixed_command("棉花生图 一只白猫"))
         self.assertTrue(looks_like_qqbot_fixed_command("查询生图积分"))
+        self.assertTrue(looks_like_qqbot_fixed_command("用量"))
         self.assertTrue(looks_like_qqbot_fixed_command("菜单Arcaea"))
         self.assertFalse(looks_like_qqbot_fixed_command("生成一张白猫图片"))
+        self.assertFalse(looks_like_qqbot_fixed_command("查询"))
+        self.assertFalse(looks_like_qqbot_fixed_command("查询 戴森球蓝图怎么导出"))
         self.assertFalse(looks_like_qqbot_fixed_command("你怎么看这个报错"))
 
     def test_twin_target_detection_ignores_normal_group_member_mentions(self) -> None:

@@ -5,5 +5,11 @@
   "data_root": "",
   "point_multiplier": 1000,
   "draw_timeout_seconds": 240,
-  "api_key": ""
+  "api_key": "",
+  "sub2api_base_url": "",
+  "sub2api_admin_api_key": "",
+  "sub2api_default_account_name": "Pro",
+  "sub2api_timeout_seconds": 90,
+  "sub2api_refresh_interval_seconds": 300,
+  "sub2api_alert_group_ids": ""
 }

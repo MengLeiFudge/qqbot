@@ -64,6 +64,17 @@ from .social_events import GROUP_MEMBER_WELCOME_SUFFIXES
 from .social_events import format_group_member_welcome
 from .social_events import format_self_join_private_notice
 from .social_events import should_send_member_welcome
+from .sub2api_usage import Sub2APIClient
+from .sub2api_usage import SUB2API_USAGE_CACHE_TTL_SECONDS
+from .sub2api_usage import Sub2APIAccountUsage
+from .sub2api_usage import Sub2APIUsageAlert
+from .sub2api_usage import format_sub2api_usage_alert_message
+from .sub2api_usage import format_sub2api_usage_response
+from .sub2api_usage import load_sub2api_config
+from .sub2api_usage import looks_like_sub2api_usage_command
+from .sub2api_usage import parse_sub2api_usage_command
+from .sub2api_usage import Sub2APIUsageCache
+from .sub2api_usage import update_sub2api_usage_alert_state
 from .twin_poke import TWIN_BOT_QQ_IDS
 from .twin_poke import should_follow_poke_notice
 
@@ -78,6 +89,7 @@ NOTE_EXPORT_PATTERN = (
     r"(?:记录|导出).*(?:对话|聊天记录|群聊记录).*(?:md|MD|markdown|Markdown|\.md|文件|当前目录).*)$"
 )
 GROUP_FILE_CLEANUP_PATTERN = r"^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
+SUB2API_USAGE_PATTERN = r"(?i)^用量$"
 LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
 LOLICON_PATTERN = r"^(?:来点)?(?:[美色涩蛇]图|混合).*$"
 ARC_RECOMMEND_PATTERN = r"^arctj\s*[0-9]+(?:\.[0-9]+)?$"
@@ -105,6 +117,7 @@ FIXED_COMMAND_PATTERNS = tuple(
         FEATURE_MENU_PATTERN,
         NOTE_EXPORT_PATTERN,
         GROUP_FILE_CLEANUP_PATTERN,
+        SUB2API_USAGE_PATTERN,
         FACTORIO_DOWNLOAD_PATTERN,
         SHAPEZ_PATTERN,
         LOLICON_ADMIN_PATTERN,
@@ -300,6 +313,10 @@ class QQBotFeaturesPlugin(Star):
         self._reread_state = RereadRepeatState()
         self._arc_apk_update_manager = None
         self._rightcodes_config = load_rightcodes_config(config)
+        self._sub2api_config = load_sub2api_config(config)
+        self._sub2api_usage_cache = Sub2APIUsageCache(ttl_seconds=SUB2API_USAGE_CACHE_TTL_SECONDS)
+        self._sub2api_refresh_task: asyncio.Task | None = None
+        self._sub2api_alerted_thresholds_by_account: dict[str, set[int]] = {}
         self._rightcodes_draw_lock = asyncio.Semaphore(2)
         self._group_inviter_by_group_id: dict[str, str] = {}
         logger.info(
@@ -308,6 +325,19 @@ class QQBotFeaturesPlugin(Star):
             self._auto_approve_friend_requests,
             self._auto_approve_group_invites,
         )
+
+    async def initialize(self) -> None:
+        if self._sub2api_config.base_url and self._sub2api_config.admin_api_key:
+            self._sub2api_refresh_task = asyncio.create_task(self._sub2api_usage_refresh_loop())
+
+    async def terminate(self) -> None:
+        if self._sub2api_refresh_task is not None:
+            self._sub2api_refresh_task.cancel()
+            try:
+                await self._sub2api_refresh_task
+            except asyncio.CancelledError:
+                pass
+        self._sub2api_refresh_task = None
 
     @filter.regex(MENU_PATTERN, desc="发送总览图片菜单，展示当前 AstrBot 已接管的群务、互动、生图、游戏和工具分类。")
     async def menu(self, event: AstrMessageEvent):
@@ -408,6 +438,92 @@ class QQBotFeaturesPlugin(Star):
             f"Factorio: Space Age Windows {link.version} 下载链接：\n{link.url}"
         )
         event.stop_event()
+
+    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询 Sub2API 默认账号的 5h/7d 用量窗口；直接返回后台刷新缓存。")
+    async def sub2api_usage(self, event: AstrMessageEvent):
+        text = extract_plain_text(event).strip()
+        command = parse_sub2api_usage_command(
+            text,
+            default_account_name=self._sub2api_config.default_account_name,
+        )
+        if command is None:
+            return
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="sub2api_usage"):
+            return
+        usage = self._get_cached_sub2api_usage(command.account_name)
+        if usage is None:
+            yield event.plain_result("Sub2API 用量后台刷新中，暂无可用缓存；稍后再发“用量”即可直接返回当前值。")
+            event.stop_event()
+            return
+        yield event.plain_result(format_sub2api_usage_response(usage, command.account_name))
+        event.stop_event()
+
+    def _get_cached_sub2api_usage(self, account_name: str) -> list[Sub2APIAccountUsage] | None:
+        return self._sub2api_usage_cache.get_latest(account_name)
+
+    async def _refresh_sub2api_usage_once(self) -> list[Sub2APIAccountUsage]:
+        account_name = self._sub2api_config.default_account_name
+        usage = await Sub2APIClient(
+            base_url=self._sub2api_config.base_url,
+            admin_api_key=self._sub2api_config.admin_api_key,
+            timeout_seconds=self._sub2api_config.timeout_seconds,
+        ).get_account_usage(account_name, force_refresh=True)
+        self._sub2api_usage_cache.set(account_name, usage, now=time.monotonic())
+        return usage
+
+    async def _sub2api_usage_refresh_loop(self) -> None:
+        account_name = self._sub2api_config.default_account_name
+        interval = self._sub2api_config.refresh_interval_seconds
+        while True:
+            try:
+                usage = await self._refresh_sub2api_usage_once()
+                await self._send_sub2api_usage_alerts(
+                    update_sub2api_usage_alert_state(usage, self._sub2api_alerted_thresholds_by_account)
+                )
+                logger.info(
+                    "[QQBotFeatures] refreshed Sub2API usage cache, account=%s count=%s interval=%ss",
+                    account_name,
+                    len(usage),
+                    interval,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("[QQBotFeatures] failed to refresh Sub2API usage cache: %s", exc)
+            await asyncio.sleep(interval)
+
+    async def _send_sub2api_usage_alerts(self, alerts: list[Sub2APIUsageAlert]) -> None:
+        if not alerts or not self._sub2api_config.alert_group_ids:
+            return
+        bot = self._get_onebot_bot()
+        if bot is None:
+            logger.warning("[QQBotFeatures] skip Sub2API usage alert because no aiocqhttp bot is connected")
+            return
+        for alert in alerts:
+            message = format_sub2api_usage_alert_message(alert)
+            for group_id in self._sub2api_config.alert_group_ids:
+                try:
+                    await bot.call_action(
+                        "send_group_msg",
+                        group_id=int(group_id),
+                        message=message,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[QQBotFeatures] failed to send Sub2API usage alert: group_id=%s threshold=%s error=%s",
+                        group_id,
+                        alert.threshold,
+                        exc,
+                    )
+
+    def _get_onebot_bot(self):
+        for platform in getattr(self.context.platform_manager, "platform_insts", []):
+            if getattr(platform.meta(), "name", "") != "aiocqhttp":
+                continue
+            bot = getattr(platform, "bot", None)
+            if bot is not None:
+                return bot
+        return None
 
     @filter.regex(SHAPEZ_PATTERN, desc="渲染异形工厂 shapez 短代码、结构图或路径图；在线谜题在未配置 token 时给出提示。")
     async def shapez_render(self, event: AstrMessageEvent):
@@ -1108,6 +1224,8 @@ def looks_like_qqbot_fixed_command(text: str) -> bool:
     if looks_like_rightcodes_draw_points_query(normalized):
         return True
     if looks_like_rightcodes_draw_help_command(normalized):
+        return True
+    if looks_like_sub2api_usage_command(normalized):
         return True
     return any(pattern.search(normalized) for pattern in FIXED_COMMAND_PATTERNS)
 
