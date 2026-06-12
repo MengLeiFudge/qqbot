@@ -7,6 +7,7 @@ import re
 
 DUAL_PLATFORM_DUPLICATE_WINDOW_SECONDS = 3.0
 ACTIVE_REPLY_INFLIGHT_LEASE_SECONDS = 600.0
+FOLLOWUP_CALL_WINDOW_SECONDS = 45.0
 FIXED_COMMAND_PREFIX_RE = re.compile(
     r"^(?:棉花糖|棉花)\s*生图|^(?:查|查询|查看|看)(?:一下)?(?:我(?:的)?|当前)?(?:生图)?积分"
     r"|^(?:生图模型|生图价格|draw\s*models|draw\s*help|balance|points?)$"
@@ -70,6 +71,56 @@ def should_consider_active_window(
     if latest.at_bot or latest.reply_bot or has_strong_topic_signal(latest.text):
         return True
     return len(messages) >= 2
+
+
+def should_force_active_reply_for_named_call(window: deque[TopicWindowMessage]) -> bool:
+    messages = [message for message in window if compact_text(message.text)]
+    if not messages:
+        return False
+    latest = messages[-1]
+    if looks_like_direct_bot_call(latest.text):
+        return True
+    if not looks_like_short_presence_probe(latest.text):
+        return False
+    for previous in reversed(messages[:-1]):
+        if latest.created_at - previous.created_at > FOLLOWUP_CALL_WINDOW_SECONDS:
+            return False
+        if previous.user_id != latest.user_id:
+            continue
+        return looks_like_direct_bot_call(previous.text)
+    return False
+
+
+def looks_like_direct_bot_call(text: str) -> bool:
+    raw = str(text or "").strip()
+    if looks_like_qqbot_fixed_command(raw):
+        return False
+    core = _compact_call_text(raw)
+    if not core:
+        return False
+    names = ("棉花糖", "天使棉花糖", "恶魔棉花糖", "萌萌棉花糖", "qqbot")
+    if core in names:
+        return True
+    prefixes = ("呼叫", "叫一下", "喊一下")
+    for name in names:
+        if core in {f"{prefix}{name}" for prefix in prefixes}:
+            return True
+        if core in {
+            f"{name}在吗",
+            f"{name}在嘛",
+            f"{name}在不在",
+            f"{name}出来",
+            f"{name}说句话",
+            f"{name}回答一下",
+            f"{name}看一下",
+        }:
+            return True
+    return False
+
+
+def looks_like_short_presence_probe(text: str) -> bool:
+    core = _compact_call_text(text)
+    return core in {"在吗", "在嘛", "在不在", "还在吗", "人呢"}
 
 
 def build_active_reply_decision_prompt(
@@ -324,3 +375,8 @@ def looks_like_low_information(text: str) -> bool:
 
 def looks_like_qqbot_fixed_command(text: str) -> bool:
     return FIXED_COMMAND_PREFIX_RE.search(str(text or "").strip()) is not None
+
+
+def _compact_call_text(text: str) -> str:
+    compact = compact_text(text).lower()
+    return re.sub(r"[?!？！，,。.~～…、:：；;\s]+", "", compact)

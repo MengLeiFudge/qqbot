@@ -17,8 +17,10 @@ from astrbot_plugin_topic_concentration.logic import (
     chat_with_current_provider,
     has_strong_topic_signal,
     is_recent_duplicate_observation,
+    looks_like_direct_bot_call,
     looks_like_qqbot_fixed_command,
     looks_like_low_information,
+    should_force_active_reply_for_named_call,
     release_active_reply_inflight,
     should_consider_active_window,
     try_acquire_active_reply_inflight,
@@ -167,6 +169,61 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         )
 
         self.assertTrue(should_consider_active_window(window, named_call=True))
+
+    def test_direct_named_call_forces_active_reply_without_decision_provider(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="棉花糖",
+                    user_id="3062317151",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=10.0,
+                )
+            ]
+        )
+
+        self.assertTrue(looks_like_direct_bot_call("棉花糖"))
+        self.assertTrue(looks_like_direct_bot_call("棉花糖在吗"))
+        self.assertFalse(looks_like_direct_bot_call("棉花糖生图 一只白猫"))
+        self.assertTrue(should_force_active_reply_for_named_call(window))
+
+    def test_presence_probe_after_named_call_forces_active_reply(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="棉花糖",
+                    user_id="3062317151",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=10.0,
+                ),
+                TopicWindowMessage(
+                    text="在吗",
+                    user_id="3062317151",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=13.0,
+                ),
+            ]
+        )
+
+        self.assertTrue(should_force_active_reply_for_named_call(window))
+
+    def test_presence_probe_without_named_call_does_not_force_active_reply(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="在吗",
+                    user_id="3062317151",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=10.0,
+                )
+            ]
+        )
+
+        self.assertFalse(should_force_active_reply_for_named_call(window))
 
     def test_active_reply_prompt_uses_group_history_and_quoted_source(self) -> None:
         window = deque(
