@@ -1,6 +1,0 @@
-name: astrbot_plugin_source_knowledge
-display_name: 本地源码知识注入
-desc: "按群号和问题只读检索本机源码树，把少量可信源码证据临时注入 AstrBot 本轮 LLM 请求。"
-version: v0.1.1
-author: MengLei
-repo: ""

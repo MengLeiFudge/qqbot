@@ -1,6 +1,0 @@
-name: astrbot_plugin_rightcodes_draw
-display_name: RightCodes 生图兼容壳
-desc: "兼容旧插件入口；实际 RightCodes 生图命令和积分逻辑已经迁入“棉花糖功能合集”。"
-version: v0.1.2
-author: MengLei
-repo: ""

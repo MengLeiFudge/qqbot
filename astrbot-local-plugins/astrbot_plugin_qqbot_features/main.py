@@ -27,6 +27,9 @@ from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
 from .command_guard import record_command_handled
 from .command_guard import try_claim_command
+from .context_bridge import build_group_context_injection
+from .context_bridge import format_enabled_groups as format_context_bridge_enabled_groups
+from .context_bridge import load_bridge_config
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
@@ -62,10 +65,22 @@ from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
+from .reply_style_guard_logic import build_delegated_reply_instruction_text
+from .reply_style_guard_logic import is_dangerous_local_tool_name
+from .reply_style_guard_logic import normalize_fold_threshold
+from .reply_style_guard_logic import sanitize_reply_plain_text
+from .reply_style_guard_logic import should_disable_model_regex_segmenting
+from .reply_style_guard_logic import should_fold_long_reply
+from .reply_style_guard_logic import split_forward_text
 from .social_events import GROUP_MEMBER_WELCOME_EXPRESSIONS
 from .social_events import format_group_member_welcome
 from .social_events import format_self_join_private_notice
 from .social_events import should_send_member_welcome
+from .source_knowledge import SourceIndex
+from .source_knowledge import format_enabled_groups as format_source_enabled_groups
+from .source_knowledge import format_source_injection
+from .source_knowledge import load_source_knowledge_config
+from .source_knowledge import resolve_domains
 from .sub2api_usage import Sub2APIClient
 from .sub2api_usage import SUB2API_USAGE_CACHE_TTL_SECONDS
 from .sub2api_usage import Sub2APIAccountUsage
@@ -77,9 +92,27 @@ from .sub2api_usage import looks_like_sub2api_usage_command
 from .sub2api_usage import parse_sub2api_usage_command
 from .sub2api_usage import Sub2APIUsageCache
 from .sub2api_usage import update_sub2api_usage_alert_state
+from .twin_interaction_logic import TwinInteractionConfig
+from .twin_interaction_logic import TwinProfile
+from .twin_interaction_logic import build_direct_twin_prompt
+from .twin_interaction_logic import build_twin_injection
+from .twin_interaction_logic import clamp_int as clamp_twin_int
+from .twin_interaction_logic import group_enabled
+from .twin_interaction_logic import is_bot_sender_id
+from .twin_interaction_logic import parse_group_ids as parse_twin_group_ids
+from .twin_interaction_logic import read_bool as read_twin_bool
+from .twin_interaction_logic import read_profile
+from .twin_interaction_logic import read_profile_for_self_id
+from .twin_interaction_logic import should_handle_direct_twin_request
 from .twin_poke import TWIN_BOT_QQ_IDS
 from .twin_poke import should_follow_poke_notice
 
+from astrbot.api.provider import LLMResponse
+from astrbot.core.message.components import Plain as CorePlain
+from astrbot.core.message.message_event_result import ResultContentType
+from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
+    AiocqhttpMessageEvent,
+)
 
 FACTORIO_DOWNLOAD_PATTERN = (
     r"(?i)^.*(?:factorio|异星|太空时代|space\s*age|spaceage).*(?:下载|安装包).*(?:链接|地址)?$"
@@ -145,6 +178,35 @@ NONEBOT2_PORT = 8080
 OWNER_QQ = "605738729"
 DEFAULT_COMMAND_OWNER_QQ = "2629227874"
 LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
+PROFILE_ENV = "QQBOT_ASTRBOT_PROFILE"
+DEFAULT_PROFILE = "demon"
+DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
+LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
+LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
+DELEGATED_FROM_EXTRA = "_qqbot_twin_llm_delegated_from"
+BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
+DEFAULT_TWIN_MAX_CONTEXT_MESSAGES = 4
+DEFAULT_TWIN_MAX_CONTEXT_CHARS = 1200
+INTERNAL_ERROR_PREFIXES = (
+    "Error occurred while processing agent request:",
+)
+BOT_PROFILES = {
+    "angel": {
+        "bot_id": "1443944862",
+        "bot_name": "😇棉花糖😇",
+    },
+    "demon": {
+        "bot_id": "2629227874",
+        "bot_name": "👿棉花糖👿",
+    },
+}
+PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
+PLAIN_TEXT_REPLY_INSTRUCTION = (
+    "本轮回复必须使用 QQ 纯文本聊天格式，不要使用 Markdown。"
+    "禁止使用 # 标题、Markdown 列表符号、粗体、反引号代码块、引用块、Markdown 链接和表格。"
+    "普通聊天优先短句自然表达，不要主动列项目符号；需要给 API、JSON、配置示例时允许保留换行和缩进，但不要包代码围栏。"
+    "不要用“如果你愿意”“要的话”“你把具体内容发我”“我可以再帮你”等追问式收尾。"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,8 +357,8 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 @register(
     "astrbot_plugin_qqbot_features",
     "MengLei",
-    "棉花糖群务、互动、生图、游戏和工具类固定功能合集。",
-    "0.9.8",
+    "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
+    "0.10.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -321,11 +383,60 @@ class QQBotFeaturesPlugin(Star):
         self._sub2api_alerted_thresholds_by_account: dict[str, set[int]] = {}
         self._rightcodes_draw_lock = asyncio.Semaphore(2)
         self._group_inviter_by_group_id: dict[str, str] = {}
+        self._context_bridge_config = load_bridge_config(
+            ScopedPluginConfig(
+                config,
+                prefix="context_bridge",
+                legacy_plugin_name="astrbot_plugin_qqbot_context_bridge",
+            )
+        )
+        self._reply_long_reply_fold_threshold_chars = normalize_fold_threshold(
+            get_config_value(
+                ScopedPluginConfig(
+                    config,
+                    prefix="reply_style_guard",
+                    legacy_plugin_name="astrbot_plugin_reply_style_guard",
+                ),
+                "long_reply_fold_threshold_chars",
+                DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS,
+            ),
+            default=DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS,
+        )
+        self._source_knowledge_config = load_source_knowledge_config(
+            ScopedPluginConfig(
+                config,
+                prefix="source_knowledge",
+                legacy_plugin_name="astrbot_plugin_source_knowledge",
+            )
+        )
+        self._source_knowledge_index = SourceIndex(self._source_knowledge_config)
+        self._twin_config = load_twin_config(
+            ScopedPluginConfig(
+                config,
+                prefix="twin_interaction",
+                legacy_plugin_name="astrbot_plugin_twin_interaction",
+            )
+        )
+        self._twin_fallback_profile = os.environ.get(PROFILE_ENV, DEFAULT_PROFILE)
+        self._twin_profile = read_profile(self._twin_fallback_profile)
+        self._install_aiocqhttp_error_guard()
         logger.info(
             "[QQBotFeatures] migrated feature plugin loaded, mode=%s auto_approve_friend=%s auto_approve_group_invite=%s",
             self._feature_mode,
             self._auto_approve_friend_requests,
             self._auto_approve_group_invites,
+        )
+        logger.info(
+            "[QQBotFeatures] merged guards loaded: context_groups=%s context_max_messages=%s "
+            "reply_fold_chars=%s source_groups=%s source_roots=%s twin_profile=%s twin_groups=%s twin_direct=%s",
+            format_context_bridge_enabled_groups(self._context_bridge_config.enabled_groups),
+            self._context_bridge_config.max_messages,
+            self._reply_long_reply_fold_threshold_chars,
+            format_source_enabled_groups(self._source_knowledge_config.enabled_groups),
+            len(self._source_knowledge_config.roots),
+            self._twin_fallback_profile,
+            "*" if not self._twin_config.enabled_groups else ",".join(sorted(self._twin_config.enabled_groups)),
+            self._twin_config.direct_handler_enabled,
         )
 
     async def initialize(self) -> None:
@@ -340,6 +451,306 @@ class QQBotFeaturesPlugin(Star):
             except asyncio.CancelledError:
                 pass
         self._sub2api_refresh_task = None
+
+    @filter.on_llm_request(desc="在 AstrBot 调用 LLM 前，按当前群号读取 bot1 公开群上下文并临时注入本轮请求。")
+    async def inject_bot1_group_context(self, event: AstrMessageEvent, req: ProviderRequest):
+        group_id = str(event.get_group_id() or "")
+        if self._context_bridge_config.enabled_groups and group_id not in self._context_bridge_config.enabled_groups:
+            return
+        injection = build_group_context_injection(group_id, self._context_bridge_config)
+        if not injection:
+            return
+        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
+        logger.info(
+            "[QQBotFeatures] injected bot1 context: group=%s chars=%s",
+            group_id,
+            len(injection),
+        )
+
+    @filter.on_llm_request(desc="在 LLM 请求前记录耗时、移除非主人私聊本机工具并注入纯文本回复边界。")
+    async def inject_reply_style_guard(self, event: AstrMessageEvent, req: ProviderRequest):
+        started = time.monotonic()
+        event.set_extra(LLM_STARTED_AT_EXTRA, started)
+        event.set_extra(LLM_REQUEST_SESSION_EXTRA, req.session_id or "")
+        logger.info(
+            "[QQBotFeatures] LLM request started: session=%s message_type=%s "
+            "request_session=%s model=%s prompt_chars=%s image_count=%s audio_count=%s has_tools=%s",
+            getattr(event, "unified_msg_origin", ""),
+            safe_event_value(event, "get_message_type"),
+            req.session_id or "",
+            req.model or "",
+            len(req.prompt or ""),
+            len(req.image_urls or []),
+            len(req.audio_urls or []),
+            bool(req.func_tool),
+        )
+        removed_tools = remove_forbidden_local_tools(event, req)
+        if removed_tools:
+            logger.info(
+                "[QQBotFeatures] removed local tools for non-owner-private request: session=%s tools=%s",
+                getattr(event, "unified_msg_origin", ""),
+                ",".join(removed_tools),
+            )
+        req.extra_user_content_parts.append(TextPart(text=PLAIN_TEXT_REPLY_INSTRUCTION).mark_as_temp())
+        delegated_from = str(event.get_extra(DELEGATED_FROM_EXTRA, "") or "").strip()
+        if delegated_from:
+            req.extra_user_content_parts.append(
+                TextPart(text=build_delegated_reply_instruction(event, delegated_from)).mark_as_temp()
+            )
+        if str(event.get_extra(BOTH_TARGETED_EXTRA, "") or "").strip():
+            req.extra_user_content_parts.append(
+                TextPart(
+                    text="用户这次同时叫到了天使棉花糖和恶魔棉花糖。你只代表自己回答，不替另一个 bot 发言；可以自然提到她也被叫到了，但不要解释调度机制。"
+                ).mark_as_temp()
+            )
+
+    @filter.on_llm_request(desc="在 LLM 请求前按群号和问题检索本机源码树，把少量可信源码片段临时注入上下文。")
+    async def inject_source_knowledge(self, event: AstrMessageEvent, req: ProviderRequest):
+        group_id = str(event.get_group_id() or "")
+        if self._source_knowledge_config.enabled_groups and group_id not in self._source_knowledge_config.enabled_groups:
+            return
+        request_context = build_current_request_context(event, req.prompt or "")
+        query = request_context.combined_query or request_context.current_text
+        if not query:
+            return
+        domains = resolve_domains(group_id, query)
+        if not domains:
+            return
+        results = self._source_knowledge_index.search(query, domains)
+        if not results:
+            logger.debug(
+                "[QQBotFeatures] no source evidence: group=%s domains=%s query=%s",
+                group_id,
+                ",".join(domains),
+                query[:80],
+            )
+            return
+        injection = format_source_injection(results, query, self._source_knowledge_config.max_chars)
+        if not injection:
+            return
+        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
+        logger.info(
+            "[QQBotFeatures] injected source evidence: group=%s domains=%s results=%s chars=%s",
+            group_id,
+            ",".join(domains),
+            len(results),
+            len(injection),
+        )
+
+    @filter.on_llm_request(desc="在 LLM 请求前注入当前 bot 与另一个棉花糖的双子关系边界，不替对方发言。")
+    async def inject_twin_context(self, event: AstrMessageEvent, req: ProviderRequest):
+        profile = self._profile_for_event(event)
+        if is_bot_sender(event, profile):
+            return
+        group_id = str(event.get_group_id() or "")
+        if not event.is_private_chat() and not group_enabled(group_id, self._twin_config.enabled_groups):
+            return
+        text = str(event.get_message_str() or "")
+        injection = build_twin_injection(
+            text=text,
+            group_id=group_id,
+            profile=profile,
+            config=self._twin_config,
+        )
+        if not injection:
+            return
+        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
+        logger.info(
+            "[QQBotFeatures] injected twin context: group=%s chars=%s",
+            group_id or "private",
+            len(injection),
+        )
+
+    @filter.on_llm_response(desc="记录 LLM 返回耗时，帮助区分上游仍在处理、已返回或已失败。")
+    async def log_llm_response_latency(self, event: AstrMessageEvent, response: LLMResponse):
+        started = event.get_extra(LLM_STARTED_AT_EXTRA)
+        elapsed = time.monotonic() - started if isinstance(started, (int, float)) else -1.0
+        logger.info(
+            "[QQBotFeatures] LLM response returned: session=%s request_session=%s "
+            "elapsed=%.2fs has_text=%s has_chain=%s has_tool_call=%s has_reasoning=%s is_chunk=%s",
+            getattr(event, "unified_msg_origin", ""),
+            event.get_extra(LLM_REQUEST_SESSION_EXTRA, ""),
+            elapsed,
+            bool((getattr(response, "completion_text", "") or "").strip()) if response else False,
+            bool(getattr(response, "result_chain", None)) if response else False,
+            bool(getattr(response, "tools_call_args", None)) if response else False,
+            bool((getattr(response, "reasoning_content", "") or "").strip()) if response else False,
+            bool(getattr(response, "is_chunk", False)) if response else False,
+        )
+
+    @filter.on_decorating_result(desc="在消息发送前清理 Markdown、追问式、反问式或空洞邀请式收尾。")
+    async def strip_reply_style_tail(self, event: AstrMessageEvent):
+        result = event.get_result()
+        if result is None or not result.chain:
+            return
+        started = event.get_extra(LLM_STARTED_AT_EXTRA)
+        if isinstance(started, (int, float)):
+            logger.info(
+                "[QQBotFeatures] decorating reply result: session=%s request_session=%s "
+                "elapsed=%.2fs chain_items=%s",
+                getattr(event, "unified_msg_origin", ""),
+                event.get_extra(LLM_REQUEST_SESSION_EXTRA, ""),
+                time.monotonic() - started,
+                len(result.chain),
+            )
+        changed = False
+        if hasattr(result, "use_markdown"):
+            result.use_markdown(False)
+        cleaned_chain = []
+        for comp in result.chain:
+            if not isinstance(comp, CorePlain):
+                cleaned_chain.append(comp)
+                continue
+            cleaned = sanitize_reply_plain_text(comp.text)
+            if cleaned != comp.text:
+                comp.text = cleaned
+                changed = True
+            if cleaned:
+                cleaned_chain.append(comp)
+        if changed:
+            result.chain = cleaned_chain
+            logger.info(
+                "[QQBotFeatures] sanitized reply style: session=%s",
+                getattr(event, "unified_msg_origin", ""),
+            )
+        folded = await self._try_send_folded_long_reply(event, result)
+        if folded:
+            event.clear_result()
+            event.stop_event()
+            return
+        if _should_disable_segmented_reply_for_result(self.context, result):
+            result.set_result_content_type(ResultContentType.GENERAL_RESULT)
+            logger.info(
+                "[QQBotFeatures] disabled segmented reply for long multi-part LLM result: session=%s",
+                getattr(event, "unified_msg_origin", ""),
+            )
+
+    @filter.event_message_type(EventMessageType.ALL, desc="处理明确询问姐姐、妹妹、天使或恶魔的互动请求，只让当前 bot 以自己身份回应。")
+    async def handle_explicit_twin_request(self, event: AstrMessageEvent):
+        if not self._twin_config.direct_handler_enabled:
+            return
+        profile = self._profile_for_event(event)
+        if is_bot_sender(event, profile):
+            return
+        group_id = str(event.get_group_id() or "")
+        if not event.is_private_chat() and not group_enabled(group_id, self._twin_config.enabled_groups):
+            return
+        text = str(event.get_message_str() or "")
+        if not should_handle_direct_twin_request(
+            text,
+            profile,
+            is_private=event.is_private_chat(),
+            is_at_or_wake_command=bool(getattr(event, "is_at_or_wake_command", False)),
+        ):
+            return
+        prompt = build_direct_twin_prompt(
+            text=text,
+            group_id=group_id,
+            profile=profile,
+            config=self._twin_config,
+        )
+        yield event.request_llm(prompt=prompt, contexts=[])
+        event.stop_event()
+
+    def _profile_for_event(self, event: AstrMessageEvent) -> TwinProfile:
+        return read_profile_for_self_id(str(event.get_self_id() or ""), self._twin_fallback_profile)
+
+    def _install_aiocqhttp_error_guard(self) -> None:
+        if getattr(AiocqhttpMessageEvent, "_runtime_guard_installed", False):
+            logger.info("[QQBotFeatures] aiocqhttp error guard already installed")
+            return
+
+        original_send_message = AiocqhttpMessageEvent.send_message
+
+        async def guarded_send_message(
+            cls,
+            bot,
+            message_chain,
+            event=None,
+            is_group: bool = False,
+            session_id: str | None = None,
+        ) -> None:
+            text = _plain_message_chain_text(message_chain)
+            if any(text.startswith(prefix) for prefix in INTERNAL_ERROR_PREFIXES):
+                logger.error(
+                    "[QQBotFeatures] suppressed internal agent error from user output: "
+                    "session_id=%s is_group=%s message=%s",
+                    session_id,
+                    is_group,
+                    text,
+                )
+                return
+            await original_send_message.__func__(
+                cls,
+                bot,
+                message_chain,
+                event=event,
+                is_group=is_group,
+                session_id=session_id,
+            )
+
+        AiocqhttpMessageEvent.send_message = classmethod(guarded_send_message)
+        AiocqhttpMessageEvent._runtime_guard_installed = True
+        logger.info("[QQBotFeatures] aiocqhttp internal error guard installed")
+
+    async def _try_send_folded_long_reply(self, event: AstrMessageEvent, result) -> bool:
+        if self._reply_long_reply_fold_threshold_chars <= 0:
+            return False
+        if event.get_platform_name() != "aiocqhttp":
+            return False
+        group_id = str(event.get_group_id() or "").strip()
+        if not group_id:
+            return False
+        if result is None or not result.is_model_result():
+            return False
+        text = _plain_result_text(result.chain)
+        if not should_fold_long_reply(
+            text,
+            threshold=self._reply_long_reply_fold_threshold_chars,
+        ):
+            return False
+        bot = getattr(event, "bot", None)
+        call_action = getattr(bot, "call_action", None)
+        if not callable(call_action):
+            return False
+        chunks = split_forward_text(text)
+        if not chunks:
+            return False
+        try:
+            forward_result = await call_action(
+                "send_group_forward_msg",
+                group_id=int(group_id) if group_id.isdigit() else group_id,
+                messages=_build_onebot_forward_nodes(
+                    chunks,
+                    uin=safe_event_value(event, "get_self_id") or "10000",
+                    name=read_bot_display_name(event),
+                ),
+            )
+            message_id = _extract_message_id(forward_result)
+            notice_message = _build_fold_notice_message(
+                f"内容比较长，已经折叠成 {len(chunks)} 段。" if len(chunks) > 1 else "内容比较长，已经折叠起来了。",
+                reply_message_id=message_id,
+            )
+            await call_action(
+                "send_group_msg",
+                group_id=int(group_id) if group_id.isdigit() else group_id,
+                message=notice_message,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[QQBotFeatures] folded long reply send failed: session=%s error=%s",
+                getattr(event, "unified_msg_origin", ""),
+                exc,
+            )
+            return False
+        logger.info(
+            "[QQBotFeatures] folded long reply: session=%s chars=%s nodes=%s quoted=%s",
+            getattr(event, "unified_msg_origin", ""),
+            len(text),
+            len(chunks),
+            bool(_extract_message_id(forward_result)),
+        )
+        return True
 
     @filter.regex(MENU_PATTERN, desc="发送总览图片菜单，展示当前 AstrBot 已接管的群务、互动、生图、游戏和工具分类。")
     async def menu(self, event: AstrMessageEvent):
@@ -1347,6 +1758,261 @@ def read_bool_config(config, key: str, *, default: bool) -> bool:
         default,
     )
     return default
+
+
+class ScopedPluginConfig:
+    def __init__(self, base_config, *, prefix: str, legacy_plugin_name: str = "") -> None:
+        self._base_config = base_config
+        self._prefix = prefix
+        self._legacy_plugin_name = legacy_plugin_name
+        self._legacy_config = _load_legacy_plugin_config(legacy_plugin_name)
+
+    def get(self, key: str, default=None):
+        prefixed_key = f"{self._prefix}_{key}"
+        value = get_config_value(self._base_config, prefixed_key, None)
+        if value is not None:
+            return value
+        value = get_config_value(self._base_config, key, None)
+        if value is not None:
+            return value
+        return get_config_value(self._legacy_config, key, default)
+
+
+def _load_legacy_plugin_config(plugin_name: str) -> dict:
+    if not plugin_name:
+        return {}
+    config_file = resolve_astrbot_data_root() / "config" / f"{plugin_name}_config.json"
+    try:
+        payload = json.loads(config_file.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        logger.warning("[QQBotFeatures] failed to read legacy plugin config %s: %s", config_file, exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def resolve_astrbot_data_root() -> Path:
+    astrbot_root = Path(os.environ.get("ASTRBOT_ROOT", "")).resolve()
+    if astrbot_root.name == "astrbot" and astrbot_root.parent.name == "data":
+        return astrbot_root / "data"
+    cwd = Path.cwd().resolve()
+    if cwd.name == "astrbot" and cwd.parent.name == "data":
+        return cwd / "data"
+    if cwd.name == "qqbot":
+        return cwd / "data" / "astrbot" / "data"
+    return astrbot_root / "data" if str(astrbot_root) else cwd / "data" / "astrbot" / "data"
+
+
+def get_config_value(config, key: str, default=None):
+    if config is None:
+        return default
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            return getter(key, default)
+        except TypeError:
+            try:
+                value = getter(key)
+            except Exception:
+                return default
+            return default if value is None else value
+        except Exception:
+            return default
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return getattr(config, key, default)
+
+
+def load_twin_config(config=None) -> TwinInteractionConfig:
+    return TwinInteractionConfig(
+        enabled_groups=parse_twin_group_ids(get_config_value(config, "enabled_groups", "")),
+        direct_handler_enabled=read_twin_bool(get_config_value(config, "direct_handler_enabled", True), default=True),
+        max_context_messages=clamp_twin_int(
+            get_config_value(config, "max_context_messages", DEFAULT_TWIN_MAX_CONTEXT_MESSAGES),
+            default=DEFAULT_TWIN_MAX_CONTEXT_MESSAGES,
+            minimum=0,
+            maximum=20,
+        ),
+        max_context_chars=clamp_twin_int(
+            get_config_value(config, "max_context_chars", DEFAULT_TWIN_MAX_CONTEXT_CHARS),
+            default=DEFAULT_TWIN_MAX_CONTEXT_CHARS,
+            minimum=400,
+            maximum=4000,
+        ),
+        context_root=resolve_public_group_context_root(),
+    )
+
+
+def resolve_public_group_context_root() -> Path:
+    astrbot_root = Path(os.environ.get("ASTRBOT_ROOT", "")).resolve()
+    if astrbot_root.name == "astrbot" and astrbot_root.parent.name == "data":
+        workspace_root = astrbot_root.parent.parent
+    else:
+        cwd = Path.cwd().resolve()
+        if cwd.name == "qqbot":
+            workspace_root = cwd
+        elif cwd.name == "astrbot" and cwd.parent.name == "data":
+            workspace_root = cwd.parent.parent
+        else:
+            workspace_root = cwd
+    return workspace_root / "data" / "nonebot2" / "run" / "ai" / "group_context"
+
+
+def is_bot_sender(event: AstrMessageEvent, profile: TwinProfile) -> bool:
+    return is_bot_sender_id(str(event.get_sender_id() or ""), str(event.get_self_id() or ""), profile)
+
+
+def safe_event_value(event: AstrMessageEvent, method_name: str) -> str:
+    method = getattr(event, method_name, None)
+    if not callable(method):
+        return ""
+    try:
+        return str(method() or "").strip()
+    except Exception:
+        return ""
+
+
+def _should_disable_segmented_reply_for_result(context: Context, result) -> bool:
+    if result is None or not result.is_model_result():
+        return False
+    segmented_reply = _read_segmented_reply_config(context)
+    if segmented_reply.get("enable") is not True:
+        return False
+    if segmented_reply.get("only_llm_result", True) is not True:
+        return False
+    if str(segmented_reply.get("split_mode", "regex")) != "regex":
+        return False
+    return should_disable_model_regex_segmenting(segmented_reply, is_model_result=True)
+
+
+def _read_segmented_reply_config(context: Context) -> dict:
+    get_config = getattr(context, "get_config", None)
+    config = None
+    if callable(get_config):
+        try:
+            config = get_config()
+        except Exception:
+            config = None
+    if not isinstance(config, dict):
+        return {}
+    platform_settings = config.get("platform_settings")
+    if not isinstance(platform_settings, dict):
+        return {}
+    segmented_reply = platform_settings.get("segmented_reply")
+    return segmented_reply if isinstance(segmented_reply, dict) else {}
+
+
+def build_delegated_reply_instruction(event: AstrMessageEvent, delegated_from: str) -> str:
+    return build_delegated_reply_instruction_text(
+        current_id=safe_event_value(event, "get_self_id"),
+        current_name=read_bot_display_name(event),
+        delegated_from=delegated_from,
+    )
+
+
+def _plain_result_text(chain) -> str:
+    if not chain:
+        return ""
+    texts: list[str] = []
+    for comp in chain:
+        if not isinstance(comp, CorePlain):
+            return ""
+        texts.append(comp.text)
+    return "".join(texts).strip()
+
+
+def _plain_message_chain_text(message_chain) -> str:
+    parts: list[str] = []
+    for segment in getattr(message_chain, "chain", []):
+        if isinstance(segment, CorePlain):
+            parts.append(segment.text)
+    return "".join(parts).strip()
+
+
+def _build_onebot_forward_nodes(
+    chunks: list[str],
+    *,
+    uin: str,
+    name: str,
+) -> list[dict[str, object]]:
+    node_name = name.strip() or "棉花糖"
+    node_uin = str(uin or "10000")
+    return [
+        {
+            "type": "node",
+            "data": {
+                "name": node_name,
+                "uin": node_uin,
+                "content": [{"type": "text", "data": {"text": chunk}}],
+            },
+        }
+        for chunk in chunks
+    ]
+
+
+def _build_fold_notice_message(
+    text: str,
+    *,
+    reply_message_id: str,
+) -> list[dict[str, object]]:
+    message: list[dict[str, object]] = []
+    if reply_message_id:
+        message.append({"type": "reply", "data": {"id": reply_message_id}})
+    message.append({"type": "text", "data": {"text": text}})
+    return message
+
+
+def _extract_message_id(value) -> str:
+    if isinstance(value, dict):
+        for key in ("message_id", "id"):
+            raw = value.get(key)
+            if raw not in (None, ""):
+                return str(raw)
+        data = value.get("data")
+        if isinstance(data, dict):
+            return _extract_message_id(data)
+    for key in ("message_id", "id"):
+        raw = getattr(value, key, None)
+        if raw not in (None, ""):
+            return str(raw)
+    return ""
+
+
+def allow_local_runtime_tools(event: AstrMessageEvent) -> bool:
+    return event.is_private_chat() and safe_event_value(event, "get_sender_id") == OWNER_QQ
+
+
+def remove_forbidden_local_tools(event: AstrMessageEvent, req: ProviderRequest) -> list[str]:
+    toolset = getattr(req, "func_tool", None)
+    if toolset is None or allow_local_runtime_tools(event):
+        return []
+    tools = list(getattr(toolset, "tools", []) or [])
+    removed: list[str] = []
+    for tool in tools:
+        name = str(getattr(tool, "name", "") or "").strip()
+        if not is_dangerous_local_tool_name(name):
+            continue
+        remover = getattr(toolset, "remove_tool", None)
+        if callable(remover):
+            remover(name)
+        else:
+            toolset.tools = [
+                candidate
+                for candidate in getattr(toolset, "tools", [])
+                if getattr(candidate, "name", "") != name
+            ]
+        removed.append(name)
+    if getattr(toolset, "empty", None) and toolset.empty():
+        req.func_tool = None
+    return removed
+
+
+def read_bot_display_name(event: AstrMessageEvent) -> str:
+    self_id = safe_event_value(event, "get_self_id")
+    profile = PROFILE_BY_BOT_ID.get(self_id, DEFAULT_PROFILE)
+    data = BOT_PROFILES.get(profile, BOT_PROFILES[DEFAULT_PROFILE])
+    return data["bot_name"]
 
 
 def allow_passive_events(feature_mode: str) -> bool:

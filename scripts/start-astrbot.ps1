@@ -22,6 +22,10 @@ $WorkspaceRoot = Split-Path -Parent $PSScriptRoot
 $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
 $LocalPluginRoot = Join-Path $WorkspaceRoot "astrbot-local-plugins"
 $RuntimePluginRoot = Join-Path $AstrRoot "data\plugins"
+$ManagedLocalPluginPrefixes = @("astrbot_plugin_")
+$PreservedRuntimePluginNames = @(
+    "astrbot_plugin_hapi_connector"
+)
 
 function Join-CodePoints {
     param([int[]]$CodePoints)
@@ -235,12 +239,32 @@ function Invoke-LocalPythonScript {
 Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json") -Profile $BotProfile -OneBotPort $AiocqhttpPort
 
 if (Test-Path $LocalPluginRoot) {
+    $localPluginNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     Get-ChildItem -Path $LocalPluginRoot -Directory | ForEach-Object {
+        [void]$localPluginNames.Add($_.Name)
         $target = Join-Path $RuntimePluginRoot $_.Name
         if (Test-Path $target) {
             Remove-Item -Path $target -Recurse -Force
         }
         Copy-Item -Path $_.FullName -Destination $RuntimePluginRoot -Recurse -Force
+    }
+    Get-ChildItem -Path $RuntimePluginRoot -Directory | ForEach-Object {
+        $runtimeName = $_.Name
+        $isManaged = $false
+        foreach ($prefix in $ManagedLocalPluginPrefixes) {
+            if ($runtimeName.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $isManaged = $true
+                break
+            }
+        }
+        if (-not $isManaged) {
+            return
+        }
+        if ($localPluginNames.Contains($runtimeName) -or $PreservedRuntimePluginNames -contains $runtimeName) {
+            return
+        }
+        Remove-Item -Path $_.FullName -Recurse -Force
+        Write-Host "Removed stale AstrBot local plugin: $runtimeName"
     }
 }
 

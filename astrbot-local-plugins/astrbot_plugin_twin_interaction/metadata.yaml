@@ -1,6 +1,0 @@
-name: astrbot_plugin_twin_interaction
-display_name: 天使恶魔双子互动
-desc: "为天使棉花糖和恶魔棉花糖注入双子关系上下文，并处理明确询问姐姐/妹妹的互动请求。"
-version: v0.1.2
-author: MengLei
-repo: ""

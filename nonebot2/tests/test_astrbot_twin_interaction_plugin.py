@@ -9,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
-from astrbot_plugin_twin_interaction.logic import (
+from astrbot_plugin_qqbot_features.twin_interaction_logic import (
     TwinInteractionConfig,
     build_direct_twin_prompt,
     build_twin_injection,

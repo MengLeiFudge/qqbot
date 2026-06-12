@@ -7,11 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api.event import filter
-from astrbot.core.agent.message import TextPart
-from astrbot.api.provider import ProviderRequest
-from astrbot.api.star import Context, Star, register
 
 
 DEFAULT_MAX_MESSAGES = 12
@@ -33,40 +28,6 @@ class BridgeConfig:
     max_messages: int
     max_chars: int
     context_root: Path
-
-
-@register(
-    "astrbot_plugin_qqbot_context_bridge",
-    "MengLei",
-    "把 NoneBot2 公开群上下文桥接到 AstrBot 本轮 LLM 请求。",
-    "0.1.2",
-)
-class QQBotContextBridgePlugin(Star):
-    def __init__(self, context: Context, config=None):
-        super().__init__(context)
-        self._config = load_bridge_config(config)
-        logger.info(
-            "[QQBotContextBridge] loaded: groups=%s max_messages=%s max_chars=%s root=%s",
-            format_enabled_groups(self._config.enabled_groups),
-            self._config.max_messages,
-            self._config.max_chars,
-            self._config.context_root,
-        )
-
-    @filter.on_llm_request(desc="在 AstrBot 调用 LLM 前，按当前群号读取 bot1 公开群上下文并临时注入本轮请求。")
-    async def inject_bot1_group_context(self, event: AstrMessageEvent, req: ProviderRequest):
-        group_id = str(event.get_group_id() or "")
-        if self._config.enabled_groups and group_id not in self._config.enabled_groups:
-            return
-        injection = build_group_context_injection(group_id, self._config)
-        if not injection:
-            return
-        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
-        logger.info(
-            "[QQBotContextBridge] injected bot1 context: group=%s chars=%s",
-            group_id,
-            len(injection),
-        )
 
 
 def load_bridge_config(config=None) -> BridgeConfig:

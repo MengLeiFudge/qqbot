@@ -11,19 +11,8 @@ import time
 from typing import Iterable
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api.event import filter
-from astrbot.api.provider import ProviderRequest
-from astrbot.api.star import Context, Star, register
-from astrbot.core.agent.message import TextPart
-
-try:
-    from astrbot_plugin_qqbot_features.request_context import build_current_request_context
-except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<name>.
-    from data.plugins.astrbot_plugin_qqbot_features.request_context import build_current_request_context
 
 
-PLUGIN_NAME = "astrbot_plugin_source_knowledge"
 DEFAULT_MAX_RESULTS = 4
 DEFAULT_MAX_CHARS = 2600
 DEFAULT_MAX_FILES_PER_DOMAIN = 80
@@ -417,59 +406,6 @@ class SourceIndex:
         )
         self._file_by_path[source_path.path] = source_file
         return source_file
-
-
-@register(
-    PLUGIN_NAME,
-    "MengLei",
-    "按问题检索本机源码证据并注入 AstrBot 本轮 LLM 请求。",
-    "0.1.1",
-)
-class SourceKnowledgePlugin(Star):
-    def __init__(self, context: Context, config=None):
-        super().__init__(context)
-        self._config = load_source_knowledge_config(config)
-        self._index = SourceIndex(self._config)
-        logger.info(
-            "[SourceKnowledge] loaded: groups=%s roots=%s max_results=%s max_chars=%s",
-            format_enabled_groups(self._config.enabled_groups),
-            len(self._config.roots),
-            self._config.max_results,
-            self._config.max_chars,
-        )
-
-    @filter.on_llm_request(desc="在 LLM 请求前按群号和问题检索本机源码树，把少量可信源码片段临时注入上下文。")
-    async def inject_source_knowledge(self, event: AstrMessageEvent, req: ProviderRequest):
-        group_id = str(event.get_group_id() or "")
-        if self._config.enabled_groups and group_id not in self._config.enabled_groups:
-            return
-        request_context = build_current_request_context(event, req.prompt or "")
-        query = request_context.combined_query or request_context.current_text
-        if not query:
-            return
-        domains = resolve_domains(group_id, query)
-        if not domains:
-            return
-        results = self._index.search(query, domains)
-        if not results:
-            logger.debug(
-                "[SourceKnowledge] no source evidence: group=%s domains=%s query=%s",
-                group_id,
-                ",".join(domains),
-                query[:80],
-            )
-            return
-        injection = format_source_injection(results, query, self._config.max_chars)
-        if not injection:
-            return
-        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
-        logger.info(
-            "[SourceKnowledge] injected source evidence: group=%s domains=%s results=%s chars=%s",
-            group_id,
-            ",".join(domains),
-            len(results),
-            len(injection),
-        )
 
 
 def load_source_knowledge_config(config=None) -> SourceKnowledgeConfig:

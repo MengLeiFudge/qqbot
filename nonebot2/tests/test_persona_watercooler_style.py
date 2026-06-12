@@ -60,8 +60,8 @@ def test_astrbot_plugins_do_not_embed_persona_prompt_text() -> None:
     combined = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (
-            root / "astrbot-local-plugins" / "astrbot_plugin_reply_style_guard" / "main.py",
-            root / "astrbot-local-plugins" / "astrbot_plugin_twin_interaction" / "logic.py",
+            root / "astrbot-local-plugins" / "astrbot_plugin_qqbot_features" / "main.py",
+            root / "astrbot-local-plugins" / "astrbot_plugin_qqbot_features" / "twin_interaction_logic.py",
         )
     )
 

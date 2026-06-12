@@ -80,5 +80,95 @@
     "type": "string",
     "default": "",
     "hint": "英文逗号分隔一个或多个 QQ 群号。5h 用量首次跨过 80%、90%、95% 时自动提醒；回落到阈值以下后才会再次触发同一阈值。"
+  },
+  "context_bridge_enabled_groups": {
+    "description": "公开群上下文桥接群号",
+    "type": "string",
+    "default": "",
+    "hint": "英文逗号分隔群号；留空表示所有存在公开群上下文文件的群都允许注入。"
+  },
+  "context_bridge_max_messages": {
+    "description": "公开群上下文最大消息数",
+    "type": "int",
+    "default": 12,
+    "hint": "LLM 请求前最多注入多少条 data/nonebot2/run/ai/group_context 里的公开群聊上下文。"
+  },
+  "context_bridge_max_chars": {
+    "description": "公开群上下文最大字符数",
+    "type": "int",
+    "default": 1800,
+    "hint": "限制桥接上下文长度，避免 prompt 过长。"
+  },
+  "reply_style_guard_long_reply_fold_threshold_chars": {
+    "description": "长回复折叠阈值",
+    "type": "int",
+    "default": 300,
+    "hint": "群聊 LLM 纯文本回复超过该字符数时折叠为合并转发；填 0 表示禁用折叠。"
+  },
+  "source_knowledge_enabled_groups": {
+    "description": "源码知识注入群号",
+    "type": "string",
+    "default": "",
+    "hint": "英文逗号分隔群号；留空表示按问题领域自动决定是否注入源码证据。"
+  },
+  "source_knowledge_source_roots": {
+    "description": "源码知识根目录",
+    "type": "text",
+    "default": "",
+    "hint": "每行或分号分隔 domain=path；留空使用内置 DSP、FE、星环、创世、shapez、Factorio 源码根。"
+  },
+  "source_knowledge_max_results": {
+    "description": "源码知识最大结果数",
+    "type": "int",
+    "default": 4,
+    "hint": "每轮 LLM 请求最多注入多少条源码检索结果。"
+  },
+  "source_knowledge_max_chars": {
+    "description": "源码知识最大字符数",
+    "type": "int",
+    "default": 2600,
+    "hint": "限制源码证据注入长度。"
+  },
+  "source_knowledge_max_files_per_domain": {
+    "description": "源码知识每领域最大扫描文件数",
+    "type": "int",
+    "default": 80,
+    "hint": "rg 不可用时的 Python 扫描上限；rg 可用时优先使用 rg。"
+  },
+  "source_knowledge_max_file_bytes": {
+    "description": "源码知识单文件最大字节数",
+    "type": "int",
+    "default": 220000,
+    "hint": "超过该大小的单个源码文件不读取。"
+  },
+  "source_knowledge_refresh_seconds": {
+    "description": "源码知识索引刷新秒数",
+    "type": "int",
+    "default": 600,
+    "hint": "Python fallback 索引缓存刷新间隔。"
+  },
+  "twin_interaction_enabled_groups": {
+    "description": "双子互动启用群号",
+    "type": "string",
+    "default": "",
+    "hint": "英文逗号分隔群号；留空表示所有群和私聊都允许双子关系上下文。"
+  },
+  "twin_interaction_direct_handler_enabled": {
+    "description": "双子明确请求接管",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，明确询问天使/恶魔/姐姐/妹妹/双子关系时由当前 bot 直接发起本轮 LLM 回复。"
+  },
+  "twin_interaction_max_context_messages": {
+    "description": "双子上下文最大消息数",
+    "type": "int",
+    "default": 4,
+    "hint": "最多注入另一个 bot 的近期公开群消息片段。"
+  },
+  "twin_interaction_max_context_chars": {
+    "description": "双子上下文最大字符数",
+    "type": "int",
+    "default": 1200,
+    "hint": "限制双子上下文注入长度。"
   }
 }
