@@ -21,6 +21,7 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     format_rightcodes_draw_points_status,
     format_rightcodes_draw_suggestion_message,
     load_rightcodes_config,
+    looks_like_rightcodes_draw_feature_request,
     looks_like_rightcodes_draw_invocation,
     looks_like_rightcodes_draw_points_mutation_request,
     looks_like_rightcodes_draw_points_query,
@@ -61,8 +62,18 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertIsNone(parse_rightcodes_draw_command("生成一张白猫图片"))
         self.assertFalse(looks_like_rightcodes_draw_invocation("生成一张白猫图片"))
         self.assertTrue(looks_like_rightcodes_draw_suggestion("生成一张白猫图片"))
+        self.assertFalse(looks_like_rightcodes_draw_feature_request("生成一张白猫图片"))
+        self.assertTrue(looks_like_rightcodes_draw_feature_request("生成一张白猫图片", is_direct_or_private=True))
         self.assertIn("棉花糖生图 提示词", format_rightcodes_draw_suggestion_message())
         self.assertIn("消耗生图积分", format_rightcodes_draw_suggestion_message())
+
+    def test_plain_chat_does_not_enter_rightcodes_feature_route(self) -> None:
+        self.assertFalse(looks_like_rightcodes_draw_feature_request("刚回到"))
+        self.assertFalse(looks_like_rightcodes_draw_feature_request("扣1就开"))
+        self.assertFalse(looks_like_rightcodes_draw_feature_request("无限手套你也干了吗"))
+        self.assertTrue(looks_like_rightcodes_draw_feature_request("棉花糖生图 一只白猫"))
+        self.assertTrue(looks_like_rightcodes_draw_feature_request("查询生图积分"))
+        self.assertTrue(looks_like_rightcodes_draw_feature_request("生图模型说明"))
 
     def test_rightcodes_draw_catalog_mentions_size_body(self) -> None:
         self.assertTrue(should_inject_rightcodes_draw_catalog("我要 1024x1024 body 里写什么"))

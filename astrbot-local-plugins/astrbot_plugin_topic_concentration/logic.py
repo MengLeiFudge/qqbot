@@ -102,6 +102,9 @@ def looks_like_direct_bot_call(text: str) -> bool:
     names = ("棉花糖", "天使棉花糖", "恶魔棉花糖", "萌萌棉花糖", "qqbot")
     if core in names:
         return True
+    for name in names:
+        if core.startswith(name) and len(core) > len(name):
+            return True
     prefixes = ("呼叫", "叫一下", "喊一下")
     for name in names:
         if core in {f"{prefix}{name}" for prefix in prefixes}:

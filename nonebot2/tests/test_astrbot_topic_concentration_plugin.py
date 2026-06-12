@@ -26,11 +26,18 @@ from astrbot_plugin_topic_concentration.logic import (
     try_acquire_active_reply_inflight,
 )
 from astrbot_plugin_topic_concentration.twin_scheduler import (
+    calculate_angel_probability,
     clear_scheduler_state,
+    complete_claim_response,
     decide_llm_worker,
     is_worker_busy,
     mark_worker_busy,
+    mark_claim_processing,
+    pop_pending_delegated_comment,
     release_worker,
+    record_worker_handled,
+    read_group_balance,
+    set_group_balance,
     targeted_twin_ids,
 )
 
@@ -329,12 +336,14 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             self_id="1443944862",
             at_ids=("1443944862",),
             message_key="message:abc:llm",
+            group_id="10001",
             now=10.0,
         )
         second = decide_llm_worker(
             self_id="2629227874",
             at_ids=("1443944862",),
             message_key="message:abc:llm",
+            group_id="10001",
             now=11.0,
         )
 
@@ -350,12 +359,16 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             self_id="1443944862",
             at_ids=("1443944862",),
             message_key="message:def:llm",
+            group_id="10001",
+            original_text="@天使 配置怎么看",
             now=20.0,
         )
         delegated = decide_llm_worker(
             self_id="2629227874",
             at_ids=("1443944862",),
             message_key="message:def:llm",
+            group_id="10001",
+            original_text="@天使 配置怎么看",
             now=21.0,
         )
 
@@ -364,6 +377,47 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertTrue(delegated.should_handle)
         self.assertEqual(delegated.reason, "message_claim_owner")
         self.assertEqual(delegated.worker_id, "2629227874")
+        self.assertEqual(delegated.delegated_from, "1443944862")
+
+        mark_claim_processing("message:def:llm", "2629227874", now=22.0)
+        comment = complete_claim_response("message:def:llm", "2629227874", "这个配置要先看端口", now=30.0)
+        self.assertIsNotNone(comment)
+        assert comment is not None
+        self.assertEqual(comment.commenter_id, "1443944862")
+        self.assertEqual(comment.responder_id, "2629227874")
+        self.assertEqual(comment.original_text, "@天使 配置怎么看")
+        self.assertEqual(read_group_balance("10001"), 1.0)
+
+        popped = pop_pending_delegated_comment(
+            group_id="10001",
+            commenter_id="1443944862",
+            responder_id="2629227874",
+            now=31.0,
+        )
+        self.assertEqual(popped, comment)
+
+    def test_twin_scheduler_allows_both_workers_for_dual_target_chat(self) -> None:
+        angel = decide_llm_worker(
+            self_id="1443944862",
+            at_ids=("1443944862", "2629227874"),
+            message_key="message:both:llm",
+            group_id="10001",
+            allow_multi_target=True,
+            now=20.0,
+        )
+        demon = decide_llm_worker(
+            self_id="2629227874",
+            at_ids=("1443944862", "2629227874"),
+            message_key="message:both:llm",
+            group_id="10001",
+            allow_multi_target=True,
+            now=21.0,
+        )
+
+        self.assertTrue(angel.should_handle)
+        self.assertTrue(demon.should_handle)
+        self.assertTrue(angel.both_targeted)
+        self.assertTrue(demon.both_targeted)
 
     def test_twin_scheduler_releases_busy_worker(self) -> None:
         mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
@@ -371,22 +425,36 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         release_worker("2629227874")
         self.assertFalse(is_worker_busy("2629227874", now=20.0))
 
-    def test_twin_scheduler_uses_random_choice_when_no_worker_targeted(self) -> None:
-        rng = random.Random(0)
-        choices = [
-            decide_llm_worker(
-                self_id="1443944862",
-                message_key=f"message:random-{index}:llm",
-                now=10.0 + index,
-                rng=rng,
-            ).worker_id
-            for index in range(6)
-        ]
+    def test_twin_scheduler_uses_group_balance_probability_when_no_worker_targeted(self) -> None:
+        self.assertEqual(calculate_angel_probability(0.0), 0.5)
+        self.assertEqual(calculate_angel_probability(99.0), 0.8)
+        self.assertEqual(calculate_angel_probability(-99.0), 0.2)
 
-        self.assertEqual(
-            choices,
-            ["2629227874", "2629227874", "1443944862", "2629227874", "2629227874", "2629227874"],
+        set_group_balance("10001", 8.0)
+        angel = decide_llm_worker(
+            self_id="1443944862",
+            message_key="message:weighted-angel:llm",
+            group_id="10001",
+            now=10.0,
+            rng=random.Random(1),
         )
+        self.assertEqual(angel.worker_id, "1443944862")
+        self.assertEqual(angel.angel_probability, 0.8)
+
+        set_group_balance("10001", -8.0)
+        demon = decide_llm_worker(
+            self_id="2629227874",
+            message_key="message:weighted-demon:llm",
+            group_id="10001",
+            now=20.0,
+            rng=random.Random(0),
+        )
+        self.assertEqual(demon.worker_id, "2629227874")
+        self.assertEqual(demon.angel_probability, 0.2)
+
+    def test_record_worker_handled_pulls_group_balance_toward_other_worker(self) -> None:
+        self.assertEqual(record_worker_handled("10001", "1443944862"), -1.0)
+        self.assertEqual(record_worker_handled("10001", "2629227874"), 0.0)
 
     def test_twin_scheduler_private_chat_always_uses_current_worker(self) -> None:
         rng = random.Random(0)
@@ -422,6 +490,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertFalse(looks_like_qqbot_fixed_command("查询"))
         self.assertFalse(looks_like_qqbot_fixed_command("查询 戴森球蓝图怎么导出"))
         self.assertFalse(looks_like_qqbot_fixed_command("你怎么看这个报错"))
+        self.assertTrue(looks_like_direct_bot_call("棉花糖无限制推荐一首好歌"))
 
     def test_twin_target_detection_ignores_normal_group_member_mentions(self) -> None:
         self.assertEqual(targeted_twin_ids(["1443944862", "10001"]), {"1443944862"})

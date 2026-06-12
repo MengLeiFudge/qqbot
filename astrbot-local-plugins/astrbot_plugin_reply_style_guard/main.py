@@ -39,6 +39,7 @@ BOT_PROFILES = {
 }
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
 DELEGATED_FROM_EXTRA = "_qqbot_twin_llm_delegated_from"
+BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
 
 
 PLAIN_TEXT_REPLY_INSTRUCTION = (
@@ -98,6 +99,12 @@ class ReplyStyleGuardPlugin(Star):
         if delegated_from:
             req.extra_user_content_parts.append(
                 TextPart(text=build_delegated_reply_instruction(event, delegated_from)).mark_as_temp()
+            )
+        if str(event.get_extra(BOTH_TARGETED_EXTRA, "") or "").strip():
+            req.extra_user_content_parts.append(
+                TextPart(
+                    text="用户这次同时叫到了天使棉花糖和恶魔棉花糖。你只代表自己回答，不替另一个 bot 发言；可以自然提到她也被叫到了，但不要解释调度机制。"
+                ).mark_as_temp()
             )
 
     @filter.on_llm_response(desc="记录 LLM 返回耗时，帮助区分上游仍在处理、已返回或已失败。")

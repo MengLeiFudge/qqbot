@@ -25,11 +25,16 @@ from .logic import chat_with_current_provider as _chat_with_current_decision_pro
 from .logic import compact_text as _compact
 from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
 from .logic import looks_like_qqbot_fixed_command
+from .logic import looks_like_direct_bot_call
 from .logic import should_force_active_reply_for_named_call as _should_force_named_call_reply
 from .logic import should_consider_active_window as _should_consider_active_window
 from .logic import try_acquire_active_reply_inflight as _try_acquire_active_reply_inflight
+from .twin_scheduler import complete_claim_response
 from .twin_scheduler import decide_llm_worker
 from .twin_scheduler import mark_worker_busy
+from .twin_scheduler import mark_claim_processing
+from .twin_scheduler import pop_pending_delegated_comment
+from .twin_scheduler import record_worker_handled
 from .twin_scheduler import release_worker
 from .twin_scheduler import targeted_twin_ids
 try:
@@ -64,13 +69,16 @@ _GROUP_COOLDOWNS: dict[str, float] = {}
 _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
 _ACTIVE_REPLY_INFLIGHT: dict[str, float] = {}
 LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
+LLM_WORKER_CLAIM_KEY_EXTRA = "_qqbot_twin_llm_worker_claim_key"
+LLM_WORKER_BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
+DELEGATED_COMMENT_EXTRA = "_qqbot_twin_delegated_comment"
 
 
 @register(
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖普通群聊主动接话门控。",
-    "0.3.8",
+    "0.3.9",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -84,6 +92,25 @@ class TopicConcentrationPlugin(Star):
 
     @filter.event_message_type(EventMessageType.ALL, priority=1000, desc="双棉花糖普通 LLM worker 调度；固定命令不参与负载均衡。")
     async def schedule_direct_llm_worker(self, event):
+        comment = pop_pending_delegated_comment(
+            group_id=event.get_group_id(),
+            commenter_id=event.get_self_id(),
+            responder_id=event.get_sender_id(),
+        )
+        if comment is not None:
+            logger.info(
+                "[TopicConcentration] delegated comment started: group=%s commenter=%s responder=%s",
+                event.get_group_id(),
+                comment.commenter_id,
+                comment.responder_id,
+            )
+            event.set_extra(DELEGATED_COMMENT_EXTRA, "1")
+            yield event.request_llm(
+                prompt=_build_delegated_comment_prompt(comment),
+                contexts=[],
+            )
+            event.stop_event()
+            return
         if not _is_llm_schedulable_event(event):
             return
         text = _plain_text(event) or str(event.get_message_str() or "")
@@ -94,29 +121,45 @@ class TopicConcentrationPlugin(Star):
             at_ids=_at_target_ids(event),
             reply_sender_id=_reply_target_id(event),
             message_key=_llm_message_key(event),
+            group_id=event.get_group_id(),
+            original_text=text,
             private_chat=event.is_private_chat(),
+            allow_multi_target=True,
         )
         if not decision.should_handle:
             event.should_call_llm(True)
             event.stop_event()
             logger.info(
-                "[TopicConcentration] skip direct LLM: self=%s selected=%s reason=%s",
+                "[TopicConcentration] skip direct LLM: self=%s selected=%s reason=%s claim=%s group=%s targets=%s balance=%.2f p_angel=%.2f",
                 event.get_self_id(),
                 decision.worker_id,
                 decision.reason,
+                decision.claim_key,
+                event.get_group_id(),
+                ",".join(_at_target_ids(event)),
+                decision.balance_before,
+                decision.angel_probability,
             )
             return
         event.is_wake = True
         event.is_at_or_wake_command = True
         event.set_extra(LLM_WORKER_SELECTED_EXTRA, decision.worker_id)
+        event.set_extra(LLM_WORKER_CLAIM_KEY_EXTRA, decision.claim_key)
+        event.set_extra(LLM_WORKER_BOTH_TARGETED_EXTRA, "1" if decision.both_targeted else "")
         if decision.delegated_from:
             event.set_extra("_qqbot_twin_llm_delegated_from", decision.delegated_from)
         logger.info(
-            "[TopicConcentration] allow direct LLM: self=%s selected=%s reason=%s delegated_from=%s",
+            "[TopicConcentration] allow direct LLM: self=%s selected=%s reason=%s delegated_from=%s both_targeted=%s claim=%s group=%s targets=%s balance=%.2f p_angel=%.2f",
             event.get_self_id(),
             decision.worker_id,
             decision.reason,
             decision.delegated_from,
+            decision.both_targeted,
+            decision.claim_key,
+            event.get_group_id(),
+            ",".join(_at_target_ids(event)),
+            decision.balance_before,
+            decision.angel_probability,
         )
 
     @filter.on_llm_request(desc="标记当前双棉花糖 worker 正在等待普通 LLM 返回。")
@@ -128,24 +171,47 @@ class TopicConcentrationPlugin(Star):
             event.should_call_llm(True)
             event.stop_event()
             return
+        claim_key = str(event.get_extra(LLM_WORKER_CLAIM_KEY_EXTRA, "") or "")
+        mark_claim_processing(claim_key, selected)
         mark_worker_busy(selected)
+        delegated_from = str(event.get_extra("_qqbot_twin_llm_delegated_from", "") or "")
         logger.info(
-            "[TopicConcentration] mark direct LLM worker busy: worker=%s session=%s request_session=%s",
+            "[TopicConcentration] mark direct LLM worker busy: worker=%s session=%s request_session=%s claim=%s delegated_from=%s",
             selected,
             getattr(event, "unified_msg_origin", ""),
             getattr(req, "session_id", ""),
+            claim_key,
+            delegated_from,
         )
 
     @filter.on_llm_response(desc="释放当前双棉花糖普通 LLM worker。")
     async def release_direct_llm_worker(self, event, response):
+        if str(event.get_extra(DELEGATED_COMMENT_EXTRA, "") or "").strip():
+            logger.info(
+                "[TopicConcentration] delegated comment response completed: group=%s self=%s session=%s",
+                event.get_group_id(),
+                event.get_self_id(),
+                getattr(event, "unified_msg_origin", ""),
+            )
+            return
         selected = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "")
         if not selected:
             return
         release_worker(selected)
+        claim_key = str(event.get_extra(LLM_WORKER_CLAIM_KEY_EXTRA, "") or "")
+        comment = complete_claim_response(
+            claim_key,
+            selected,
+            _response_text(response),
+        )
+        if not claim_key:
+            record_worker_handled(event.get_group_id(), selected)
         logger.info(
-            "[TopicConcentration] release direct LLM worker: worker=%s session=%s",
+            "[TopicConcentration] release direct LLM worker: worker=%s session=%s claim=%s comment_required_for=%s",
             selected,
             getattr(event, "unified_msg_origin", ""),
+            claim_key,
+            comment.commenter_id if comment is not None else "",
         )
 
     def _install_active_reply_gate(self) -> None:
@@ -185,16 +251,20 @@ class TopicConcentrationPlugin(Star):
                 self_id=event.get_self_id(),
                 at_ids=(),
                 message_key=f"active:{_llm_message_key(event)}",
+                group_id=event.get_group_id(),
+                original_text=_plain_text(event),
                 now=now,
             )
             if not worker_decision.should_handle:
                 logger.info(
                     "[TopicConcentration] skip active reply: "
                     f"group={event.get_group_id()} reason={worker_decision.reason} "
-                    f"selected={worker_decision.worker_id}"
+                    f"selected={worker_decision.worker_id} claim={worker_decision.claim_key} "
+                    f"balance={worker_decision.balance_before:.2f} p_angel={worker_decision.angel_probability:.2f}"
                 )
                 return False
             event.set_extra(LLM_WORKER_SELECTED_EXTRA, worker_decision.worker_id)
+            event.set_extra(LLM_WORKER_CLAIM_KEY_EXTRA, worker_decision.claim_key)
             record = _record_message(event, scope_key=scope_key)
             if record.duplicate:
                 logger.debug(
@@ -246,9 +316,9 @@ class TopicConcentrationPlugin(Star):
                     )
                     return False
                 if not decision.should_reply:
-                    logger.debug(
+                    logger.info(
                         "[TopicConcentration] skip active reply: "
-                        f"group={event.get_group_id()} topic={decision.topic_key} "
+                        f"group={event.get_group_id()} should_reply=false topic={decision.topic_key} "
                         f"type={decision.topic_type} elapsed={elapsed:.2f}s reason={decision.reason}"
                     )
                     return False
@@ -424,6 +494,35 @@ def _parse_decision(text: str) -> TopicDecision:
     )
 
 
+def _build_delegated_comment_prompt(comment) -> str:
+    return "\n".join(
+        [
+            "这是双棉花糖代班后的短评论任务。",
+            "用户原本叫到了你，但另一个棉花糖已经代你回答了。",
+            "你只能基于原消息和对方回复做一句有实质内容的短评论，不能重新完整回答原问题。",
+            "不要说“接住”“我看到了”“已经处理啦”“我补一句”这类空话。",
+            "语气偏 QQ 群日常、轻松、夸张一点，但结论要贴合内容。",
+            f"原消息：{comment.original_text}",
+            f"对方回复：{comment.response_text}",
+        ]
+    )
+
+
+def _response_text(response) -> str:
+    text = str(getattr(response, "completion_text", "") or "").strip()
+    if text:
+        return text
+    chain = getattr(response, "result_chain", None)
+    if not chain:
+        return ""
+    parts: list[str] = []
+    for item in chain:
+        value = str(getattr(item, "text", "") or "").strip()
+        if value:
+            parts.append(value)
+    return "\n".join(parts).strip()
+
+
 def _get_interest(origin: str) -> TopicInterest | None:
     current = _INTERESTS.get(origin)
     if current is None:
@@ -464,6 +563,8 @@ def _is_llm_schedulable_event(event) -> bool:
     if getattr(event, "is_at_or_wake_command", False):
         return True
     if targeted_twin_ids(_at_target_ids(event)):
+        return True
+    if looks_like_direct_bot_call(_plain_text(event) or str(event.get_message_str() or "")):
         return True
     return bool(_reply_target_id(event) in targeted_twin_ids(_reply_target_id(event)))
 

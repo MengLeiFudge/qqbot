@@ -55,7 +55,7 @@ AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参
 
 `astrbot_plugin_source_knowledge` 负责 bot2 的源码知识兜底：在没有 Embedding 模型、不能使用 AstrBot 原生知识库时，它会按当前群号和问题文本只读检索本机源码树，并把少量相关源码片段临时注入本轮 LLM 请求。默认源码根覆盖 DSPCore、万物分馏、星环、创世之书、shapez 和 Factorio 模组源码；可信依据优先是源码、反编译源码、源码邻近 README/设计文档和配置数据。插件跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件，不读取私聊、运行日志、token、QQ 登录态、运行态 `data` 或数据库密钥。
 
-`astrbot_plugin_topic_concentration` 负责 AstrBot 的普通群聊主动接话门控：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用短窗口话题判断、弱窗口过滤、同群 in-flight、组级冷却、同话题冷却和双子账号消息过滤决定是否放行。它不主动发送最终回复，只控制 Core active reply 是否继续执行。普通主动接话的 provider 选择、模型切换和回退链只使用 AstrBot 当前会话配置；插件不提供独立 provider 顺序或判定专用模型配置，判定失败时静默跳过本次普通主动接话。明确出现“棉花糖”“棉花糖在吗”“呼叫棉花糖”等命名呼叫时，插件本地直接放行当前选中的普通 LLM worker；同一用户短时间内紧接“在吗”等探活短句也继承这次呼叫，不依赖主动接话判定 provider。明确 @ 和私聊不会被主动接话 in-flight 拦截；私聊永远由当前收到私聊的 bot 处理，不参与跨 bot 随机 worker、claim 或忙闲代班。
+`astrbot_plugin_topic_concentration` 负责 AstrBot 的普通群聊主动接话门控和双棉花糖普通回复调度：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用短窗口话题判断、弱窗口过滤、同群 in-flight、组级冷却、同话题冷却和双子账号消息过滤决定是否放行。它不主动发送最终主动回复，只控制 Core active reply 是否继续执行。普通主动接话的 provider 选择、模型切换和回退链只使用 AstrBot 当前会话配置；插件不提供独立 provider 顺序或判定专用模型配置，判定失败时静默跳过本次普通主动接话，并在 INFO 日志记录 `should_reply=false`、topic、reason、耗时和 worker。明确出现“棉花糖”“棉花糖在吗”“呼叫棉花糖”或“棉花糖+明确请求”等命名呼叫时，插件按群权重选一个普通 LLM worker 直接进入回复链路，不依赖主动接话判定 provider；同一用户短时间内紧接“在吗”等探活短句也继承这次呼叫。明确 @ 和私聊不会被主动接话 in-flight 拦截；私聊永远由当前收到私聊的 bot 处理，不参与跨 bot 随机 worker、claim 或忙闲代班。只 @ 其中一只时，目标忙碌可由另一只代班，原目标不会再完整回答原消息，只在代班回复公开后做一句基于原消息和代班回复的短评论。未指定身份的固定命令按群权重选一只执行，并继续用 command claim 保证副作用只执行一次；同时 @ 双方的普通聊天允许两只各自按自己的身份回答。
 
 `astrbot_plugin_qqbot_features` 负责已迁移的群务、菜单、生图、游戏和固定命令。好友申请和邀请入群默认按配置自动同意；机器人自身入群成功后会优先私聊通知邀请者，文案包含群名和群号，不在群聊里发送“主人”自报。双平台 `both/full` 下，天使和恶魔会各自按身份发送新成员入群欢迎，并各自独立随机选择旧四选一群地位后缀；双子自身入群不会触发欢迎。
 

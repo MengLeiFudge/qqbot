@@ -375,6 +375,20 @@ def looks_like_rightcodes_draw_suggestion(text: str) -> bool:
     return extract_natural_draw_prompt(text.strip()) is not None
 
 
+def looks_like_rightcodes_draw_feature_request(text: str, *, is_direct_or_private: bool = False) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if looks_like_rightcodes_draw_suggestion(normalized):
+        return is_direct_or_private
+    return (
+        looks_like_rightcodes_draw_invocation(normalized)
+        or looks_like_rightcodes_draw_points_mutation_request(normalized)
+        or looks_like_rightcodes_draw_points_query(normalized)
+        or looks_like_rightcodes_draw_help_command(normalized)
+    )
+
+
 def extract_rightcodes_draw_prompt(text: str) -> str | None:
     command_match = re.match(r"^(?:棉花糖|棉花)\s*生图([\s\S]*)$", text)
     if command_match is not None:

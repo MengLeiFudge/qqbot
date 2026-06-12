@@ -25,6 +25,7 @@ from astrbot.core.star.filter.event_message_type import EventMessageType
 
 from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
+from .command_guard import record_command_handled
 from .command_guard import try_claim_command
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
@@ -45,6 +46,7 @@ from .rightcodes_draw_logic import format_rightcodes_draw_suggestion_message
 from .rightcodes_draw_logic import format_rightcodes_draw_success
 from .rightcodes_draw_logic import format_rightcodes_draw_timeout
 from .rightcodes_draw_logic import load_rightcodes_config
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_feature_request
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_help_command
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_invocation
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_request
@@ -653,7 +655,10 @@ class QQBotFeaturesPlugin(Star):
         text = extract_plain_text(event).strip()
         if not text:
             return
-        if looks_like_rightcodes_draw_suggestion(text) and _is_direct_or_private(event):
+        is_direct_or_private = _is_direct_or_private(event)
+        if not looks_like_rightcodes_draw_feature_request(text, is_direct_or_private=is_direct_or_private):
+            return
+        if looks_like_rightcodes_draw_suggestion(text) and is_direct_or_private:
             if not _should_handle_scheduled_or_migrated_command(
                 event,
                 self._feature_mode,
@@ -1146,10 +1151,14 @@ def _should_handle_migrated_command(
     *,
     command_type: str = "generic",
 ) -> bool:
+    claim_key = _command_claim_key(event, command_type=command_type)
     decision = decide_migrated_command_route(
         sender_id=event.get_sender_id(),
         self_id=event.get_self_id(),
         at_ids=_at_target_ids(event),
+        group_id=event.get_group_id(),
+        message_key=claim_key,
+        text=extract_plain_text(event) or str(event.get_message_str() or ""),
         is_private=event.is_private_chat(),
         is_direct_or_private=_is_direct_or_private(event),
         feature_mode=feature_mode,
@@ -1158,14 +1167,14 @@ def _should_handle_migrated_command(
     )
     if not decision.should_handle:
         logger.debug(
-            "[QQBotFeatures] skip migrated command: type=%s self=%s reason=%s message_id=%s",
+            "[QQBotFeatures] skip migrated command: type=%s self=%s reason=%s selected=%s message_id=%s",
             command_type,
             event.get_self_id(),
             decision.reason,
+            decision.selected_worker,
             _event_message_id(event),
         )
         return False
-    claim_key = _command_claim_key(event, command_type=command_type)
     if not try_claim_command(claim_key):
         logger.info(
             "[QQBotFeatures] skip duplicated migrated command: type=%s self=%s claim=%s",
@@ -1174,6 +1183,16 @@ def _should_handle_migrated_command(
             claim_key,
         )
         return False
+    balance = record_command_handled(event.get_group_id(), event.get_self_id())
+    logger.info(
+        "[QQBotFeatures] handle migrated command: type=%s self=%s reason=%s selected=%s claim=%s balance_after=%.2f",
+        command_type,
+        event.get_self_id(),
+        decision.reason,
+        decision.selected_worker,
+        claim_key,
+        balance,
+    )
     return True
 
 
@@ -1217,13 +1236,7 @@ def looks_like_qqbot_fixed_command(text: str) -> bool:
         return False
     if parse_rightcodes_draw_command(normalized) is not None:
         return True
-    if looks_like_rightcodes_draw_invocation(normalized):
-        return True
-    if looks_like_rightcodes_draw_points_mutation_request(normalized):
-        return True
-    if looks_like_rightcodes_draw_points_query(normalized):
-        return True
-    if looks_like_rightcodes_draw_help_command(normalized):
+    if looks_like_rightcodes_draw_feature_request(normalized):
         return True
     if looks_like_sub2api_usage_command(normalized):
         return True
