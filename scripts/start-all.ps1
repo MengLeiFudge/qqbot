@@ -1,6 +1,6 @@
 param(
     [ValidateSet("all", "nonebot2", "astrbot")]
-    [string]$Target = "all",
+    [string]$Target = "astrbot",
     [switch]$SkipInstall,
     [switch]$RestartBot,
     [switch]$Child,
@@ -15,6 +15,15 @@ param(
     [int]$AstrBotOneBotPort = 6200,
     [int]$AstrBotAngelOneBotPort = 6201
 )
+
+if ($Target -eq "astrbot") {
+    if (-not $PSBoundParameters.ContainsKey("FeatureMode")) {
+        $FeatureMode = "full"
+    }
+    if (-not $PSBoundParameters.ContainsKey("AstrBotProfile")) {
+        $AstrBotProfile = "both"
+    }
+}
 
 $ErrorActionPreference = "Stop"
 $ScriptRoot = $PSScriptRoot

@@ -128,8 +128,11 @@ def resolve_reply_texts_from_public_context(event: object, reply_ids: list[str])
     return texts
 
 
-def canonical_event_claim_key(event: object, *, purpose: str) -> str:
-    group_id = safe_call(event, "get_group_id") or "private"
+def canonical_event_claim_key(event: object, *, purpose: str, include_private_self_id: bool = False) -> str:
+    group_id = safe_call(event, "get_group_id")
+    if not group_id:
+        self_id = safe_call(event, "get_self_id") if include_private_self_id else ""
+        group_id = f"private:{self_id}" if self_id else "private"
     sender_id = safe_call(event, "get_sender_id") or "unknown"
     text = re.sub(r"\s+", "", extract_plain_text(event))[:160]
     at_ids = ",".join(sorted(extract_at_ids(event)))

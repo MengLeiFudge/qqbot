@@ -1638,7 +1638,11 @@ def _event_message_id(event: AstrMessageEvent) -> str:
 
 
 def _command_claim_key(event: AstrMessageEvent, *, command_type: str) -> str:
-    return canonical_event_claim_key(event, purpose=f"command:{command_type}")
+    return canonical_event_claim_key(
+        event,
+        purpose=f"command:{command_type}",
+        include_private_self_id=event.is_private_chat(),
+    )
 
 
 def looks_like_qqbot_fixed_command(text: str) -> bool:

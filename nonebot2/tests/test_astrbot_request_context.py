@@ -37,9 +37,21 @@ class MessageObj:
 
 
 class StubEvent:
-    def __init__(self, messages: list[object], *, message_id: str = "", timestamp: int = 0) -> None:
+    def __init__(
+        self,
+        messages: list[object],
+        *,
+        message_id: str = "",
+        timestamp: int = 0,
+        group_id: str = "10001",
+        sender_id: str = "3062317151",
+        self_id: str = "2629227874",
+    ) -> None:
         self._messages = messages
         self.message_obj = MessageObj(message_id=message_id, timestamp=timestamp)
+        self._group_id = group_id
+        self._sender_id = sender_id
+        self._self_id = self_id
 
     def get_messages(self) -> list[object]:
         return self._messages
@@ -48,10 +60,13 @@ class StubEvent:
         return "".join(getattr(message, "text", "") for message in self._messages)
 
     def get_group_id(self) -> str:
-        return "10001"
+        return self._group_id
 
     def get_sender_id(self) -> str:
-        return "3062317151"
+        return self._sender_id
+
+    def get_self_id(self) -> str:
+        return self._self_id
 
 
 class AstrBotRequestContextTest(unittest.TestCase):
@@ -84,6 +99,39 @@ class AstrBotRequestContextTest(unittest.TestCase):
         self.assertEqual(
             canonical_event_claim_key(first, purpose="llm"),
             canonical_event_claim_key(second, purpose="llm"),
+        )
+
+    def test_private_command_claim_key_can_be_scoped_by_current_bot(self) -> None:
+        angel = StubEvent(
+            [Plain("用量")],
+            timestamp=100,
+            group_id="",
+            sender_id="605738729",
+            self_id="1443944862",
+        )
+        demon = StubEvent(
+            [Plain("用量")],
+            timestamp=100,
+            group_id="",
+            sender_id="605738729",
+            self_id="2629227874",
+        )
+
+        self.assertEqual(
+            canonical_event_claim_key(angel, purpose="command:sub2api_usage"),
+            canonical_event_claim_key(demon, purpose="command:sub2api_usage"),
+        )
+        self.assertNotEqual(
+            canonical_event_claim_key(
+                angel,
+                purpose="command:sub2api_usage",
+                include_private_self_id=True,
+            ),
+            canonical_event_claim_key(
+                demon,
+                purpose="command:sub2api_usage",
+                include_private_self_id=True,
+            ),
         )
 
 
