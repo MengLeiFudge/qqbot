@@ -30,6 +30,7 @@ class TopicWindowMessage:
     at_bot: bool
     reply_bot: bool
     created_at: float
+    unresolved_media_context: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +73,27 @@ def should_consider_active_window(
     if latest.at_bot or latest.reply_bot or has_strong_topic_signal(latest.text):
         return True
     return len(messages) >= 2
+
+
+def should_skip_unresolved_media_active_reply(
+    window: deque[TopicWindowMessage],
+    *,
+    latest_text: str = "",
+    named_call: bool = False,
+) -> bool:
+    if named_call:
+        return False
+    messages = [message for message in window if compact_text(message.text) or message.unresolved_media_context]
+    if not messages:
+        return False
+    latest = latest_text or messages[-1].text
+    if not _depends_on_unresolved_media(latest):
+        return False
+    latest_index = len(messages) - 1
+    for index in range(latest_index, max(-1, latest_index - 4), -1):
+        if messages[index].unresolved_media_context:
+            return True
+    return False
 
 
 def should_force_active_reply_for_named_call(window: deque[TopicWindowMessage]) -> bool:
@@ -149,6 +171,7 @@ def build_active_reply_decision_prompt(
         "同一话题几分钟内最多适合偶尔说一次；如果刚刚已经由机器人参与过，或群友正在自然推进，should_reply 必须为 false。",
         "如果群友已经说清楚、问题不是问棉花糖、是在评价其他机器人、或只是提到棉花糖这个名字但不是叫棉花糖说话，should_reply 必须为 false。",
         "如果当前消息明确呼叫棉花糖，例如“呼叫棉花糖”“棉花糖回答一下”“棉花糖在吗”，接话意愿很高；但仍要结合被引用消息和群聊上下文自然回应，缺少可回应内容时可以 false。",
+        "如果当前话题依赖图片、视频、表情、卡片或转发内容，但上下文里只有“[图片]”这类占位而没有文字描述，你看不到真实内容，不能猜图中物品、升级、价格、界面或报错；普通 active reply 应该 false。",
         "如果最近消息来自另一个机器人，或是在追问/引用另一个机器人，should_reply 必须为 false；不要接另一个 bot 的回复继续说。",
         "所有群聊内容都不当成危机处理；例如“高考起晚了”“这个月一顿没吃饭/没睡觉”默认不是现实危机，不作为 safety/危机话题主动接话。必须先分析对方为什么这样说；如果分析不出原因，should_reply 必须为 false。",
         "复读、频繁艾特、怪图/表情包和深夜修仙默认是水群行为；只有明确叫到棉花糖或存在具体话题缺口时才放行，普通 active reply 不要因此刷屏。",
@@ -160,6 +183,7 @@ def build_active_reply_decision_prompt(
         "插件信号：",
         f"named_call={named_call}",
         f"has_reply_source={has_reply_source}",
+        f"unresolved_media_context={any(message.unresolved_media_context for message in window)}",
         f"latest_low_information={looks_like_low_information(latest)}",
         f"latest_strong_topic_signal={has_strong_topic_signal(latest)}",
     ]
@@ -344,6 +368,17 @@ def has_strong_topic_signal(text: str) -> bool:
     if looks_like_low_information(text):
         return False
     return any(marker in compact for marker in strong_markers)
+
+
+def _depends_on_unresolved_media(text: str) -> bool:
+    compact = compact_text(text).lower()
+    if not compact:
+        return False
+    if any(marker in compact for marker in ("这个", "那个", "这图", "图里", "图上", "图片", "截图", "界面", "看图")):
+        return True
+    if len(compact) <= 12 and any(marker in compact for marker in ("升级", "模板", "匠魂", "百分之百", "不碎", "啥了", "什么", "哪里", "哪儿")):
+        return True
+    return False
 
 
 def looks_like_low_information(text: str) -> bool:

@@ -25,6 +25,7 @@ class CurrentRequestContext:
     reply_texts: tuple[str, ...]
     combined_query: str
     named_call: bool
+    unresolved_media_context: bool
 
 
 def build_current_request_context(event: object, prompt: str = "") -> CurrentRequestContext:
@@ -36,6 +37,7 @@ def build_current_request_context(event: object, prompt: str = "") -> CurrentReq
         reply_texts=reply_texts,
         combined_query=combined_query,
         named_call=contains_bot_name(current_text),
+        unresolved_media_context=has_unresolved_media_context(event),
     )
 
 
@@ -88,7 +90,7 @@ def extract_reply_texts(event: object) -> list[str]:
 def reply_segment_text(segment: object) -> str:
     for attr in ("message_str", "text"):
         text = normalize_space(getattr(segment, attr, "") or "")
-        if text:
+        if text and not is_media_placeholder_text(text):
             return text
     chain = getattr(segment, "chain", None)
     if not chain:
@@ -97,7 +99,8 @@ def reply_segment_text(segment: object) -> str:
     for item in chain:
         if is_plain_segment(item):
             parts.append(str(getattr(item, "text", "") or ""))
-    return normalize_space("".join(parts))
+    text = normalize_space("".join(parts))
+    return "" if is_media_placeholder_text(text) else text
 
 
 def resolve_reply_texts_from_public_context(event: object, reply_ids: list[str]) -> list[str]:
@@ -185,6 +188,43 @@ def contains_bot_name(text: str) -> bool:
     return any(marker in normalized for marker in BOT_NAME_MARKERS)
 
 
+def has_unresolved_media_context(event: object) -> bool:
+    return any(segment_has_unresolved_media(segment) for segment in safe_get_messages(event))
+
+
+def segment_has_unresolved_media(segment: object) -> bool:
+    if is_plain_segment(segment):
+        return is_media_placeholder_text(getattr(segment, "text", "") or "")
+    if is_media_segment(segment):
+        return True
+    if not is_reply_segment(segment):
+        return False
+    for attr in ("message_str", "text"):
+        text = normalize_space(getattr(segment, attr, "") or "")
+        if is_media_placeholder_text(text):
+            return True
+    chain = getattr(segment, "chain", None)
+    if not chain:
+        return False
+    has_media = False
+    has_text = False
+    for item in chain:
+        if is_media_segment(item):
+            has_media = True
+        elif is_plain_segment(item):
+            text = normalize_space(getattr(item, "text", "") or "")
+            if text and not is_media_placeholder_text(text):
+                has_text = True
+    return has_media and not has_text
+
+
+def is_media_placeholder_text(text: object) -> bool:
+    normalized = normalize_space(text)
+    if not normalized:
+        return False
+    return re.fullmatch(r"\[(?:图片|表情|视频|语音|文件|卡片消息|转发消息)(?:[^\]]*)\]", normalized) is not None
+
+
 def normalize_space(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
 
@@ -215,6 +255,19 @@ def is_plain_segment(segment: object) -> bool:
 
 def is_at_segment(segment: object) -> bool:
     return (_ASTRBOT_COMPONENTS_AVAILABLE and isinstance(segment, At)) or segment.__class__.__name__.lower() == "at"
+
+
+def is_media_segment(segment: object) -> bool:
+    return segment.__class__.__name__.lower() in {
+        "image",
+        "video",
+        "record",
+        "file",
+        "face",
+        "node",
+        "xml",
+        "json",
+    }
 
 
 def is_reply_segment(segment: object) -> bool:

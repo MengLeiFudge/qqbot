@@ -26,6 +26,7 @@ from .logic import compact_text as _compact
 from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
 from .logic import looks_like_qqbot_fixed_command
 from .logic import looks_like_direct_bot_call
+from .logic import should_skip_unresolved_media_active_reply as _should_skip_unresolved_media_active_reply
 from .logic import should_force_active_reply_for_named_call as _should_force_named_call_reply
 from .logic import should_consider_active_window as _should_consider_active_window
 from .logic import try_acquire_active_reply_inflight as _try_acquire_active_reply_inflight
@@ -78,7 +79,7 @@ DELEGATED_COMMENT_EXTRA = "_qqbot_twin_delegated_comment"
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖普通群聊主动接话门控。",
-    "0.3.9",
+    "0.3.10",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -288,6 +289,17 @@ class TopicConcentrationPlugin(Star):
                     f"worker={worker_decision.worker_id} reason=local_named_call"
                 )
                 return True
+            request_context = build_current_request_context(event)
+            if _should_skip_unresolved_media_active_reply(
+                record.window,
+                latest_text=request_context.current_text,
+                named_call=request_context.named_call,
+            ):
+                logger.info(
+                    "[TopicConcentration] skip active reply: "
+                    f"group={event.get_group_id()} reason=unresolved_media_context"
+                )
+                return False
             group_cooldown_until = _GROUP_COOLDOWNS.get(scope_key, 0.0)
             if now < group_cooldown_until:
                 logger.info(
@@ -369,6 +381,7 @@ def _record_message(event, *, scope_key: str | None = None) -> TopicRecordResult
             user_id=user_id,
             at_bot=_has_at_bot(event),
             reply_bot=_has_reply_bot(event),
+            unresolved_media_context=build_current_request_context(event).unresolved_media_context,
             created_at=now,
         )
     )

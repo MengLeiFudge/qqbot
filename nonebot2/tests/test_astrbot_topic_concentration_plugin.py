@@ -20,6 +20,7 @@ from astrbot_plugin_topic_concentration.logic import (
     looks_like_direct_bot_call,
     looks_like_qqbot_fixed_command,
     looks_like_low_information,
+    should_skip_unresolved_media_active_reply,
     should_force_active_reply_for_named_call,
     release_active_reply_inflight,
     should_consider_active_window,
@@ -40,6 +41,7 @@ from astrbot_plugin_topic_concentration.twin_scheduler import (
     set_group_balance,
     targeted_twin_ids,
 )
+from astrbot_plugin_qqbot_features.request_context import build_current_request_context
 
 
 class StubResponse:
@@ -108,6 +110,29 @@ class StubGroupMessageEvent:
 
     def get_self_id(self) -> str:
         return self._self_id
+
+
+class Plain:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class Reply:
+    def __init__(self, message_str: str = "", chain: list[object] | None = None) -> None:
+        self.message_str = message_str
+        self.chain = chain or []
+        self.id = ""
+
+
+class StubRequestEvent:
+    def __init__(self, messages: list[object]) -> None:
+        self._messages = messages
+
+    def get_messages(self) -> list[object]:
+        return self._messages
+
+    def get_group_id(self) -> str:
+        return "1163635014"
 
 
 class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
@@ -261,6 +286,92 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertIn("被引用消息1：如何生成画图支持分辨率：1K、2K、4K", prompt)
         self.assertIn("AstrBot 群聊上下文节选", prompt)
         self.assertIn("[san ji/12:37:37]", prompt)
+
+    def test_request_context_treats_image_placeholder_as_unresolved_media(self) -> None:
+        context = build_current_request_context(
+            StubRequestEvent(
+                [
+                    Reply("[图片]"),
+                    Plain("匠魂吗还是"),
+                ]
+            )
+        )
+
+        self.assertEqual(context.current_text, "匠魂吗还是")
+        self.assertEqual(context.reply_texts, ())
+        self.assertTrue(context.unresolved_media_context)
+
+    def test_unresolved_image_context_blocks_short_active_reply_guess(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="",
+                    user_id="2026961588",
+                    at_bot=False,
+                    reply_bot=False,
+                    unresolved_media_context=True,
+                    created_at=10.0,
+                ),
+                TopicWindowMessage(
+                    text="这个末影之眼升级啥了",
+                    user_id="3189534564",
+                    at_bot=False,
+                    reply_bot=False,
+                    unresolved_media_context=True,
+                    created_at=20.0,
+                ),
+                TopicWindowMessage(
+                    text="百分之百不碎（）",
+                    user_id="3055289971",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=30.0,
+                ),
+                TopicWindowMessage(
+                    text="匠魂吗还是",
+                    user_id="3189534564",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=40.0,
+                ),
+            ]
+        )
+
+        self.assertTrue(
+            should_skip_unresolved_media_active_reply(
+                window,
+                latest_text="匠魂吗还是",
+            )
+        )
+
+    def test_unresolved_image_context_does_not_block_named_call(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="",
+                    user_id="2026961588",
+                    at_bot=False,
+                    reply_bot=False,
+                    unresolved_media_context=True,
+                    created_at=10.0,
+                ),
+                TopicWindowMessage(
+                    text="棉花糖看一下这个",
+                    user_id="3189534564",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=20.0,
+                ),
+            ]
+        )
+
+        self.assertFalse(
+            should_skip_unresolved_media_active_reply(
+                window,
+                latest_text="棉花糖看一下这个",
+                named_call=True,
+            )
+        )
 
     def test_dual_platform_events_share_group_scope_and_deduplicate_same_message(self) -> None:
         group_id = "746497406"
