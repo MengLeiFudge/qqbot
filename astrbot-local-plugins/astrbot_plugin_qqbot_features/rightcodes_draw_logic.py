@@ -46,8 +46,6 @@ FEATURE_MODE_ENV = "QQBOT_ASTRBOT_FEATURE_MODE"
 FEATURE_MODE_DUAL = "dual"
 FEATURE_MODE_FULL = "full"
 FEATURE_MODES = {FEATURE_MODE_DUAL, FEATURE_MODE_FULL}
-NONEBOT2_HOST = "127.0.0.1"
-NONEBOT2_PORT = 8080
 _DRAW_POINTS_LOCK = threading.Lock()
 _DRAW_POINTS_QUERY_RE = re.compile(
     r"^(?:(?:查|查询|查看|看)(?:一下)?)?(?:我(?:的)?|当前)?(?:生图)?积分(?:余额|情况|多少)?$"
@@ -337,7 +335,7 @@ def read_feature_mode(config=None) -> str:
 def should_record_passive_group_points(
     *,
     feature_mode: str,
-    nonebot2_online: bool,
+    legacy_runtime_online: bool = False,
 ) -> bool:
     return True
 
@@ -668,7 +666,15 @@ def resolve_zone(timezone_name: str):
 
 
 def resolve_default_data_root() -> Path:
-    return resolve_workspace_root() / "data" / "nonebot2" / "run"
+    return resolve_astrbot_data_root() / "plugin_data" / "qqbot_features_runtime"
+
+
+def resolve_astrbot_data_root() -> Path:
+    astrbot_root = Path(os.environ.get("ASTRBOT_ROOT", "")).resolve()
+    if astrbot_root.name == "astrbot" and astrbot_root.parent.name == "data":
+        return astrbot_root / "data"
+    workspace_root = resolve_workspace_root()
+    return workspace_root / "data" / "astrbot" / "data"
 
 
 def resolve_workspace_root() -> Path:
@@ -681,7 +687,7 @@ def resolve_workspace_root() -> Path:
     if current.name == "astrbot" and current.parent.name == "data":
         return current.parent.parent
     for parent in current.parents:
-        if (parent / "astrbot-local-plugins").is_dir() and (parent / "nonebot2").is_dir():
+        if (parent / "astrbot-local-plugins").is_dir():
             return parent
     return current
 

@@ -40,24 +40,25 @@ MENU_SECTIONS: tuple[MenuSection, ...] = (
         aliases=("鲲",),
         lines=(
             "摸鲲 / 养鲲 / 抓鲲 / 捕鲲：私聊创建或获取鲲",
-            "属性 / 背包 / 商城 / 签到 / 挑战 / 排行 / 进击 / 赠送：复用 bot1 存档与状态机",
+            "属性 / 背包 / 商城 / 签到 / 挑战 / 排行 / 进击 / 赠送：使用 AstrBot 迁移后的存档与状态机",
         ),
     ),
     MenuSection(
         name="落樱之都",
         aliases=("樱花", "落樱"),
         status="基础玩法已移植",
-        lines=("落樱之都 / 注册 / 改名 / 个人信息 / 加经验 / 嘤 / 加点 / 恢复：复用 bot1 存档",),
+        lines=("落樱之都 / 注册 / 改名 / 个人信息 / 加经验 / 嘤 / 加点 / 恢复：使用 AstrBot 迁移后的存档",),
     ),
     MenuSection(
         name="Arcaea",
         aliases=("Arc", "Arc查询", "Arc狼人杀", "Arc吃鸡", "arcaea"),
-        status="部分移植",
+        status="已移植",
         lines=(
-            "arctj10.5：按 PTT 推荐谱面，复用 bot1 本地曲库和定数缓存",
+            "arctj10.5：按 PTT 推荐谱面，使用本地曲库和定数缓存",
             "archd / arctz：查看当前活动梯子",
             "zm / arczm：字母猜歌；qh / arcqh：曲绘猜歌；jx / arcjx：揭晓",
             "xz / arcxz：作者限定，查询并下载最新 c 版安装包",
+            "后台同步别名、定数缓存、猜歌过期会话和每日活动提醒",
         ),
     ),
     MenuSection(

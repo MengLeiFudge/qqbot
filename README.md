@@ -2,7 +2,6 @@
 
 这是本机机器人 monorepo 工作区，按运行组件拆分：
 
-- `nonebot2/`：原 qqbot / NoneBot2 应用源码，当前作为功能存档和纯 Python service 复用来源。
 - `astrbot/`：AstrBot 上游源码快照和本机配置示例；实际 AstrBot Core 由 `uv tool` 管理。
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码，启动 AstrBot 前同步到运行态插件目录。
 - `napcat/`：共用 NapCat / QQ 登录端程序包。
@@ -13,29 +12,26 @@
 
 `data/` 存放真实配置、数据库、日志、QQ 登录态、AI 会话、插件数据和更新备份。
 
-- `data/nonebot2/config/`：NoneBot2 的 `.env`、`qqbot.toml`。
-- `data/nonebot2/run/`：迁移期历史存档和可复用功能状态。
-- `data/nonebot2/logs/`：旧 NoneBot2 启动和运行日志。
 - `data/astrbot/data/`：AstrBot 的 `cmd_config.json`、`data_v4.db`、插件和插件数据。
+- `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的游戏、Arcaea、公开群上下文、RightCodes 积分和本地 artifact 发布状态。
+- `data/astrbot/data/plugin_data/qqbot_features_config/`：从旧 qqbot 迁入的 `.env` 和 `qqbot.toml`，供 AstrBot 本地插件读取必要本机配置。
 - `data/memes/mlj_pack/`：AstrBot 使用的本地表情包运行态副本和 `index.json`；敏感、涩涩、待复核类别默认不自动发送。
 - `data/napcat/`：NapCat 更新下载、旧包备份、账号配置、登录态和日志。
 
 可提交配置模板只放在：
 
-- `nonebot2/config/env.example`：敏感环境变量和本机账号示例。
-- `nonebot2/config/qqbot.toml.example`：非敏感运行配置示例。
 - `astrbot/config/`：AstrBot 插件、本机配置和人格示例；可用 `python3 scripts/export-astrbot-config-examples.py` 从当前运行态重新导出，脚本会剔除 LLM provider/model 路由并脱敏 key/token/secret。
 
-不要再使用 `nonebot2/.env`、`nonebot2/.env.example` 或 `nonebot2/config/qqbot.toml` 作为运行配置入口；根级启动脚本会固定读取 `data/nonebot2/config/`。
+不要再使用旧 NoneBot2 配置入口；AstrBot 本地迁移插件读取 `data/astrbot/data/plugin_data/qqbot_features_config/`。
 
 AstrBot Core 不再从 `astrbot/` 源码快照启动；`scripts/start-astrbot.ps1` 会优先直调 `uv tool` 安装出的 `astrbot.exe`，再回退到 PATH 中的 `astrbot` / `uv tool run`，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。
 
-`astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责承接从 NoneBot2 迁移到 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、Sub2API 账号用量查询、复读、入群欢迎、戳一戳文本响应、按配置自动同意好友申请和邀请入群、群文件清理通知、主人限定群聊记录导出、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；NoneBot2 AI runtime 使用 AstrBot 原生链路替代。
+`astrbot-local-plugins/` 下的本地插件会在 `scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、Sub2API 账号用量查询、复读、入群欢迎、戳一戳文本响应、按配置自动同意好友申请和邀请入群、群文件清理通知、主人限定群聊记录导出、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；旧 AI runtime 使用 AstrBot 原生链路替代。
 
 `astrbot_plugin_local_artifact_api` 负责 AstrBot 的本地构建产物发布兼容入口。AstrBot `full` 模式下会在 `127.0.0.1:8080` 提供 `POST /admin/api/artifacts/publish-local`，保持原 NoneBot2 localhost-only 请求体、Git 上下文校验、SHA 跳过策略和 OneBot 群文件上传行为，供 `AfterBuildEvent.exe 1` 这类本机白名单构建流程继续发布 zip 产物。
 `scripts\start-all.ps1` 日常默认等价于 `-Target astrbot -FeatureMode full -AstrBotProfile both`，会清理旧的 `8080` 占用，并在启动验证中等待 `6185`、`6200/6201` 和 `8080` 都就绪；如果 artifact API 绑定失败，启动入口会失败而不是只报告 AstrBot WebUI ready。
 
-RightCodes 生图命令已归入 `astrbot_plugin_qqbot_features`。默认复用 `data\nonebot2\run\ai\draw_points.json` 迁移期积分存档；双平台 `both/full` 下只有固定命令 owner 账号累计普通群消息积分，避免天使和恶魔同群时同一消息重复记分。RightCodes API Key 直接填写在 AstrBot 插件配置 `astrbot_plugin_qqbot_features.api_key`，不再读取 `QQBOT_AI_KEY_RIGHTCODES` 或 NoneBot2 `.env`。生图成功、失败或超时失败都会引用原始请求；默认 240 秒总超时，超时失败会退回本次扣除的积分或免费次数。
+RightCodes 生图命令已归入 `astrbot_plugin_qqbot_features`。默认使用 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\draw_points.json` 积分存档；双平台 `both/full` 下只有固定命令 owner 账号累计普通群消息积分，避免天使和恶魔同群时同一消息重复记分。RightCodes API Key 直接填写在 AstrBot 插件配置 `astrbot_plugin_qqbot_features.api_key`，不再读取 `QQBOT_AI_KEY_RIGHTCODES` 或旧 `.env`。生图成功、失败或超时失败都会引用原始请求；默认 240 秒总超时，超时失败会退回本次扣除的积分或免费次数。
 
 RightCodes 生图接口问答也归入 `astrbot_plugin_qqbot_features` 的静态知识 catalog。用户问 RightCodes 画图接口、请求体、`size`、`1024x1024`、`/v1/images/generations` 或 `/v1/chat/completions` 时，插件会在 LLM 请求前注入官方文档摘要：`/v1/images/generations` 支持 `size` 字段，`/v1/chat/completions` 适合流式防超时。
 
@@ -49,11 +45,11 @@ AstrBot 启动入口支持显式选择 bot 身份：日常默认是 `both/full`�
 
 AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参与；群聊固定命令只由一个账号执行。没有明确 @ 或私聊时，固定命令默认由恶魔账号 `2629227874` 处理，可用 `QQBOT_ASTRBOT_COMMAND_OWNER` 覆盖；明确 @ 天使/恶魔时，由当前被叫到的 bot 处理；私聊由当前收到私聊的 bot 独立处理，命中固定命令就执行对应命令，未命中固定命令就进入当前 bot 的 LLM 链路。`菜单`、`帮助`、`指令` 会发送统一图片菜单，总览按 `群务管理`、`棉花糖互动`、`养鲲`、`落樱之都`、`Arcaea`、`Factorio`、`异形工厂` 分组；`菜单模块名` 会发送模块详情图。
 
-`astrbot_plugin_qqbot_features` 内部的公开群上下文模块负责迁移期公开群上下文复用：AstrBot 发起群聊 LLM 请求时，会按当前群号读取历史公开群上下文 `data\nonebot2\run\ai\group_context\<群号>.json` 并注入本轮请求。默认不限制群号，只要有对应公开群上下文文件就桥接；`context_bridge_enabled_groups` 只作为可选 allowlist。星环群 `1035445959` 额外带 OrbitalRing 领域提示，但不作为桥接范围条件。模块不读取私聊、日志、token 或其他敏感运行态。
+`astrbot_plugin_qqbot_features` 内部的公开群上下文模块负责公开群上下文复用：AstrBot 发起群聊 LLM 请求时，会按当前群号读取 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\<群号>.json` 并注入本轮请求。默认不限制群号，只要有对应公开群上下文文件就桥接；`context_bridge_enabled_groups` 只作为可选 allowlist。星环群 `1035445959` 额外带 OrbitalRing 领域提示，但不作为桥接范围条件。模块不读取私聊、日志、token 或其他敏感运行态。
 
 `astrbot_plugin_qqbot_features` 内部的双子互动模块负责天使/恶魔两个棉花糖的双子互动增强：当用户明确围绕天使、恶魔、姐姐/妹妹、双子关系或另一个 bot 的公开输出发问时，模块会给本轮 LLM 请求注入当前 bot、另一个 bot 的账号事实、互动边界和少量同群公开上下文。它不注入固定人设或语气文本，只让当前 bot 用自己的 WebUI 人格回应，不替另一个 bot 发言、认错、解释或承诺修改；另一个 bot 发出的普通消息不会触发当前 bot 自动接话。配置项集中到功能合集卡片下，以 `twin_interaction_` 为前缀。
 
-`astrbot_plugin_qqbot_features` 内部的源码知识模块负责 bot2 的源码知识兜底：在没有 Embedding 模型、不能使用 AstrBot 原生知识库时，它会按当前群号和问题文本只读检索本机源码树，并把少量相关源码片段临时注入本轮 LLM 请求。默认源码根覆盖 DSPCore、万物分馏、星环、创世之书、shapez 和 Factorio 模组源码；可信依据优先是源码、反编译源码、源码邻近 README/设计文档和配置数据。模块跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件，不读取私聊、运行日志、token、QQ 登录态、运行态 `data` 或数据库密钥。配置项集中到功能合集卡片下，以 `source_knowledge_` 为前缀。
+`astrbot_plugin_qqbot_features` 内部的源码知识模块负责 bot2 的源码知识兜底：在没有 Embedding 模型、不能使用 AstrBot 原生知识库时，它会按当前群号和问题文本只读检索本机源码树，并把少量相关源码片段临时注入本轮 LLM 请求。默认源码根覆盖 DSPCore、万物分馏、MLJ_DSPmods 辅助模组/工具、星环、创世之书、shapez 和 Factorio 模组源码；其中辅助模组/工具域覆盖 SaveDataExporter、UXAEnhance、AfterBuildEvent、GetDspData、VanillaCurveSim 和 UXAssist。可信依据优先是源码、反编译源码、源码邻近 README/设计文档和配置数据。群号只作为默认领域偏置；当问题出现精确模组名、工具名、目录名或机制词时，模块会跨默认群域检索对应源码根。为保证 `data/strings.json` 这类较大的说明/本地化资料可检索，源码知识运行时会把过低的 `source_knowledge_max_results`、`source_knowledge_max_chars` 和 `source_knowledge_max_file_bytes` 提升到有效下限。模块跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件，不读取私聊、运行日志、token、QQ 登录态、运行态 `data` 或数据库密钥。配置项集中到功能合集卡片下，以 `source_knowledge_` 为前缀。
 
 `astrbot_plugin_topic_concentration` 负责 AstrBot 的普通群聊主动接话门控和双棉花糖普通回复调度：保留 AstrBot Core 的主动回复开关、群聊、非 @、白名单和 method 硬门槛，再用批量话题归类、弱窗口过滤、同群 in-flight、组级冷却、同话题冷却和双子账号消息过滤决定是否放行。它不主动发送最终主动回复，只控制 Core active reply 是否继续执行。普通主动接话不再逐消息调用 LLM 判定；插件会先收集普通群聊窗口，达到批量时间或消息数门槛后才使用 AstrBot 当前会话 provider 做一次话题归类。插件不提供独立 provider 顺序或判定专用模型配置，判定失败时静默跳过本批次，并在 INFO 日志记录 `should_reply=false`、topic、reason、耗时和 worker。普通主动接话如果依赖图片、视频、表情、卡片或转发内容，但当前只有 `[图片]` 这类占位、没有可用文字描述或引用文本，会直接静默跳过，避免看不到图时猜图中物品、升级、价格、界面或报错。明确出现“棉花糖”“棉花糖在吗”“呼叫棉花糖”或“棉花糖+明确请求”等命名呼叫时，插件按群权重选一个普通 LLM worker 直接进入回复链路，不依赖主动接话批量判定；同一用户短时间内紧接“在吗”等探活短句也继承这次呼叫。明确 @ 和私聊不会被主动接话 in-flight 拦截；私聊永远由当前收到私聊的 bot 处理，不参与跨 bot 随机 worker、claim 或忙闲代班。只 @ 其中一只时，目标忙碌可由另一只代班，原目标不会再完整回答原消息，只在代班回复公开后做一句基于原消息和代班回复的短评论。未指定身份的固定命令按群权重选一只执行，并继续用 command claim 保证副作用只执行一次；同时 @ 双方的普通聊天允许两只各自按自己的身份回答。
 
@@ -71,14 +67,11 @@ AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参
 
 ```powershell
 Set-Location D:\project\qqbot
-.\scripts\start-nonebot2.bat
 .\scripts\start-astrbot.bat
 .\scripts\start-all.bat
 ```
 
-日常入口是 `start-astrbot.bat` 或 `start-all.bat`，两者默认启动 AstrBot 的天使+恶魔双平台；直接运行 `start-all.ps1` 时默认也是 AstrBot `both/full`。`start-nonebot2.bat` 只作为旧 NoneBot2 存档调试入口保留。每个入口会拉起对应 Bot 和 OneBot 协议端子窗口，子窗口确认就绪后退出；全部子窗口完成后入口窗口退出。
-
-旧 NoneBot2 管理端重启入口不会打开 Windows Terminal 标签页；它只用于调试存档代码，不是日常机器人运行入口。
+日常入口是 `start-astrbot.bat` 或 `start-all.bat`，两者默认启动 AstrBot 的天使+恶魔双平台；直接运行 `start-all.ps1` 时默认也是 AstrBot `both/full`。每个入口会拉起 AstrBot 和 OneBot 协议端子窗口，子窗口确认就绪后退出；全部子窗口完成后入口窗口退出。
 
 默认账号链路：
 
@@ -100,15 +93,12 @@ Set-Location D:\project\qqbot
 
 ```powershell
 .\scripts\update-napcat.bat
-.\scripts\update-nonebot2.bat
 .\scripts\update-astrbot.bat
 ```
 
-`update-all.bat` 会按顺序更新 NapCat、NoneBot2/OneBot adapter、AstrBot Core。
+`update-all.bat` 会按顺序更新 NapCat 和 AstrBot Core。
 
 NapCat 更新会先停止本工作区关联的 NapCat/QQ 进程，再从 GitHub 最新 release 下载 Windows Shell OneKey zip，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换程序包后自动迁移 `napcat_*.json`、`napcat_protocol_*.json` 和 `onebot11_*.json` 账号配置。
-
-NoneBot2 更新会按 `nonebot2\pyproject.toml` 中的版本约束升级依赖；OneBot v11 对应的 Python 适配器是 `nonebot-adapter-onebot`，随 NoneBot2 更新入口一起处理。
 
 AstrBot 更新默认使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会先用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
 

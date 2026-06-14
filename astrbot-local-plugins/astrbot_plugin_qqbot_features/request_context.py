@@ -16,7 +16,15 @@ except Exception:  # pragma: no cover - imported by lightweight unit tests.
 
 
 BOT_NAME_MARKERS = ("棉花糖", "天使棉花糖", "恶魔棉花糖", "呼叫棉花糖")
-DEFAULT_CONTEXT_ROOT = Path("data") / "nonebot2" / "run" / "ai" / "group_context"
+DEFAULT_CONTEXT_ROOT = (
+    Path("data")
+    / "astrbot"
+    / "data"
+    / "plugin_data"
+    / "qqbot_features_runtime"
+    / "ai"
+    / "group_context"
+)
 
 
 @dataclass(frozen=True, slots=True)

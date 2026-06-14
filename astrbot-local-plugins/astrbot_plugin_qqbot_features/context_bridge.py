@@ -11,12 +11,12 @@ from astrbot.api import logger
 
 DEFAULT_MAX_MESSAGES = 12
 DEFAULT_MAX_CHARS = 1800
-BOT1_ID = "1443944862"
-BOT2_ID = "2629227874"
+ANGEL_BOT_ID = "1443944862"
+DEMON_BOT_ID = "2629227874"
 DOMAIN_HINTS = {
     "1035445959": (
         "本群是星环/OrbitalRing 模组群。三阶、二阶、功率、休谟值、火箭、球、"
-        "配方、建筑和机制类问题必须优先依据 OrbitalRing-MOD 证据或 bot1 已沉淀"
+        "配方、建筑和机制类问题必须优先依据 OrbitalRing-MOD 证据或迁移后的"
         "上下文回答；证据不足就直说证据不足，不要按通用游戏机制或其他模组经验补猜。"
     )
 }
@@ -48,7 +48,7 @@ def load_bridge_config(config=None) -> BridgeConfig:
         enabled_groups=enabled_groups,
         max_messages=max_messages,
         max_chars=max_chars,
-        context_root=resolve_bot1_context_root(),
+        context_root=resolve_migrated_context_root(),
     )
 
 
@@ -88,31 +88,32 @@ def clamp_int(raw: object, *, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
-def resolve_bot1_context_root() -> Path:
+def resolve_migrated_context_root() -> Path:
+    return resolve_astrbot_data_root() / "plugin_data" / "qqbot_features_runtime" / "ai" / "group_context"
+
+
+def resolve_astrbot_data_root() -> Path:
     astrbot_root = Path(os.environ.get("ASTRBOT_ROOT", "")).resolve()
     if astrbot_root.name == "astrbot" and astrbot_root.parent.name == "data":
-        workspace_root = astrbot_root.parent.parent
-    else:
-        cwd = Path.cwd().resolve()
-        if cwd.name == "qqbot":
-            workspace_root = cwd
-        elif cwd.name == "astrbot" and cwd.parent.name == "data":
-            workspace_root = cwd.parent.parent
-        else:
-            workspace_root = cwd
-    return workspace_root / "data" / "nonebot2" / "run" / "ai" / "group_context"
+        return astrbot_root / "data"
+    cwd = Path.cwd().resolve()
+    if cwd.name == "qqbot":
+        return cwd / "data" / "astrbot" / "data"
+    if cwd.name == "astrbot" and cwd.parent.name == "data":
+        return cwd / "data"
+    return astrbot_root / "data" if str(astrbot_root) else cwd / "data" / "astrbot" / "data"
 
 
 def build_group_context_injection(group_id: str, config: BridgeConfig) -> str:
     context_file = safe_group_context_file(config.context_root, group_id)
     if context_file is None or not context_file.is_file():
-        logger.debug("[QQBotContextBridge] bot1 context not found: group=%s", group_id)
+        logger.debug("[QQBotContextBridge] migrated context not found: group=%s", group_id)
         return ""
     records = load_group_context_records(context_file)
     if not records:
         return ""
     lines = [
-        "bot1/NoneBot2 已沉淀的同群公开上下文，仅作为事实参考，不要向用户提到内部桥接：",
+        "迁移后的同群公开上下文，仅作为事实参考，不要向用户提到内部桥接：",
     ]
     domain_hint = DOMAIN_HINTS.get(group_id)
     if domain_hint:
@@ -141,7 +142,7 @@ def load_group_context_records(path: Path) -> list[dict[str, Any]]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
-        logger.warning("[QQBotContextBridge] failed to read bot1 context %s: %s", path, exc)
+        logger.warning("[QQBotContextBridge] failed to read migrated context %s: %s", path, exc)
         return []
     if not isinstance(payload, list):
         return []
@@ -154,7 +155,7 @@ def format_context_record(record: dict[str, Any]) -> str:
     text = " ".join(str(record.get("text") or "").split())
     if not text:
         return ""
-    speaker = "bot1" if user_id == BOT1_ID else "bot2" if user_id == BOT2_ID else sender_name
+    speaker = "天使棉花糖" if user_id == ANGEL_BOT_ID else "恶魔棉花糖" if user_id == DEMON_BOT_ID else sender_name
     message_id = str(record.get("message_id") or "").strip()
     suffix = f" #{message_id}" if message_id else ""
     return f"- {speaker}{suffix}: {text}"

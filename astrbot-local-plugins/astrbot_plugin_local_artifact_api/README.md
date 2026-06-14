@@ -29,9 +29,9 @@
 ## 运行边界
 
 - 只有 `QQBOT_ASTRBOT_FEATURE_MODE=full` 时才启动接口监听。
-- `dual` 模式下不抢占 NoneBot2 管理端的 `8080`。
+- 非 `full` 模式下不启动监听，避免抢占 `8080`。
 - 不读取 QQ 登录态、token、私聊记录或 AstrBot 运行日志。
-- 发布状态和复用服务来自 `data\nonebot2\run`，用于保持 bot1 到 bot2 迁移期间的兼容性。
+- 发布状态来自 `data\astrbot\data\plugin_data\qqbot_features_runtime`。
 
 ## 验证重点
 

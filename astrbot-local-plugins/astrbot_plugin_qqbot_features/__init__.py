@@ -1,1 +1,1 @@
-"""Local AstrBot plugin bundle migrated from NoneBot2 qqbot features."""
+"""Local AstrBot plugin bundle for qqbot features."""

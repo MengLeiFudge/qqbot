@@ -1,10 +1,9 @@
 param(
-    [ValidateSet("all", "nonebot2", "astrbot")]
+    [ValidateSet("astrbot")]
     [string]$Target = "astrbot",
     [switch]$SkipInstall,
-    [switch]$RestartBot,
     [switch]$Child,
-    [ValidateSet("", "nonebot2", "astrbot", "napcat-nonebot2", "napcat-astrbot", "napcat-astrbot-demon", "napcat-astrbot-angel")]
+    [ValidateSet("", "astrbot", "napcat-astrbot", "napcat-astrbot-demon", "napcat-astrbot-angel")]
     [string]$Component = "",
     [string]$RunId = "",
     [string]$WindowTitle = "",
@@ -44,10 +43,7 @@ function Get-ComponentLogRoot {
         [string]$RunId
     )
 
-    if ($Component -eq "astrbot" -or $Component.StartsWith("napcat-astrbot")) {
-        return Join-Path $WorkspaceRoot "data\astrbot\logs\start_all\$RunId\$Component"
-    }
-    return Join-Path $WorkspaceRoot "data\nonebot2\logs\start_all\$RunId\$Component"
+    return Join-Path $WorkspaceRoot "data\astrbot\logs\start_all\$RunId\$Component"
 }
 
 function Write-LauncherLog {
@@ -158,41 +154,6 @@ function Get-AdminStatus {
     }
 }
 
-function Wait-NoneBotConnection {
-    param(
-        [int]$TimeoutSeconds,
-        [string]$LogFile,
-        [System.Diagnostics.Process]$Process = $null
-    )
-
-    Write-LauncherLog -LogFile $LogFile -Message "Waiting for NoneBot OneBot connection for up to $TimeoutSeconds seconds."
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        $status = Get-AdminStatus -Url "http://127.0.0.1:8080/admin/api/status"
-        if ($status -and ($status.onebot_connected -or ([int]$status.connected_bot_count -ge 1))) {
-            Write-LauncherLog -LogFile $LogFile -Message "NoneBot OneBot connection confirmed. connected_bot_count=$($status.connected_bot_count)"
-            return $true
-        }
-        try {
-            $connection = Get-NetTCPConnection -LocalPort 8080 -State Established -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($connection) {
-                Write-LauncherLog -LogFile $LogFile -Message "NoneBot TCP connection confirmed on local port 8080."
-                return $true
-            }
-        }
-        catch {
-        }
-        if ($Process -and $Process.HasExited) {
-            Write-LauncherLog -LogFile $LogFile -Message "Background process pid=$($Process.Id) exited before NoneBot OneBot connection was ready. exit_code=$($Process.ExitCode)"
-            return $false
-        }
-        Start-Sleep -Seconds 2
-    } while ((Get-Date) -lt $deadline)
-
-    Write-LauncherLog -LogFile $LogFile -Message "Timed out waiting for NoneBot OneBot connection."
-    return $false
-}
-
 function Wait-EstablishedConnection {
     param(
         [int]$Port,
@@ -226,50 +187,6 @@ function Wait-EstablishedConnection {
 
     Write-LauncherLog -LogFile $LogFile -Message "Timed out waiting for established TCP connection on local port $Port."
     return $false
-}
-
-function Stop-ProcessByPidFile {
-    param(
-        [string]$PidFile,
-        [string]$Name,
-        [string]$LogFile
-    )
-
-    if (-not (Test-Path $PidFile)) {
-        Write-LauncherLog -LogFile $LogFile -Message "No existing $Name pid file found."
-        return
-    }
-
-    $pidText = Get-Content -Path $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $pidText) {
-        Write-LauncherLog -LogFile $LogFile -Message "$Name pid file is empty."
-        return
-    }
-    $pidText = $pidText.Trim()
-    if (-not ($pidText -match '^\d+$')) {
-        Write-LauncherLog -LogFile $LogFile -Message "Invalid $Name pid file content: $pidText"
-        return
-    }
-
-    $targetPid = [int]$pidText
-    if ($targetPid -eq $PID) {
-        Write-LauncherLog -LogFile $LogFile -Message "Skip stopping current launcher pid=$targetPid."
-        return
-    }
-
-    $process = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-    if (-not $process) {
-        Write-LauncherLog -LogFile $LogFile -Message "Existing $Name pid=$targetPid is not running."
-        return
-    }
-
-    Write-LauncherLog -LogFile $LogFile -Message "Stopping existing $Name pid=$targetPid."
-    Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
-    try {
-        Wait-Process -Id $targetPid -Timeout 30 -ErrorAction SilentlyContinue
-    }
-    catch {
-    }
 }
 
 function Stop-ProcessByPort {
@@ -497,47 +414,6 @@ function Start-BackgroundPowerShell {
     return $process
 }
 
-function Start-NoneBotComponent {
-    param(
-        [string]$RunId,
-        [switch]$NoNapCatWait
-    )
-
-    $logRoot = Get-ComponentLogRoot -Component "nonebot2" -RunId $RunId
-    New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
-    $launcherLog = Join-Path $logRoot "launcher.log"
-    $stdoutLog = Join-Path $logRoot "qqbot_stdout.log"
-    $stderrLog = Join-Path $logRoot "qqbot_stderr.log"
-    New-Item -ItemType File -Path $stdoutLog -Force | Out-Null
-    New-Item -ItemType File -Path $stderrLog -Force | Out-Null
-
-    Write-LauncherLog -LogFile $launcherLog -Message "Starting NoneBot2 component."
-    Stop-ProcessByPidFile -PidFile (Join-Path $WorkspaceRoot "data\nonebot2\run\qqbot.pid") -Name "NoneBot2" -LogFile $launcherLog
-    Stop-ProcessByPort -Port 8080 -Name "NoneBot2" -LogFile $launcherLog
-    Complete-ChildStage -RunId $RunId -Component "nonebot2" -Stage "ports-cleared"
-
-    $script = Join-Path $ScriptRoot "start-nonebot2.ps1"
-    $extra = if ($SkipInstall) { "-SkipInstall" } else { "" }
-    $command = "& '$script' $extra"
-    $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
-    Write-LauncherLog -LogFile $launcherLog -Message "NoneBot2 stdout log: $stdoutLog"
-
-    if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port 8080 -TimeoutSeconds 90 -LogFile $launcherLog -Process $process)) {
-        $tail = Get-LogTailText -Path $stdoutLog
-        if ($tail) {
-            Write-Host "Recent NoneBot2 output:" -ForegroundColor Yellow
-            Write-Host $tail
-        }
-        if ($process.HasExited) {
-            throw "NoneBot2 exited before opening port 8080. exit_code=$($process.ExitCode). Log: $stdoutLog"
-        }
-        throw "NoneBot2 did not open port 8080. Log: $stdoutLog"
-    }
-    if (-not $NoNapCatWait) {
-        Write-LauncherLog -LogFile $launcherLog -Message "NoneBot2 component is ready for NapCat."
-    }
-}
-
 function Start-AstrBotComponent {
     param([string]$RunId)
 
@@ -612,11 +488,10 @@ function Start-NapCatComponent {
         [string]$RunId,
         [string]$Account,
         [int]$BotPort,
-        [string]$DoneCheck,
         [string]$ComponentName = ""
     )
 
-    $componentName = if ($ComponentName) { $ComponentName } elseif ($Account -eq "1443944862") { "napcat-nonebot2" } else { "napcat-astrbot" }
+    $componentName = if ($ComponentName) { $ComponentName } else { "napcat-astrbot" }
     $logRoot = Get-ComponentLogRoot -Component $componentName -RunId $RunId
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
     $launcherLog = Join-Path $logRoot "launcher.log"
@@ -627,12 +502,7 @@ function Start-NapCatComponent {
 
     Write-LauncherLog -LogFile $launcherLog -Message "Starting NapCat account $Account."
 
-    if ($DoneCheck -eq "nonebot2") {
-        Sync-NapCatOneBotClientConfig -Account $Account -BotPort $BotPort -ClientName "qqbot-reverse-ws" -PathSuffix "/onebot/v11/ws"
-    }
-    else {
-        Sync-NapCatOneBotClientConfig -Account $Account -BotPort $BotPort -ClientName "astrbot-reverse-ws" -PathSuffix "/ws"
-    }
+    Sync-NapCatOneBotClientConfig -Account $Account -BotPort $BotPort -ClientName "astrbot-reverse-ws" -PathSuffix "/ws"
 
     Stop-NapCatAccountProcesses -Account $Account -LogFile $launcherLog
     if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $BotPort -TimeoutSeconds 120 -LogFile $launcherLog)) {
@@ -643,25 +513,13 @@ function Start-NapCatComponent {
     $process = Start-BackgroundPowerShell -CommandText $command -WorkingDirectory $WorkspaceRoot -StdoutLog $stdoutLog -StderrLog $stderrLog -LauncherLog $launcherLog
     Write-LauncherLog -LogFile $launcherLog -Message "NapCat stdout log: $stdoutLog"
 
-    if ($DoneCheck -eq "nonebot2") {
-        if (-not (Wait-NoneBotConnection -TimeoutSeconds 120 -LogFile $launcherLog -Process $process)) {
-            $tail = Get-LogTailText -Path $stderrLog
-            if ($tail) {
-                Write-Host "Recent NapCat error output:" -ForegroundColor Yellow
-                Write-Host $tail
-            }
-            throw "NapCat account $Account did not connect to NoneBot2."
+    if (-not (Wait-EstablishedConnection -Port $BotPort -TimeoutSeconds 120 -LogFile $launcherLog -Process $process)) {
+        $tail = Get-LogTailText -Path $stderrLog
+        if ($tail) {
+            Write-Host "Recent NapCat error output:" -ForegroundColor Yellow
+            Write-Host $tail
         }
-    }
-    else {
-        if (-not (Wait-EstablishedConnection -Port $BotPort -TimeoutSeconds 120 -LogFile $launcherLog -Process $process)) {
-            $tail = Get-LogTailText -Path $stderrLog
-            if ($tail) {
-                Write-Host "Recent NapCat error output:" -ForegroundColor Yellow
-                Write-Host $tail
-            }
-            throw "NapCat account $Account did not connect to AstrBot."
-        }
+        throw "NapCat account $Account did not connect to AstrBot."
     }
 }
 
@@ -751,12 +609,10 @@ function Invoke-Child {
 
     try {
         switch ($Component) {
-            "nonebot2" { Start-NoneBotComponent -RunId $RunId -NoNapCatWait }
             "astrbot" { Start-AstrBotComponent -RunId $RunId }
-            "napcat-nonebot2" { Start-NapCatComponent -RunId $RunId -Account "1443944862" -BotPort 8080 -DoneCheck "nonebot2" }
-            "napcat-astrbot" { Start-NapCatComponent -RunId $RunId -Account (Get-AstrBotAccount) -BotPort $AstrBotOneBotPort -DoneCheck "astrbot" -ComponentName "napcat-astrbot" }
-            "napcat-astrbot-demon" { Start-NapCatComponent -RunId $RunId -Account "2629227874" -BotPort $AstrBotOneBotPort -DoneCheck "astrbot" -ComponentName "napcat-astrbot-demon" }
-            "napcat-astrbot-angel" { Start-NapCatComponent -RunId $RunId -Account "1443944862" -BotPort $AstrBotAngelOneBotPort -DoneCheck "astrbot" -ComponentName "napcat-astrbot-angel" }
+            "napcat-astrbot" { Start-NapCatComponent -RunId $RunId -Account (Get-AstrBotAccount) -BotPort $AstrBotOneBotPort -ComponentName "napcat-astrbot" }
+            "napcat-astrbot-demon" { Start-NapCatComponent -RunId $RunId -Account "2629227874" -BotPort $AstrBotOneBotPort -ComponentName "napcat-astrbot-demon" }
+            "napcat-astrbot-angel" { Start-NapCatComponent -RunId $RunId -Account "1443944862" -BotPort $AstrBotAngelOneBotPort -ComponentName "napcat-astrbot-angel" }
             default { throw "Unknown component: $Component" }
         }
         Complete-Child -RunId $RunId -Component $Component
@@ -814,9 +670,7 @@ function Start-ComponentWindow {
     )
 
     switch ($Component) {
-        "nonebot2" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NoneBot2-1443944862" }
         "astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title (Get-AstrBotTitle) }
-        "napcat-nonebot2" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-1443944862" }
         "napcat-astrbot" { Start-ChildWindow -RunId $RunId -Component $Component -Title (Get-AstrBotNapCatTitle) }
         "napcat-astrbot-demon" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-AstrBot-2629227874" }
         "napcat-astrbot-angel" { Start-ChildWindow -RunId $RunId -Component $Component -Title "NapCat-AstrBot-1443944862" }
@@ -858,17 +712,8 @@ function Wait-Children {
 }
 
 function Invoke-Parent {
-    if ($FeatureMode -eq "full" -and $Target -ne "astrbot") {
-        throw "FeatureMode full is only allowed with -Target astrbot."
-    }
-    if ($AstrBotProfile -eq "both" -and $Target -ne "astrbot") {
-        throw "AstrBotProfile both is only allowed with -Target astrbot."
-    }
     if ($AstrBotProfile -eq "both" -and $FeatureMode -ne "full") {
         throw "AstrBotProfile both requires -FeatureMode full so AstrBot-only event ownership is explicit."
-    }
-    if ($AstrBotProfile -eq "angel" -and $Target -ne "astrbot") {
-        throw "AstrBotProfile angel is only allowed with -Target astrbot."
     }
     if ($AstrBotProfile -eq "angel" -and $FeatureMode -ne "full") {
         throw "AstrBotProfile angel requires -FeatureMode full so AstrBot-only event ownership is explicit."
@@ -878,21 +723,14 @@ function Invoke-Parent {
     $controlRoot = Get-ControlRoot -RunId $runId
     New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null
 
-    $botComponents = @()
+    $botComponents = @("astrbot")
     $napcatComponents = @()
-    if ($Target -eq "nonebot2" -or $Target -eq "all") {
-        $botComponents += "nonebot2"
-        $napcatComponents += "napcat-nonebot2"
+    if ($AstrBotProfile -eq "both") {
+        $napcatComponents += "napcat-astrbot-demon"
+        $napcatComponents += "napcat-astrbot-angel"
     }
-    if ($Target -eq "astrbot" -or $Target -eq "all") {
-        $botComponents += "astrbot"
-        if ($AstrBotProfile -eq "both") {
-            $napcatComponents += "napcat-astrbot-demon"
-            $napcatComponents += "napcat-astrbot-angel"
-        }
-        else {
-            $napcatComponents += "napcat-astrbot"
-        }
+    else {
+        $napcatComponents += "napcat-astrbot"
     }
 
     Write-Host "Starting target: $Target"
@@ -914,17 +752,6 @@ function Invoke-Parent {
 if ($Child) {
     Invoke-Child
     exit $LASTEXITCODE
-}
-
-if ($RestartBot) {
-    $runId = New-RunId
-    Start-NoneBotComponent -RunId $runId
-    $restartLogRoot = Get-ComponentLogRoot -Component "nonebot2" -RunId $runId
-    $restartLogFile = Join-Path $restartLogRoot "launcher.log"
-    if (-not (Wait-NoneBotConnection -TimeoutSeconds 120 -LogFile $restartLogFile)) {
-        exit 2
-    }
-    exit 0
 }
 
 try {

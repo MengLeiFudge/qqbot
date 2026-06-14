@@ -25,13 +25,13 @@
     "description": "RightCodes 生图积分存储根目录",
     "type": "string",
     "default": "",
-    "hint": "留空时自动使用工作区 data/nonebot2/run 的迁移期存档。"
+    "hint": "留空时自动使用 data/astrbot/data/plugin_data/qqbot_features_runtime 的迁移后存档。"
   },
   "api_key": {
     "description": "RightCodes API Key",
     "type": "string",
     "default": "",
-    "hint": "直接填写 RightCodes 生图 API Key；示例导出会脱敏，不再读取 NoneBot2 .env 或 QQBOT_AI_KEY_RIGHTCODES。"
+    "hint": "直接填写 RightCodes 生图 API Key；示例导出会脱敏，不读取旧 .env 或 QQBOT_AI_KEY_RIGHTCODES。"
   },
   "point_multiplier": {
     "description": "RightCodes 生图积分倍率",
@@ -91,7 +91,7 @@
     "description": "公开群上下文最大消息数",
     "type": "int",
     "default": 12,
-    "hint": "LLM 请求前最多注入多少条 data/nonebot2/run/ai/group_context 里的公开群聊上下文。"
+    "hint": "LLM 请求前最多注入多少条 data/astrbot/data/plugin_data/qqbot_features_runtime/ai/group_context 里的公开群聊上下文。"
   },
   "context_bridge_max_chars": {
     "description": "公开群上下文最大字符数",
@@ -115,31 +115,31 @@
     "description": "源码知识根目录",
     "type": "text",
     "default": "",
-    "hint": "每行或分号分隔 domain=path；留空使用内置 DSP、FE、星环、创世、shapez、Factorio 源码根。"
+    "hint": "每行或分号分隔 domain=path；留空使用内置 DSP、FE、MLJ_DSPmods 辅助模组/工具、星环、创世、shapez、Factorio 源码根。"
   },
   "source_knowledge_max_results": {
     "description": "源码知识最大结果数",
     "type": "int",
-    "default": 4,
+    "default": 6,
     "hint": "每轮 LLM 请求最多注入多少条源码检索结果。"
   },
   "source_knowledge_max_chars": {
     "description": "源码知识最大字符数",
     "type": "int",
-    "default": 2600,
-    "hint": "限制源码证据注入长度。"
+    "default": 4200,
+    "hint": "限制源码证据注入长度；低于插件有效下限时会自动提升，保证大号源码邻近说明文件可召回。"
   },
   "source_knowledge_max_files_per_domain": {
     "description": "源码知识每领域最大扫描文件数",
     "type": "int",
-    "default": 80,
+    "default": 180,
     "hint": "rg 不可用时的 Python 扫描上限；rg 可用时优先使用 rg。"
   },
   "source_knowledge_max_file_bytes": {
     "description": "源码知识单文件最大字节数",
     "type": "int",
-    "default": 220000,
-    "hint": "超过该大小的单个源码文件不读取。"
+    "default": 800000,
+    "hint": "超过该大小的单个源码文件不读取；低于插件有效下限时会自动提升，用于覆盖 data/strings.json 这类说明资料。"
   },
   "source_knowledge_refresh_seconds": {
     "description": "源码知识索引刷新秒数",

@@ -67,7 +67,7 @@ def parse_note_export_count(text: str) -> int:
 
 
 def load_public_group_context_records(group_id: str, *, limit: int) -> tuple[GroupNoteRecord, ...]:
-    path = get_nonebot2_data_root() / "ai" / "group_context" / f"{group_id}.json"
+    path = get_qqbot_runtime_root() / "ai" / "group_context" / f"{group_id}.json"
     if not path.is_file():
         return ()
     try:
@@ -114,7 +114,7 @@ def format_group_notes_markdown(
     lines = [
         f"# 群聊记录导出 - {group_id}",
         "",
-        f"- 来源：公开群上下文缓存 data/nonebot2/run/ai/group_context/{group_id}.json",
+        f"- 来源：公开群上下文缓存 data/astrbot/data/plugin_data/qqbot_features_runtime/ai/group_context/{group_id}.json",
         f"- 导出时间：{generated_at.isoformat(timespec='seconds')}",
         f"- 消息数量：{len(records)}",
         "",
@@ -158,8 +158,8 @@ def get_astrbot_data_root() -> Path:
     return get_workspace_root() / "data" / "astrbot" / "data"
 
 
-def get_nonebot2_data_root() -> Path:
-    return get_workspace_root() / "data" / "nonebot2" / "run"
+def get_qqbot_runtime_root() -> Path:
+    return get_astrbot_data_root() / "plugin_data" / "qqbot_features_runtime"
 
 
 def get_workspace_root() -> Path:

@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import random
 import re
-import sys
 import time
 import tomllib
 from urllib.error import HTTPError, URLError
@@ -174,8 +173,6 @@ COMMAND_OWNER_ENV = "QQBOT_ASTRBOT_COMMAND_OWNER"
 FEATURE_MODE_DUAL = "dual"
 FEATURE_MODE_FULL = "full"
 FEATURE_MODES = {FEATURE_MODE_DUAL, FEATURE_MODE_FULL}
-NONEBOT2_HOST = "127.0.0.1"
-NONEBOT2_PORT = 8080
 OWNER_QQ = "605738729"
 DEFAULT_COMMAND_OWNER_QQ = "2629227874"
 LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
@@ -255,7 +252,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         name="Lolicon美图",
         aliases=("Lolicon", "美图", "色图"),
         lines=(
-            "来点美图 / 色图 / 混合：复用 bot1 Lolicon API、图片缓存和元数据存储",
+            "来点美图 / 色图 / 混合：使用 AstrBot 迁移后的 Lolicon API、图片缓存和元数据存储",
             "开群色图 / 关群色图：作者限定，控制当前群是否允许 R18",
             "开图片显示 / 关图片显示：作者限定，控制 R18 结果是否直接发图",
         ),
@@ -265,24 +262,25 @@ FEATURES: tuple[FeatureSpec, ...] = (
         aliases=("鲲",),
         lines=(
             "摸鲲 / 养鲲 / 抓鲲 / 捕鲲：私聊创建或获取鲲",
-            "属性 / 背包 / 商城 / 签到 / 挑战 / 排行 / 进击 / 赠送：复用 bot1 存档与状态机",
+            "属性 / 背包 / 商城 / 签到 / 挑战 / 排行 / 进击 / 赠送：使用 AstrBot 迁移后的存档与状态机",
         ),
     ),
     FeatureSpec(
         name="落樱之都",
         aliases=("樱花", "落樱"),
         status="基础玩法已移植",
-        lines=("落樱之都 / 注册 / 改名 / 个人信息 / 加经验 / 嘤 / 加点 / 恢复：复用 bot1 存档",),
+        lines=("落樱之都 / 注册 / 改名 / 个人信息 / 加经验 / 嘤 / 加点 / 恢复：使用 AstrBot 迁移后的存档",),
     ),
     FeatureSpec(
         name="Arc",
         aliases=("Arc查询", "Arc狼人杀", "Arc吃鸡", "arcaea"),
-        status="部分移植",
+        status="已移植",
         lines=(
-            "arctj10.5：按 PTT 推荐谱面，复用 bot1 本地 Arcaea 曲库和定数缓存",
+            "arctj10.5：按 PTT 推荐谱面，使用本地 Arcaea 曲库和定数缓存",
             "archd / arctz：查看当前活动梯子",
             "zm / arczm：字母猜歌；qh / arcqh：曲绘猜歌；jx / arcjx：揭晓",
             "xz / arcxz：作者限定，查询并下载最新 c 版安装包",
+            "后台：同步别名和定数缓存、过期猜歌会话、按日发送活动提醒",
         ),
     ),
     FeatureSpec(
@@ -308,7 +306,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         name="AI对话",
         aliases=("AI测试", "主动接话", "长期记忆"),
         status="使用 AstrBot 原生链路",
-        lines=("bot1 的 NoneBot2 AI runtime 不直接迁移；bot2 使用 AstrBot provider/persona/记忆插件",),
+        lines=("AI 对话使用 AstrBot provider、persona、记忆和主动接话链路",),
     ),
 )
 
@@ -381,6 +379,7 @@ class QQBotFeaturesPlugin(Star):
         self._sub2api_config = load_sub2api_config(config)
         self._sub2api_usage_cache = Sub2APIUsageCache(ttl_seconds=SUB2API_USAGE_CACHE_TTL_SECONDS)
         self._sub2api_refresh_task: asyncio.Task | None = None
+        self._arc_background_task: asyncio.Task | None = None
         self._sub2api_alerted_thresholds_by_account: dict[str, set[int]] = {}
         self._rightcodes_draw_lock = asyncio.Semaphore(2)
         self._group_inviter_by_group_id: dict[str, str] = {}
@@ -443,6 +442,7 @@ class QQBotFeaturesPlugin(Star):
     async def initialize(self) -> None:
         if self._sub2api_config.base_url and self._sub2api_config.admin_api_key:
             self._sub2api_refresh_task = asyncio.create_task(self._sub2api_usage_refresh_loop())
+        self._arc_background_task = asyncio.create_task(self._arc_background_loop())
 
     async def terminate(self) -> None:
         if self._sub2api_refresh_task is not None:
@@ -452,9 +452,16 @@ class QQBotFeaturesPlugin(Star):
             except asyncio.CancelledError:
                 pass
         self._sub2api_refresh_task = None
+        if self._arc_background_task is not None:
+            self._arc_background_task.cancel()
+            try:
+                await self._arc_background_task
+            except asyncio.CancelledError:
+                pass
+        self._arc_background_task = None
 
-    @filter.on_llm_request(desc="在 AstrBot 调用 LLM 前，按当前群号读取 bot1 公开群上下文并临时注入本轮请求。")
-    async def inject_bot1_group_context(self, event: AstrMessageEvent, req: ProviderRequest):
+    @filter.on_llm_request(desc="在 AstrBot 调用 LLM 前，按当前群号读取迁移后的公开群上下文并临时注入本轮请求。")
+    async def inject_migrated_group_context(self, event: AstrMessageEvent, req: ProviderRequest):
         group_id = str(event.get_group_id() or "")
         if self._context_bridge_config.enabled_groups and group_id not in self._context_bridge_config.enabled_groups:
             return
@@ -463,7 +470,7 @@ class QQBotFeaturesPlugin(Star):
             return
         req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
         logger.info(
-            "[QQBotFeatures] injected bot1 context: group=%s chars=%s",
+            "[QQBotFeatures] injected migrated group context: group=%s chars=%s",
             group_id,
             len(injection),
         )
@@ -800,7 +807,7 @@ class QQBotFeaturesPlugin(Star):
             return
         if not is_bot_admin_or_self(event):
             return
-        if not is_nonebot2_plugin_enabled("group_assistant"):
+        if not is_migrated_plugin_enabled("group_assistant"):
             return
         try:
             await run_group_file_cleanup(event)
@@ -928,6 +935,21 @@ class QQBotFeaturesPlugin(Star):
                         exc,
                     )
 
+    async def _arc_background_loop(self) -> None:
+        service = None
+        while True:
+            try:
+                if service is None:
+                    service = build_arc_background_service()
+                bot = self._get_onebot_bot()
+                if bot is not None:
+                    await service.run_once(bot)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("[QQBotFeatures] Arc background loop failed: %s", exc)
+            await asyncio.sleep(60)
+
     def _get_onebot_bot(self):
         for platform in getattr(self.context.platform_manager, "platform_insts", []):
             if getattr(platform.meta(), "name", "") != "aiocqhttp":
@@ -962,7 +984,7 @@ class QQBotFeaturesPlugin(Star):
     async def lolicon_admin(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode, command_type="lolicon_admin"):
             return
-        if str(event.get_sender_id()) != get_nonebot2_config_value("bot", "author_qq", "0"):
+        if str(event.get_sender_id()) != get_qqbot_config_value("bot", "author_qq", "0"):
             yield event.plain_result("只有作者才能调整美图配置哦！")
             event.stop_event()
             return
@@ -978,7 +1000,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(response)
         event.stop_event()
 
-    @filter.regex(LOLICON_PATTERN, desc="Lolicon 美图命令，支持美图、色图、混合等关键词，并复用 bot1 图片缓存和群配置。")
+    @filter.regex(LOLICON_PATTERN, desc="Lolicon 美图命令，支持美图、色图、混合等关键词，并使用迁移后的图片缓存和群配置。")
     async def lolicon_image(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode, command_type="lolicon_image"):
             return
@@ -1191,7 +1213,7 @@ class QQBotFeaturesPlugin(Star):
     async def arc_apk_update(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode, command_type="arc_apk_update"):
             return
-        if str(event.get_sender_id()) != get_nonebot2_config_value("bot", "author_qq", "0"):
+        if str(event.get_sender_id()) != get_qqbot_config_value("bot", "author_qq", "0"):
             yield event.plain_result("只有作者可以使用这个指令。")
             event.stop_event()
             return
@@ -1708,7 +1730,7 @@ def find_feature(key: str) -> FeatureSpec | None:
 
 
 def build_menu_text(feature_mode: str = FEATURE_MODE_DUAL) -> str:
-    lines = ["NoneBot2 已迁移功能清单：", build_feature_mode_text(feature_mode)]
+    lines = ["AstrBot 功能清单：", build_feature_mode_text(feature_mode)]
     for section in MENU_SECTIONS:
         lines.append(f"- {section.name}：{section.status}")
     lines.append("发送 菜单模块名 查看具体命令，例如 菜单棉花糖互动 / 菜单Arcaea。")
@@ -1848,18 +1870,7 @@ def load_twin_config(config=None) -> TwinInteractionConfig:
 
 
 def resolve_public_group_context_root() -> Path:
-    astrbot_root = Path(os.environ.get("ASTRBOT_ROOT", "")).resolve()
-    if astrbot_root.name == "astrbot" and astrbot_root.parent.name == "data":
-        workspace_root = astrbot_root.parent.parent
-    else:
-        cwd = Path.cwd().resolve()
-        if cwd.name == "qqbot":
-            workspace_root = cwd
-        elif cwd.name == "astrbot" and cwd.parent.name == "data":
-            workspace_root = cwd.parent.parent
-        else:
-            workspace_root = cwd
-    return workspace_root / "data" / "nonebot2" / "run" / "ai" / "group_context"
+    return get_qqbot_runtime_root() / "ai" / "group_context"
 
 
 def is_bot_sender(event: AstrMessageEvent, profile: TwinProfile) -> bool:
@@ -2027,11 +2038,10 @@ def is_bot_admin_or_self(event: AstrMessageEvent) -> bool:
     return sender_id == str(get_author_qq()) or sender_id == str(event.get_self_id())
 
 
-def is_nonebot2_plugin_enabled(plugin_id: str) -> bool:
-    ensure_nonebot2_services_path()
-    from qqbot.services.settings_store import SettingsStore
+def is_migrated_plugin_enabled(plugin_id: str) -> bool:
+    from .legacy_services.settings_store import SettingsStore
 
-    return SettingsStore(get_nonebot2_data_root(), get_author_qq()).get_plugin_enabled(plugin_id)
+    return SettingsStore(get_qqbot_runtime_root(), get_author_qq()).get_plugin_enabled(plugin_id)
 
 
 def build_feature_mode_text(feature_mode: str) -> str:
@@ -2074,8 +2084,7 @@ class AstrBotOneBotApi:
 
 
 async def run_group_file_cleanup(event: AstrMessageEvent) -> dict[str, object]:
-    ensure_nonebot2_services_path()
-    from qqbot.features.group.file_cleanup_service import (
+    from .legacy_services.group.file_cleanup_service import (
         ShapezGroupFileCleanupService,
         ShapezGroupFileCleanupStore,
     )
@@ -2084,10 +2093,10 @@ async def run_group_file_cleanup(event: AstrMessageEvent) -> dict[str, object]:
     group_id = int(event.get_group_id())
     service = ShapezGroupFileCleanupService(
         store=ShapezGroupFileCleanupStore(
-            get_nonebot2_data_root() / "data" / "shapez_file_cleanup_state.json"
+            get_qqbot_runtime_root() / "data" / "shapez_file_cleanup_state.json"
         ),
         group_id=str(group_id),
-        timezone_name=get_nonebot2_config_value("bot", "timezone", "Asia/Shanghai"),
+        timezone_name=get_qqbot_config_value("bot", "timezone", "Asia/Shanghai"),
     )
     result = await service.scan_and_notify_group(api)
     if result.get("violating_user_count") == 0:
@@ -2106,10 +2115,9 @@ async def run_group_file_cleanup(event: AstrMessageEvent) -> dict[str, object]:
 
 
 def build_arc_recommendation(text: str) -> ArcRecommendationResult:
-    ensure_nonebot2_services_path()
-    from qqbot.features.arc.alias_service import load_song_titles
-    from qqbot.features.arc.constant_service import ArcConstantService
-    from qqbot.features.arc.service import ArcService
+    from .legacy_services.arc.alias_service import load_song_titles
+    from .legacy_services.arc.constant_service import ArcConstantService
+    from .legacy_services.arc.service import ArcService
 
     ptt = parse_arc_recommend_ptt(text)
     if ptt is None:
@@ -2117,7 +2125,7 @@ def build_arc_recommendation(text: str) -> ArcRecommendationResult:
     assets_root = get_arc_assets_root()
     service = ArcService(assets_root)
     constant_service = ArcConstantService(
-        get_nonebot2_data_root() / "data" / "arc" / "constants.json"
+        get_qqbot_runtime_root() / "data" / "arc" / "constants.json"
     )
     song_titles = load_song_titles(assets_root / "官谱" / "songlist")
     constant_service.sync_missing_constants(song_titles)
@@ -2130,14 +2138,45 @@ def build_arc_recommendation(text: str) -> ArcRecommendationResult:
 
 
 def build_arc_activity_messages() -> list[str]:
-    ensure_nonebot2_services_path()
-    from qqbot.features.arc.event_service import ArcEventService
+    from .legacy_services.arc.event_service import ArcEventService
 
     service = ArcEventService(
-        timezone=get_nonebot2_config_value("bot", "timezone", "Asia/Shanghai")
+        timezone=get_qqbot_config_value("bot", "timezone", "Asia/Shanghai")
     )
     events = service.fetch_active_events()
     return service.render_event_messages(events)
+
+
+def build_arc_background_service():
+    from .legacy_services.arc.alias_service import ArcAliasService, load_song_titles
+    from .legacy_services.arc.background_service import ArcBackgroundService
+    from .legacy_services.arc.constant_service import ArcConstantService
+    from .legacy_services.arc.event_service import ArcEventService, _fetch_latest_arc_version
+    from .legacy_services.feature_catalog import get_feature_by_menu_key
+    from .legacy_services.settings_store import SettingsStore
+
+    data_root = get_qqbot_runtime_root()
+    assets_root = get_arc_assets_root()
+    alias_service = ArcAliasService(
+        assets_root,
+        data_root / "data" / "arc" / "guess_aliases.json",
+    )
+    constant_service = ArcConstantService(data_root / "data" / "arc" / "constants.json")
+    return ArcBackgroundService(
+        state_path=data_root / "data" / "arc" / "background_state.json",
+        settings_store=SettingsStore(data_root, get_author_qq()),
+        arc_feature=get_feature_by_menu_key("arc"),
+        author_qq=get_author_qq(),
+        version_fetcher=_fetch_latest_arc_version,
+        event_service=ArcEventService(
+            timezone=get_qqbot_config_value("bot", "timezone", "Asia/Shanghai")
+        ),
+        alias_service=alias_service,
+        guess_service=get_arc_guess_service(),
+        constant_service=constant_service,
+        constant_song_loader=lambda: load_song_titles(assets_root / "官谱" / "songlist"),
+        timezone_name=get_qqbot_config_value("bot", "timezone", "Asia/Shanghai"),
+    )
 
 
 def start_arc_guess_game(room_id: int, text: str):
@@ -2254,35 +2293,33 @@ def is_arc_guess_control_command(text: str) -> bool:
 
 
 def get_arc_apk_update_manager(plugin: QQBotFeaturesPlugin):
-    ensure_nonebot2_services_path()
-    from qqbot.features.arc.apk_update_service import ArcApkUpdateManager
-    from qqbot.features.arc.arcaea_record_apk_downloader import ArcaeaRecordApkDownloader
-    from qqbot.features.arc.event_service import _fetch_latest_arc_version
+    from .legacy_services.arc.apk_update_service import ArcApkUpdateManager
+    from .legacy_services.arc.arcaea_record_apk_downloader import ArcaeaRecordApkDownloader
+    from .legacy_services.arc.event_service import _fetch_latest_arc_version
 
     if plugin._arc_apk_update_manager is None:
-        data_root = get_nonebot2_data_root()
+        data_root = get_qqbot_runtime_root()
         plugin._arc_apk_update_manager = ArcApkUpdateManager(
             state_path=data_root / "data" / "arc" / "background_state.json",
             version_fetcher=_fetch_latest_arc_version,
             downloader=ArcaeaRecordApkDownloader(
-                project_root=get_required_nonebot2_config_path(
+                project_root=get_required_qqbot_config_path(
                     "paths",
                     "arcaea_record_root",
                 ),
                 target_dir=get_arc_assets_root(),
-                maven_command=get_nonebot2_config_value("paths", "arcaea_record_maven", ""),
-                java_home=get_nonebot2_config_value("paths", "arcaea_record_java_home", ""),
+                maven_command=get_qqbot_config_value("paths", "arcaea_record_maven", ""),
+                java_home=get_qqbot_config_value("paths", "arcaea_record_java_home", ""),
             ),
-            timezone_name=get_nonebot2_config_value("bot", "timezone", "Asia/Shanghai"),
+            timezone_name=get_qqbot_config_value("bot", "timezone", "Asia/Shanghai"),
         )
     return plugin._arc_apk_update_manager
 
 
 def get_arc_guess_service():
-    ensure_nonebot2_services_path()
-    from qqbot.features.arc.guess_service import ArcGuessService
+    from .legacy_services.arc.guess_service import ArcGuessService
 
-    data_root = get_nonebot2_data_root()
+    data_root = get_qqbot_runtime_root()
     return ArcGuessService(
         assets_root=get_arc_assets_root(),
         alias_cache_path=data_root / "data" / "arc" / "guess_aliases.json",
@@ -2299,24 +2336,23 @@ def build_arc_guess_event_result(event: AstrMessageEvent, result):
 
 
 def get_arc_assets_root() -> Path:
-    raw = get_nonebot2_config_value("paths", "arc_assets_root", "")
+    raw = get_qqbot_config_value("paths", "arc_assets_root", "")
     if raw:
         return Path(raw)
     return get_workspace_root() / "data" / "arc"
 
 
-def get_required_nonebot2_config_path(section: str, key: str) -> Path:
-    raw = get_nonebot2_config_value(section, key, "").strip()
+def get_required_qqbot_config_path(section: str, key: str) -> Path:
+    raw = get_qqbot_config_value(section, key, "").strip()
     if not raw:
-        raise RuntimeError(f"缺少 NoneBot2 配置 {section}.{key}")
+        raise RuntimeError(f"缺少 AstrBot 迁移配置 {section}.{key}")
     return Path(raw)
 
 
 def render_shapez_command(command: str, argument: str) -> ShapezRenderResult:
-    ensure_nonebot2_services_path()
-    from qqbot.features.shapez.service import render_shape_chart, render_shape_code, render_shape_path
+    from .legacy_services.shapez.service import render_shape_chart, render_shape_code, render_shape_path
 
-    data_root = get_nonebot2_data_root()
+    data_root = get_qqbot_runtime_root()
     if command in {"path", "path1", "path2"}:
         tree, output, path_text = render_shape_path(data_root, argument)
         return ShapezRenderResult(
@@ -2334,10 +2370,9 @@ def render_shapez_command(command: str, argument: str) -> ShapezRenderResult:
 
 
 def handle_lolicon_admin_command(group_id: int, text: str) -> str:
-    ensure_nonebot2_services_path()
-    from qqbot.services.settings_store import SettingsStore
+    from .legacy_services.settings_store import SettingsStore
 
-    store = SettingsStore(get_nonebot2_data_root(), get_author_qq())
+    store = SettingsStore(get_qqbot_runtime_root(), get_author_qq())
     group_r18, show_image = store.get_lolicon_config(group_id)
     if text == "开群色图":
         store.set_lolicon_config(group_id, True, show_image)
@@ -2355,14 +2390,13 @@ def handle_lolicon_admin_command(group_id: int, text: str) -> str:
 
 
 def build_lolicon_results(text: str, is_private: bool, group_id: int = 0) -> list[LoliconRenderResult]:
-    ensure_nonebot2_services_path()
-    from qqbot.features.lolicon.service import (
+    from .legacy_services.lolicon.service import (
         LoliconImageStore,
         LoliconMode,
         fetch_lolicon_items,
         parse_lolicon_command,
     )
-    from qqbot.services.settings_store import SettingsStore
+    from .legacy_services.settings_store import SettingsStore
 
     command = parse_lolicon_command(text)
     if command is None:
@@ -2370,7 +2404,7 @@ def build_lolicon_results(text: str, is_private: bool, group_id: int = 0) -> lis
     show_image = True
     if not is_private:
         group_r18, show_image = SettingsStore(
-            get_nonebot2_data_root(),
+            get_qqbot_runtime_root(),
             get_author_qq(),
         ).get_lolicon_config(group_id)
         if command.mode != LoliconMode.NON_R18 and not group_r18:
@@ -2388,7 +2422,7 @@ def build_lolicon_results(text: str, is_private: bool, group_id: int = 0) -> lis
                 suffix="没有找到符合你要求的图片呢QAQ\n尝试减少一些tag吧！",
             )
         ]
-    store = LoliconImageStore(get_nonebot2_data_root())
+    store = LoliconImageStore(get_qqbot_runtime_root())
     results: list[LoliconRenderResult] = []
     for index, item in enumerate(items, start=1):
         prepared = store.prepare_item(item)
@@ -2412,7 +2446,7 @@ def build_lolicon_results(text: str, is_private: bool, group_id: int = 0) -> lis
 
 
 def get_author_qq() -> int:
-    raw = get_nonebot2_config_value("bot", "author_qq", OWNER_QQ)
+    raw = get_qqbot_config_value("bot", "author_qq", OWNER_QQ)
     try:
         return int(raw)
     except ValueError:
@@ -2420,10 +2454,9 @@ def get_author_qq() -> int:
 
 
 def handle_kun_command(event: AstrMessageEvent) -> str | None:
-    ensure_nonebot2_services_path()
-    from qqbot.features.kun.service import KunService
+    from .legacy_services.kun.service import KunService
 
-    service = KunService(get_nonebot2_data_root() / "data" / "kun" / "users.json")
+    service = KunService(get_qqbot_runtime_root() / "data" / "kun" / "users.json")
     at_ids = [int(segment.qq) for segment in event.get_messages() if isinstance(segment, At) and str(segment.qq).isdigit()]
     return service.handle_command(
         event.get_message_str().strip(),
@@ -2438,12 +2471,11 @@ def handle_kun_command(event: AstrMessageEvent) -> str | None:
 
 
 def handle_sakura_command(event: AstrMessageEvent) -> str | None:
-    ensure_nonebot2_services_path()
-    from qqbot.features.sakura.service import SakuraService
+    from .legacy_services.sakura.service import SakuraService
 
     text = event.get_message_str().strip()
     user_id = int(event.get_sender_id())
-    service = SakuraService(get_nonebot2_data_root() / "data" / "sakura" / "players.json")
+    service = SakuraService(get_qqbot_runtime_root() / "data" / "sakura" / "players.json")
     player = service.get_player(user_id)
 
     if text == "落樱之都":
@@ -2485,13 +2517,6 @@ def handle_sakura_command(event: AstrMessageEvent) -> str | None:
     return None
 
 
-def ensure_nonebot2_services_path() -> None:
-    service_root = get_workspace_root() / "nonebot2" / "src"
-    service_root_text = str(service_root)
-    if service_root_text not in sys.path:
-        sys.path.insert(0, service_root_text)
-
-
 def get_workspace_root() -> Path:
     astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
     if astrbot_root:
@@ -2499,19 +2524,27 @@ def get_workspace_root() -> Path:
     return Path.cwd().resolve()
 
 
-def get_nonebot2_data_root() -> Path:
-    return get_workspace_root() / "data" / "nonebot2" / "run"
+def get_astrbot_data_root() -> Path:
+    astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
+    if astrbot_root:
+        return Path(astrbot_root).resolve() / "data"
+    return get_workspace_root() / "data" / "astrbot" / "data"
+
+
+def get_qqbot_runtime_root() -> Path:
+    return get_astrbot_data_root() / "plugin_data" / "qqbot_features_runtime"
+
+
+def get_qqbot_config_root() -> Path:
+    return get_astrbot_data_root() / "plugin_data" / "qqbot_features_config"
 
 
 def get_menu_image_cache_root() -> Path:
-    astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
-    if astrbot_root:
-        return Path(astrbot_root).resolve() / "data" / "plugin_data" / "qqbot_menu"
-    return get_workspace_root() / "data" / "astrbot" / "data" / "plugin_data" / "qqbot_menu"
+    return get_astrbot_data_root() / "plugin_data" / "qqbot_menu"
 
 
-def get_nonebot2_config_value(section: str, key: str, default: str = "") -> str:
-    config = load_nonebot2_config()
+def get_qqbot_config_value(section: str, key: str, default: str = "") -> str:
+    config = load_qqbot_migrated_config()
     raw_section = config.get(section, {})
     if not isinstance(raw_section, dict):
         return default
@@ -2521,8 +2554,8 @@ def get_nonebot2_config_value(section: str, key: str, default: str = "") -> str:
     return str(value)
 
 
-def load_nonebot2_config() -> dict:
-    config_path = get_workspace_root() / "data" / "nonebot2" / "config" / "qqbot.toml"
+def load_qqbot_migrated_config() -> dict:
+    config_path = get_qqbot_config_root() / "qqbot.toml"
     if not config_path.is_file():
         return {}
     return tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -2609,11 +2642,7 @@ def load_factorio_credentials() -> FactorioCredentials:
 
 
 def load_workspace_env_values() -> dict[str, str]:
-    astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
-    if not astrbot_root:
-        return {}
-    workspace_root = Path(astrbot_root).resolve().parents[1]
-    env_path = workspace_root / "data" / "nonebot2" / "config" / ".env"
+    env_path = get_qqbot_config_root() / ".env"
     if not env_path.is_file():
         return {}
     values: dict[str, str] = {}

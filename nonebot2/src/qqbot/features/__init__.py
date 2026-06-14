@@ -1,2 +1,0 @@
-"""Feature-owned application modules."""
-

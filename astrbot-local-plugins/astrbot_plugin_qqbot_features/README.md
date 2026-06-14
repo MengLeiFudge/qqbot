@@ -4,7 +4,7 @@
 
 ## 插件用途
 
-本插件承接从 NoneBot2 迁移到 AstrBot 的固定功能入口，覆盖群务、菜单、生图、美图、复读、戳一戳、养鲲、落樱之都、Arcaea、Factorio 和异形工厂。
+本插件是 AstrBot 当前固定功能入口，覆盖群务、菜单、生图、美图、复读、戳一戳、养鲲、落樱之都、Arcaea、Factorio 和异形工厂。
 
 普通聊天不在这里硬编码回复。没有命中明确命令、游戏会话答案、协议事件或本地硬安全提醒时，消息应交给 AstrBot LLM 链路。
 
@@ -57,7 +57,7 @@
   - 可配置一个或多个提醒群号；5h 用量首次跨过 80%、90%、95% 时自动提醒，回落到阈值以下后才会再次触发同一阈值。
   - 如果 Sub2API 只返回一个匹配账号，机器人只返回这一条；如果返回多个匹配账号，机器人按接口顺序逐个列出。
 - `来点美图` / `色图` / `混合`
-  - 调用 Lolicon 图片能力，复用 bot1 缓存和群配置。
+  - 调用 Lolicon 图片能力，使用 AstrBot 迁移后的缓存和群配置。
 - `开群色图` / `关群色图`
   - 作者限定，控制当前群 R18 权限。
 - `开图片显示` / `关图片显示`
@@ -119,6 +119,14 @@
   - 获取 Factorio Space Age Windows 安装包下载链接。
   - 需要本机配置 Factorio 凭据。
 
+## 源码知识兜底
+
+- LLM 请求前按当前问题检索只读源码树，临时注入少量证据片段；不依赖 AstrBot 原生知识库或 Embedding。
+- 默认领域覆盖 DSPCore、万物分馏、MLJ_DSPmods 辅助模组/工具、星环、创世之书、shapez 和 Factorio。
+- `dsp-mod-tools` 辅助模组/工具域默认覆盖 SaveDataExporter、UXAEnhance、AfterBuildEvent、GetDspData、VanillaCurveSim 和 UXAssist。
+- 群号只作为默认领域偏置；当问题包含精确模组名、工具名、目录名或机制词时，会跨默认群域检索对应源码根。
+- 运行态配置里的 `source_knowledge_max_results`、`source_knowledge_max_chars`、`source_knowledge_max_file_bytes` 如果低于插件有效下限，会自动提升到能覆盖大号 `data/strings.json` 说明文件的范围。
+
 ## 异形工厂
 
 - `i <短代码>` / `view <短代码>`
@@ -168,8 +176,8 @@
 
 ## 数据与安全边界
 
-- 复用 `data\nonebot2\run` 的迁移期存档，作为历史数据来源。
-- 群聊记录导出只读取公开群上下文 `data\nonebot2\run\ai\group_context\<群号>.json`，只写固定安全目录，不接受用户传入路径。
+- 使用 `data\astrbot\data\plugin_data\qqbot_features_runtime` 作为游戏、Arcaea、公开群上下文、RightCodes 积分和本地 artifact 发布状态目录。
+- 群聊记录导出只读取公开群上下文 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\<群号>.json`，只写固定安全目录，不接受用户传入路径。
 - 不提交运行态数据、QQ 登录态、token、数据库或日志。
-- RightCodes API Key 直接填写在本插件配置字段 `api_key`，不写入插件源码，也不再读取 NoneBot2 `.env`。
+- RightCodes API Key 直接填写在本插件配置字段 `api_key`，不写入插件源码，也不再读取旧 `.env`。
 - Sub2API Admin API Key 直接填写在本插件运行态配置字段 `sub2api_admin_api_key`，不写入插件源码、示例配置、群消息或日志。

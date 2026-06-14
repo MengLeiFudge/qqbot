@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import subprocess
-import sys
 from typing import Any
 
 from aiohttp import web
@@ -107,8 +106,7 @@ class AstrBotPlatformOneBotApi:
 
 
 async def publish_local_artifact_payload(payload: dict[str, Any], bot: AstrBotPlatformOneBotApi) -> dict[str, object]:
-    ensure_nonebot2_services_path()
-    from qqbot.features.artifacts.publish_service import (
+    from .legacy_services.artifacts.publish_service import (
         LocalArtifactPublishContext,
         publish_local_artifacts,
     )
@@ -132,7 +130,7 @@ async def publish_local_artifact_payload(payload: dict[str, Any], bot: AstrBotPl
         commit_detail=str(payload.get("commit_detail") or "").strip(),
     )
     try:
-        result = await publish_local_artifacts(bot, files, context, data_root=get_nonebot2_data_root())
+        result = await publish_local_artifacts(bot, files, context, data_root=get_qqbot_runtime_root())
     except ValueError as exc:
         raise HttpError(400, str(exc)) from exc
     return {
@@ -144,8 +142,7 @@ async def publish_local_artifact_payload(payload: dict[str, Any], bot: AstrBotPl
 
 
 def _build_local_artifact_publish_file(payload: dict[str, Any], repo_path: Path):
-    ensure_nonebot2_services_path()
-    from qqbot.features.artifacts.publish_service import LocalArtifactPublishFile
+    from .legacy_services.artifacts.publish_service import LocalArtifactPublishFile
 
     if not isinstance(payload, dict):
         raise HttpError(400, "Invalid artifact file payload.")
@@ -171,8 +168,7 @@ def _build_local_artifact_publish_file(payload: dict[str, Any], repo_path: Path)
 
 
 def _validate_generic_local_artifact_path(raw_path: str, repo_path: Path) -> Path:
-    ensure_nonebot2_services_path()
-    from qqbot.features.artifacts.publish_service import normalize_local_path
+    from .legacy_services.artifacts.publish_service import normalize_local_path
 
     artifact = normalize_local_path(raw_path)
     if artifact.suffix.lower() != ".zip":
@@ -187,8 +183,7 @@ def _validate_generic_local_artifact_path(raw_path: str, repo_path: Path) -> Pat
 
 
 def _infer_publish_repo_path(files: list[Any]) -> Path:
-    ensure_nonebot2_services_path()
-    from qqbot.features.artifacts.publish_service import normalize_local_path
+    from .legacy_services.artifacts.publish_service import normalize_local_path
 
     first = files[0] if isinstance(files[0], dict) else {}
     first_path = normalize_local_path(str(first.get("path") or ""))
@@ -278,13 +273,6 @@ def _read_git_output(repo_path: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def ensure_nonebot2_services_path() -> None:
-    service_root = get_workspace_root() / "nonebot2" / "src"
-    service_root_text = str(service_root)
-    if service_root_text not in sys.path:
-        sys.path.insert(0, service_root_text)
-
-
 def get_workspace_root() -> Path:
     astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
     if astrbot_root:
@@ -292,5 +280,12 @@ def get_workspace_root() -> Path:
     return Path.cwd().resolve()
 
 
-def get_nonebot2_data_root() -> Path:
-    return get_workspace_root() / "data" / "nonebot2" / "run"
+def get_astrbot_data_root() -> Path:
+    astrbot_root = os.environ.get("ASTRBOT_ROOT", "").strip()
+    if astrbot_root:
+        return Path(astrbot_root).resolve() / "data"
+    return get_workspace_root() / "data" / "astrbot" / "data"
+
+
+def get_qqbot_runtime_root() -> Path:
+    return get_astrbot_data_root() / "plugin_data" / "qqbot_features_runtime"
