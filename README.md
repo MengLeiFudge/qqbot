@@ -15,7 +15,8 @@
 - `data/astrbot/data/`：AstrBot 的 `cmd_config.json`、`data_v4.db`、插件和插件数据。
 - `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的游戏、Arcaea、公开群上下文、RightCodes 积分和本地 artifact 发布状态。
 - `data/astrbot/data/plugin_data/qqbot_features_config/`：从旧 qqbot 迁入的 `.env` 和 `qqbot.toml`，供 AstrBot 本地插件读取必要本机配置。
-- `data/memes/mlj_pack/`：AstrBot 使用的本地表情包运行态副本和 `index.json`；敏感、涩涩、待复核类别默认不自动发送。
+- `data/astrbot/data/plugin_data/meme_manager/`：AstrBot 本地表情包运行态事实源，包含 `memes/` 图片目录、`meme_index.json` 单图语义索引和兼容的 `memes_data.json` 类别描述。
+- `data/memes/mlj_pack/`：旧本地表情包整理结果，仅作为迁移来源保留；不再作为日常运行事实源。
 - `data/napcat/`：NapCat 更新下载、旧包备份、账号配置、登录态和日志。
 
 可提交配置模板只放在：
@@ -59,7 +60,7 @@ AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参
 
 普通聊天文本不会因为 `在吗`、`111`、`真的吗`、`回复慢`、`低信息` 或测试探活这类启发式在本地插件里直接生成固定回复；没有命中明确命令、游戏会话答案、协议事件处理或本地硬安全提醒时，统一交给 LLM 链路。
 
-本地表情包由 `data\memes\mlj_pack\index.json` 描述每张图的分类、用途和禁用场景。`scripts\sync-meme-pack.py` 会把可自动发送类别同步到 AstrBot `meme_manager` 运行态目录，并把轻松日常、玩梗、吐槽、撒娇、短情绪回复调成优先使用表情；短情绪闲聊允许只发一张表情不带文字，技术、报错、安全、群管理和长解释场景不自动附图。
+本地表情包统一由 AstrBot 本地插件 `meme_manager` 管理。插件源码在 `astrbot-local-plugins/meme_manager/`，启动前同步到 `data\astrbot\data\plugins\meme_manager\`；运行态图片和单图语义索引以 `data\astrbot\data\plugin_data\meme_manager\memes\` 与 `meme_index.json` 为准。私聊发送 `表情管理 开启管理后台` 后，可在 WebUI 中预览、搜索、移动分类、编辑单图说明/关键词/适用场景/禁用场景和自动发送开关。旧 `data\memes\mlj_pack\index.json` 只作为迁移来源，可用 `scripts\migrate-meme-pack-to-manager.py` 或兼容命令 `scripts\sync-meme-pack.py` 复制/合并进 `meme_manager`，不会删除旧目录。自动发送仍遵守 `auto_send_enabled=false`：敏感支付、涩涩慎用、待复核类别不得自动发送；轻松日常、玩梗、吐槽、撒娇和短情绪回复优先使用表情，技术、报错、安全、群管理和长解释场景不自动附图。
 
 ## 启动
 

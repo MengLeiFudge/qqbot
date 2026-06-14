@@ -23,6 +23,8 @@ $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
 $LocalPluginRoot = Join-Path $WorkspaceRoot "astrbot-local-plugins"
 $RuntimePluginRoot = Join-Path $AstrRoot "data\plugins"
 $ManagedLocalPluginPrefixes = @("astrbot_plugin_")
+$ManagedLocalPluginNames = @("meme_manager")
+$LocalPluginCopyExcludes = @("__pycache__", "*.pyc", ".pytest_cache")
 $PreservedRuntimePluginNames = @(
     "astrbot_plugin_hapi_connector"
 )
@@ -246,7 +248,7 @@ if (Test-Path $LocalPluginRoot) {
         if (Test-Path $target) {
             Remove-Item -Path $target -Recurse -Force
         }
-        Copy-Item -Path $_.FullName -Destination $RuntimePluginRoot -Recurse -Force
+        Copy-Item -Path $_.FullName -Destination $RuntimePluginRoot -Recurse -Force -Exclude $LocalPluginCopyExcludes
     }
     Get-ChildItem -Path $RuntimePluginRoot -Directory | ForEach-Object {
         $runtimeName = $_.Name
@@ -256,6 +258,9 @@ if (Test-Path $LocalPluginRoot) {
                 $isManaged = $true
                 break
             }
+        }
+        if (-not $isManaged -and $ManagedLocalPluginNames -contains $runtimeName) {
+            $isManaged = $true
         }
         if (-not $isManaged) {
             return
