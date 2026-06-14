@@ -14,12 +14,15 @@ from astrbot_plugin_topic_concentration.logic import (
     TopicWindowMessage,
     active_reply_scope_key,
     build_active_reply_decision_prompt,
+    build_batch_active_reply_decision_prompt,
     chat_with_current_provider,
     has_strong_topic_signal,
     is_recent_duplicate_observation,
+    is_effective_batch_message,
     looks_like_direct_bot_call,
     looks_like_qqbot_fixed_command,
     looks_like_low_information,
+    should_run_batch_decision,
     should_skip_unresolved_media_active_reply,
     should_force_active_reply_for_named_call,
     release_active_reply_inflight,
@@ -201,6 +204,113 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         )
 
         self.assertTrue(should_consider_active_window(window, named_call=True))
+
+    def test_batch_decision_waits_for_time_and_message_threshold(self) -> None:
+        window = deque(
+            TopicWindowMessage(
+                text=f"图灵完备线路怎么接第{i}句",
+                user_id=str(1000 + i),
+                at_bot=False,
+                reply_bot=False,
+                created_at=float(i),
+            )
+            for i in range(20)
+        )
+
+        young = should_run_batch_decision(window, now=120.0, last_decision_at=0.0)
+        ready = should_run_batch_decision(window, now=360.0, last_decision_at=0.0)
+        throttled = should_run_batch_decision(window, now=500.0, last_decision_at=300.0)
+
+        self.assertFalse(young.should_run)
+        self.assertEqual(young.reason, "batch_window_too_young")
+        self.assertTrue(ready.should_run)
+        self.assertEqual(ready.reason, "timed_message_threshold")
+        self.assertFalse(throttled.should_run)
+        self.assertEqual(throttled.reason, "batch_interval")
+
+    def test_batch_decision_can_run_early_for_many_effective_messages(self) -> None:
+        window = deque(
+            TopicWindowMessage(
+                text=f"分馏塔配方讨论第{i}句",
+                user_id=str(1000 + i % 5),
+                at_bot=False,
+                reply_bot=False,
+                created_at=float(i),
+            )
+            for i in range(50)
+        )
+
+        result = should_run_batch_decision(window, now=80.0, last_decision_at=0.0)
+        throttled = should_run_batch_decision(window, now=80.0, last_decision_at=70.0)
+
+        self.assertTrue(result.should_run)
+        self.assertEqual(result.reason, "early_message_threshold")
+        self.assertEqual(result.effective_count, 50)
+        self.assertFalse(throttled.should_run)
+        self.assertEqual(throttled.reason, "batch_interval")
+
+    def test_batch_effective_messages_filter_low_info_media_and_direct_targets(self) -> None:
+        effective = TopicWindowMessage(
+            text="ProjectGenesis 氯化钠堵了还在生产",
+            user_id="10001",
+            at_bot=False,
+            reply_bot=False,
+            created_at=1.0,
+        )
+        low_info = TopicWindowMessage(
+            text="？",
+            user_id="10002",
+            at_bot=False,
+            reply_bot=False,
+            created_at=2.0,
+        )
+        media = TopicWindowMessage(
+            text="这个怎么做",
+            user_id="10003",
+            at_bot=False,
+            reply_bot=False,
+            unresolved_media_context=True,
+            created_at=3.0,
+        )
+        direct = TopicWindowMessage(
+            text="帮我看一下",
+            user_id="10004",
+            at_bot=True,
+            reply_bot=False,
+            created_at=4.0,
+        )
+
+        self.assertTrue(is_effective_batch_message(effective))
+        self.assertFalse(is_effective_batch_message(low_info))
+        self.assertFalse(is_effective_batch_message(media))
+        self.assertFalse(is_effective_batch_message(direct))
+
+    def test_batch_prompt_asks_for_topic_classification(self) -> None:
+        window = deque(
+            [
+                TopicWindowMessage(
+                    text="图灵完备这个线路是不是少了门",
+                    user_id="10001",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=1.0,
+                ),
+                TopicWindowMessage(
+                    text="我也卡在这个门上",
+                    user_id="10002",
+                    at_bot=False,
+                    reply_bot=False,
+                    created_at=2.0,
+                ),
+            ]
+        )
+
+        prompt = build_batch_active_reply_decision_prompt(window)
+
+        self.assertIn("先归类话题", prompt)
+        self.assertIn("effective_message_count=2", prompt)
+        self.assertIn("图灵完备这个线路是不是少了门", prompt)
+        self.assertIn("topic_key", prompt)
 
     def test_direct_named_call_forces_active_reply_without_decision_provider(self) -> None:
         window = deque(

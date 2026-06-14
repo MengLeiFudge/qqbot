@@ -19,6 +19,7 @@ from .logic import TopicInterest
 from .logic import TopicRecordResult
 from .logic import TopicWindowMessage
 from .logic import build_active_reply_decision_prompt as _build_active_reply_decision_prompt
+from .logic import build_batch_active_reply_decision_prompt as _build_batch_active_reply_decision_prompt
 from .logic import release_active_reply_inflight as _release_active_reply_inflight
 from .logic import active_reply_scope_key as _active_reply_scope_key
 from .logic import chat_with_current_provider as _chat_with_current_decision_provider
@@ -26,6 +27,7 @@ from .logic import compact_text as _compact
 from .logic import is_recent_duplicate_observation as _is_recent_duplicate_observation
 from .logic import looks_like_qqbot_fixed_command
 from .logic import looks_like_direct_bot_call
+from .logic import should_run_batch_decision as _should_run_batch_decision
 from .logic import should_skip_unresolved_media_active_reply as _should_skip_unresolved_media_active_reply
 from .logic import should_force_active_reply_for_named_call as _should_force_named_call_reply
 from .logic import should_consider_active_window as _should_consider_active_window
@@ -46,8 +48,8 @@ except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<
     from data.plugins.astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
 
 
-WINDOW_SECONDS = 150.0
-MAX_WINDOW_MESSAGES = 10
+WINDOW_SECONDS = 600.0
+MAX_WINDOW_MESSAGES = 80
 MAX_ACTIVE_HISTORY_MESSAGES = 80
 MAX_ACTIVE_HISTORY_CHARS = 6000
 COOLDOWN_SECONDS = 480.0
@@ -69,6 +71,7 @@ _COOLDOWNS: dict[tuple[str, str], float] = {}
 _GROUP_COOLDOWNS: dict[str, float] = {}
 _INTERESTS: dict[str, tuple[TopicInterest, float]] = {}
 _ACTIVE_REPLY_INFLIGHT: dict[str, float] = {}
+_BATCH_DECISION_AT: dict[str, float] = {}
 LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
 LLM_WORKER_CLAIM_KEY_EXTRA = "_qqbot_twin_llm_worker_claim_key"
 LLM_WORKER_BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
@@ -79,7 +82,7 @@ DELEGATED_COMMENT_EXTRA = "_qqbot_twin_delegated_comment"
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖普通群聊主动接话门控。",
-    "0.3.10",
+    "0.3.11",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -300,6 +303,18 @@ class TopicConcentrationPlugin(Star):
                     f"group={event.get_group_id()} reason=unresolved_media_context"
                 )
                 return False
+            batch_gate = _should_run_batch_decision(
+                record.window,
+                now=now,
+                last_decision_at=_BATCH_DECISION_AT.get(scope_key, 0.0),
+            )
+            if not batch_gate.should_run:
+                logger.info(
+                    "[TopicConcentration] skip active reply: "
+                    f"group={event.get_group_id()} reason={batch_gate.reason} "
+                    f"effective_messages={batch_gate.effective_count}"
+                )
+                return False
             group_cooldown_until = _GROUP_COOLDOWNS.get(scope_key, 0.0)
             if now < group_cooldown_until:
                 logger.info(
@@ -315,11 +330,13 @@ class TopicConcentrationPlugin(Star):
                 return False
             started = time.monotonic()
             logger.info(
-                "[TopicConcentration] active reply decision started: "
-                f"group={event.get_group_id()} scope={scope_key}"
+                "[TopicConcentration] batch active reply decision started: "
+                f"group={event.get_group_id()} scope={scope_key} "
+                f"reason={batch_gate.reason} effective_messages={batch_gate.effective_count}"
             )
             try:
                 decision = await _decide_with_ai(group_context, event, record.window, scope_key=scope_key)
+                _BATCH_DECISION_AT[scope_key] = now
                 elapsed = time.monotonic() - started
                 if decision is None:
                     logger.info(
@@ -445,6 +462,12 @@ def _build_decision_prompt(
     active_interest: TopicInterest | None,
 ) -> str:
     request_context = build_current_request_context(event) if event is not None else None
+    if request_context is not None and not request_context.named_call and not request_context.reply_texts:
+        return _build_batch_active_reply_decision_prompt(
+            window,
+            history_lines=_active_history_lines(group_context, event),
+            active_interest=active_interest,
+        )
     latest_text = request_context.current_text if request_context is not None else (window[-1].text if window else "")
     return _build_active_reply_decision_prompt(
         window,

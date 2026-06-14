@@ -56,6 +56,58 @@ class TopicDecision:
     max_length: str
 
 
+@dataclass(frozen=True, slots=True)
+class BatchGateState:
+    should_run: bool
+    reason: str
+    effective_count: int
+
+
+MIN_BATCH_DECISION_SECONDS = 300.0
+MIN_BATCH_DECISION_MESSAGES = 20
+EARLY_BATCH_DECISION_MESSAGES = 50
+MAX_BATCH_DECISION_MESSAGES = 80
+
+
+def should_run_batch_decision(
+    window: deque[TopicWindowMessage],
+    *,
+    now: float,
+    last_decision_at: float = 0.0,
+    min_seconds: float = MIN_BATCH_DECISION_SECONDS,
+    min_messages: int = MIN_BATCH_DECISION_MESSAGES,
+    early_messages: int = EARLY_BATCH_DECISION_MESSAGES,
+) -> BatchGateState:
+    effective_messages = [message for message in window if is_effective_batch_message(message)]
+    count = len(effective_messages)
+    if count <= 0:
+        return BatchGateState(False, "no_effective_messages", 0)
+    if last_decision_at > 0 and now - last_decision_at < min_seconds:
+        return BatchGateState(False, "batch_interval", count)
+    if count >= early_messages:
+        return BatchGateState(True, "early_message_threshold", count)
+    if count < min_messages:
+        return BatchGateState(False, "not_enough_messages", count)
+    if last_decision_at <= 0 and effective_messages and now - effective_messages[0].created_at < min_seconds:
+        return BatchGateState(False, "batch_window_too_young", count)
+    return BatchGateState(True, "timed_message_threshold", count)
+
+
+def is_effective_batch_message(message: TopicWindowMessage) -> bool:
+    if message.at_bot or message.reply_bot:
+        return False
+    if message.unresolved_media_context:
+        return False
+    text = str(message.text or "").strip()
+    if not compact_text(text):
+        return False
+    if looks_like_low_information(text):
+        return False
+    if looks_like_qqbot_fixed_command(text):
+        return False
+    return True
+
+
 def should_consider_active_window(
     window: deque[TopicWindowMessage],
     *,
@@ -212,6 +264,48 @@ def build_active_reply_decision_prompt(
             flags.append("reply_bot")
         flag_text = f" [{' '.join(flags)}]" if flags else ""
         lines.append(f"{index}. 用户{message.user_id}{flag_text}: {text}")
+    return "\n".join(lines)
+
+
+def build_batch_active_reply_decision_prompt(
+    window: deque[TopicWindowMessage],
+    *,
+    history_lines: list[str] | None = None,
+    active_interest: TopicInterest | None = None,
+    max_messages: int = MAX_BATCH_DECISION_MESSAGES,
+) -> str:
+    messages = [message for message in window if is_effective_batch_message(message)][-max_messages:]
+    lines = [
+        "你是 QQ 群机器人“棉花糖”的批量主动接话判定器。",
+        "你会看到一段时间内的普通群聊消息。你的任务是先归类话题，再判断是否存在值得棉花糖主动接的一条。",
+        "必须只返回 JSON，不要解释，不要输出 Markdown。",
+        "普通主动接话不追求每个问题都答；只有某个话题已经被多人持续讨论、存在明显未解决缺口，且棉花糖现在插一句不会打断群聊时，should_reply 才为 true。",
+        "不要因为棉花糖能回答就接话；如果只是可补充、可总结、可表达看法，但群友没有明显缺口，should_reply 必须为 false。",
+        "优先选择同一 topic 有多条有效消息、多个真人参与、最后 60-90 秒仍在延续的话题；如果话题已经自然结束、群友已经回答清楚、或只是在水群玩梗，should_reply 必须为 false。",
+        "如果话题依赖图片、视频、表情、卡片或转发内容，但上下文里只有占位而没有文字描述，你看不到真实内容，不能猜图中物品、升级、价格、界面或报错；should_reply 应为 false。",
+        "固定命令、扣积分、写文件、上传、群管、下载、改存档、游戏动作等副作用请求不能通过普通主动接话执行；最多提示真实指令，但通常 should_reply=false。",
+        "另一个 bot 的消息、追问另一个 bot、评价棉花糖乱接话、危机/健康安慰类话题、安全合规引导类话题，在没有明确 @ 或追问棉花糖时都应 false。",
+        "如果最终放行回复，回复时不要反问、不要追问用户、不要以“你要的话/如果你愿意/你把具体名字发我/我可以再帮你”收尾。",
+        "输出字段：should_reply(boolean), topic_key(string), topic_type(string), reason(string), reply_style(casual|topic|technical|safety), max_length(short|normal|detail)。",
+        "topic_key 必须是你选择的稳定短话题名；reason 要说明为什么这个话题达到主动接话门槛，或为什么不该接。",
+        f"effective_message_count={len(messages)}",
+        f"unresolved_media_context={any(message.unresolved_media_context for message in window)}",
+    ]
+    if active_interest is not None:
+        lines.append(
+            "当前短期高兴趣话题："
+            f"topic_key={active_interest.topic_key}; "
+            f"topic_type={active_interest.topic_type}; "
+            f"reason={active_interest.reason}"
+        )
+    if history_lines:
+        lines.append("AstrBot 群聊上下文节选：")
+        lines.extend(history_lines)
+    lines.append("普通群聊批量窗口：")
+    for index, message in enumerate(messages, start=1):
+        text = message.text.strip()
+        if text:
+            lines.append(f"{index}. 用户{message.user_id}: {text}")
     return "\n".join(lines)
 
 
