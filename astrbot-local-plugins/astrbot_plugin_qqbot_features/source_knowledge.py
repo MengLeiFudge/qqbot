@@ -13,21 +13,24 @@ from typing import Iterable
 from astrbot.api import logger
 
 
-DEFAULT_MAX_RESULTS = 4
-DEFAULT_MAX_CHARS = 2600
-DEFAULT_MAX_FILES_PER_DOMAIN = 80
-DEFAULT_MAX_FILE_BYTES = 220_000
+DEFAULT_MAX_RESULTS = 6
+DEFAULT_MAX_CHARS = 4200
+DEFAULT_MAX_FILES_PER_DOMAIN = 180
+DEFAULT_MAX_FILE_BYTES = 800_000
 DEFAULT_REFRESH_SECONDS = 600
+MIN_EFFECTIVE_MAX_RESULTS = 6
+MIN_EFFECTIVE_MAX_CHARS = 4200
+MIN_EFFECTIVE_MAX_FILE_BYTES = 500_000
 MIN_SCORE = 5.0
 CONTEXT_LINES = 2
 MIN_SCAN_FILES_PER_DOMAIN = 32
 MIN_PATH_CANDIDATES_PER_ROOT = 80
 MAX_PATH_CANDIDATES_PER_ROOT = 240
 RG_TIMEOUT_SECONDS = 3.0
-MAX_RG_TERMS = 12
+MAX_RG_TERMS = 14
 RG_PRIMARY_TERM_COUNT = 5
-MAX_RG_MATCH_EVENTS = 80
-MAX_RG_UNIQUE_FILES = 12
+MAX_RG_MATCH_EVENTS = 240
+MAX_RG_UNIQUE_FILES = 80
 SUPPORTED_EXTENSIONS = {
     ".cs",
     ".lua",
@@ -118,6 +121,10 @@ BROAD_RG_TERMS = {
     "code",
     "display",
     "key",
+    "mod",
+    "mods",
+    "tool",
+    "tools",
     "shape",
     "shapes",
 }
@@ -133,6 +140,25 @@ DEFAULT_ROOTS = (
     ("fractionate-everything", "D:/project/dsp/MLJ_DSPmods/FractionateEverything/README.md"),
     ("fractionate-everything", "D:/project/dsp/MLJ_DSPmods/FractionateEverything/CHANGELOG.md"),
     ("fractionate-everything", "D:/project/dsp/MLJ_DSPmods/VanillaCurveSim/src"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/README.md"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/SaveDataExporter/README.md"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/SaveDataExporter/src"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/SaveDataExporter/SaveDataExporter.csproj"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/SaveDataExporter/Assets/manifest.json"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/UXAEnhance/README.md"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/UXAEnhance/src"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/UXAEnhance/UXAEnhance.csproj"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/UXAEnhance/Assets/manifest.json"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/AfterBuildEvent/src"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/AfterBuildEvent/AfterBuildEvent.csproj"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/GetDspData/src"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/GetDspData/GetDspData.csproj"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/GetDspData/Assets/manifest.json"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/VanillaCurveSim/src"),
+    ("dsp-mod-tools", "D:/project/dsp/MLJ_DSPmods/VanillaCurveSim/VanillaCurveSim.csproj"),
+    ("dsp-mod-tools", "D:/project/dsp/DSP_Mods/UXAssist/README.md"),
+    ("dsp-mod-tools", "D:/project/dsp/DSP_Mods/UXAssist/UXAssist.cs"),
+    ("dsp-mod-tools", "D:/project/dsp/DSP_Mods/UXAssist/UIConfigWindow.cs"),
     ("orbital-ring", "D:/project/dsp/OrbitalRing-MOD/src"),
     ("orbital-ring", "D:/project/dsp/OrbitalRing-MOD/data"),
     ("orbital-ring", "D:/project/dsp/OrbitalRing-MOD/README.md"),
@@ -182,6 +208,31 @@ DOMAIN_ALIASES = {
         "增产点数",
         "数据中心",
         "黑雾",
+    ),
+    "dsp-mod-tools": (
+        "mlj_dspmods",
+        "mlj dspmods",
+        "dsp-mod-tools",
+        "dspmodtools",
+        "辅助模组",
+        "小工具",
+        "工具模组",
+        "savedataexporter",
+        "save data exporter",
+        "存档数据导出",
+        "导出存档统计",
+        "uxaenhance",
+        "uxa enhance",
+        "uxassist enhance",
+        "uxassist",
+        "afterbuildevent",
+        "after build event",
+        "构建发布",
+        "本地发布",
+        "getdspdata",
+        "vanillacurvesim",
+        "vanilla curve sim",
+        "曲线模拟",
     ),
     "orbital-ring": (
         "星环",
@@ -235,9 +286,15 @@ SEARCH_TERM_SYNONYMS = {
     "单路锁定": ("singlelock", "single lock", "locked output"),
     "单锁": ("singlelock", "single lock", "locked output"),
     "锁定": ("lock", "locked"),
-    "三阶": ("third",),
+    "三阶": ("third", "tier 3"),
+    "三阶段": ("三阶", "third", "tier 3"),
     "二阶": ("second",),
+    "二阶段": ("二阶", "second", "tier 2"),
     "功率": ("power",),
+    "光度": ("luminosity", "power"),
+    "系数": ("coefficient", "ratio"),
+    "休谟": ("hume",),
+    "数学率": ("mathematical", "rate"),
     "配方": ("recipe", "recipes"),
     "科技": ("tech", "technology"),
     "矩阵": ("matrix", "matrices"),
@@ -254,12 +311,97 @@ SEARCH_TERM_SYNONYMS = {
     "蓝图": ("blueprint", "blueprints"),
     "品质": ("quality",),
     "异星工厂": ("factorio",),
+    "存档数据导出": ("savedataexporter", "save data exporter"),
+    "导出存档统计": ("savedataexporter", "save data exporter"),
+    "构建发布": ("afterbuildevent", "after build event"),
+    "本地发布": ("afterbuildevent", "after build event"),
 }
 SEARCH_SYNONYM_VALUES = {
     str(synonym).strip().lower()
     for synonyms in SEARCH_TERM_SYNONYMS.values()
     for synonym in synonyms
 }
+PRECISE_SEARCH_TERMS = {
+    "savedataexporter",
+    "save data exporter",
+    "uxaenhance",
+    "uxa enhance",
+    "uxassist",
+    "uxassist enhance",
+    "afterbuildevent",
+    "after build event",
+    "getdspdata",
+    "vanillacurvesim",
+    "vanilla curve sim",
+    "数学率引擎",
+    "引力系数",
+    "三阶段系数",
+}
+HIGH_VALUE_SEARCH_TERMS = set(SEARCH_TERM_SYNONYMS) | {
+    "数学率引擎",
+    "引力系数",
+    "三阶段",
+    "二阶段",
+    "休谟",
+    "系数",
+    "光度",
+    "功率",
+}
+BROAD_SCORE_TERMS = {
+    "dsp",
+    "dyson",
+    "vanilla",
+    "fe",
+    "fractionate",
+    "fractionator",
+    "orbital",
+    "orbitalring",
+    "ring",
+    "genesis",
+    "projectgenesis",
+    "shapez",
+    "factorio",
+    "mod",
+    "mods",
+    "tool",
+    "tools",
+    "源码",
+    "模组",
+}
+NOISE_SEARCH_TERMS = {
+    "是什么",
+    "是什么啊",
+    "都是什么",
+    "都是什么啊",
+    "什么啊",
+    "干什么",
+    "干什么的",
+    "不会",
+    "不会是",
+    "直接",
+    "直接加",
+    "加到",
+    "在哪",
+    "哪里",
+    "哪些",
+    "影响",
+    "东西",
+    "那个",
+    "这个",
+    "哪了",
+    "加到哪",
+    "到哪了",
+}
+NOISE_SEARCH_MARKERS = (
+    "是什么",
+    "什么啊",
+    "干什么",
+    "不会",
+    "那个",
+    "这个",
+    "哪些",
+    "东西",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,12 +464,13 @@ class SourceIndex:
         terms = build_search_terms(query)
         if not terms or not domains:
             return ()
-        rg_rows = search_with_rg(self.config, self._rg_path, terms, domains)
+        search_domains = self._expand_domains_for_query(query, terms, domains)
+        rg_rows = search_with_rg(self.config, self._rg_path, terms, search_domains)
         if rg_rows is not None:
             return rg_rows[: self.config.max_results]
-        self._ensure_loaded(domains)
+        self._ensure_loaded(search_domains)
         rows: list[SearchResult] = []
-        for domain in domains:
+        for domain in search_domains:
             domain_rows: list[SearchResult] = []
             scanned = 0
             source_paths = sorted(
@@ -371,6 +514,29 @@ class SourceIndex:
             rows.extend(domain_rows)
         rows.sort(key=lambda row: (-row.score, row.domain, row.display_path, row.line_start))
         return tuple(rows[: self.config.max_results])
+
+    def available_domains(self) -> tuple[str, ...]:
+        domains = {root.domain for root in self.config.roots if root.path.is_dir() or root.path.is_file()}
+        return tuple(sorted(domains))
+
+    def _expand_domains_for_query(
+        self,
+        query: str,
+        terms: tuple[str, ...],
+        domains: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        expanded = list(domains)
+        matched_domains = domains_matching_query(query, terms)
+        for domain in matched_domains:
+            if domain not in expanded:
+                expanded.insert(0, domain)
+        if matched_domains:
+            return tuple(dict.fromkeys(expanded))
+        if has_precise_cross_domain_terms(terms):
+            for domain in self.available_domains():
+                if domain not in expanded:
+                    expanded.append(domain)
+        return tuple(dict.fromkeys(expanded))
 
     def _ensure_loaded(self, domains: tuple[str, ...]) -> None:
         now = time.monotonic()
@@ -418,13 +584,13 @@ def load_source_knowledge_config(config=None) -> SourceKnowledgeConfig:
         max_results=clamp_int(
             get_config_value(config, "max_results", DEFAULT_MAX_RESULTS),
             default=DEFAULT_MAX_RESULTS,
-            minimum=1,
+            minimum=MIN_EFFECTIVE_MAX_RESULTS,
             maximum=8,
         ),
         max_chars=clamp_int(
             get_config_value(config, "max_chars", DEFAULT_MAX_CHARS),
             default=DEFAULT_MAX_CHARS,
-            minimum=600,
+            minimum=MIN_EFFECTIVE_MAX_CHARS,
             maximum=9000,
         ),
         max_files_per_domain=clamp_int(
@@ -436,7 +602,7 @@ def load_source_knowledge_config(config=None) -> SourceKnowledgeConfig:
         max_file_bytes=clamp_int(
             get_config_value(config, "max_file_bytes", DEFAULT_MAX_FILE_BYTES),
             default=DEFAULT_MAX_FILE_BYTES,
-            minimum=10_000,
+            minimum=MIN_EFFECTIVE_MAX_FILE_BYTES,
             maximum=2_000_000,
         ),
         refresh_seconds=clamp_int(
@@ -515,6 +681,10 @@ def normalize_domain(raw: object) -> str:
         "genesis": "project-genesis",
         "projectgenesis": "project-genesis",
         "spz": "shapez",
+        "dsp-tools": "dsp-mod-tools",
+        "dspmodtools": "dsp-mod-tools",
+        "mlj-dspmods": "dsp-mod-tools",
+        "mlj-dspmods-tools": "dsp-mod-tools",
     }
     return aliases.get(domain, domain)
 
@@ -532,13 +702,24 @@ def format_enabled_groups(enabled_groups: set[str]) -> str:
 
 
 def resolve_domains(group_id: str, query: str) -> tuple[str, ...]:
-    domains: list[str] = []
+    domains: list[str] = list(domains_matching_query(query, build_search_terms(query)))
     for domain in DOMAIN_GROUPS.get(group_id, ()):
         domains.append(domain)
+    return tuple(dict.fromkeys(domains))
+
+
+def domains_matching_query(query: str, terms: tuple[str, ...]) -> tuple[str, ...]:
     lowered = normalize_text(query)
+    term_set = set(terms)
+    domains: list[str] = []
     for domain, aliases in DOMAIN_ALIASES.items():
-        if any(normalize_text(alias) in lowered for alias in aliases):
-            domains.append(domain)
+        for alias in aliases:
+            normalized_alias = normalize_text(alias)
+            if not normalized_alias:
+                continue
+            if normalized_alias in lowered or normalized_alias in term_set:
+                domains.append(domain)
+                break
     return tuple(dict.fromkeys(domains))
 
 
@@ -546,27 +727,66 @@ def build_search_terms(query: str) -> tuple[str, ...]:
     lowered = normalize_text(query)
     terms: list[str] = []
     for aliases in DOMAIN_ALIASES.values():
-        normalized_aliases = tuple(normalize_text(alias) for alias in aliases)
-        if any(alias and alias in lowered for alias in normalized_aliases):
-            terms.extend(normalized_aliases)
+        for alias in aliases:
+            normalized_alias = normalize_text(alias)
+            if normalized_alias and normalized_alias in lowered:
+                terms.append(normalized_alias)
     terms.extend(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{1,}|[0-9]+", lowered))
     for seq in re.findall(r"[\u4e00-\u9fff]{2,}", query):
-        if seq in CJK_STOP_TERMS:
+        if is_noise_search_term(seq):
             continue
         if len(seq) <= 10:
             terms.append(seq)
         terms.extend(cjk_ngrams(seq, 2, 4))
     for key, synonyms in SEARCH_TERM_SYNONYMS.items():
         if normalize_text(key) in lowered or key in terms:
+            terms.append(key)
             terms.extend(synonyms)
     clean_terms: list[str] = []
     for term in terms:
         normalized = normalize_text(term)
-        if len(normalized) < 2 or normalized in CJK_STOP_TERMS:
+        if len(normalized) < 2 or is_noise_search_term(normalized):
             continue
         clean_terms.append(normalized)
-    clean_terms.sort(key=lambda item: (-len(item), item))
-    return tuple(dict.fromkeys(clean_terms))[:36]
+    clean_terms.sort(key=search_term_sort_key)
+    return tuple(dict.fromkeys(clean_terms))[:48]
+
+
+def search_term_sort_key(term: str) -> tuple[int, int, int, str]:
+    if is_precise_search_term(term):
+        return (0, -len(term), 0, term)
+    if term in HIGH_VALUE_SEARCH_TERMS:
+        return (1, -len(term), 0, term)
+    if term in SEARCH_SYNONYM_VALUES:
+        return (3, -len(term), 0, term)
+    if contains_cjk(term):
+        length = len(term)
+        if 2 <= length <= 6:
+            return (2, -length, 0, term)
+        return (5, length, 0, term)
+    if term in BROAD_SCORE_TERMS:
+        return (8, -len(term), 0, term)
+    return (4, -len(term), 0, term)
+
+
+def is_noise_search_term(term: str) -> bool:
+    normalized = normalize_text(term)
+    if normalized in CJK_STOP_TERMS or normalized in NOISE_SEARCH_TERMS:
+        return True
+    return any(marker in normalized for marker in NOISE_SEARCH_MARKERS)
+
+
+def has_precise_cross_domain_terms(terms: tuple[str, ...]) -> bool:
+    return any(is_precise_search_term(term) for term in terms)
+
+
+def is_precise_search_term(term: str) -> bool:
+    normalized = normalize_text(term)
+    if normalized in PRECISE_SEARCH_TERMS:
+        return True
+    if normalized in SEARCH_SYNONYM_VALUES:
+        return False
+    return False
 
 
 def cjk_ngrams(text: str, minimum: int, maximum: int) -> Iterable[str]:
@@ -623,7 +843,8 @@ def search_with_rg(
             domain_rows = parse_rg_matches(domain, completed.stdout, terms, config.max_file_bytes)
             if domain_rows:
                 rows.extend(domain_rows)
-                break
+                if len(rows) >= config.max_results * 3:
+                    break
     rows = dedupe_results(rows)
     rows.sort(key=lambda row: (-row.score, row.domain, row.display_path, row.line_start))
     return tuple(rows[: config.max_results])
@@ -654,8 +875,8 @@ def rg_term_batches(terms: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
 
 def rg_term_sort_key(term: str) -> tuple[int, int, int, str]:
     if term in BROAD_RG_TERMS:
-        return (4, -len(term), 0, term)
-    if term in SEARCH_SYNONYM_VALUES:
+        return (8, -len(term), 0, term)
+    if is_precise_search_term(term):
         return (0, -len(term), 0, term)
     if term in SEARCH_TERM_SYNONYMS:
         return (1, -len(term), 0, term)
@@ -665,8 +886,10 @@ def rg_term_sort_key(term: str) -> tuple[int, int, int, str]:
             return (2, -length, 0, term)
         if length <= 6:
             return (3, -length, 0, term)
-        return (5, length, 0, term)
-    return (6, -len(term), 0, term)
+        return (6, length, 0, term)
+    if term in SEARCH_SYNONYM_VALUES:
+        return (5, -len(term), 0, term)
+    return (7, -len(term), 0, term)
 
 
 def is_rg_noise_term(term: str) -> bool:
@@ -686,7 +909,25 @@ def existing_roots_for_domain(config: SourceKnowledgeConfig, domain: str) -> tup
     for root in config.roots:
         if root.domain == domain and (root.path.is_dir() or root.path.is_file()):
             roots.append(root.path)
+    roots.sort(key=root_search_priority)
     return tuple(roots)
+
+
+def root_search_priority(path: Path) -> tuple[int, int, str]:
+    name = path.name.lower()
+    parts = {part.lower() for part in path.parts}
+    priority = 50
+    if path.is_file() and name in {"readme.md", "changelog.md", "manifest.json"}:
+        priority -= 30
+    if name in {"data", "locale", "localization"} or parts & {"data", "locale", "localization"}:
+        priority -= 24
+    if path.is_file() and name.startswith(("strings", "tutorial")):
+        priority -= 24
+    if name in {"src", "source"} or parts & {"src", "source"}:
+        priority -= 8
+    if parts & {"decompiledsource"}:
+        priority += 10
+    return (priority, len(path.parts), path.as_posix().lower())
 
 
 def build_rg_command(
@@ -699,6 +940,7 @@ def build_rg_command(
         rg_path,
         "--json",
         "--fixed-strings",
+        "--ignore-case",
         "--line-number",
         "--color",
         "never",
@@ -791,7 +1033,7 @@ def score_match_line(display_path: str, line: str, terms: tuple[str, ...]) -> fl
     for term in terms:
         weight = term_weight(term)
         if term in lower_path:
-            score += weight * 4.0
+            score += weight * 6.0
         if term in lower_line:
             score += weight * 2.0
     return score
@@ -915,7 +1157,7 @@ def source_path_sort_key(source_path: SourcePath, terms: tuple[str, ...]) -> tup
     path_score = 0.0
     for term in terms:
         if term in source_path.lower_path:
-            path_score += term_weight(term) * 4.0
+            path_score += term_weight(term) * 6.0
     return (-path_score, source_path_priority(source_path.path), len(source_path.path.parts), source_path.lower_path)
 
 
@@ -929,19 +1171,23 @@ def source_path_priority(path: Path) -> int:
     parts = {part.lower() for part in path.parts}
     priority = 50
     if name in {"readme.md", "changelog.md", "manifest.json", "info.json"}:
-        priority -= 16
-    if suffix in {".cs", ".lua"}:
-        priority -= 14
-    elif suffix in {".json", ".toml", ".yaml", ".yml", ".xml"}:
+        priority -= 24
+    if name.startswith(("strings", "tutorial")):
+        priority -= 22
+    if parts & {"data", "locale", "localization"}:
+        priority -= 18
+    if suffix in {".json", ".toml", ".yaml", ".yml", ".xml"}:
+        priority -= 12
+    elif suffix in {".cs", ".lua"}:
         priority -= 10
     elif suffix in {".md", ".txt"}:
         priority -= 8
     elif suffix in {".ts", ".js", ".py"}:
         priority -= 6
     if parts & {"src", "source", "scripts"}:
-        priority -= 10
-    if parts & {"data", "protos", "locale", "localization"}:
         priority -= 8
+    if parts & {"protos"}:
+        priority -= 6
     if parts & {"docs", "doc", "examples", "mod_examples"}:
         priority += 8
     return priority
@@ -973,17 +1219,30 @@ def display_source_path(path: Path) -> str:
 
 def score_source_file(source_file: SourceFile, terms: tuple[str, ...]) -> float:
     score = 0.0
+    precise_hits = 0
     for term in terms:
         weight = term_weight(term)
         if term in source_file.lower_path:
-            score += weight * 4.0
+            score += weight * 6.0
+            if is_precise_search_term(term):
+                precise_hits += 1
         count = source_file.lower_text.count(term)
         if count:
             score += weight * min(count, 8)
+            if is_precise_search_term(term):
+                precise_hits += 1
+    if precise_hits >= 2:
+        score += 24.0
+    elif precise_hits == 1:
+        score += 10.0
     return score
 
 
 def term_weight(term: str) -> float:
+    if term in BROAD_SCORE_TERMS:
+        return 0.4
+    if is_precise_search_term(term):
+        return 8.0
     if len(term) >= 6:
         return 4.0
     if len(term) >= 4:
@@ -1002,6 +1261,8 @@ def best_excerpt(text: str, terms: tuple[str, ...]) -> tuple[int, int, str]:
     for index, line in enumerate(lines):
         lowered = normalize_text(line)
         line_score = sum(term_weight(term) for term in terms if term in lowered)
+        if line_score and any(is_precise_search_term(term) and term in lowered for term in terms):
+            line_score += 12.0
         if line_score > best_score:
             best_score = line_score
             best_index = index
@@ -1009,16 +1270,49 @@ def best_excerpt(text: str, terms: tuple[str, ...]) -> tuple[int, int, str]:
         return 0, 0, ""
     start = max(0, best_index - CONTEXT_LINES)
     end = min(len(lines), best_index + CONTEXT_LINES + 1)
-    excerpt_lines = [trim_line(line) for line in lines[start:end]]
+    excerpt_lines = [trim_line(line, terms=terms) for line in lines[start:end]]
     excerpt = "\n".join(line for line in excerpt_lines if line.strip())
     return start + 1, end, excerpt
 
 
-def trim_line(line: str, limit: int = 220) -> str:
+def trim_line(line: str, limit: int = 220, terms: tuple[str, ...] = ()) -> str:
     clean = line.rstrip()
     if len(clean) <= limit:
         return clean
-    return clean[: limit - 12].rstrip() + " ...（截断）"
+    start = best_trim_start(clean, terms, limit)
+    end = min(len(clean), start + limit)
+    prefix = "… " if start > 0 else ""
+    suffix = " …（截断）" if end < len(clean) else ""
+    return prefix + clean[start:end].strip() + suffix
+
+
+def best_trim_start(text: str, terms: tuple[str, ...], limit: int) -> int:
+    lowered = normalize_text(text)
+    candidates = {0}
+    for term in terms:
+        if len(term) < 2:
+            continue
+        index = lowered.find(term)
+        while index >= 0:
+            candidates.add(max(0, index - limit // 3))
+            candidates.add(max(0, index - limit // 2))
+            candidates.add(max(0, index - 20))
+            index = lowered.find(term, index + 1)
+    best_start = 0
+    best_score = -1.0
+    for start in candidates:
+        snippet = normalize_text(text[start : start + limit])
+        score = sum(term_weight(term) for term in terms if term in snippet)
+        if "15000" in snippet:
+            score += 8.0
+        if "系数" in snippet:
+            score += 6.0
+        if "三阶" in snippet or "三阶段" in snippet:
+            score += 4.0
+        if score > best_score or (score == best_score and start < best_start):
+            best_score = score
+            best_start = start
+    return best_start
 
 
 def format_source_injection(results: tuple[SearchResult, ...], query: str, max_chars: int) -> str:
@@ -1026,7 +1320,7 @@ def format_source_injection(results: tuple[SearchResult, ...], query: str, max_c
         return ""
     lines = [
         "源码知识库检索结果：以下片段来自本机只读源码树，只能作为本轮回答的证据。",
-        "回答戴森球计划、万物分馏、星环、创世之书、shapez、Factorio 相关问题时，优先依据这些源码证据；证据不足就说源码证据不足，不要用通用游戏或其他模组经验补猜。",
+        "回答戴森球计划、万物分馏、MLJ_DSPmods 辅助模组/工具、星环、创世之书、shapez、Factorio 相关问题时，优先依据这些源码证据；证据不足就说源码证据不足，不要用通用游戏或其他模组经验补猜。",
         f"用户问题：{query}",
     ]
     for index, result in enumerate(results, 1):
