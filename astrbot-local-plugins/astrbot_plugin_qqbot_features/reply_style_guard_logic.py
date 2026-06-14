@@ -264,6 +264,16 @@ def build_delegated_reply_instruction_text(
     return opener + "开头用一句很短的话说明正在接力，不要冒充对方，不要替对方认错、解释或承诺修改。"
 
 
+def build_both_targeted_reply_instruction_text() -> str:
+    return (
+        "用户这次同时叫到了天使棉花糖和恶魔棉花糖，也是在叫你本人。"
+        "请用当前 bot 自己的身份直接完成用户这次请求；如果用户让讲笑话、回答问题、评价或说一句话，你也要给出自己的内容。"
+        "不要把任务转给另一个 bot，不要说“让她来讲/让对方回应/我不替她讲”。"
+        "“不替另一个 bot 发言”只表示不能冒充对方、代发对方原话、替对方认错或承诺修改；不表示当前 bot 可以拒绝完成自己被点到的普通请求。"
+        "可以自然提到她也被叫到了，但不要解释调度机制。"
+    )
+
+
 def count_segmented_reply_parts(
     text: str,
     *,

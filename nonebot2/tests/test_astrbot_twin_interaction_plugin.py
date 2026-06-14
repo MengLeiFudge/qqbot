@@ -81,7 +81,27 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         )
 
         self.assertIn("当前消息没有实质文本，只是在同时叫两个 bot", injection)
-        self.assertIn("不要解读成用户只是在找另一个 bot", injection)
+        self.assertIn("表示用户也在叫你", injection)
+
+    def test_dual_target_task_requires_current_bot_to_answer_itself(self) -> None:
+        profile = read_profile("angel")
+        config = TwinInteractionConfig(
+            enabled_groups=set(),
+            direct_handler_enabled=True,
+            max_context_messages=2,
+            max_context_chars=2000,
+            context_root=Path("/tmp/missing"),
+        )
+        injection = build_twin_injection(
+            text="[At:1443944862] [At:2629227874] 讲一个笑话",
+            group_id="123",
+            profile=profile,
+            config=config,
+        )
+
+        self.assertIn("你要用当前 bot 身份完成自己的那份请求", injection)
+        self.assertIn("不要转给另一个 bot", injection)
+        self.assertIn("不要把普通请求说成要另一个 bot 自己回应", injection)
 
     def test_bot_sender_ids_are_never_eligible_for_direct_handling(self) -> None:
         profile = read_profile("angel")

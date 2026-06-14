@@ -18,6 +18,7 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_followup
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_markdown_syntax
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_model_regex_segmenting
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_reply_instruction_text
+from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_both_targeted_reply_instruction_text
 
 
 class AstrBotReplyStyleGuardTest(unittest.TestCase):
@@ -97,6 +98,15 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("👿棉花糖👿 那边在忙", instruction)
         self.assertIn("😇棉花糖😇 自己的身份", instruction)
         self.assertIn("不要冒充对方", instruction)
+
+    def test_both_targeted_instruction_requires_current_bot_to_complete_task(self) -> None:
+        instruction = build_both_targeted_reply_instruction_text()
+
+        self.assertIn("也是在叫你本人", instruction)
+        self.assertIn("直接完成用户这次请求", instruction)
+        self.assertIn("如果用户让讲笑话", instruction)
+        self.assertIn("不要把任务转给另一个 bot", instruction)
+        self.assertIn("不要说“让她来讲/让对方回应/我不替她讲”", instruction)
 
     def test_long_reply_fold_threshold_can_be_disabled(self) -> None:
         self.assertTrue(should_fold_long_reply("a" * 301, threshold=300))

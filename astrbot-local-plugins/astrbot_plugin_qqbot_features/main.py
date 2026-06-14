@@ -65,6 +65,7 @@ from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
+from .reply_style_guard_logic import build_both_targeted_reply_instruction_text
 from .reply_style_guard_logic import build_delegated_reply_instruction_text
 from .reply_style_guard_logic import is_dangerous_local_tool_name
 from .reply_style_guard_logic import normalize_fold_threshold
@@ -358,7 +359,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.10.0",
+    "0.10.1",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -499,9 +500,7 @@ class QQBotFeaturesPlugin(Star):
             )
         if str(event.get_extra(BOTH_TARGETED_EXTRA, "") or "").strip():
             req.extra_user_content_parts.append(
-                TextPart(
-                    text="用户这次同时叫到了天使棉花糖和恶魔棉花糖。你只代表自己回答，不替另一个 bot 发言；可以自然提到她也被叫到了，但不要解释调度机制。"
-                ).mark_as_temp()
+                TextPart(text=build_both_targeted_reply_instruction_text()).mark_as_temp()
             )
 
     @filter.on_llm_request(desc="在 LLM 请求前按群号和问题检索本机源码树，把少量可信源码片段临时注入上下文。")
