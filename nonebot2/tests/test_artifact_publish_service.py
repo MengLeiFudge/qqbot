@@ -17,6 +17,7 @@ class FakeBot:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.next_upload_message_id = 12345
 
     async def call_api(self, api: str, **kwargs: Any) -> dict[str, Any]:
         self.calls.append((api, kwargs))
@@ -31,7 +32,9 @@ class FakeBot:
                 ]
             }
         if api == "upload_group_file":
-            return {"message_id": "12345"}
+            message_id = self.next_upload_message_id
+            self.next_upload_message_id += 1
+            return {"message_id": str(message_id)}
         if api == "send_group_msg":
             return {"message_id": "23456"}
         return {}
@@ -163,3 +166,43 @@ def test_publish_local_artifacts_tracks_sha_per_upload_name(tmp_path: Path) -> N
     assert result.uploaded[0]["name"] == "second.zip"
     assert not result.skipped
     assert any(api == "upload_group_file" for api, _ in bot.calls)
+
+
+def test_publish_local_artifacts_sends_one_notice_after_multi_file_upload(tmp_path: Path) -> None:
+    first_package = tmp_path / "first.zip"
+    second_package = tmp_path / "second.zip"
+    first_package.write_bytes(b"first content")
+    second_package.write_bytes(b"second content")
+    first_sha256 = calculate_sha256(first_package)
+    second_sha256 = calculate_sha256(second_package)
+    bot = FakeBot()
+    context = LocalArtifactPublishContext(
+        project_id="mlj_dspmods",
+        branch="master",
+        commit_hash="abcdef123456",
+        commit_subject="构建：测试多包通知",
+        commit_detail="验证：测试",
+    )
+    artifacts = [
+        LocalArtifactPublishFile(
+            path=first_package,
+            name="first.zip",
+            targets=(319567534,),
+            sha256=first_sha256,
+        ),
+        LocalArtifactPublishFile(
+            path=second_package,
+            name="second.zip",
+            targets=(319567534,),
+            sha256=second_sha256,
+        ),
+    ]
+
+    result = asyncio.run(publish_local_artifacts(bot, artifacts, context, data_root=tmp_path))
+
+    assert [item["name"] for item in result.uploaded] == ["first.zip", "second.zip"]
+    upload_calls = [kwargs for api, kwargs in bot.calls if api == "upload_group_file"]
+    message_calls = [kwargs for api, kwargs in bot.calls if api == "send_group_msg"]
+    assert [item["name"] for item in upload_calls] == ["first.zip", "second.zip"]
+    assert len(message_calls) == 1
+    assert str(message_calls[0]["message"]).startswith("[CQ:reply,id=12346]abcdef1 构建：测试多包通知")

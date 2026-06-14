@@ -48,6 +48,12 @@ class LocalArtifactPublishResult:
     skipped: list[dict[str, object]]
 
 
+@dataclass(slots=True)
+class LocalArtifactPublishNotice:
+    reply_message_id: str = ""
+    message: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class CommitSummary:
     short_hash: str
@@ -116,6 +122,7 @@ async def publish_local_artifacts(
     uploaded: list[dict[str, object]] = []
     deleted: list[dict[str, object]] = []
     skipped: list[dict[str, object]] = []
+    notices: dict[int, LocalArtifactPublishNotice] = {}
 
     for artifact in files:
         package_path = normalize_local_path(artifact.path)
@@ -157,13 +164,10 @@ async def publish_local_artifacts(
             reply_message_id = _extract_message_id(upload_result)
             if not reply_message_id:
                 reply_message_id = await find_uploaded_file_message_id(bot, group_id, upload_name)
-            message = build_local_artifact_publish_message(
-                context,
-                artifact.message,
-                reply_message_id=reply_message_id,
-            )
-            if message:
-                await bot.call_api("send_group_msg", group_id=group_id, message=message)
+            notice = notices.setdefault(group_id, LocalArtifactPublishNotice())
+            notice.reply_message_id = reply_message_id
+            if artifact.message.strip():
+                notice.message = artifact.message.strip()
             uploaded.append(
                 {
                     "group_id": group_id,
@@ -179,6 +183,14 @@ async def publish_local_artifacts(
                 publish_sha256,
                 data_root=data_root,
             )
+    for group_id, notice in notices.items():
+        message = build_local_artifact_publish_message(
+            context,
+            notice.message,
+            reply_message_id=notice.reply_message_id,
+        )
+        if message:
+            await bot.call_api("send_group_msg", group_id=group_id, message=message)
     return LocalArtifactPublishResult(uploaded=uploaded, deleted=deleted, skipped=skipped)
 
 
