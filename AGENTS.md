@@ -13,7 +13,7 @@
 ## 目录边界
 
 - `astrbot/`：AstrBot 上游源码快照和本机配置示例；不保留 AstrBot 上游 Git 历史，也不作为 bot2 Core 的日常启动来源。
-- AstrBot 行为调整硬限制：配置优先，插件其次，绝不直接修改 AstrBot Core 源码。能通过 `data/astrbot/data/` 运行态配置、AstrBot 参数或插件实现的行为，不允许改 `astrbot/` 源码快照或 uv tool 安装目录源码；只有先确认配置和插件都无法实现，并获得用户明确批准后，才允许讨论 Core 补丁。
+- AstrBot 行为调整硬限制：配置优先，插件其次，绝不直接修改 AstrBot Core 源码。能通过 `data/astrbot/data/` 运行态配置、AstrBot 参数或插件实现的行为，不允许改 `astrbot/` 源码快照或 uv tool 安装目录源码；只有先确认配置和插件都无法实现，并获得用户明确批准后，才允许讨论 Core 补丁。新增、改造或迁移 AstrBot 插件能力前，必须先查 AstrBot 原生配置、WebUI 现有开关、Core 已有行为和本仓库现有插件是否已经提供同类能力；若 AstrBot 原生能力可满足或可复用，应优先复用并只做最小插件补足，禁止在插件里另起一套会和原生设置冲突、重复或绕过原生配置的开关、provider、分段、路由、权限或发送机制。
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`tools/runtime-scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
 - 原 qqbot / NoneBot2 功能已迁入 AstrBot 本地插件；运行时代码不得依赖 `nonebot2/` 源码、`nonebot` 包、NoneBot2 plugin 入口或 OneBot adapter。
 - 从旧 qqbot 迁入的纯 Python service 只允许作为 AstrBot 插件内 vendored service 使用，运行态数据根统一为 `data\astrbot\data\plugin_data\qqbot_features_runtime`，迁移配置根统一为 `data\astrbot\data\plugin_data\qqbot_features_config`。
