@@ -32,7 +32,7 @@ function Invoke-UpdateScript {
     if ($DryRun) {
         $arguments += "-DryRun"
     }
-    if ($NoStopProcesses -and $ScriptName -eq "update-napcat.ps1") {
+    if ($NoStopProcesses -and ($ScriptName -eq "update-napcat.ps1" -or $ScriptName -eq "update-astrbot.ps1")) {
         $arguments += "-NoStopProcesses"
     }
 

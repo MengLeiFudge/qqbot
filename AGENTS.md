@@ -64,6 +64,7 @@
 - 根目录 `tests/` 保留 AstrBot 本地插件、启动脚本和配置导出回归测试；相关改动优先运行 `py -3.14 -m pytest tests` 或本机可用的等价 Python 命令。
 - AstrBot Core 源码快照不作为运行态；Core 相关验证优先使用 ruff、`python -m py_compile` 和实际 uv tool 启动探针。
 - AstrBot Core 运行/更新脚本变更优先做 PowerShell 语法检查；不要把源码快照测试结果当作 uv tool 运行态验证。
+- 对本仓库启动、重启、更新、进程残留、端口占用、脚本编排和机器人运行态修复，完成脚本或配置改动后必须直接执行真实入口验证；不要因为会停止现有机器人、关闭 NapCat/QQ、替换 `napcat\onekey`、升级 uv tool、重启 AstrBot、清理残留进程或短暂中断服务而停下来要求用户再次确认。用户提出这类问题本身即表示要解决到真实运行可用。
 
 ## 启动与重启
 
@@ -78,9 +79,9 @@
 
 - AstrBot Core 手动更新入口是 `D:\project\qqbot\scripts\update-astrbot.bat`。
 - 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat 和 AstrBot 更新入口。
-- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；正式更新会先停止本工作区关联的 NapCat/QQ 进程，再把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换后迁移账号 OneBot 配置。
+- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；正式更新会先下载并解压新包到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换后迁移账号 OneBot 配置。
 - OneBot v11 本身是协议；本仓库实际更新对象是 NapCat 协议端和 AstrBot Core。
-- `update-astrbot.bat` 默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
+- `update-astrbot.bat` 会先停止本工作区正在运行的 AstrBot uv tool 进程，再默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
 - Windows PATH 找不到 `uv` 时，更新脚本可以用 `py -3.14 -m pip install --user -U uv` 自举用户级 uv。
 - 更新日志写入 `data\astrbot\logs\updates\`，真实数据仍在 `data\astrbot\data\`。
 - 切换到 uv tool 后，修改 `astrbot\` 源码快照不会影响实际运行的 bot2；不要用 `astrbot\` 的源码 diff 判断线上 AstrBot Core 是否已更新。

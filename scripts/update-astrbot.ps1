@@ -1,6 +1,7 @@
 param(
     [string]$PythonVersion = "3.14",
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NoStopProcesses
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +33,154 @@ function Write-Step {
     $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $Message
     Write-Host $line
     Add-Content -Path $logFile -Value $line -Encoding UTF8
+}
+
+function Format-ProcessSummary {
+    param([array]$Processes)
+
+    if (-not $Processes -or $Processes.Count -eq 0) {
+        return "(none)"
+    }
+    return (($Processes | ForEach-Object { "$($_.ProcessId): $($_.Name)" }) -join "; ")
+}
+
+function Test-PathUnderRoot {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
+        return $false
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path.Trim('"'))
+        $fullRoot = [System.IO.Path]::GetFullPath($Root.Trim('"'))
+        $rootPrefix = $fullRoot
+        if (-not $rootPrefix.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+            $rootPrefix += [System.IO.Path]::DirectorySeparatorChar
+        }
+
+        return (
+            $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-AstrBotProcessRoot {
+    param([object]$ProcessInfo)
+
+    if (-not $ProcessInfo -or [int]$ProcessInfo.ProcessId -eq $PID) {
+        return $false
+    }
+
+    $commandLine = [string]$ProcessInfo.CommandLine
+    $executablePath = [string]$ProcessInfo.ExecutablePath
+    $escapedWorkspace = [regex]::Escape($WorkspaceRoot)
+    $escapedAstrBotExe = [regex]::Escape("\Scripts\astrbot.exe")
+
+    $isWorkspaceLauncher = (
+        $commandLine -and
+        $commandLine -match $escapedWorkspace -and
+        $commandLine -match '(?i)start-astrbot\.ps1'
+    )
+    $isAstrBotRunCommand = (
+        $commandLine -and
+        $commandLine -match $escapedAstrBotExe -and
+        $commandLine -match '(?i)\srun\s+-p\s+6185(\s|$)'
+    )
+    $isUvToolAstrBotExe = (
+        (Test-PathUnderRoot -Path $executablePath -Root (Join-Path $env:APPDATA "uv\tools\astrbot")) -and
+        $commandLine -and
+        $commandLine -match '(?i)\srun\s+-p\s+6185(\s|$)'
+    )
+
+    return ($isWorkspaceLauncher -or $isAstrBotRunCommand -or $isUvToolAstrBotExe)
+}
+
+function Get-ProcessTreeIds {
+    param(
+        [int]$RootProcessId,
+        [object[]]$Processes
+    )
+
+    $ids = [System.Collections.Generic.HashSet[int]]::new()
+    $queue = [System.Collections.Generic.Queue[int]]::new()
+    $queue.Enqueue($RootProcessId)
+    while ($queue.Count -gt 0) {
+        $currentId = $queue.Dequeue()
+        if (-not $ids.Add($currentId)) {
+            continue
+        }
+        foreach ($child in @($Processes | Where-Object { $_.ParentProcessId -eq $currentId })) {
+            $queue.Enqueue([int]$child.ProcessId)
+        }
+    }
+    return @($ids)
+}
+
+function Get-ProcessDepth {
+    param(
+        [object]$ProcessInfo,
+        [hashtable]$ProcessById
+    )
+
+    $depth = 0
+    $seen = [System.Collections.Generic.HashSet[int]]::new()
+    $parentId = [int]$ProcessInfo.ParentProcessId
+    while ($parentId -and $ProcessById.ContainsKey($parentId) -and $seen.Add($parentId)) {
+        $depth += 1
+        $parent = $ProcessById[$parentId]
+        $parentId = [int]$parent.ParentProcessId
+    }
+    return $depth
+}
+
+function Get-AstrBotProcesses {
+    $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $targetIds = [System.Collections.Generic.HashSet[int]]::new()
+    $roots = @($allProcesses | Where-Object { Test-AstrBotProcessRoot -ProcessInfo $_ })
+
+    foreach ($root in $roots) {
+        foreach ($processId in (Get-ProcessTreeIds -RootProcessId ([int]$root.ProcessId) -Processes $allProcesses)) {
+            if ($processId -ne $PID) {
+                [void]$targetIds.Add([int]$processId)
+            }
+        }
+    }
+
+    @($allProcesses | Where-Object { $targetIds.Contains([int]$_.ProcessId) })
+}
+
+function Stop-AstrBotProcesses {
+    param([array]$Processes)
+
+    $processById = @{}
+    foreach ($processInfo in $Processes) {
+        $processById[[int]$processInfo.ProcessId] = $processInfo
+    }
+    $orderedProcesses = @($Processes | Sort-Object @{ Expression = { Get-ProcessDepth -ProcessInfo $_ -ProcessById $processById }; Descending = $true })
+
+    foreach ($processInfo in $orderedProcesses) {
+        Write-Step "Stopping AstrBot process $($processInfo.ProcessId): $($processInfo.Name)"
+        Stop-Process -Id $processInfo.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        Start-Sleep -Seconds 1
+        $remaining = @(Get-AstrBotProcesses)
+        if ($remaining.Count -eq 0) {
+            return
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Some AstrBot processes are still running: $(Format-ProcessSummary $remaining)"
 }
 
 function Invoke-LoggedCommand {
@@ -138,6 +287,25 @@ Write-Step "ASTRBOT_ROOT: $AstrRoot"
 Write-Step "Log: $logFile"
 if ($DryRun) {
     Write-Step "DryRun enabled; no install or upgrade command will be executed."
+}
+
+$running = @(Get-AstrBotProcesses)
+if ($running.Count -gt 0) {
+    if ($DryRun) {
+        if ($NoStopProcesses) {
+            Write-Step "Would require these AstrBot processes to be closed manually before upgrade: $(Format-ProcessSummary $running)"
+        }
+        else {
+            Write-Step "Would stop running AstrBot processes before upgrade: $(Format-ProcessSummary $running)"
+        }
+    }
+    elseif ($NoStopProcesses) {
+        throw "AstrBot is running. Close these processes first or rerun without -NoStopProcesses: $(Format-ProcessSummary $running)"
+    }
+    else {
+        Write-Step "Running AstrBot processes detected before upgrade: $(Format-ProcessSummary $running)"
+        Stop-AstrBotProcesses $running
+    }
 }
 
 $uvCommand = Get-UvCommand
