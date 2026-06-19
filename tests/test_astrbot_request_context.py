@@ -101,6 +101,44 @@ class AstrBotRequestContextTest(unittest.TestCase):
             canonical_event_claim_key(second, purpose="llm"),
         )
 
+    def test_canonical_claim_key_uses_reply_text_instead_of_platform_reply_id(self) -> None:
+        first = StubEvent(
+            [
+                Reply(message_str="上一条模型价格回答", reply_id="angel-reply-id"),
+                At("1443944862"),
+                Plain("我买了10块钱的一小时用完了喵"),
+            ],
+            timestamp=100,
+        )
+        second = StubEvent(
+            [
+                Reply(message_str="上一条模型价格回答", reply_id="demon-reply-id"),
+                At("1443944862"),
+                Plain("我买了10块钱的一小时用完了喵"),
+            ],
+            timestamp=105,
+        )
+
+        self.assertEqual(
+            canonical_event_claim_key(first, purpose="llm"),
+            canonical_event_claim_key(second, purpose="llm"),
+        )
+
+    def test_canonical_claim_key_keeps_different_reply_texts_separate(self) -> None:
+        first = StubEvent(
+            [Reply(message_str="上一条模型价格回答", reply_id="same-id"), At("1443944862"), Plain("回答一下")],
+            timestamp=100,
+        )
+        second = StubEvent(
+            [Reply(message_str="另一条上下文", reply_id="same-id"), At("1443944862"), Plain("回答一下")],
+            timestamp=105,
+        )
+
+        self.assertNotEqual(
+            canonical_event_claim_key(first, purpose="llm"),
+            canonical_event_claim_key(second, purpose="llm"),
+        )
+
     def test_private_command_claim_key_can_be_scoped_by_current_bot(self) -> None:
         angel = StubEvent(
             [Plain("用量")],

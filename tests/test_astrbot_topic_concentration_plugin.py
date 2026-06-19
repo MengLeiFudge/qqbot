@@ -573,6 +573,30 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertFalse(second.should_handle)
         self.assertEqual(second.reason, "message_claimed_by_other_worker")
 
+    def test_twin_scheduler_does_not_delegate_message_already_claimed_by_target(self) -> None:
+        first = decide_llm_worker(
+            self_id="1443944862",
+            at_ids=("1443944862",),
+            message_key="canonical:llm:1163635014:321374585:178186220:1443944862:text:上一条模型价格回答:我买了10块钱的一小时用完了喵",
+            group_id="1163635014",
+            now=10.0,
+        )
+        mark_claim_processing(first.claim_key, first.worker_id, now=10.1)
+
+        second = decide_llm_worker(
+            self_id="2629227874",
+            at_ids=("1443944862",),
+            message_key=first.claim_key,
+            group_id="1163635014",
+            now=10.2,
+        )
+
+        self.assertTrue(first.should_handle)
+        self.assertEqual(first.reason, "target_available")
+        self.assertFalse(second.should_handle)
+        self.assertEqual(second.reason, "message_claimed_by_other_worker")
+        self.assertEqual(second.worker_id, "1443944862")
+
     def test_twin_scheduler_delegates_when_target_worker_busy(self) -> None:
         mark_worker_busy("1443944862", now=10.0, lease_seconds=600.0)
 

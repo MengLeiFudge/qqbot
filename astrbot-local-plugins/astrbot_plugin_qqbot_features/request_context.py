@@ -147,14 +147,26 @@ def canonical_event_claim_key(event: object, *, purpose: str, include_private_se
     sender_id = safe_call(event, "get_sender_id") or "unknown"
     text = re.sub(r"\s+", "", extract_plain_text(event))[:160]
     at_ids = ",".join(sorted(extract_at_ids(event)))
-    reply_ids = ",".join(extract_reply_ids(event))
+    reply_key = canonical_reply_key(event)
     bucket = event_time_bucket(event)
-    if text or at_ids or reply_ids:
-        return f"canonical:{purpose}:{group_id}:{sender_id}:{bucket}:{at_ids}:{reply_ids}:{text}"
+    if text or at_ids or reply_key:
+        return f"canonical:{purpose}:{group_id}:{sender_id}:{bucket}:{at_ids}:{reply_key}:{text}"
     message_id = event_message_id(event)
     if message_id:
         return f"message:{purpose}:{message_id}"
     return f"fallback:{purpose}:{group_id}:{sender_id}:{bucket}"
+
+
+def canonical_reply_key(event: object) -> str:
+    reply_texts = tuple(
+        re.sub(r"\s+", "", text)[:160]
+        for text in extract_reply_texts(event)
+        if text
+    )
+    if reply_texts:
+        return "text:" + "|".join(reply_texts)
+    reply_ids = extract_reply_ids(event)
+    return "id:" + ",".join(reply_ids) if reply_ids else ""
 
 
 def extract_at_ids(event: object) -> tuple[str, ...]:
