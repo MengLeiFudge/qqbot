@@ -35,6 +35,7 @@ from .menu_image import render_feature_menu_image
 from .menu_image import render_overview_menu_image
 from .note_export import GroupNoteExportError
 from .note_export import export_group_notes_markdown
+from .onebot_api import OneBotCallApiAdapter
 from .rightcodes_draw_logic import RightCodesDrawClient
 from .rightcodes_draw_logic import RightCodesDrawQuotaStore
 from .rightcodes_draw_logic import format_draw_quota_exceeded_message
@@ -959,7 +960,7 @@ class QQBotFeaturesPlugin(Star):
                     service = build_arc_background_service()
                 bot = self._get_onebot_bot()
                 if bot is not None:
-                    await service.run_once(bot)
+                    await service.run_once(OneBotCallApiAdapter(bot))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import sys
 import unittest
@@ -13,9 +14,32 @@ from astrbot_plugin_qqbot_features.social_events import (
     format_self_join_private_notice,
     should_send_member_welcome,
 )
+from astrbot_plugin_qqbot_features.onebot_api import OneBotCallApiAdapter
+
+
+class FakeOneBot:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def call_action(self, action: str, **kwargs):
+        self.calls.append((action, kwargs))
+        return {"ok": True}
 
 
 class AstrBotQQBotFeaturesSocialEventsTest(unittest.TestCase):
+    def test_call_api_adapter_uses_astrbot_call_action_shape(self) -> None:
+        bot = FakeOneBot()
+
+        result = asyncio.run(
+            OneBotCallApiAdapter(bot).call_api(
+                "get_group_list",
+                group_id=123,
+            )
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(bot.calls, [("get_group_list", {"group_id": 123})])
+
     def test_self_join_notice_names_group_without_owner_assumption(self) -> None:
         self.assertEqual(
             format_self_join_private_notice("测试群", "1085441389"),
