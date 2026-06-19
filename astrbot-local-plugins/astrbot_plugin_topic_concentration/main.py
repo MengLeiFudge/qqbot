@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import inspect
 import json
 import os
 import re
@@ -84,7 +85,7 @@ DELEGATED_COMMENT_EXTRA = "_qqbot_twin_delegated_comment"
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖普通群聊主动接话门控。",
-    "0.3.11",
+    "0.3.12",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -226,6 +227,22 @@ class TopicConcentrationPlugin(Star):
             return
 
         original_need_active_reply = GroupChatContext.need_active_reply
+        try:
+            original_signature = inspect.signature(original_need_active_reply)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "[TopicConcentration] active reply gate not installed: "
+                "cannot inspect GroupChatContext.need_active_reply: %s",
+                exc,
+            )
+            return
+        if len(original_signature.parameters) != 2:
+            logger.error(
+                "[TopicConcentration] active reply gate not installed: "
+                "incompatible GroupChatContext.need_active_reply signature=%s",
+                original_signature,
+            )
+            return
 
         async def patched_need_active_reply(group_context: GroupChatContext, event) -> bool:
             cfg = group_context.cfg(event)
@@ -381,7 +398,12 @@ class TopicConcentrationPlugin(Star):
         GroupChatContext._topic_concentration_original_need_active_reply = original_need_active_reply
         GroupChatContext.need_active_reply = patched_need_active_reply
         GroupChatContext._topic_concentration_installed = True
-        logger.info("[TopicConcentration] active reply gate installed")
+        logger.info(
+            "[TopicConcentration] active reply gate installed: "
+            "monkey_patch=GroupChatContext.need_active_reply override=possibility_reply "
+            "fallback=core_original signature=%s",
+            original_signature,
+        )
 
 
 def _record_message(event, *, scope_key: str | None = None) -> TopicRecordResult:

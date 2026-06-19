@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import sanitize_reply_plain_text
+from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_reply_too_long_to_read
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import is_dangerous_local_tool_name
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import split_forward_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_fold_long_reply
@@ -81,11 +82,19 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         )
         self.assertFalse(should_disable_segmented_reply_for_text("懂了吧，低调版炫耀。"))
 
-    def test_model_result_always_disables_astrbot_regex_segmenting(self) -> None:
+    def test_model_result_disables_astrbot_regex_segmenting_when_plugin_override_is_enabled(self) -> None:
         self.assertTrue(
             should_disable_model_regex_segmenting(
                 {"enable": True, "only_llm_result": True, "split_mode": "regex"},
                 is_model_result=True,
+                override_enabled=True,
+            )
+        )
+        self.assertFalse(
+            should_disable_model_regex_segmenting(
+                {"enable": True, "only_llm_result": True, "split_mode": "regex"},
+                is_model_result=True,
+                override_enabled=False,
             )
         )
 
@@ -136,6 +145,17 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertTrue(should_fold_long_reply("a" * 301, threshold=300))
         self.assertFalse(should_fold_long_reply("a" * 301, threshold=0))
         self.assertFalse(should_fold_long_reply("a" * 300, threshold=300))
+
+    def test_long_input_tldr_uses_length_not_content(self) -> None:
+        strict_review_template = (
+            "请以最严苛的标准审查该文本。"
+            "语言风格极度客观冷静犀利一针见血。"
+            "事实核查找出任何不准确的数据日期人名历史事件或科学概念。"
+            "逻辑漏洞标记所有逻辑谬误。"
+            "语言废话删除无意义修饰词重复废话和陈词滥调。"
+        )
+        self.assertTrue(should_reply_too_long_to_read(strict_review_template, threshold=80))
+        self.assertFalse(should_reply_too_long_to_read(strict_review_template, threshold=10000))
 
     def test_forward_text_split_prefers_natural_boundary(self) -> None:
         chunks = split_forward_text("第一段。\n第二段很长很长。\n第三段。", limit=14)

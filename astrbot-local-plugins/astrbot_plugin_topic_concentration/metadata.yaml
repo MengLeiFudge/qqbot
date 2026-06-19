@@ -1,6 +1,6 @@
 name: astrbot_plugin_topic_concentration
 display_name: 棉花糖主动接话门控
 desc: "控制 AstrBot 普通群聊主动接话、双 bot worker 调度、代班评论和按群权重选择。"
-version: v0.3.11
+version: v0.3.12
 author: MengLei
 repo: ""

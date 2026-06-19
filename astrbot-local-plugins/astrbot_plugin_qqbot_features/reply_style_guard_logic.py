@@ -6,6 +6,7 @@ import re
 DEFAULT_SEGMENTED_REPLY_REGEX = r".*?[。？！~…]+|.+$"
 MAX_SEGMENTED_REPLY_PARTS = 3
 DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
+DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS = 300
 FORWARD_NODE_TEXT_CHARS = 4000
 DANGEROUS_LOCAL_TOOL_NAMES = frozenset(
     {
@@ -186,6 +187,32 @@ def normalize_fold_threshold(value: object, *, default: int = DEFAULT_LONG_REPLY
     return max(80, min(threshold, 10000))
 
 
+def normalize_long_input_tldr_threshold(
+    value: object,
+    *,
+    default: int = DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS,
+) -> int:
+    try:
+        threshold = int(value)
+    except (TypeError, ValueError):
+        return default
+    if threshold <= 0:
+        return 0
+    return max(80, min(threshold, 10000))
+
+
+def should_reply_too_long_to_read(
+    text: str,
+    *,
+    threshold: int = DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS,
+) -> bool:
+    threshold = normalize_long_input_tldr_threshold(threshold)
+    if threshold <= 0:
+        return False
+    compact = re.sub(r"\s+", "", str(text or ""))
+    return len(compact) > threshold
+
+
 def should_fold_long_reply(
     text: str,
     *,
@@ -238,7 +265,14 @@ def should_disable_segmented_reply_for_text(
     )
 
 
-def should_disable_model_regex_segmenting(segmented_reply: dict, *, is_model_result: bool) -> bool:
+def should_disable_model_regex_segmenting(
+    segmented_reply: dict,
+    *,
+    is_model_result: bool,
+    override_enabled: bool = True,
+) -> bool:
+    if not override_enabled:
+        return False
     if not is_model_result:
         return False
     if segmented_reply.get("enable") is not True:

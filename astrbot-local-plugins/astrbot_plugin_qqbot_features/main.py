@@ -67,12 +67,15 @@ from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
 from .reply_style_guard_logic import build_both_targeted_reply_instruction_text
 from .reply_style_guard_logic import build_delegated_reply_instruction_text
+from .reply_style_guard_logic import normalize_long_input_tldr_threshold
 from .reply_style_guard_logic import is_dangerous_local_tool_name
 from .reply_style_guard_logic import normalize_fold_threshold
 from .reply_style_guard_logic import sanitize_reply_plain_text
 from .reply_style_guard_logic import should_disable_model_regex_segmenting
-from .reply_style_guard_logic import should_fold_long_reply
-from .reply_style_guard_logic import split_forward_text
+from .reply_style_guard_logic import should_reply_too_long_to_read
+from .reply_style_guard_runtime import build_folded_reply_chain
+from .reply_style_guard_runtime import extract_onebot_forward_text
+from .reply_style_guard_runtime import has_forward_message
 from .social_events import GROUP_MEMBER_WELCOME_EXPRESSIONS
 from .social_events import format_group_member_welcome
 from .social_events import format_self_join_private_notice
@@ -181,6 +184,8 @@ LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
 PROFILE_ENV = "QQBOT_ASTRBOT_PROFILE"
 DEFAULT_PROFILE = "demon"
 DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
+DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS = 300
+DEFAULT_LONG_INPUT_TLDR_TEXT = "太长不看喵"
 LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
 LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
 DELEGATED_FROM_EXTRA = "_qqbot_twin_llm_delegated_from"
@@ -359,7 +364,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.10.1",
+    "0.10.2",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -392,17 +397,42 @@ class QQBotFeaturesPlugin(Star):
                 legacy_plugin_name="astrbot_plugin_qqbot_context_bridge",
             )
         )
+        reply_style_guard_config = ScopedPluginConfig(
+            config,
+            prefix="reply_style_guard",
+            legacy_plugin_name="astrbot_plugin_reply_style_guard",
+        )
         self._reply_long_reply_fold_threshold_chars = normalize_fold_threshold(
             get_config_value(
-                ScopedPluginConfig(
-                    config,
-                    prefix="reply_style_guard",
-                    legacy_plugin_name="astrbot_plugin_reply_style_guard",
-                ),
+                reply_style_guard_config,
                 "long_reply_fold_threshold_chars",
                 DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS,
             ),
             default=DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS,
+        )
+        self._reply_disable_astrbot_segmented_reply = read_bool_config(
+            reply_style_guard_config,
+            "disable_astrbot_segmented_reply",
+            default=True,
+        )
+        self._reply_long_input_tldr_threshold_chars = normalize_long_input_tldr_threshold(
+            get_config_value(
+                reply_style_guard_config,
+                "long_input_tldr_threshold_chars",
+                DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS,
+            ),
+            default=DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS,
+        )
+        self._reply_long_input_tldr_text = (
+            str(
+                get_config_value(
+                    reply_style_guard_config,
+                    "long_input_tldr_text",
+                    DEFAULT_LONG_INPUT_TLDR_TEXT,
+                )
+                or DEFAULT_LONG_INPUT_TLDR_TEXT
+            ).strip()
+            or DEFAULT_LONG_INPUT_TLDR_TEXT
         )
         self._source_knowledge_config = load_source_knowledge_config(
             ScopedPluginConfig(
@@ -430,10 +460,13 @@ class QQBotFeaturesPlugin(Star):
         )
         logger.info(
             "[QQBotFeatures] merged guards loaded: context_groups=%s context_max_messages=%s "
-            "reply_fold_chars=%s source_groups=%s source_roots=%s twin_profile=%s twin_groups=%s twin_direct=%s",
+            "reply_fold_chars=%s disable_astrbot_segmented=%s long_input_tldr_chars=%s "
+            "source_groups=%s source_roots=%s twin_profile=%s twin_groups=%s twin_direct=%s",
             format_context_bridge_enabled_groups(self._context_bridge_config.enabled_groups),
             self._context_bridge_config.max_messages,
             self._reply_long_reply_fold_threshold_chars,
+            self._reply_disable_astrbot_segmented_reply,
+            self._reply_long_input_tldr_threshold_chars,
             format_source_enabled_groups(self._source_knowledge_config.enabled_groups),
             len(self._source_knowledge_config.roots),
             self._twin_fallback_profile,
@@ -636,17 +669,61 @@ class QQBotFeaturesPlugin(Star):
                 "[QQBotFeatures] sanitized reply style: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
-        folded = await self._try_send_folded_long_reply(event, result)
+        folded = self._fold_long_reply_result(event, result)
         if folded:
-            event.clear_result()
-            event.stop_event()
-            return
-        if _should_disable_segmented_reply_for_result(self.context, result):
-            result.set_result_content_type(ResultContentType.GENERAL_RESULT)
             logger.info(
-                "[QQBotFeatures] disabled segmented reply for long multi-part LLM result: session=%s",
+                "[QQBotFeatures] folded long reply into AstrBot Nodes chain: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
+        if _should_disable_segmented_reply_for_result(
+            self.context,
+            result,
+            override_enabled=self._reply_disable_astrbot_segmented_reply,
+        ):
+            result.set_result_content_type(ResultContentType.GENERAL_RESULT)
+            logger.info(
+                "[QQBotFeatures] plugin override disabled AstrBot segmented reply for LLM result: session=%s",
+                getattr(event, "unified_msg_origin", ""),
+            )
+
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=2000, desc="直接叫到 bot 的群聊长消息短路回复。")
+    async def handle_too_long_direct_group_message(self, event: AstrMessageEvent):
+        if not _should_reply_too_long_to_read_event(
+            event,
+            threshold=self._reply_long_input_tldr_threshold_chars,
+        ):
+            return
+        yield event.plain_result(self._reply_long_input_tldr_text)
+        event.stop_event()
+
+    @filter.event_message_type(EventMessageType.PRIVATE_MESSAGE, priority=2000, desc="私聊合并转发消息解包后进入当前 bot LLM。")
+    async def handle_private_forward_message(self, event: AstrMessageEvent):
+        if not has_forward_message(event):
+            return
+        if is_twin_bot_sender(event):
+            return
+        forward_text = await extract_onebot_forward_text(event)
+        if not forward_text:
+            logger.warning(
+                "[QQBotFeatures] private forward message has no readable text: session=%s sender=%s",
+                getattr(event, "unified_msg_origin", ""),
+                event.get_sender_id(),
+            )
+            yield event.plain_result("这条折叠消息我读不到内容。")
+            event.stop_event()
+            return
+        current_text = extract_event_plain_text(event)
+        prompt_parts: list[str] = []
+        if current_text:
+            prompt_parts.append(f"用户私聊附言：{current_text}")
+        prompt_parts.append(f"用户私聊发送了一条折叠/合并转发消息，内容如下：\n{forward_text}")
+        logger.info(
+            "[QQBotFeatures] private forward message expanded for LLM: session=%s chars=%s",
+            getattr(event, "unified_msg_origin", ""),
+            len(forward_text),
+        )
+        yield event.request_llm(prompt="\n\n".join(prompt_parts), contexts=[])
+        event.stop_event()
 
     @filter.event_message_type(EventMessageType.ALL, desc="处理明确询问姐姐、妹妹、天使或恶魔的互动请求，只让当前 bot 以自己身份回应。")
     async def handle_explicit_twin_request(self, event: AstrMessageEvent):
@@ -716,7 +793,7 @@ class QQBotFeaturesPlugin(Star):
         AiocqhttpMessageEvent._runtime_guard_installed = True
         logger.info("[QQBotFeatures] aiocqhttp internal error guard installed")
 
-    async def _try_send_folded_long_reply(self, event: AstrMessageEvent, result) -> bool:
+    def _fold_long_reply_result(self, event: AstrMessageEvent, result) -> bool:
         if self._reply_long_reply_fold_threshold_chars <= 0:
             return False
         if event.get_platform_name() != "aiocqhttp":
@@ -727,51 +804,21 @@ class QQBotFeaturesPlugin(Star):
         if result is None or not result.is_model_result():
             return False
         text = _plain_result_text(result.chain)
-        if not should_fold_long_reply(
+        folded = build_folded_reply_chain(
             text,
             threshold=self._reply_long_reply_fold_threshold_chars,
-        ):
+            uin=safe_event_value(event, "get_self_id") or "10000",
+            name=read_bot_display_name(event),
+        )
+        if folded is None:
             return False
-        bot = getattr(event, "bot", None)
-        call_action = getattr(bot, "call_action", None)
-        if not callable(call_action):
-            return False
-        chunks = split_forward_text(text)
-        if not chunks:
-            return False
-        try:
-            forward_result = await call_action(
-                "send_group_forward_msg",
-                group_id=int(group_id) if group_id.isdigit() else group_id,
-                messages=_build_onebot_forward_nodes(
-                    chunks,
-                    uin=safe_event_value(event, "get_self_id") or "10000",
-                    name=read_bot_display_name(event),
-                ),
-            )
-            message_id = _extract_message_id(forward_result)
-            notice_message = _build_fold_notice_message(
-                f"内容比较长，已经折叠成 {len(chunks)} 段。" if len(chunks) > 1 else "内容比较长，已经折叠起来了。",
-                reply_message_id=message_id,
-            )
-            await call_action(
-                "send_group_msg",
-                group_id=int(group_id) if group_id.isdigit() else group_id,
-                message=notice_message,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[QQBotFeatures] folded long reply send failed: session=%s error=%s",
-                getattr(event, "unified_msg_origin", ""),
-                exc,
-            )
-            return False
+        result.chain = folded.chain
+        result.set_result_content_type(ResultContentType.GENERAL_RESULT)
         logger.info(
-            "[QQBotFeatures] folded long reply: session=%s chars=%s nodes=%s quoted=%s",
+            "[QQBotFeatures] folded long reply: session=%s chars=%s nodes=%s via_core_chain=true",
             getattr(event, "unified_msg_origin", ""),
-            len(text),
-            len(chunks),
-            bool(_extract_message_id(forward_result)),
+            folded.text_chars,
+            folded.node_count,
         )
         return True
 
@@ -1904,7 +1951,29 @@ def safe_event_value(event: AstrMessageEvent, method_name: str) -> str:
         return ""
 
 
-def _should_disable_segmented_reply_for_result(context: Context, result) -> bool:
+def _should_reply_too_long_to_read_event(event: AstrMessageEvent, *, threshold: int) -> bool:
+    if threshold <= 0:
+        return False
+    if event.is_private_chat():
+        return False
+    if not _is_direct_or_private(event):
+        return False
+    if is_twin_bot_sender(event):
+        return False
+    text = extract_event_plain_text(event) or str(event.get_message_str() or "")
+    if not should_reply_too_long_to_read(text, threshold=threshold):
+        return False
+    if looks_like_qqbot_fixed_command(text):
+        return False
+    return True
+
+
+def _should_disable_segmented_reply_for_result(
+    context: Context,
+    result,
+    *,
+    override_enabled: bool,
+) -> bool:
     if result is None or not result.is_model_result():
         return False
     segmented_reply = _read_segmented_reply_config(context)
@@ -1914,7 +1983,11 @@ def _should_disable_segmented_reply_for_result(context: Context, result) -> bool
         return False
     if str(segmented_reply.get("split_mode", "regex")) != "regex":
         return False
-    return should_disable_model_regex_segmenting(segmented_reply, is_model_result=True)
+    return should_disable_model_regex_segmenting(
+        segmented_reply,
+        is_model_result=True,
+        override_enabled=override_enabled,
+    )
 
 
 def _read_segmented_reply_config(context: Context) -> dict:
@@ -1959,55 +2032,6 @@ def _plain_message_chain_text(message_chain) -> str:
         if isinstance(segment, CorePlain):
             parts.append(segment.text)
     return "".join(parts).strip()
-
-
-def _build_onebot_forward_nodes(
-    chunks: list[str],
-    *,
-    uin: str,
-    name: str,
-) -> list[dict[str, object]]:
-    node_name = name.strip() or "棉花糖"
-    node_uin = str(uin or "10000")
-    return [
-        {
-            "type": "node",
-            "data": {
-                "name": node_name,
-                "uin": node_uin,
-                "content": [{"type": "text", "data": {"text": chunk}}],
-            },
-        }
-        for chunk in chunks
-    ]
-
-
-def _build_fold_notice_message(
-    text: str,
-    *,
-    reply_message_id: str,
-) -> list[dict[str, object]]:
-    message: list[dict[str, object]] = []
-    if reply_message_id:
-        message.append({"type": "reply", "data": {"id": reply_message_id}})
-    message.append({"type": "text", "data": {"text": text}})
-    return message
-
-
-def _extract_message_id(value) -> str:
-    if isinstance(value, dict):
-        for key in ("message_id", "id"):
-            raw = value.get(key)
-            if raw not in (None, ""):
-                return str(raw)
-        data = value.get("data")
-        if isinstance(data, dict):
-            return _extract_message_id(data)
-    for key in ("message_id", "id"):
-        raw = getattr(value, key, None)
-        if raw not in (None, ""):
-            return str(raw)
-    return ""
 
 
 def allow_local_runtime_tools(event: AstrMessageEvent) -> bool:

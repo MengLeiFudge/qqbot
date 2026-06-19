@@ -23,7 +23,9 @@
 
 ## 事件入口
 
-本插件通过启动时 patch AstrBot 的 `GroupChatContext.need_active_reply` 接入主动接话判断；同时用高优先级事件 handler 和 LLM request/response hook 管理普通 LLM worker busy/lease，因此管理端不会显示普通群聊命令。
+本插件通过启动时 patch AstrBot 的 `GroupChatContext.need_active_reply` 接入主动接话判断；这是有意覆盖 Core 主动回复入口的实现，不是 WebUI 普通命令。插件只覆盖 `active_reply.method=possibility_reply` 的主动接话判定，其他 method 会回落 AstrBot Core 原逻辑。启动时会检查 `GroupChatContext.need_active_reply(self, event)` 签名，签名不兼容时不安装 patch 并记录 ERROR 日志。
+
+同时用高优先级事件 handler 和 LLM request/response hook 管理普通 LLM worker busy/lease，因此管理端不会显示普通群聊命令。
 
 ## 双 bot 边界
 

@@ -103,7 +103,25 @@
     "description": "长回复折叠阈值",
     "type": "int",
     "default": 300,
-    "hint": "群聊 LLM 纯文本回复超过该字符数时折叠为合并转发；填 0 表示禁用折叠。"
+    "hint": "群聊 LLM 纯文本回复超过该字符数时，插件会先改写为 AstrBot Nodes 合并转发消息链，再交回 AstrBot 发送链路；填 0 表示禁用。此阈值独立于 Core forward_threshold，用于更早折叠水群长回复。"
+  },
+  "reply_style_guard_disable_astrbot_segmented_reply": {
+    "description": "禁用 AstrBot 原生 LLM 正则分段",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，插件会把普通 LLM 结果改为 GENERAL_RESULT，故意架空 WebUI 的 platform_settings.segmented_reply 对 LLM 结果的句末正则分段，避免解释类回答被拆成多条刷屏。关闭后恢复 AstrBot 原生分段设置。"
+  },
+  "reply_style_guard_long_input_tldr_threshold_chars": {
+    "description": "群聊长输入太长不看阈值",
+    "type": "int",
+    "default": 300,
+    "hint": "仅限制群聊。群聊中直接 @ 或唤醒当前 bot，正文非空白字符数超过该值时，本地短回太长不看，不进入 LLM；私聊不限制；固定命令、生图、群管、下载等副作用入口不走该短路。填 0 表示禁用。"
+  },
+  "reply_style_guard_long_input_tldr_text": {
+    "description": "群聊长输入短回复",
+    "type": "string",
+    "default": "太长不看喵",
+    "hint": "触发长输入太长不看阈值时发送的固定短回复。"
   },
   "source_knowledge_enabled_groups": {
     "description": "源码知识注入群号",
