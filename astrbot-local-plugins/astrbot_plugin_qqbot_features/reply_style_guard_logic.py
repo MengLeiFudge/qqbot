@@ -7,7 +7,17 @@ DEFAULT_SEGMENTED_REPLY_REGEX = r".*?[。？！~…]+|.+$"
 MAX_SEGMENTED_REPLY_PARTS = 3
 DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
 DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS = 300
+MAX_CHAT_BUBBLE_LINES = 2
+MAX_CHAT_BUBBLE_LINE_CHARS = 80
 FORWARD_NODE_TEXT_CHARS = 4000
+CHAT_BUBBLE_REPLY_INSTRUCTION = (
+    "普通群聊问答默认只输出一行短气泡，直接给结论。"
+    "只有第二条信息确实有独立价值时才输出第二行，最多两行；每行就是一条将要发送的 QQ 消息。"
+    "每行控制在 80 个中文字符以内，不要把寒暄、免责声明、自嘲、吐槽铺垫或废话评价塞进答案。"
+    "第一行给结论；第二行只放必要证据、条件或纠错。"
+    "上下文不完整时保留“大概率”“像是”“可能”这类概率词，不要把线索说成确定事实，也不要追问用户补全。"
+    "例如用户问 RC 且补充锅炉会炸，应回“RC 大概率是 Railcraft，锅炉会炸这点对得上。”，不要追加无信息密度的收尾。"
+)
 DANGEROUS_LOCAL_TOOL_NAMES = frozenset(
     {
         "astrbot_execute_shell",
@@ -126,6 +136,48 @@ _PERMISSION_ESCALATION_ACTIONS = (
 
 def sanitize_reply_plain_text(text: str) -> str:
     return strip_followup_tail(strip_permission_escalation_advice(strip_markdown_syntax(text)))
+
+
+def split_chat_bubble_lines(
+    text: str,
+    *,
+    max_lines: int = MAX_CHAT_BUBBLE_LINES,
+    max_line_chars: int = MAX_CHAT_BUBBLE_LINE_CHARS,
+) -> list[str]:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return []
+    if _looks_like_structured_plain_text(normalized):
+        return [normalized]
+    raw_lines = [line.strip() for line in normalized.split("\n")]
+    lines = [line for line in raw_lines if line]
+    if len(lines) <= 1 or len(lines) > max_lines:
+        return [normalized]
+    if any(len(line) > max_line_chars for line in lines):
+        return [normalized]
+    return lines
+
+
+def _looks_like_structured_plain_text(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.startswith(("{", "[", "<")) or stripped.endswith(("}", "]", ">")):
+        return True
+    structured_markers = (
+        "\n  ",
+        "\n\t",
+        "\n· ",
+        "\n- ",
+        "\n* ",
+        "\n1、",
+        "\n1.",
+        "\n2、",
+        "\n2.",
+        "\nhttp://",
+        "\nhttps://",
+    )
+    return any(marker in stripped for marker in structured_markers)
 
 
 def is_dangerous_local_tool_name(name: object) -> bool:

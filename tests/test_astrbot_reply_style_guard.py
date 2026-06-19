@@ -10,7 +10,9 @@ sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import sanitize_reply_plain_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_reply_too_long_to_read
+from astrbot_plugin_qqbot_features.reply_style_guard_logic import CHAT_BUBBLE_REPLY_INSTRUCTION
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import is_dangerous_local_tool_name
+from astrbot_plugin_qqbot_features.reply_style_guard_logic import split_chat_bubble_lines
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import split_forward_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_fold_long_reply
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_segmented_reply_for_text
@@ -156,6 +158,28 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         )
         self.assertTrue(should_reply_too_long_to_read(strict_review_template, threshold=80))
         self.assertFalse(should_reply_too_long_to_read(strict_review_template, threshold=10000))
+
+    def test_chat_bubble_lines_split_only_model_declared_short_lines(self) -> None:
+        self.assertEqual(
+            split_chat_bubble_lines("RC 大概率是 Railcraft\n锅炉会炸这点对得上"),
+            ["RC 大概率是 Railcraft", "锅炉会炸这点对得上"],
+        )
+        self.assertEqual(split_chat_bubble_lines("RC 大概率是 Railcraft，锅炉会炸这点对得上。"), ["RC 大概率是 Railcraft，锅炉会炸这点对得上。"])
+        self.assertEqual(
+            split_chat_bubble_lines('{\n  "model": "deepseek-v4-flash"\n}'),
+            ['{\n  "model": "deepseek-v4-flash"\n}'],
+        )
+        self.assertEqual(
+            split_chat_bubble_lines("结论\n· 证据"),
+            ["结论\n· 证据"],
+        )
+
+    def test_chat_bubble_instruction_keeps_reply_dense(self) -> None:
+        self.assertIn("默认只输出一行短气泡", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("最多两行", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("不要把寒暄、免责声明、自嘲、吐槽铺垫或废话评价塞进答案", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("上下文不完整时保留", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("RC 大概率是 Railcraft", CHAT_BUBBLE_REPLY_INSTRUCTION)
 
     def test_forward_text_split_prefers_natural_boundary(self) -> None:
         chunks = split_forward_text("第一段。\n第二段很长很长。\n第三段。", limit=14)

@@ -66,6 +66,7 @@ from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
 from .reply_style_guard_logic import build_both_targeted_reply_instruction_text
+from .reply_style_guard_logic import CHAT_BUBBLE_REPLY_INSTRUCTION
 from .reply_style_guard_logic import build_delegated_reply_instruction_text
 from .reply_style_guard_logic import normalize_long_input_tldr_threshold
 from .reply_style_guard_logic import is_dangerous_local_tool_name
@@ -73,6 +74,7 @@ from .reply_style_guard_logic import normalize_fold_threshold
 from .reply_style_guard_logic import sanitize_reply_plain_text
 from .reply_style_guard_logic import should_disable_model_regex_segmenting
 from .reply_style_guard_logic import should_reply_too_long_to_read
+from .reply_style_guard_logic import split_chat_bubble_lines
 from .reply_style_guard_runtime import build_folded_reply_chain
 from .reply_style_guard_runtime import extract_onebot_forward_text
 from .reply_style_guard_runtime import has_forward_message
@@ -211,6 +213,7 @@ PLAIN_TEXT_REPLY_INSTRUCTION = (
     "禁止使用 # 标题、Markdown 列表符号、粗体、反引号代码块、引用块、Markdown 链接和表格。"
     "普通聊天优先短句自然表达，不要主动列项目符号；需要给 API、JSON、配置示例时允许保留换行和缩进，但不要包代码围栏。"
     "不要用“如果你愿意”“要的话”“你把具体内容发我”“我可以再帮你”等追问式收尾。"
+    + CHAT_BUBBLE_REPLY_INSTRUCTION
 )
 
 
@@ -364,7 +367,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.10.2",
+    "0.10.3",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -669,13 +672,20 @@ class QQBotFeaturesPlugin(Star):
                 "[QQBotFeatures] sanitized reply style: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
+        bubbled = self._split_short_chat_bubble_result(event, result)
+        if bubbled:
+            logger.info(
+                "[QQBotFeatures] split model-declared chat bubble lines: session=%s lines=%s",
+                getattr(event, "unified_msg_origin", ""),
+                bubbled,
+            )
         folded = self._fold_long_reply_result(event, result)
         if folded:
             logger.info(
                 "[QQBotFeatures] folded long reply into AstrBot Nodes chain: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
-        if _should_disable_segmented_reply_for_result(
+        if not bubbled and _should_disable_segmented_reply_for_result(
             self.context,
             result,
             override_enabled=self._reply_disable_astrbot_segmented_reply,
@@ -821,6 +831,22 @@ class QQBotFeaturesPlugin(Star):
             folded.node_count,
         )
         return True
+
+    def _split_short_chat_bubble_result(self, event: AstrMessageEvent, result) -> int:
+        if result is None or not result.is_model_result():
+            return 0
+        if event.is_private_chat():
+            return 0
+        if len(result.chain) != 1:
+            return 0
+        comp = result.chain[0]
+        if not isinstance(comp, CorePlain):
+            return 0
+        lines = split_chat_bubble_lines(comp.text)
+        if len(lines) <= 1:
+            return 0
+        result.chain = [CorePlain(line) for line in lines]
+        return len(lines)
 
     @filter.regex(MENU_PATTERN, desc="发送总览图片菜单，展示当前 AstrBot 已接管的群务、互动、生图、游戏和工具分类。")
     async def menu(self, event: AstrMessageEvent):
