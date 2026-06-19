@@ -639,6 +639,9 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertTrue(demon.should_handle)
         self.assertTrue(angel.both_targeted)
         self.assertTrue(demon.both_targeted)
+        self.assertNotEqual(angel.claim_key, demon.claim_key)
+        self.assertTrue(angel.claim_key.endswith(":worker:1443944862"))
+        self.assertTrue(demon.claim_key.endswith(":worker:2629227874"))
 
     def test_twin_scheduler_releases_busy_worker(self) -> None:
         mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)

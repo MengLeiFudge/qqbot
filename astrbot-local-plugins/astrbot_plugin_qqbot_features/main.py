@@ -95,6 +95,7 @@ from .sub2api_usage import update_sub2api_usage_alert_state
 from .twin_interaction_logic import TwinInteractionConfig
 from .twin_interaction_logic import TwinProfile
 from .twin_interaction_logic import build_direct_twin_prompt
+from .twin_interaction_logic import build_identity_fact_injection
 from .twin_interaction_logic import build_twin_injection
 from .twin_interaction_logic import clamp_int as clamp_twin_int
 from .twin_interaction_logic import group_enabled
@@ -509,6 +510,21 @@ class QQBotFeaturesPlugin(Star):
             req.extra_user_content_parts.append(
                 TextPart(text=build_both_targeted_reply_instruction_text()).mark_as_temp()
             )
+
+    @filter.on_llm_request(desc="在 LLM 请求前注入当前 self_id 对应的天使/恶魔身份事实。")
+    async def inject_current_identity_fact(self, event: AstrMessageEvent, req: ProviderRequest):
+        profile = self._profile_for_event(event)
+        if is_bot_sender(event, profile):
+            return
+        req.extra_user_content_parts.append(
+            TextPart(text=build_identity_fact_injection(profile)).mark_as_temp()
+        )
+        logger.info(
+            "[QQBotFeatures] injected current identity fact: session=%s self=%s profile=%s",
+            getattr(event, "unified_msg_origin", ""),
+            safe_event_value(event, "get_self_id"),
+            profile.profile,
+        )
 
     @filter.on_llm_request(desc="在 LLM 请求前按群号和问题检索本机源码树，把少量可信源码片段临时注入上下文。")
     async def inject_source_knowledge(self, event: AstrMessageEvent, req: ProviderRequest):

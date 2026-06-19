@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 from astrbot_plugin_qqbot_features.twin_interaction_logic import (
     TwinInteractionConfig,
     build_direct_twin_prompt,
+    build_identity_fact_injection,
     build_twin_injection,
     is_bare_dual_bot_call,
     is_bot_sender_id,
@@ -101,6 +102,8 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
 
         self.assertIn("你要用当前 bot 身份完成自己的那份请求", injection)
         self.assertIn("不要转给另一个 bot", injection)
+        self.assertIn("只能代表当前 bot 作出自己的回应", injection)
+        self.assertIn("不要追加“不过/但是”转折", injection)
         self.assertIn("不要把普通请求说成要另一个 bot 自己回应", injection)
 
     def test_bot_sender_ids_are_never_eligible_for_direct_handling(self) -> None:
@@ -115,6 +118,22 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         self.assertEqual(read_profile_for_self_id("1443944862").profile, "angel")
         self.assertEqual(read_profile_for_self_id("2629227874").profile, "demon")
         self.assertEqual(read_profile_for_self_id("missing", "angel").profile, "angel")
+
+    def test_identity_fact_keeps_current_self_id_as_viewpoint(self) -> None:
+        angel = read_profile_for_self_id("1443944862")
+        demon = read_profile_for_self_id("2629227874")
+
+        angel_injection = build_identity_fact_injection(angel)
+        demon_injection = build_identity_fact_injection(demon)
+
+        self.assertIn("你现在就是 😇棉花糖😇", angel_injection)
+        self.assertIn("另一个 bot 是 👿棉花糖👿", angel_injection)
+        self.assertIn("是你的妹妹", angel_injection)
+        self.assertIn("不能把自己说成 恶魔棉花糖", angel_injection)
+        self.assertIn("你现在就是 👿棉花糖👿", demon_injection)
+        self.assertIn("另一个 bot 是 😇棉花糖😇", demon_injection)
+        self.assertIn("是你的姐姐", demon_injection)
+        self.assertIn("不能把自己说成 天使棉花糖", demon_injection)
 
     def test_load_recent_other_bot_records_only_uses_other_bot_public_context(self) -> None:
         profile = read_profile("angel")

@@ -87,11 +87,12 @@ def decide_llm_worker(
 
     if allow_multi_target and both_targeted:
         should = self_key in targeted
+        multi_claim_key = f"{claim_key}:worker:{self_key}" if claim_key and should else claim_key
         return WorkerScheduleDecision(
             should,
             self_key if should else "",
             "both_targets_current_worker" if should else "both_targets_not_current_worker",
-            claim_key=claim_key,
+            claim_key=multi_claim_key,
             both_targeted=True,
             group_key=group_key,
             balance_before=balance_before,

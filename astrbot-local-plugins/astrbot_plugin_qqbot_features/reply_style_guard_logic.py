@@ -58,6 +58,10 @@ BOT_DISPLAY_NAMES = {
     "1443944862": "😇棉花糖😇",
     "2629227874": "👿棉花糖👿",
 }
+BOT_RELATION_NAMES = {
+    "1443944862": "姐姐",
+    "2629227874": "妹妹",
+}
 _TAIL_BOUNDARY = re.compile(r"(?<=[。！？!?；;])")
 _FOLLOWUP_MARKERS = (
     "如果你愿意",
@@ -261,7 +265,11 @@ def build_delegated_reply_instruction_text(
         opener = f"这是代班接力请求：{delegated_names} 那边在忙，请用 {current_name} 自己的身份先温柔接一下。"
     else:
         opener = f"这是代班接力请求：{delegated_names} 那边忙着呢，请用 {current_name} 自己的身份先顶上。"
-    return opener + "开头用一句很短的话说明正在接力，不要冒充对方，不要替对方认错、解释或承诺修改。"
+    return (
+        opener
+        + "开头用一句很短的话说明正在接力，不要冒充对方，不要替对方认错、解释或承诺修改。"
+        "本轮回复里的“我”必须是当前 bot；不要把自己说成另一个 bot，也不要替另一个 bot 接受夸奖、道歉或表态。"
+    )
 
 
 def build_both_targeted_reply_instruction_text() -> str:
@@ -269,8 +277,39 @@ def build_both_targeted_reply_instruction_text() -> str:
         "用户这次同时叫到了天使棉花糖和恶魔棉花糖，也是在叫你本人。"
         "请用当前 bot 自己的身份直接完成用户这次请求；如果用户让讲笑话、回答问题、评价或说一句话，你也要给出自己的内容。"
         "不要把任务转给另一个 bot，不要说“让她来讲/让对方回应/我不替她讲”。"
+        "如果用户说“我喜欢你们”“谢谢你们”“你们真好”这类同时面向两只的情绪表达，你只能代表当前 bot 独立回应，不能替另一个 bot 接受、感谢或承诺。"
+        "这类场景必须使用单数第一人称，例如“谢谢你喜欢我”；不要说“我们收到”“两只都收到”“姐姐和妹妹都收到”。"
+        "这类场景最稳妥的回复是一句短感谢，不要追加“不过/但是”转折、姐妹比较或对另一个 bot 的评价。"
+        "这类场景不要提另一个 bot 的名字、姐姐、妹妹或其他称谓，除非用户另行要求你评价对方或解释双子关系。"
+        "也不要猜测另一个 bot 的心情、反应或态度，例如“她也很开心”“她肯定在偷笑”。"
         "“不替另一个 bot 发言”只表示不能冒充对方、代发对方原话、替对方认错或承诺修改；不表示当前 bot 可以拒绝完成自己被点到的普通请求。"
         "可以自然提到她也被叫到了，但不要解释调度机制。"
+    )
+
+
+def build_delegated_comment_prompt_text(
+    *,
+    current_id: str,
+    responder_id: str,
+    original_text: str,
+    response_text: str,
+) -> str:
+    current_name = BOT_DISPLAY_NAMES.get(str(current_id or "").strip(), "当前棉花糖")
+    current_relation = BOT_RELATION_NAMES.get(str(current_id or "").strip(), "当前这只")
+    responder_name = BOT_DISPLAY_NAMES.get(str(responder_id or "").strip(), "另一个棉花糖")
+    return "\n".join(
+        [
+            "这是双棉花糖代班后的短评论任务。",
+            f"你是 {current_name}，也就是原本被用户叫到的{current_relation}。",
+            f"{responder_name} 已经用她自己的身份代班回答了。",
+            "你现在只能基于原消息和对方回复，用第一人称做一句有实质内容的短评论，不能重新完整回答原问题。",
+            "不要说“接住”“我看到了”“已经处理啦”“我补一句”这类空话。",
+            "不要再说自己在忙，也不要把自己描述成正在被别人代班的第三人称。",
+            "如果对方回复已经跑偏、瞎编或替你表态，你要轻轻纠正核心点，不要继续顺着错设定演。",
+            "语气偏 QQ 群日常、轻松一点，但结论要贴合内容。",
+            f"原消息：{original_text}",
+            f"对方回复：{response_text}",
+        ]
     )
 
 

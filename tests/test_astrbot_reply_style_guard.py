@@ -19,6 +19,7 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_markdown
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_model_regex_segmenting
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_reply_instruction_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_both_targeted_reply_instruction_text
+from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
 
 
 class AstrBotReplyStyleGuardTest(unittest.TestCase):
@@ -98,6 +99,7 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("👿棉花糖👿 那边在忙", instruction)
         self.assertIn("😇棉花糖😇 自己的身份", instruction)
         self.assertIn("不要冒充对方", instruction)
+        self.assertIn("本轮回复里的“我”必须是当前 bot", instruction)
 
     def test_both_targeted_instruction_requires_current_bot_to_complete_task(self) -> None:
         instruction = build_both_targeted_reply_instruction_text()
@@ -106,7 +108,29 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("直接完成用户这次请求", instruction)
         self.assertIn("如果用户让讲笑话", instruction)
         self.assertIn("不要把任务转给另一个 bot", instruction)
+        self.assertIn("我喜欢你们", instruction)
+        self.assertIn("只能代表当前 bot 独立回应", instruction)
+        self.assertIn("必须使用单数第一人称", instruction)
+        self.assertIn("一句短感谢", instruction)
+        self.assertIn("不要追加“不过/但是”转折", instruction)
+        self.assertIn("不要说“我们收到”", instruction)
+        self.assertIn("不要提另一个 bot 的名字", instruction)
+        self.assertIn("不要猜测另一个 bot 的心情", instruction)
         self.assertIn("不要说“让她来讲/让对方回应/我不替她讲”", instruction)
+
+    def test_delegated_comment_prompt_uses_current_target_viewpoint(self) -> None:
+        prompt = build_delegated_comment_prompt_text(
+            current_id="1443944862",
+            responder_id="2629227874",
+            original_text="@天使 为什么没有开机指令",
+            response_text="姐姐在忙，我替她盯一会儿。",
+        )
+
+        self.assertIn("你是 😇棉花糖😇", prompt)
+        self.assertIn("原本被用户叫到的姐姐", prompt)
+        self.assertIn("👿棉花糖👿 已经用她自己的身份代班回答了", prompt)
+        self.assertIn("不要再说自己在忙", prompt)
+        self.assertIn("不要把自己描述成正在被别人代班的第三人称", prompt)
 
     def test_long_reply_fold_threshold_can_be_disabled(self) -> None:
         self.assertTrue(should_fold_long_reply("a" * 301, threshold=300))

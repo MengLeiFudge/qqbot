@@ -43,9 +43,11 @@ from .twin_scheduler import targeted_twin_ids
 try:
     from astrbot_plugin_qqbot_features.request_context import build_current_request_context
     from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
+    from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
 except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<name>.
     from data.plugins.astrbot_plugin_qqbot_features.request_context import build_current_request_context
     from data.plugins.astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
+    from data.plugins.astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
 
 
 WINDOW_SECONDS = 600.0
@@ -531,16 +533,11 @@ def _parse_decision(text: str) -> TopicDecision:
 
 
 def _build_delegated_comment_prompt(comment) -> str:
-    return "\n".join(
-        [
-            "这是双棉花糖代班后的短评论任务。",
-            "用户原本叫到了你，但另一个棉花糖已经代你回答了。",
-            "你只能基于原消息和对方回复做一句有实质内容的短评论，不能重新完整回答原问题。",
-            "不要说“接住”“我看到了”“已经处理啦”“我补一句”这类空话。",
-            "语气偏 QQ 群日常、轻松、夸张一点，但结论要贴合内容。",
-            f"原消息：{comment.original_text}",
-            f"对方回复：{comment.response_text}",
-        ]
+    return build_delegated_comment_prompt_text(
+        current_id=comment.commenter_id,
+        responder_id=comment.responder_id,
+        original_text=comment.original_text,
+        response_text=comment.response_text,
     )
 
 
