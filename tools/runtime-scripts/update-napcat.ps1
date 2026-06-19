@@ -12,7 +12,7 @@ catch {
 }
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$WorkspaceRoot = Split-Path -Parent $ScriptRoot
+$WorkspaceRoot = Split-Path -Parent (Split-Path -Parent $ScriptRoot)
 $NapCatRoot = Join-Path $WorkspaceRoot "napcat"
 $OneKeyRoot = Join-Path $NapCatRoot "onekey"
 $DataRoot = Join-Path $WorkspaceRoot "data\napcat"

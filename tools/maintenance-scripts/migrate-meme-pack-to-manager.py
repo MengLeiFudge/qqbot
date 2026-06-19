@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 PLUGIN_SOURCE_ROOT = REPO_ROOT / "astrbot-local-plugins" / "meme_manager"
 DEFAULT_SOURCE_INDEX = REPO_ROOT / "data" / "memes" / "mlj_pack" / "index.json"
 

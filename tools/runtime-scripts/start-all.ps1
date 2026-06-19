@@ -26,7 +26,7 @@ if ($Target -eq "astrbot") {
 
 $ErrorActionPreference = "Stop"
 $ScriptRoot = $PSScriptRoot
-$WorkspaceRoot = Split-Path -Parent $ScriptRoot
+$WorkspaceRoot = Split-Path -Parent (Split-Path -Parent $ScriptRoot)
 
 function New-RunId {
     return Get-Date -Format "yyyyMMdd-HHmmss"

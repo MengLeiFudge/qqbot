@@ -5,7 +5,7 @@
 ## 基本原则
 
 - 默认使用简体中文沟通。
-- 修改前先确认目标子目录：`astrbot/`、`astrbot-local-plugins/`、`napcat/`、`scripts/`、`data/`。
+- 修改前先确认目标子目录：`astrbot/`、`astrbot-local-plugins/`、`napcat/`、`scripts/`、`tools/`、`data/`。
 - 不把真实 token、QQ 登录态、数据库、运行日志或本机配置提交进 Git。
 - 完成可验证改动后需要提交，除非用户明确要求暂不提交。
 - 严禁 push，除非用户明确批准。
@@ -14,7 +14,7 @@
 
 - `astrbot/`：AstrBot 上游源码快照和本机配置示例；不保留 AstrBot 上游 Git 历史，也不作为 bot2 Core 的日常启动来源。
 - AstrBot 行为调整硬限制：配置优先，插件其次，绝不直接修改 AstrBot Core 源码。能通过 `data/astrbot/data/` 运行态配置、AstrBot 参数或插件实现的行为，不允许改 `astrbot/` 源码快照或 uv tool 安装目录源码；只有先确认配置和插件都无法实现，并获得用户明确批准后，才允许讨论 Core 补丁。
-- `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
+- `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`tools/runtime-scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
 - 原 qqbot / NoneBot2 功能已迁入 AstrBot 本地插件；运行时代码不得依赖 `nonebot2/` 源码、`nonebot` 包、NoneBot2 plugin 入口或 OneBot adapter。
 - 从旧 qqbot 迁入的纯 Python service 只允许作为 AstrBot 插件内 vendored service 使用，运行态数据根统一为 `data\astrbot\data\plugin_data\qqbot_features_runtime`，迁移配置根统一为 `data\astrbot\data\plugin_data\qqbot_features_config`。
 - AstrBot 账号/身份切换通过启动参数显式控制：日常默认是 `-Target astrbot -FeatureMode full -AstrBotProfile both`，在同一个 AstrBot 管理端内同步两个 `aiocqhttp` 平台，恶魔默认反连 `6200`，天使默认反连 `6201`，并分别拉起两个 NapCat 账号；显式 `-AstrBotProfile demon` 才使用恶魔账号 `2629227874` 单平台，显式 `-AstrBotProfile angel -FeatureMode full -Target astrbot` 才使用天使账号 `1443944862` 单平台。本地插件必须按事件 `self_id` 区分天使/恶魔身份，不能把 `QQBOT_ASTRBOT_PROFILE` 当成双平台模式下的单一身份事实源。AstrBot OneBot 恶魔端口可用 `-AstrBotOneBotPort` 覆盖，天使端口可用 `-AstrBotAngelOneBotPort` 覆盖；不要重新硬编码 `6199`。
@@ -25,7 +25,7 @@
 - 公开群上下文桥接优先用 AstrBot 本地插件实现，不改 Core。桥接插件只能只读 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\` 这类公开群上下文，默认不按具体群号限制；星环群 `1035445959` 只能作为领域提示特例，不能作为桥接范围条件。不得读取私聊、token、QQ 登录态、数据库密钥或运行日志作为 LLM prompt 证据。
 - 双子 bot 互动由 `astrbot_plugin_qqbot_features` 内部的双子互动模块负责，只在用户明确围绕天使/恶魔/双子关系或另一个 bot 公开输出发问时增强当前 bot 的 LLM 上下文或接管明确请求。它不得响应另一个 bot 发出的普通消息，不得冒充另一个 bot 发言、替另一个 bot 认错、解释或承诺修改；调度层安排普通 LLM 代班/接力时，当前 bot 只能用自己的身份处理。近期上下文只能只读公开群上下文文件，不得读取私聊、日志、token、QQ 登录态或数据库密钥。
 - AstrBot 源码知识兜底优先用 `astrbot_plugin_qqbot_features` 内部的源码知识模块实现，不改 Core、不依赖 Embedding。可信依据必须优先来自源码、反编译源码、源码邻近 README/设计文档和配置数据，尤其是戴森球计划本体相关源码、相关 mod 源码和 MLJ_DSPmods 辅助模组/工具资料；群聊、群文件、攻略和 release notes 只能作为候选或补充。群号只能作为默认领域偏置，不能当成唯一领域事实；分馏群、星环群也可能问同一 DSP 工作区里的其他模组或工具，精确模组名、工具名、目录名和机制词应优先触发跨默认群域检索。源码检索模块只读明确配置的源码根，必须跳过 `.git`、`.codex`、`bin`、`obj`、`.vs`、`.idea`、`packages`、`node_modules`、`logs`、缓存和密钥类文件；不得读取私聊、token、QQ 登录态、数据库密钥、运行日志或本仓库运行态 `data`。为保证大号源码邻近说明文件可召回，`source_knowledge_max_results`、`source_knowledge_max_chars`、`source_knowledge_max_file_bytes` 不能配置得低于插件有效下限。
-- 双平台共用 AstrBot 本地插件 `meme_manager` 的本地表情包索引，运行态事实源是 `data\astrbot\data\plugin_data\meme_manager\meme_index.json` 和 `memes\`，插件源码事实源是 `astrbot-local-plugins\meme_manager\`，启动前同步到 `data\astrbot\data\plugins\meme_manager\`；`data\memes\mlj_pack\index.json` 只作为历史迁移来源保留，不再作为日常运行事实源。轻松日常、玩梗、吐槽、撒娇和短情绪回复应优先使用表情，短情绪闲聊允许纯表情回复，`auto_send_enabled=false` 的敏感支付、涩涩慎用、待复核类别不得自动发送。`meme_manager` 通过 `/表情管理 开启管理后台` 提供本地图库 UI，支持预览、搜索、分类移动、类别编辑、单图说明/关键词/适用场景/禁用场景和自动发送开关；发送链路不额外调用 LLM 做单图选择，只让主 LLM 决定是否用表情和粗类别，再由插件本地 selector 按类别、关键词、禁用场景、权重和近期去重选图。不改 Core、不删除旧图库目录；`scripts\migrate-meme-pack-to-manager.py` 和兼容命令 `scripts\sync-meme-pack.py` 只做旧 `mlj_pack` 到 `meme_manager` 的复制/合并迁移。
+- 双平台共用 AstrBot 本地插件 `meme_manager` 的本地表情包索引，运行态事实源是 `data\astrbot\data\plugin_data\meme_manager\meme_index.json` 和 `memes\`，插件源码事实源是 `astrbot-local-plugins\meme_manager\`，启动前同步到 `data\astrbot\data\plugins\meme_manager\`；`data\memes\mlj_pack\index.json` 只作为历史迁移来源保留，不再作为日常运行事实源。轻松日常、玩梗、吐槽、撒娇和短情绪回复应优先使用表情，短情绪闲聊允许纯表情回复，`auto_send_enabled=false` 的敏感支付、涩涩慎用、待复核类别不得自动发送。`meme_manager` 通过 `/表情管理 开启管理后台` 提供本地图库 UI，支持预览、搜索、分类移动、类别编辑、单图说明/关键词/适用场景/禁用场景和自动发送开关；发送链路不额外调用 LLM 做单图选择，只让主 LLM 决定是否用表情和粗类别，再由插件本地 selector 按类别、关键词、禁用场景、权重和近期去重选图。不改 Core、不删除旧图库目录；`tools\maintenance-scripts\migrate-meme-pack-to-manager.py` 和兼容命令 `tools\maintenance-scripts\sync-meme-pack.py` 只做旧 `mlj_pack` 到 `meme_manager` 的复制/合并迁移。
 - 本地 artifact 发布迁移到 `astrbot_plugin_local_artifact_api`，在 AstrBot `full` 模式下监听 `127.0.0.1:8080` 的兼容 `POST /admin/api/artifacts/publish-local`；它使用插件内发布服务和 `data\astrbot\data\plugin_data\qqbot_features_runtime` 发布状态，通过 AstrBot aiocqhttp OneBot 上传群文件，不改 AstrBot Core。发布服务必须独立打开 zip 计算内容 hash，与自身缓存比对后再决定是否删除、上传和发群消息；客户端传入的 `content_sha256` 只能用于一致性校验，不能作为唯一判重事实源。AstrBot-only 启动会清理旧 8080 占用并接管该端口。
 - AstrBot `full` 模式启动验证必须同时覆盖 WebUI `6185`、OneBot `6200/6201` 和 artifact API `8080`；`LocalArtifactApi failed to listen`、`WinError 10013` 或 `PermissionError` 不能被当成 ready 状态忽略。
 - 双平台运行时，普通主动接话不得由另一个 bot 的普通输出继续触发；普通群聊主动接话判定必须按群做 in-flight 门控，避免上游慢或超时时多个旧主动回复结果一起返回刷屏。明确 @、引用当前 bot、命名呼叫和主动接话这类普通 LLM 请求进入双 worker 调度：目标 bot 空闲时由目标处理，目标 bot 正在等待 LLM 返回时可由另一个 bot 用自己的身份代班/接力；代班 worker 一旦开始处理，原目标 bot 必须抑制对原消息的完整回答，等代班回复公开后只做一句基于原消息和代班回复的实质短评论，不能说“接住/我看到了/已经处理啦”这类空话。私聊永远由当前收到私聊的 bot 处理，不参与跨 bot 随机 worker、claim 或忙闲代班；私聊命中固定命令时执行当前 bot 的对应命令，未命中固定命令时一定进入当前 bot 的 LLM 链路。固定命令、权限动作、扣积分、写文件、上传、群管、下载和游戏存档只参与“唯一执行者选择”和 command claim 去重，不参与普通 LLM 代班；其中私聊 command claim 必须按当前 `self_id` 隔离，不能让天使和恶魔互相去重。两个 bot 的普通回复、主动回复和拒答都不要反问，不要用“如果你愿意”“要的话”“你把具体名字发我”“我可以再帮你”等追问式收尾；缺关键信息时陈述缺口，不催用户补充。
@@ -38,11 +38,13 @@
 - 双平台不保留“严肃模式”人格切换；所有群聊都按轻松水群氛围处理。技术、代码、报错、配置、群管理和安全提醒也必须保持当前天使/恶魔人设语气，但结论要准确、可执行，不能用卖萌或吐槽遮住关键信息。复读、频繁艾特、怪图/表情包和深夜修仙默认是水群行为，直接被叫到时短句接梗、安慰或吐槽；普通主动接话窗口里不要因此刷屏。恶魔棉花糖平时不主动使用固定“喵”口癖，不要写“哼...喵”这类模板化短口癖。AstrBot 侧天使/恶魔身份、人设、说话风格和双子关系只来自 AstrBot WebUI 人格配置（运行态 `data\astrbot\data\data_v4.db`）；本地插件不得内嵌或覆盖固定人格/水群风格提示词，只能注入动态事实、公开上下文、接口资料或权限边界这类功能性信息。
 - `napcat/`：共用 NapCat 程序包；更新下载和旧包备份应放在 `data/napcat/`，当前账号 OneBot 配置随一键包放置并由更新脚本迁移。
 - `data/`：统一运行态根目录，默认忽略，不进 Git。
-- `scripts/`：monorepo 根级启动脚本，负责设置各应用运行态路径。
+- `scripts/`：只保留 `start-all.bat` 和 `update-all.bat` 两个根级 Windows 用户入口。
+- `tools/runtime-scripts/`：`scripts/` 两个 all 入口调用的内部 PowerShell 启动、重启和更新实现。
+- `tools/maintenance-scripts/`：配置示例导出、表情迁移等非日常维护脚本。
 
 ## 配置示例导出
 
-- AstrBot 可提交配置示例放在 `astrbot/config/`；当前运行态配置导出入口是 `python3 scripts/export-astrbot-config-examples.py`。
+- AstrBot 可提交配置示例放在 `astrbot/config/`；当前运行态配置导出入口是 `python3 tools/maintenance-scripts/export-astrbot-config-examples.py`。
 - 导出脚本可读取 `data\astrbot\data\cmd_config.json`、`data\astrbot\data\config\*.json` 和 `data\astrbot\data\data_v4.db` 的 personas 表；输出前必须剔除 LLM provider/model/provider_sources/provider_settings/fallback/image-caption/embedding 路由，并脱敏 key、token、secret、password、cookie、authorization、custom headers/body 等字段。
 - example 可以保留非密钥运行形态，例如端口、bot 账号、群号、插件开关、功能模式和人格文本；不得提交真实 provider key、OneBot token、登录态、数据库密钥、运行日志或会话历史。
 
@@ -68,20 +70,19 @@
 
 ## 启动与重启
 
-- 日常启动入口是 `D:\project\qqbot\scripts\start-astrbot.bat` 或 `scripts\start-all.bat`，两者默认启动 AstrBot 天使+恶魔双平台。
+- 日常启动入口是 `D:\project\qqbot\scripts\start-all.bat`，默认启动 AstrBot 天使+恶魔双平台。
 - 修改会影响正在运行机器人的代码、配置、提示词、运行包或启动脚本后，必须重启对应机器人并做启动验证；不能只停在“已修改/已提交”。若当前环境无法重启，最终回复必须明确写出未重启、原因和应执行的入口。
-- 只影响 AstrBot Core、`data\astrbot\data\cmd_config.json`、AstrBot persona 或 uv tool 运行包的改动，重启 bot2：`scripts\start-astrbot.bat`；该入口默认以 `-AstrBotProfile both -FeatureMode full` 启动同一管理端内的天使+恶魔双平台。
-- AstrBot 接管已迁移自动事件时，使用 `scripts\start-astrbot.bat` 或显式 `scripts\start-all.ps1 -Target astrbot -SkipInstall -AstrBotProfile both -FeatureMode full`。如本机端口冲突，可加 `-AstrBotOneBotPort <端口>` 和 `-AstrBotAngelOneBotPort <端口>` 同步 AstrBot 和 NapCat 反连配置。
+- 只影响 AstrBot Core、`data\astrbot\data\cmd_config.json`、AstrBot persona 或 uv tool 运行包的改动，重启 bot2：`scripts\start-all.bat`；该入口默认以 `-AstrBotProfile both -FeatureMode full` 启动同一管理端内的天使+恶魔双平台。
+- AstrBot 接管已迁移自动事件时，使用 `scripts\start-all.bat` 或显式 `tools\runtime-scripts\start-all.ps1 -Target astrbot -SkipInstall -AstrBotProfile both -FeatureMode full`。如本机端口冲突，可加 `-AstrBotOneBotPort <端口>` 和 `-AstrBotAngelOneBotPort <端口>` 同步 AstrBot 和 NapCat 反连配置。
 - 需要 NapCat 重新反连时也使用普通 AstrBot 启动入口，不要只重启 Python 进程。
 - 普通启动入口会拉起对应 Bot 和 NapCat 子窗口；子窗口确认端口和反连就绪后退出，全部子窗口完成后入口窗口退出。
 - NapCat 启动脚本必须同时兼容新版 `napcat\onekey\napcat\launcher-user.bat` 和旧版 `NapCat.*.Shell` / `bootmain` 结构；新版 quick login 使用 `NAPCAT_QUICK_ACCOUNT` 环境变量。
 ## 更新
 
-- AstrBot Core 手动更新入口是 `D:\project\qqbot\scripts\update-astrbot.bat`。
-- 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat 和 AstrBot 更新入口。
-- NapCat 手动更新入口是 `D:\project\qqbot\scripts\update-napcat.bat`；正式更新会先下载并解压新包到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换后迁移账号 OneBot 配置。
+- 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat 和 AstrBot 更新实现。
+- NapCat 更新由 `tools\runtime-scripts\update-napcat.ps1` 实现；正式更新会先下载并解压新包到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换后迁移账号 OneBot 配置。
 - OneBot v11 本身是协议；本仓库实际更新对象是 NapCat 协议端和 AstrBot Core。
-- `update-astrbot.bat` 会先停止本工作区正在运行的 AstrBot uv tool 进程，再默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
+- AstrBot 更新由 `tools\runtime-scripts\update-astrbot.ps1` 实现，会先停止本工作区正在运行的 AstrBot uv tool 进程，再默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
 - Windows PATH 找不到 `uv` 时，更新脚本可以用 `py -3.14 -m pip install --user -U uv` 自举用户级 uv。
 - 更新日志写入 `data\astrbot\logs\updates\`，真实数据仍在 `data\astrbot\data\`。
 - 切换到 uv tool 后，修改 `astrbot\` 源码快照不会影响实际运行的 bot2；不要用 `astrbot\` 的源码 diff 判断线上 AstrBot Core 是否已更新。

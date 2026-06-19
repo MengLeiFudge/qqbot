@@ -18,7 +18,7 @@ catch {
     # Output may be redirected; environment variables below still keep Python logs UTF-8.
 }
 
-$WorkspaceRoot = Split-Path -Parent $PSScriptRoot
+$WorkspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
 $LocalPluginRoot = Join-Path $WorkspaceRoot "astrbot-local-plugins"
 $RuntimePluginRoot = Join-Path $AstrRoot "data\plugins"
@@ -310,4 +310,4 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
     exit $LASTEXITCODE
 }
 
-throw "AstrBot uv tool is not available. Run scripts\update-astrbot.bat first."
+throw "AstrBot uv tool is not available. Run scripts\update-all.bat first."

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_export_module():
-    module_path = ROOT / "scripts" / "export-astrbot-config-examples.py"
+    module_path = ROOT / "tools" / "maintenance-scripts" / "export-astrbot-config-examples.py"
     spec = importlib.util.spec_from_file_location("export_astrbot_config_examples", module_path)
     assert spec is not None
     assert spec.loader is not None

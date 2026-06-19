@@ -6,9 +6,9 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-START_ALL = ROOT / "scripts" / "start-all.ps1"
+SCRIPTS_ROOT = ROOT / "scripts"
+START_ALL = ROOT / "tools" / "runtime-scripts" / "start-all.ps1"
 START_ALL_BAT = ROOT / "scripts" / "start-all.bat"
-START_ASTRBOT_BAT = ROOT / "scripts" / "start-astrbot.bat"
 
 
 class StartAllContractTest(unittest.TestCase):
@@ -22,15 +22,19 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn('$PSBoundParameters.ContainsKey("FeatureMode")', script)
         self.assertIn('$PSBoundParameters.ContainsKey("AstrBotProfile")', script)
 
-    def test_daily_bat_entries_start_astrbot_both_full(self) -> None:
-        for path in (START_ALL_BAT, START_ASTRBOT_BAT):
-            with self.subTest(path=path.name):
-                content = re.sub(r"\s+", " ", path.read_text(encoding="utf-8-sig")).strip()
+    def test_scripts_directory_only_exposes_all_bat_entries(self) -> None:
+        script_files = {path.name for path in SCRIPTS_ROOT.iterdir() if path.is_file()}
 
-                self.assertIn("-Target astrbot", content)
-                self.assertIn("-SkipInstall", content)
-                self.assertIn("-AstrBotProfile both", content)
-                self.assertIn("-FeatureMode full", content)
+        self.assertEqual(script_files, {"start-all.bat", "update-all.bat"})
+
+    def test_daily_bat_entry_starts_astrbot_both_full(self) -> None:
+        content = re.sub(r"\s+", " ", START_ALL_BAT.read_text(encoding="utf-8-sig")).strip()
+
+        self.assertIn(r"tools\runtime-scripts\start-all.ps1", content)
+        self.assertIn("-Target astrbot", content)
+        self.assertIn("-SkipInstall", content)
+        self.assertIn("-AstrBotProfile both", content)
+        self.assertIn("-FeatureMode full", content)
 
     def test_start_all_does_not_keep_legacy_target(self) -> None:
         content = START_ALL.read_text(encoding="utf-8-sig")

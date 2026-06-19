@@ -14,7 +14,7 @@ catch {
 }
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$WorkspaceRoot = Split-Path -Parent $ScriptRoot
+$WorkspaceRoot = Split-Path -Parent (Split-Path -Parent $ScriptRoot)
 $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
 $LogRoot = Join-Path $AstrRoot "logs\updates"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -359,4 +359,4 @@ else {
     }
 }
 
-Write-Step "Update finished. Start bot2 with scripts\start-astrbot.bat."
+Write-Step "Update finished. Start bots with scripts\start-all.bat."

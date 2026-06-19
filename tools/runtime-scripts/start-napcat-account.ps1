@@ -15,7 +15,7 @@ if (Test-Path $chcp) {
     & $chcp 65001 | Out-Null
 }
 
-$WorkspaceRoot = Split-Path -Parent $PSScriptRoot
+$WorkspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $OneKeyRoot = Join-Path $WorkspaceRoot "napcat\onekey"
 
 function Resolve-NapCatRoot {

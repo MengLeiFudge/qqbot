@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ASTRBOT_DATA = WORKSPACE_ROOT / "data" / "astrbot" / "data"
 DEFAULT_OUTPUT_DIR = WORKSPACE_ROOT / "astrbot" / "config"
 

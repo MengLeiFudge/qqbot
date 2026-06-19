@@ -50,13 +50,13 @@ LLM 仍只负责决定是否使用表情和粗类别标签。
 从旧 `data/memes/mlj_pack/index.json` 迁移：
 
 ```bash
-python3 scripts/migrate-meme-pack-to-manager.py
+python3 tools/maintenance-scripts/migrate-meme-pack-to-manager.py
 ```
 
 兼容旧命令名：
 
 ```bash
-python3 scripts/sync-meme-pack.py
+python3 tools/maintenance-scripts/sync-meme-pack.py
 ```
 
 这两个命令只复制/合并到 `meme_manager` 运行态，不删除旧目录。
