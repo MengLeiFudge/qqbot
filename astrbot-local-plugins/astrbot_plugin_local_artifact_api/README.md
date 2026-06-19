@@ -13,7 +13,9 @@
 - `POST /admin/api/artifacts/publish-local`
   - 只监听 `127.0.0.1` / `::1` / `localhost`。
   - 校验请求时间、Git 上下文、文件路径和发布元数据。
-  - `sha256` 校验 zip 文件本身，`content_sha256` 判断 zip 内部内容是否变化。
+  - `sha256` 校验 zip 文件本身。
+  - `content_sha256` 只作为客户端声明的 zip 内容 hash；服务端会独立读取 zip 条目并计算内容 hash，不信任时间戳，也不只信任客户端传值。
+  - 服务端内容 hash 与自身缓存一致时，直接跳过删除、上传和群消息。
   - 通过当前 AstrBot `aiocqhttp` OneBot 连接上传群文件。
   - 同一次请求向同一群上传多个变化文件时，先上传所有文件，最后只引用最后一个文件消息并发送一次发布说明。
 

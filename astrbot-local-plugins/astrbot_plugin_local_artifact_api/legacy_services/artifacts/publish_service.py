@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 from typing import Any
+import zipfile
 
 FE_ARTIFACT_NAME_RE = re.compile(r"^FractionateEverything_\d+(?:\.\d+)*\.zip$", re.IGNORECASE)
 
@@ -129,13 +130,16 @@ async def publish_local_artifacts(
         actual_sha256 = calculate_sha256(package_path)
         if expected_sha256 and expected_sha256 != actual_sha256:
             raise ValueError(f"Artifact sha256 mismatch: {package_path}")
-        publish_sha256 = artifact.content_sha256.strip().lower() or actual_sha256
+        server_content_sha256 = calculate_zip_content_sha256(package_path)
+        client_content_sha256 = artifact.content_sha256.strip().lower()
+        if client_content_sha256 and client_content_sha256 != server_content_sha256:
+            raise ValueError(f"Artifact content sha256 mismatch: {package_path}")
 
         for group_id in artifact.targets:
             if is_same_as_last_local_artifact_published(
                 group_id,
                 upload_name,
-                publish_sha256,
+                server_content_sha256,
                 data_root=data_root,
             ):
                 skipped.append(
@@ -144,7 +148,7 @@ async def publish_local_artifacts(
                         "file": str(package_path),
                         "name": upload_name,
                         "sha256": actual_sha256,
-                        "content_sha256": publish_sha256,
+                        "content_sha256": server_content_sha256,
                         "reason": "artifact content sha256 unchanged.",
                     }
                 )
@@ -172,13 +176,13 @@ async def publish_local_artifacts(
                     "file": str(package_path),
                     "name": upload_name,
                     "sha256": actual_sha256,
-                    "content_sha256": publish_sha256,
+                    "content_sha256": server_content_sha256,
                 }
             )
             save_last_local_artifact_published_sha(
                 group_id,
                 upload_name,
-                publish_sha256,
+                server_content_sha256,
                 data_root=data_root,
             )
     for group_id, notice in notices.items():
@@ -262,6 +266,22 @@ def calculate_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def calculate_zip_content_sha256(path: str | Path) -> str:
+    package_path = normalize_local_path(path)
+    digest = hashlib.sha256()
+    with zipfile.ZipFile(package_path, "r") as archive:
+        for info in sorted(archive.infolist(), key=lambda item: item.filename.lower()):
+            digest.update(info.filename.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(str(info.file_size).encode("utf-8"))
+            digest.update(b"\0")
+            with archive.open(info, "r") as file:
+                for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def is_same_as_last_published(
     group_id: int,
     sha256: str,
@@ -313,7 +333,11 @@ def save_last_local_artifact_published_sha(
     path = _last_local_artifact_published_sha_path(group_id, file_name, data_root=data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"name": file_name, "content_sha256": sha256, "sha256": sha256}, ensure_ascii=False, indent=2),
+        json.dumps(
+            {"name": file_name, "server_content_sha256": sha256, "content_sha256": sha256},
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
@@ -665,7 +689,7 @@ def _load_last_local_artifact_published_sha(
         return ""
     if payload.get("name") != file_name:
         return ""
-    sha256 = payload.get("content_sha256") or payload.get("sha256")
+    sha256 = payload.get("server_content_sha256") or payload.get("content_sha256") or payload.get("sha256")
     return sha256.strip().lower() if isinstance(sha256, str) else ""
 
 
