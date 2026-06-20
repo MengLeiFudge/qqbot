@@ -14,6 +14,8 @@ CHAT_BUBBLE_REPLY_INSTRUCTION = (
     "普通群聊问答默认只输出一行短气泡，直接给结论。"
     "只有第二条信息确实有独立价值时才输出第二行，最多两行；每行就是一条将要发送的 QQ 消息。"
     "每行控制在 80 个中文字符以内，不要把寒暄、免责声明、自嘲、吐槽铺垫或废话评价塞进答案。"
+    "评价上文或总结聊天时，只抓一个最明显的槽点，不要罗列多个话题。"
+    "不要在句尾追加装饰性口癖、颜文字或身份 emoji，例如单独的“喵”“喵 😇”“😇”“👿”。"
     "第一行给结论；第二行只放必要证据、条件或纠错。"
     "上下文不完整时保留“大概率”“像是”“可能”这类概率词，不要把线索说成确定事实，也不要追问用户补全。"
     "例如用户问 RC 且补充锅炉会炸，应回“RC 大概率是 Railcraft，锅炉会炸这点对得上。”，不要追加无信息密度的收尾。"
@@ -135,7 +137,16 @@ _PERMISSION_ESCALATION_ACTIONS = (
 
 
 def sanitize_reply_plain_text(text: str) -> str:
-    return strip_followup_tail(strip_permission_escalation_advice(strip_markdown_syntax(text)))
+    return strip_decorative_tail(strip_followup_tail(strip_permission_escalation_advice(strip_markdown_syntax(text))))
+
+
+def strip_decorative_tail(text: str) -> str:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return ""
+    normalized = re.sub(r"(?:\s*喵\s*){1,3}[😇👿]?\s*$", "", normalized).strip()
+    normalized = re.sub(r"\s+[😇👿]\s*$", "", normalized).strip()
+    return normalized
 
 
 def split_chat_bubble_lines(

@@ -367,7 +367,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.10.3",
+    "0.10.4",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):

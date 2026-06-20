@@ -8,7 +8,7 @@
 
 普通聊天不在这里硬编码回复。没有命中明确命令、游戏会话答案、协议事件或本地硬安全提醒时，消息应交给 AstrBot LLM 链路。
 
-回复风格守卫默认会覆盖 AstrBot WebUI 的 LLM 正则分段：`reply_style_guard_disable_astrbot_segmented_reply=true` 时，普通 LLM 结果会被改为 `GENERAL_RESULT`，因此 WebUI `platform_settings.segmented_reply.only_llm_result` 不再拆这类回复。这个覆盖是为了避免句末正则把解释类回答拆成多条刷屏；如果要完全恢复 AstrBot 原生分段行为，关闭该插件配置。普通群聊问答会在 LLM 请求前提示模型按“短气泡”输出：默认一行，最多两行；模型主动输出两行以内短文本时，插件只按换行拆成多个 `Plain` 组件交给 AstrBot 发送链路，不按句号正则二次切分。
+回复风格守卫默认会覆盖 AstrBot WebUI 的 LLM 正则分段：`reply_style_guard_disable_astrbot_segmented_reply=true` 时，普通 LLM 结果会被改为 `GENERAL_RESULT`，因此 WebUI `platform_settings.segmented_reply.only_llm_result` 不再拆这类回复。这个覆盖是为了避免句末正则把解释类回答拆成多条刷屏；如果要完全恢复 AstrBot 原生分段行为，关闭该插件配置。普通群聊问答会在 LLM 请求前提示模型按“短气泡”输出：默认一行，最多两行；评价上文或总结聊天时只抓一个主要槽点。模型主动输出两行以内短文本时，插件只按换行拆成多个 `Plain` 组件交给 AstrBot 发送链路，不按句号正则二次切分；发送前会移除末尾装饰性 `喵` 和身份 emoji。
 
 群聊长输入短路只作用于群聊；私聊不受 `太长不看` 限制。私聊发送 OneBot 合并转发/折叠消息时，插件会通过 `get_forward_msg` 解包纯文本，再交给当前收到私聊的 bot 进入 LLM 链路。
 

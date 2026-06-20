@@ -13,6 +13,7 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_reply_t
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import CHAT_BUBBLE_REPLY_INSTRUCTION
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import is_dangerous_local_tool_name
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import split_chat_bubble_lines
+from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_decorative_tail
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import split_forward_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_fold_long_reply
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_segmented_reply_for_text
@@ -55,6 +56,14 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             sanitize_reply_plain_text("**结论**：别登录。\n- 原因：不正规。\n你把具体名字发我。"),
             "结论：别登录。\n· 原因：不正规。",
         )
+
+    def test_decorative_tail_is_stripped(self) -> None:
+        self.assertEqual(
+            strip_decorative_tail("整个群跟开了个跨学科研讨会似的喵 😇"),
+            "整个群跟开了个跨学科研讨会似的",
+        )
+        self.assertEqual(strip_decorative_tail("这事对得上 😇"), "这事对得上")
+        self.assertEqual(strip_decorative_tail("这个锅大概是 Railcraft"), "这个锅大概是 Railcraft")
 
     def test_strip_markdown_syntax_preserves_json_indentation(self) -> None:
         self.assertEqual(
@@ -178,6 +187,8 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("默认只输出一行短气泡", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("最多两行", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("不要把寒暄、免责声明、自嘲、吐槽铺垫或废话评价塞进答案", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("只抓一个最明显的槽点", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("装饰性口癖", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("上下文不完整时保留", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("RC 大概率是 Railcraft", CHAT_BUBBLE_REPLY_INSTRUCTION)
 
