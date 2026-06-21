@@ -69,7 +69,9 @@ from astrbot_plugin_topic_concentration.twin_scheduler import (
     targeted_twin_ids,
 )
 from astrbot_plugin_qqbot_features.request_context import build_current_request_context
+from astrbot_plugin_qqbot_features.twin_interaction_logic import collect_target_twin_ids
 from astrbot_plugin_qqbot_features.twin_interaction_logic import requires_target_twin_to_handle
+from astrbot_plugin_qqbot_features.twin_interaction_logic import should_allow_twin_delegation
 
 
 class StubResponse:
@@ -700,6 +702,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
     def test_twin_scheduler_still_delegates_general_targeted_question(self) -> None:
         mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
         self.assertFalse(requires_target_twin_to_handle("配置怎么看", ("2629227874",)))
+        self.assertTrue(should_allow_twin_delegation("配置怎么看", ("2629227874",)))
 
         delegated = decide_llm_worker(
             self_id="1443944862",
@@ -714,6 +717,50 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertTrue(delegated.should_handle)
         self.assertEqual(delegated.worker_id, "1443944862")
         self.assertEqual(delegated.delegated_from, "2629227874")
+
+    def test_twin_delegation_blocks_low_value_watercooler_banter(self) -> None:
+        target_ids = ("2629227874",)
+
+        self.assertFalse(should_allow_twin_delegation("对", target_ids))
+        self.assertFalse(should_allow_twin_delegation("？？", target_ids))
+        self.assertFalse(should_allow_twin_delegation("标点符号？", target_ids))
+        self.assertFalse(should_allow_twin_delegation("我要玩棉花糖工厂", target_ids))
+        self.assertFalse(should_allow_twin_delegation("有人想玩异性工厂", target_ids))
+        self.assertTrue(should_allow_twin_delegation("配置错了怎么办", target_ids))
+
+    def test_twin_delegation_uses_quoted_twin_as_effective_target(self) -> None:
+        target_ids = collect_target_twin_ids((), "2629227874")
+
+        self.assertEqual(target_ids, ("2629227874",))
+        self.assertFalse(should_allow_twin_delegation("？？", target_ids))
+
+    def test_twin_scheduler_blocks_low_value_banter_when_target_busy(self) -> None:
+        mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
+
+        target = decide_llm_worker(
+            self_id="2629227874",
+            at_ids=("2629227874",),
+            message_key="message:cotton-candy-factory:llm",
+            group_id="1163635014",
+            original_text="我要玩棉花糖工厂",
+            allow_delegation=should_allow_twin_delegation("我要玩棉花糖工厂", ("2629227874",)),
+            now=20.0,
+        )
+        delegated = decide_llm_worker(
+            self_id="1443944862",
+            at_ids=("2629227874",),
+            message_key="message:cotton-candy-factory:llm",
+            group_id="1163635014",
+            original_text="我要玩棉花糖工厂",
+            allow_delegation=should_allow_twin_delegation("我要玩棉花糖工厂", ("2629227874",)),
+            now=21.0,
+        )
+
+        self.assertFalse(target.should_handle)
+        self.assertEqual(target.reason, "target_busy_no_delegation")
+        self.assertFalse(delegated.should_handle)
+        self.assertEqual(delegated.worker_id, "2629227874")
+        self.assertEqual(delegated.reason, "target_busy_no_delegation")
 
     def test_twin_scheduler_allows_both_workers_for_dual_target_chat(self) -> None:
         angel = decide_llm_worker(

@@ -92,6 +92,73 @@ TWIN_EXCLUSIVE_ACTION_MARKERS = (
     "和她",
     "对她",
 )
+SUBSTANTIVE_DELEGATION_MARKERS = (
+    "怎么",
+    "为什么",
+    "为啥",
+    "如何",
+    "哪里",
+    "哪儿",
+    "哪个",
+    "什么",
+    "啥",
+    "多少",
+    "多久",
+    "多长时间",
+    "配置",
+    "设置",
+    "报错",
+    "错误",
+    "异常",
+    "日志",
+    "代码",
+    "接口",
+    "api",
+    "文档",
+    "资料",
+    "说明",
+    "解释",
+    "查询",
+    "搜索",
+    "查一下",
+    "帮我看",
+    "分析",
+    "修",
+    "安装",
+    "下载",
+    "更新",
+    "版本",
+    "指令",
+    "命令",
+    "mod",
+    "模组",
+    "服务器",
+    "存档",
+)
+STRONG_LOW_VALUE_DELEGATION_BLOCK_MARKERS = (
+    "标点符号",
+    "标点权",
+    "检讨",
+    "垄断",
+    "明知故犯",
+    "下次不用",
+    "下次不写",
+    "出幻觉",
+    "说话",
+    "你倒是",
+    "倒是发",
+    "吹牛",
+    "我赢了",
+    "你赢了",
+    "跑马灯",
+    "棉花糖工厂",
+    "异性工厂",
+    "sexfactory",
+)
+WEAK_LOW_VALUE_DELEGATION_BLOCK_MARKERS = (
+    "标点",
+    "错了",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +253,19 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", "", str(text or "")).lower()
 
 
+def collect_target_twin_ids(at_ids: object, reply_sender_id: object = "") -> tuple[str, ...]:
+    """Return the effective twin target set from explicit @ and quoted bot sender."""
+    targets: set[str] = set()
+    for value in iter_values(at_ids):
+        target_id = str(value or "").strip()
+        if target_id in PROFILE_BY_BOT_ID:
+            targets.add(target_id)
+    reply_target = str(reply_sender_id or "").strip()
+    if reply_target in PROFILE_BY_BOT_ID:
+        targets.add(reply_target)
+    return tuple(sorted(targets))
+
+
 def is_bare_dual_bot_call(text: str, profile: TwinProfile) -> bool:
     if not (mentions_current_bot(text, profile) and mentions_other_bot(text, profile)):
         return False
@@ -243,7 +323,7 @@ def requires_target_twin_to_handle(text: str, target_ids: object) -> bool:
     compact = normalize_text(text)
     if not compact:
         return False
-    targets = {str(value or "").strip() for value in iter_values(target_ids)}
+    targets = set(collect_target_twin_ids(target_ids))
     if len(targets) != 1:
         return False
     target_id = next(iter(targets))
@@ -257,6 +337,21 @@ def requires_target_twin_to_handle(text: str, target_ids: object) -> bool:
     ):
         return False
     return any(normalize_text(marker) in compact for marker in TWIN_EXCLUSIVE_ACTION_MARKERS)
+
+
+def should_allow_twin_delegation(text: str, target_ids: object, reply_sender_id: object = "") -> bool:
+    """Allow busy-target delegation only for messages that are worth cross-bot takeover."""
+    targets = collect_target_twin_ids(target_ids, reply_sender_id)
+    if len(targets) != 1:
+        return True
+    if requires_target_twin_to_handle(text, targets):
+        return False
+    compact = normalize_text(text)
+    if not compact:
+        return False
+    if _looks_like_low_value_twin_banter(compact):
+        return False
+    return any(normalize_text(marker) in compact for marker in SUBSTANTIVE_DELEGATION_MARKERS)
 
 
 def profile_name_markers(profile: TwinProfile) -> tuple[str, ...]:
@@ -275,6 +370,23 @@ def other_profile_name_markers(profile: TwinProfile) -> tuple[str, ...]:
         profile.other_short_name + "棉花糖",
         profile.other_short_name,
     )
+
+
+def _looks_like_low_value_twin_banter(compact: str) -> bool:
+    if not compact:
+        return True
+    lexical = re.sub(r"[@＠,，。.!！?？:：;；、~～…\[\]()（）<>《》\"'“”‘’/\\|+=_\-]+", "", compact)
+    if len(lexical) <= 1:
+        return True
+    if len(lexical) <= 4 and not any(normalize_text(marker) in compact for marker in SUBSTANTIVE_DELEGATION_MARKERS):
+        return True
+    if any(normalize_text(marker) in compact for marker in STRONG_LOW_VALUE_DELEGATION_BLOCK_MARKERS):
+        return True
+    if any(normalize_text(marker) in compact for marker in SUBSTANTIVE_DELEGATION_MARKERS):
+        return False
+    if any(normalize_text(marker) in compact for marker in WEAK_LOW_VALUE_DELEGATION_BLOCK_MARKERS):
+        return True
+    return bool(re.search(r"(?:我|他|她|有人)?(?:要|想)?玩(?:.+)?工厂", compact))
 
 
 def iter_values(value: object) -> tuple[object, ...]:

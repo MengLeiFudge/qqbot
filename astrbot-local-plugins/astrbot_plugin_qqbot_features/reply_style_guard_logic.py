@@ -363,14 +363,13 @@ def build_delegated_reply_instruction_text(
     )
     if not delegated_names:
         delegated_names = "另一个棉花糖"
-    if str(current_id or "").strip() == "1443944862":
-        opener = f"这是代班接力请求：{delegated_names} 那边在忙，请用 {current_name} 自己的身份先温柔接一下。"
-    else:
-        opener = f"这是代班接力请求：{delegated_names} 那边忙着呢，请用 {current_name} 自己的身份先顶上。"
     return (
-        opener
-        + "开头用一句很短的话说明正在接力，不要冒充对方，不要替对方认错、解释或承诺修改。"
-        "本轮回复里的“我”必须是当前 bot；不要把自己说成另一个 bot，也不要替另一个 bot 接受夸奖、道歉或表态。"
+        f"这是代班接力请求：原本被叫到的是 {delegated_names}，现在由 {current_name} 用自己的身份回答。"
+        "直接回答用户这次请求，不要固定开场，不要说“我先接一下”“她在忙”“妹妹在忙”“姐姐在忙”或“等她回来”。"
+        "不要冒充对方，不要替对方认错、解释、接受夸奖、道歉、表态或承诺修改。"
+        "本轮回复里的“我”必须是当前 bot；不要把自己说成另一个 bot。"
+        "缺少事实时就承认不知道或只说能确定的部分，不要编另一个 bot 玩过、见过、说过、能发截图、会发文件、会回来处理或懂某个玩法。"
+        "除非用户明确要求详细说明，否则只用一条短气泡回答。"
     )
 
 

@@ -117,10 +117,15 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             delegated_from="2629227874",
         )
 
-        self.assertIn("👿棉花糖👿 那边在忙", instruction)
-        self.assertIn("😇棉花糖😇 自己的身份", instruction)
+        self.assertIn("原本被叫到的是 👿棉花糖👿", instruction)
+        self.assertIn("现在由 😇棉花糖😇 用自己的身份回答", instruction)
+        self.assertIn("不要固定开场", instruction)
+        self.assertIn("不要说“我先接一下”", instruction)
+        self.assertIn("不要说“我先接一下”“她在忙”", instruction)
         self.assertIn("不要冒充对方", instruction)
         self.assertIn("本轮回复里的“我”必须是当前 bot", instruction)
+        self.assertIn("不要编另一个 bot 玩过", instruction)
+        self.assertIn("能发截图", instruction)
 
     def test_both_targeted_instruction_requires_current_bot_to_complete_task(self) -> None:
         instruction = build_both_targeted_reply_instruction_text()

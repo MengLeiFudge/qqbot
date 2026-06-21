@@ -45,12 +45,14 @@ try:
     from astrbot_plugin_qqbot_features.request_context import build_current_request_context
     from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
     from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
-    from astrbot_plugin_qqbot_features.twin_interaction_logic import requires_target_twin_to_handle
+    from astrbot_plugin_qqbot_features.twin_interaction_logic import collect_target_twin_ids
+    from astrbot_plugin_qqbot_features.twin_interaction_logic import should_allow_twin_delegation
 except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<name>.
     from data.plugins.astrbot_plugin_qqbot_features.request_context import build_current_request_context
     from data.plugins.astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
     from data.plugins.astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
-    from data.plugins.astrbot_plugin_qqbot_features.twin_interaction_logic import requires_target_twin_to_handle
+    from data.plugins.astrbot_plugin_qqbot_features.twin_interaction_logic import collect_target_twin_ids
+    from data.plugins.astrbot_plugin_qqbot_features.twin_interaction_logic import should_allow_twin_delegation
 
 
 WINDOW_SECONDS = 600.0
@@ -125,28 +127,33 @@ class TopicConcentrationPlugin(Star):
         text = _plain_text(event) or str(event.get_message_str() or "")
         if looks_like_qqbot_fixed_command(text):
             return
+        at_ids = _at_target_ids(event)
+        reply_target_id = _reply_target_id(event)
+        target_ids = collect_target_twin_ids(at_ids, reply_target_id)
+        allow_delegation = should_allow_twin_delegation(text, target_ids)
         decision = decide_llm_worker(
             self_id=event.get_self_id(),
-            at_ids=_at_target_ids(event),
-            reply_sender_id=_reply_target_id(event),
+            at_ids=at_ids,
+            reply_sender_id=reply_target_id,
             message_key=_llm_message_key(event),
             group_id=event.get_group_id(),
             original_text=text,
             private_chat=event.is_private_chat(),
             allow_multi_target=True,
-            allow_delegation=not requires_target_twin_to_handle(text, _at_target_ids(event)),
+            allow_delegation=allow_delegation,
         )
         if not decision.should_handle:
             event.should_call_llm(True)
             event.stop_event()
             logger.info(
-                "[TopicConcentration] skip direct LLM: self=%s selected=%s reason=%s claim=%s group=%s targets=%s balance=%.2f p_angel=%.2f",
+                "[TopicConcentration] skip direct LLM: self=%s selected=%s reason=%s claim=%s group=%s targets=%s allow_delegation=%s balance=%.2f p_angel=%.2f",
                 event.get_self_id(),
                 decision.worker_id,
                 decision.reason,
                 decision.claim_key,
                 event.get_group_id(),
-                ",".join(_at_target_ids(event)),
+                ",".join(target_ids),
+                allow_delegation,
                 decision.balance_before,
                 decision.angel_probability,
             )
@@ -159,7 +166,7 @@ class TopicConcentrationPlugin(Star):
         if decision.delegated_from:
             event.set_extra("_qqbot_twin_llm_delegated_from", decision.delegated_from)
         logger.info(
-            "[TopicConcentration] allow direct LLM: self=%s selected=%s reason=%s delegated_from=%s both_targeted=%s claim=%s group=%s targets=%s balance=%.2f p_angel=%.2f",
+            "[TopicConcentration] allow direct LLM: self=%s selected=%s reason=%s delegated_from=%s both_targeted=%s claim=%s group=%s targets=%s allow_delegation=%s balance=%.2f p_angel=%.2f",
             event.get_self_id(),
             decision.worker_id,
             decision.reason,
@@ -167,7 +174,8 @@ class TopicConcentrationPlugin(Star):
             decision.both_targeted,
             decision.claim_key,
             event.get_group_id(),
-            ",".join(_at_target_ids(event)),
+            ",".join(target_ids),
+            allow_delegation,
             decision.balance_before,
             decision.angel_probability,
         )
