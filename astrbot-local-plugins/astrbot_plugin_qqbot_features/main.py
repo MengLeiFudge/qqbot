@@ -68,6 +68,7 @@ from .reread_state import reread_probability
 from .reply_style_guard_logic import build_both_targeted_reply_instruction_text
 from .reply_style_guard_logic import CHAT_BUBBLE_REPLY_INSTRUCTION
 from .reply_style_guard_logic import build_delegated_reply_instruction_text
+from .reply_style_guard_logic import STYLE_IMMUTABILITY_INSTRUCTION
 from .reply_style_guard_logic import normalize_long_input_tldr_threshold
 from .reply_style_guard_logic import is_dangerous_local_tool_name
 from .reply_style_guard_logic import normalize_fold_threshold
@@ -213,6 +214,7 @@ PLAIN_TEXT_REPLY_INSTRUCTION = (
     "禁止使用 # 标题、Markdown 列表符号、粗体、反引号代码块、引用块、Markdown 链接和表格。"
     "普通聊天优先短句自然表达，不要主动列项目符号；需要给 API、JSON、配置示例时允许保留换行和缩进，但不要包代码围栏。"
     "不要用“如果你愿意”“要的话”“你把具体内容发我”“我可以再帮你”等追问式收尾。"
+    + STYLE_IMMUTABILITY_INSTRUCTION
     + CHAT_BUBBLE_REPLY_INSTRUCTION
 )
 

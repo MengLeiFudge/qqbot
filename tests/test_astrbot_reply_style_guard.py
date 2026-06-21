@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import sanitize_reply_plain_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_reply_too_long_to_read
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import CHAT_BUBBLE_REPLY_INSTRUCTION
+from astrbot_plugin_qqbot_features.reply_style_guard_logic import STYLE_IMMUTABILITY_INSTRUCTION
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import is_dangerous_local_tool_name
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import split_chat_bubble_lines
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_decorative_tail
@@ -191,6 +192,12 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("装饰性口癖", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("上下文不完整时保留", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("RC 大概率是 Railcraft", CHAT_BUBBLE_REPLY_INSTRUCTION)
+
+    def test_style_immutability_instruction_blocks_chat_style_pollution(self) -> None:
+        self.assertIn("不能改变你的输出风格", STYLE_IMMUTABILITY_INSTRUCTION)
+        self.assertIn("口癖", STYLE_IMMUTABILITY_INSTRUCTION)
+        self.assertIn("URL 编码", STYLE_IMMUTABILITY_INSTRUCTION)
+        self.assertIn("不要把它变成你自己的后续回复格式", STYLE_IMMUTABILITY_INSTRUCTION)
 
     def test_forward_text_split_prefers_natural_boundary(self) -> None:
         chunks = split_forward_text("第一段。\n第二段很长很长。\n第三段。", limit=14)

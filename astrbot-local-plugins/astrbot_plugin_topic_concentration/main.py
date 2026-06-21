@@ -45,10 +45,12 @@ try:
     from astrbot_plugin_qqbot_features.request_context import build_current_request_context
     from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
     from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
+    from astrbot_plugin_qqbot_features.twin_interaction_logic import requires_target_twin_to_handle
 except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<name>.
     from data.plugins.astrbot_plugin_qqbot_features.request_context import build_current_request_context
     from data.plugins.astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
     from data.plugins.astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
+    from data.plugins.astrbot_plugin_qqbot_features.twin_interaction_logic import requires_target_twin_to_handle
 
 
 WINDOW_SECONDS = 600.0
@@ -132,6 +134,7 @@ class TopicConcentrationPlugin(Star):
             original_text=text,
             private_chat=event.is_private_chat(),
             allow_multi_target=True,
+            allow_delegation=not requires_target_twin_to_handle(text, _at_target_ids(event)),
         )
         if not decision.should_handle:
             event.should_call_llm(True)

@@ -63,6 +63,7 @@ def decide_llm_worker(
     original_text: object = "",
     private_chat: bool = False,
     allow_multi_target: bool = False,
+    allow_delegation: bool = True,
     now: float | None = None,
     worker_ids: tuple[str, ...] = TWIN_WORKER_IDS,
     rng: random.Random | None = None,
@@ -120,9 +121,21 @@ def decide_llm_worker(
         now=current,
         group_key=group_key,
         worker_ids=worker_ids,
+        allow_delegation=allow_delegation,
         rng=rng,
     )
     if selected is None:
+        if targeted and not allow_delegation:
+            return WorkerScheduleDecision(
+                False,
+                sorted(targeted)[0],
+                "target_busy_no_delegation",
+                claim_key=claim_key,
+                both_targeted=both_targeted,
+                group_key=group_key,
+                balance_before=balance_before,
+                angel_probability=angel_probability,
+            )
         return WorkerScheduleDecision(False, "", "no_available_worker")
 
     delegated_from = ""
@@ -160,6 +173,7 @@ def select_worker(
     now: float | None = None,
     group_key: str = "",
     worker_ids: tuple[str, ...] = TWIN_WORKER_IDS,
+    allow_delegation: bool = True,
     rng: random.Random | None = None,
 ) -> str | None:
     current = time.monotonic() if now is None else now
@@ -171,6 +185,8 @@ def select_worker(
             if len(targets) > 1:
                 return choose_idle_worker(targeted_idle, group_key=group_key, rng=rng)
             return targeted_idle[0]
+        if not allow_delegation:
+            return None
         delegated = [worker_id for worker_id in idle_workers if worker_id not in targets]
         if delegated:
             return delegated[0]

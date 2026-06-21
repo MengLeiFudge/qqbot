@@ -68,6 +68,30 @@ DIRECT_INTENT_MARKERS = (
     "妹妹",
     "姐姐",
 )
+TWIN_EXCLUSIVE_ACTION_MARKERS = (
+    "抱抱",
+    "抱一下",
+    "贴贴",
+    "亲亲",
+    "摸摸",
+    "摸头",
+    "牵手",
+    "和好",
+    "道歉",
+    "哄哄",
+    "安慰",
+    "叫她",
+    "喊她",
+    "让她",
+    "叫出来",
+    "出来",
+    "回来",
+    "找她",
+    "问她",
+    "跟她",
+    "和她",
+    "对她",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +239,26 @@ def should_handle_direct_twin_request(
     return False
 
 
+def requires_target_twin_to_handle(text: str, target_ids: object) -> bool:
+    compact = normalize_text(text)
+    if not compact:
+        return False
+    targets = {str(value or "").strip() for value in iter_values(target_ids)}
+    if len(targets) != 1:
+        return False
+    target_id = next(iter(targets))
+    profile_name = PROFILE_BY_BOT_ID.get(target_id)
+    if not profile_name:
+        return False
+    profile = read_profile(profile_name)
+    if not (
+        any(normalize_text(marker) in compact for marker in other_profile_name_markers(profile))
+        or any(normalize_text(marker) in compact for marker in ("姐姐", "妹妹", "另一个棉花糖", "另一个bot", "另一个 bot"))
+    ):
+        return False
+    return any(normalize_text(marker) in compact for marker in TWIN_EXCLUSIVE_ACTION_MARKERS)
+
+
 def profile_name_markers(profile: TwinProfile) -> tuple[str, ...]:
     return (
         profile.bot_name,
@@ -231,6 +275,17 @@ def other_profile_name_markers(profile: TwinProfile) -> tuple[str, ...]:
         profile.other_short_name + "棉花糖",
         profile.other_short_name,
     )
+
+
+def iter_values(value: object) -> tuple[object, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)):
+        return (value,)
+    try:
+        return tuple(value)  # type: ignore[arg-type]
+    except TypeError:
+        return (value,)
 
 
 def load_recent_other_bot_records(
