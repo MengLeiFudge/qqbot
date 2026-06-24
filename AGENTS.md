@@ -76,7 +76,7 @@
 - 只影响 AstrBot Core、`data\astrbot\data\cmd_config.json`、AstrBot persona 或 uv tool 运行包的改动，重启 bot2：`scripts\start-all.bat`；该入口默认以 `-AstrBotProfile both -FeatureMode full` 启动同一管理端内的天使+恶魔双平台。
 - AstrBot 接管已迁移自动事件时，使用 `scripts\start-all.bat` 或显式 `tools\runtime-scripts\start-all.ps1 -Target astrbot -SkipInstall -AstrBotProfile both -FeatureMode full`。如本机端口冲突，可加 `-AstrBotOneBotPort <端口>` 和 `-AstrBotAngelOneBotPort <端口>` 同步 AstrBot 和 NapCat 反连配置。
 - 需要 NapCat 重新反连时也使用普通 AstrBot 启动入口，不要只重启 Python 进程。
-- 普通启动入口会拉起对应 Bot 和 NapCat 子窗口；子窗口确认端口和反连就绪后退出，全部子窗口完成后入口窗口退出。
+- 普通启动入口会拉起对应 Bot 和 NapCat 子窗口；子窗口确认端口和反连就绪后退出，全部子窗口完成后入口窗口退出。双平台 `both/full` 下两个 NapCat 账号不得无条件并行启动，必须通过 `data\launcher\napcat-quick-login\<account>.ready` 判断是否可快速登录：任一账号缺少标记或上次失败时串行启动，避免两个账号同时写共享 `napcat\onekey\napcat\cache\qrcode.png` 导致控制台二维码不可用时扫错账号；两个账号标记都存在时允许并行启动以缩短重启时间；某账号未成功反连时必须清除该账号标记。启动器控制台诊断和 bat 失败停窗文案保持英文/ASCII，避免 Windows 控制台无法显示 NapCat 中文日志或本地化 `pause` 提示时出现乱码；完整原始日志保留在 `data\astrbot\logs\start_all\<runId>\`。
 - NapCat 启动脚本必须同时兼容新版 `napcat\onekey\napcat\launcher-user.bat` 和旧版 `NapCat.*.Shell` / `bootmain` 结构；新版 quick login 使用 `NAPCAT_QUICK_ACCOUNT` 环境变量。
 ## 更新
 

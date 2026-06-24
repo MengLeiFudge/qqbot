@@ -291,23 +291,30 @@ Set-Location $AstrRoot
 
 $directAstrBot = Join-Path $env:APPDATA "uv\tools\astrbot\Scripts\astrbot.exe"
 if (Test-Path $directAstrBot) {
+    Write-Host "AstrBot launch mode: direct uv tool executable ($directAstrBot)"
     & $directAstrBot run -p $Port
     exit $LASTEXITCODE
 }
 
-if (Get-Command astrbot -ErrorAction SilentlyContinue) {
-    & astrbot run -p $Port
+$pathAstrBot = Get-Command astrbot -ErrorAction SilentlyContinue
+if ($pathAstrBot) {
+    Write-Host "AstrBot launch mode: PATH astrbot command ($($pathAstrBot.Source))"
+    & $pathAstrBot.Source run -p $Port
     exit $LASTEXITCODE
 }
 
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-    & uv tool run --from astrbot --python $PythonVersion astrbot run -p $Port
+$pathUv = Get-Command uv -ErrorAction SilentlyContinue
+if ($pathUv) {
+    Write-Host "AstrBot launch mode: uv tool run ($($pathUv.Source))"
+    & $pathUv.Source tool run --from astrbot --python $PythonVersion astrbot run -p $Port
     exit $LASTEXITCODE
 }
 
-if (Get-Command py -ErrorAction SilentlyContinue) {
-    & py "-$PythonVersion" -m uv tool run --from astrbot --python $PythonVersion astrbot run -p $Port
+$pathPy = Get-Command py -ErrorAction SilentlyContinue
+if ($pathPy) {
+    Write-Host "AstrBot launch mode: py -$PythonVersion -m uv ($($pathPy.Source))"
+    & $pathPy.Source "-$PythonVersion" -m uv tool run --from astrbot --python $PythonVersion astrbot run -p $Port
     exit $LASTEXITCODE
 }
 
-throw "AstrBot uv tool is not available. Run scripts\update-all.bat first."
+throw "AstrBot uv tool is not available. Install or update with scripts\update-all.bat, or make astrbot/uv/py available on PATH."

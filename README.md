@@ -44,7 +44,7 @@ Sub2API 账号用量查询归入 `astrbot_plugin_qqbot_features` 固定命令：
 
 AstrBot 启动入口支持显式选择 bot 身份：日常默认是 `both/full`，在同一个 AstrBot 管理端里同步两个 `aiocqhttp` 平台，恶魔默认反连 `ws://127.0.0.1:6200/ws`，天使默认反连 `ws://127.0.0.1:6201/ws`；只有显式 `-AstrBotProfile demon` 才使用恶魔棉花糖账号 `2629227874` 单平台，显式 `-AstrBotProfile angel -FeatureMode full` 才使用天使账号 `1443944862` 单平台。`scripts\start-all.bat` 和直接运行 `tools\runtime-scripts\start-all.ps1` 默认都是 `both/full`。本地插件会按每条消息的 `self_id` 区分天使或恶魔身份。
 
-`tools\runtime-scripts\start-all.ps1` 会先让 bot 子流程完成旧端口清理，再提前启动对应 NapCat 子流程；NapCat 子流程等待目标 OneBot 端口监听后立即连接，不再等 AstrBot 全部 ready 后才开始准备。AstrBot 反向 WebSocket 端口如果出现 `WinError 10013`、`PermissionError` 等平台绑定错误，启动器会从日志中快速识别并失败，不再等满长超时。
+`tools\runtime-scripts\start-all.ps1` 会先让 bot 子流程完成旧端口清理，再启动对应 NapCat 子流程；NapCat 子流程等待目标 OneBot 端口监听后立即连接。双平台 `both/full` 下，启动器用 `data\launcher\napcat-quick-login\<account>.ready` 标记账号是否已确认过快速登录：任一账号缺少标记时按账号串行启动，避免两个账号同时生成二维码并覆盖共享的 `napcat\onekey\napcat\cache\qrcode.png`；两个账号标记都存在时并行启动以缩短重启时间；并行或串行中某账号没有成功反连时会清除该账号标记，下次启动自动退回串行。启动器控制台状态和失败停窗提示使用英文/ASCII 摘要，避免 Windows 控制台无法正确显示 NapCat 中文日志时出现乱码；完整原始日志仍写入对应 `data\astrbot\logs\start_all\<runId>\*\*.log` 文件。AstrBot 反向 WebSocket 端口如果出现 `WinError 10013`、`PermissionError` 等平台绑定错误，启动器会从日志中快速识别并失败，不再等满长超时。
 
 AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参与；群聊固定命令只由一个账号执行。没有明确 @ 或私聊时，固定命令默认由恶魔账号 `2629227874` 处理，可用 `QQBOT_ASTRBOT_COMMAND_OWNER` 覆盖；明确 @ 天使/恶魔时，由当前被叫到的 bot 处理；私聊由当前收到私聊的 bot 独立处理，命中固定命令就执行对应命令，未命中固定命令就进入当前 bot 的 LLM 链路。`菜单`、`帮助`、`指令` 会发送统一图片菜单，总览按 `群务管理`、`棉花糖互动`、`养鲲`、`落樱之都`、`Arcaea`、`Factorio`、`异形工厂` 分组；`菜单模块名` 会发送模块详情图。
 
@@ -73,7 +73,7 @@ Set-Location D:\project\qqbot
 .\scripts\start-all.bat
 ```
 
-日常入口只有 `scripts\start-all.bat`，默认启动 AstrBot 的天使+恶魔双平台；直接运行 `tools\runtime-scripts\start-all.ps1` 时默认也是 AstrBot `both/full`。入口会拉起 AstrBot 和 OneBot 协议端子窗口，子窗口确认就绪后退出；全部子窗口完成后入口窗口退出。
+日常入口只有 `scripts\start-all.bat`，默认启动 AstrBot 的天使+恶魔双平台；直接运行 `tools\runtime-scripts\start-all.ps1` 时默认也是 AstrBot `both/full`。入口会拉起 AstrBot 和 OneBot 协议端子窗口，子窗口确认就绪后退出；双账号 NapCat 在缺少快速登录标记或上次失败后串行启动，两个账号都确认过快速登录后并行启动；全部子窗口完成后入口窗口退出。
 
 默认账号链路：
 
