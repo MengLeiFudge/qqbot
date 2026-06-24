@@ -1,7 +1,7 @@
 param(
     [int]$Port = 6185,
-    [int]$AiocqhttpPort = 6200,
-    [int]$AngelAiocqhttpPort = 6201,
+    [int]$AiocqhttpPort = 6201,
+    [int]$AngelAiocqhttpPort = 6200,
     [string]$PythonVersion = "3.14",
     [ValidateSet("", "dual", "full")]
     [string]$FeatureMode = "",

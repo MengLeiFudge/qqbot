@@ -17,6 +17,8 @@ class StartAllContractTest(unittest.TestCase):
         script = START_ALL.read_text(encoding="utf-8-sig")
 
         self.assertRegex(script, r'\[string\]\$Target\s*=\s*"astrbot"')
+        self.assertIn("[int]$AstrBotOneBotPort = 6201", script)
+        self.assertIn("[int]$AstrBotAngelOneBotPort = 6200", script)
         self.assertIn('if ($Target -eq "astrbot")', script)
         self.assertIn('$FeatureMode = "full"', script)
         self.assertIn('$AstrBotProfile = "both"', script)
@@ -96,10 +98,16 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn('Set-NapCatQuickLoginReady -Account $Account -Ready $false -Reason "connection-timeout"', script)
         self.assertIn('Set-NapCatQuickLoginReady -Account $account -Ready $false -Reason "child-failed"', script)
         self.assertIn("$startedNapCatInParallel = $true", script)
+        self.assertLess(
+            script.index('$napcatComponents += "napcat-astrbot-angel"'),
+            script.index('$napcatComponents += "napcat-astrbot-demon"'),
+        )
 
     def test_start_astrbot_reports_launch_mode(self) -> None:
         script = START_ASTRBOT.read_text(encoding="utf-8-sig")
 
+        self.assertIn("[int]$AiocqhttpPort = 6201", script)
+        self.assertIn("[int]$AngelAiocqhttpPort = 6200", script)
         self.assertIn("AstrBot launch mode: direct uv tool executable", script)
         self.assertIn("AstrBot launch mode: PATH astrbot command", script)
         self.assertIn("AstrBot launch mode: uv tool run", script)

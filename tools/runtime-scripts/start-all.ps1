@@ -11,8 +11,8 @@ param(
     [string]$FeatureMode = "",
     [ValidateSet("demon", "angel", "both")]
     [string]$AstrBotProfile = "demon",
-    [int]$AstrBotOneBotPort = 6200,
-    [int]$AstrBotAngelOneBotPort = 6201
+    [int]$AstrBotOneBotPort = 6201,
+    [int]$AstrBotAngelOneBotPort = 6200
 )
 
 if ($Target -eq "astrbot") {
@@ -1147,8 +1147,8 @@ function Invoke-Parent {
     $botComponents = @("astrbot")
     $napcatComponents = @()
     if ($AstrBotProfile -eq "both") {
-        $napcatComponents += "napcat-astrbot-demon"
         $napcatComponents += "napcat-astrbot-angel"
+        $napcatComponents += "napcat-astrbot-demon"
     }
     else {
         $napcatComponents += "napcat-astrbot"

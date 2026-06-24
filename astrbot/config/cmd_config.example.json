@@ -121,7 +121,7 @@
   },
   "platform": [
     {
-      "id": "👿棉花糖👿",
+      "id": "😇棉花糖😇",
       "type": "aiocqhttp",
       "enable": true,
       "ws_reverse_host": "0.0.0.0",
@@ -133,7 +133,7 @@
       "type": "aiocqhttp",
       "enable": true,
       "ws_reverse_host": "0.0.0.0",
-      "ws_reverse_port": 6200,
+      "ws_reverse_port": 6201,
       "ws_reverse_token": ""
     }
   ],
