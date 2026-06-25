@@ -40,7 +40,7 @@ def render_overview_menu_image(
         "kind": "overview",
         "feature_mode": feature_mode,
         "features": [_feature_payload(feature) for feature in features],
-        "version": 2,
+        "version": 3,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
@@ -90,7 +90,7 @@ def render_feature_menu_image(
         "kind": "feature",
         "feature_mode": feature_mode,
         "feature": _feature_payload(feature),
-        "version": 2,
+        "version": 3,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
@@ -103,8 +103,7 @@ def render_feature_menu_image(
         wrapped_lines.extend(_wrap_text(line, 34))
 
     detail_height = 42 + len(wrapped_lines) * 42
-    alias_height = 58 if feature.aliases else 0
-    canvas_height = 310 + detail_height + alias_height
+    canvas_height = 310 + detail_height
     image = Image.new("RGB", (CANVAS_WIDTH, canvas_height), BACKGROUND)
     draw = ImageDraw.Draw(image)
 
@@ -120,12 +119,6 @@ def render_feature_menu_image(
         draw.text((82, line_y), f"- {line}", font=fonts.body, fill=INK)
         line_y += 42
     y += detail_height + 22
-
-    if feature.aliases:
-        alias_text = "别名：" + " / ".join(feature.aliases)
-        _rounded_rect(draw, (40, y, CANVAS_WIDTH - 40, y + alias_height), radius=18, fill=(250, 252, 255), outline=BORDER)
-        draw.text((74, y + 17), alias_text, font=fonts.small, fill=MUTED)
-        y += alias_height + 22
 
     _draw_footer(draw, fonts, canvas_height - 32)
     _save(image, image_path)
@@ -228,18 +221,12 @@ def _draw_overview_card(
         draw.text((x + 24, summary_y), line, font=fonts.small, fill=MUTED)
         summary_y += 30
 
-    if feature.aliases:
-        alias = " / ".join(feature.aliases[:3])
-        draw.text((x + 24, y + height - 34), f"菜单{feature.name}    别名：{alias}", font=fonts.badge, fill=(73, 87, 107))
-    else:
-        draw.text((x + 24, y + height - 34), f"菜单{feature.name}", font=fonts.badge, fill=(73, 87, 107))
+    draw.text((x + 24, y + height - 34), f"菜单{feature.name}", font=fonts.badge, fill=(73, 87, 107))
 
 
 def _feature_summary(feature: MenuFeature) -> str:
     if feature.lines:
         return feature.lines[0]
-    if feature.aliases:
-        return "可用别名：" + " / ".join(feature.aliases[:4])
     return "发送 菜单模块名 查看详情。"
 
 

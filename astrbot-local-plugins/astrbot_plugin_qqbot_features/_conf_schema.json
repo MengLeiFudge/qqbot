@@ -123,6 +123,235 @@
     "default": "太长不看喵",
     "hint": "触发长输入太长不看阈值时发送的固定短回复。"
   },
+  "meme_manager_webui_port": {
+    "description": "表情管理后台端口",
+    "type": "int",
+    "default": 5000,
+    "hint": "私聊发送 表情管理 开启管理后台 时使用。独立 meme_manager 插件已移除，本配置归入棉花糖功能合集。"
+  },
+  "meme_manager_prompt": {
+    "description": "表情标签提示词片段",
+    "type": "object",
+    "items": {
+      "prompt_head": {
+        "description": "提示词头",
+        "type": "string",
+        "default": "表情规则：轻松日常、玩梗、吐槽、撒娇、短情绪回复应优先使用 1 个 &&标签&&；当只需要表达态度、情绪或敷衍短应答时，可以只输出 1 个 &&标签&& 作为纯表情回复，不要再配文字；只有从下列标签中选择，不能编造标签。"
+      },
+      "prompt_tail_1": {
+        "description": "提示词尾 1",
+        "type": "string",
+        "default": "严肃、技术、报错、安全、群管理、长解释场景不要用表情；普通问答如需要解释，可以文字后带 1 个表情；短情绪闲聊优先纯表情。不要空行；回复仍需短。最多 "
+      },
+      "prompt_tail_2": {
+        "description": "提示词尾 2",
+        "type": "string",
+        "default": " 个。"
+      }
+    }
+  },
+  "meme_manager_enable_mixed_message": {
+    "description": "启用表情图文混合发送",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，文本和表情图片可混在同一条消息链；关闭后表情图片在文本发送后单独补发。"
+  },
+  "meme_manager_mixed_message_probability": {
+    "description": "表情图文混合概率",
+    "type": "int",
+    "default": 80,
+    "hint": "启用表情图文混合时的混合概率，范围 0-100。",
+    "slider": {
+      "min": 0,
+      "max": 100,
+      "step": 10
+    }
+  },
+  "meme_manager_emotions_probability": {
+    "description": "自动附表情概率",
+    "type": "int",
+    "default": 100,
+    "hint": "LLM 选择到表情标签后实际发送图片的概率，范围 0-100。",
+    "slider": {
+      "min": 0,
+      "max": 100,
+      "step": 10
+    }
+  },
+  "meme_manager_max_emotions_per_message": {
+    "description": "单次回复最多表情数",
+    "type": "int",
+    "default": 1,
+    "hint": "本地 selector 最多从 LLM 输出标签中选择多少张表情图。"
+  },
+  "meme_manager_strict_max_emotions_per_message": {
+    "description": "严格限制表情数量",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后超过上限的表情标签会被裁剪。"
+  },
+  "meme_manager_convert_static_to_gif": {
+    "description": "静态图转 GIF 发送",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，发送静态图片表情时会临时转换为 1 帧 GIF。"
+  },
+  "meme_manager_enable_alternative_markup": {
+    "description": "识别备用表情标记",
+    "type": "bool",
+    "default": true,
+    "hint": "识别 [标签]、(标签) 等备用标记，并在发送前清理。"
+  },
+  "meme_manager_remove_invalid_alternative_markup": {
+    "description": "移除无效备用标记",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后会移除无法识别的括号或方括号标记内容；如误删普通括号文本请关闭。"
+  },
+  "meme_manager_enable_repeated_emotion_detection": {
+    "description": "识别重复表情标签",
+    "type": "bool",
+    "default": true,
+    "hint": "识别 happyhappyhappy 这类重复标签，避免半截/畸形标签进入群聊。"
+  },
+  "meme_manager_enable_loose_emotion_matching": {
+    "description": "启用宽松表情匹配",
+    "type": "bool",
+    "default": true,
+    "hint": "允许在中文上下文中宽松识别表情标签；如果英文误判较多可关闭。"
+  },
+  "meme_manager_high_confidence_emotions": {
+    "description": "高置信度表情标签",
+    "type": "list",
+    "default": [
+      "affection_kiss",
+      "agreement_yes",
+      "angry_dislike",
+      "apology_sorry",
+      "awkward_silence",
+      "boss_feed",
+      "boss_worship",
+      "confused_question",
+      "cute_begging_trade",
+      "fear_panic",
+      "food_eat",
+      "funny_laugh",
+      "game_invite",
+      "happy_cheer",
+      "hug_comfort",
+      "no_need",
+      "polite_awkward_smile",
+      "reject_no",
+      "rhythm_game_pressure",
+      "sad_cry",
+      "self_noob",
+      "shocked_surprise",
+      "shy_flirt",
+      "slap_warning",
+      "sleep_rest",
+      "tired_defeated",
+      "touch_rua",
+      "troll_funny",
+      "watching_observe",
+      "work_progress"
+    ],
+    "hint": "这些标签重复两次即可被识别，适合本地常用标签。"
+  },
+  "meme_manager_content_cleanup_rule": {
+    "description": "表情标签清理正则",
+    "type": "string",
+    "default": "&&[a-zA-Z0-9_\\-]+&&",
+    "hint": "发送前额外清理残留标签的正则表达式。"
+  },
+  "meme_manager_emotion_llm_enabled": {
+    "description": "启用独立情感模型选表情",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭。开启后会额外调用当前会话或指定 provider 判断表情标签；普通发送链路仍不在插件内切换主回复模型。"
+  },
+  "meme_manager_emotion_llm_provider_id": {
+    "description": "情感模型 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "留空时使用当前会话 provider；仅在 meme_manager_emotion_llm_enabled=true 时生效。",
+    "_special": "select_provider"
+  },
+  "meme_manager_image_host": {
+    "description": "表情图床类型",
+    "type": "string",
+    "default": "stardots",
+    "options": [
+      "stardots",
+      "cloudflare_r2"
+    ],
+    "hint": "只影响 表情管理 同步到云端 / 从云端同步 等图床命令；不配置密钥时不会初始化图床同步。"
+  },
+  "meme_manager_streaming_compatibility": {
+    "description": "流式传输兼容",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，流式模式下表情图片会在流式消息完成后作为独立消息发送。"
+  },
+  "meme_manager_image_host_config": {
+    "description": "表情图床配置",
+    "type": "object",
+    "items": {
+      "stardots": {
+        "description": "Stardots 图床配置",
+        "type": "object",
+        "items": {
+          "key": {
+            "description": "API Key",
+            "type": "string",
+            "hint": "请输入 Stardots 的 API Key。"
+          },
+          "secret": {
+            "description": "API Secret",
+            "type": "string",
+            "hint": "请输入 Stardots 的 API Secret。"
+          },
+          "space": {
+            "description": "空间名称",
+            "type": "string",
+            "default": "memes",
+            "hint": "请输入 Stardots 的空间名称。"
+          }
+        }
+      },
+      "cloudflare_r2": {
+        "description": "Cloudflare R2 图床配置",
+        "type": "object",
+        "items": {
+          "account_id": {
+            "description": "Cloudflare Account ID",
+            "type": "string",
+            "hint": "请输入 Cloudflare Account ID。"
+          },
+          "access_key_id": {
+            "description": "R2 Access Key ID",
+            "type": "string",
+            "hint": "请输入 R2 Access Key ID。"
+          },
+          "secret_access_key": {
+            "description": "R2 Secret Access Key",
+            "type": "string",
+            "hint": "请输入 R2 Secret Access Key。"
+          },
+          "bucket_name": {
+            "description": "R2 Bucket 名称",
+            "type": "string",
+            "hint": "请输入 R2 Bucket 名称。"
+          },
+          "public_url": {
+            "description": "自定义 CDN 域名",
+            "type": "string",
+            "default": "",
+            "hint": "可选，例如 https://cdn.example.com。"
+          }
+        }
+      }
+    }
+  },
   "source_knowledge_enabled_groups": {
     "description": "源码知识注入群号",
     "type": "string",

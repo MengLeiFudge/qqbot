@@ -33,6 +33,10 @@ from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
 from .menu_image import render_overview_menu_image
+from .meme_manager.commands import MEME_MANAGER_COMMAND_PATTERN
+from .meme_manager.commands import looks_like_meme_manager_command
+from .meme_manager.commands import parse_meme_manager_command
+from .meme_manager.runtime import MemeManagerRuntime
 from .note_export import GroupNoteExportError
 from .note_export import export_group_notes_markdown
 from .onebot_api import OneBotCallApiAdapter
@@ -183,6 +187,7 @@ FIXED_COMMAND_PATTERNS = tuple(
         ARC_GUESS_ART_START_PATTERN,
         ARC_GUESS_ART_TILE_PATTERN,
         ARC_GUESS_REVEAL_PATTERN,
+        MEME_MANAGER_COMMAND_PATTERN,
         KUN_PATTERN,
         SAKURA_PATTERN,
     )
@@ -401,6 +406,14 @@ class QQBotFeaturesPlugin(Star):
         self._reread_state = RereadRepeatState()
         self._arc_apk_update_manager = None
         self._rightcodes_config = load_rightcodes_config(config)
+        self._meme_runtime = MemeManagerRuntime(
+            self.context,
+            ScopedPluginConfig(
+                config,
+                prefix="meme_manager",
+                legacy_plugin_name="meme_manager",
+            ),
+        )
         self._sub2api_config = load_sub2api_config(config)
         self._sub2api_usage_cache = Sub2APIUsageCache(ttl_seconds=SUB2API_USAGE_CACHE_TTL_SECONDS)
         self._sub2api_refresh_task: asyncio.Task | None = None
@@ -512,6 +525,7 @@ class QQBotFeaturesPlugin(Star):
             except asyncio.CancelledError:
                 pass
         self._arc_background_task = None
+        await self._meme_runtime.terminate()
 
     @filter.on_llm_request(desc="在 AstrBot 调用 LLM 前，按当前群号读取迁移后的公开群上下文并临时注入本轮请求。")
     async def inject_migrated_group_context(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -651,6 +665,7 @@ class QQBotFeaturesPlugin(Star):
             bool((getattr(response, "reasoning_content", "") or "").strip()) if response else False,
             bool(getattr(response, "is_chunk", False)) if response else False,
         )
+        await self._meme_runtime.resp(event, response)
 
     @filter.on_decorating_result(desc="在消息发送前清理 Markdown、追问式、反问式或空洞邀请式收尾。")
     async def strip_reply_style_tail(self, event: AstrMessageEvent):
@@ -722,6 +737,11 @@ class QQBotFeaturesPlugin(Star):
             )
         elif active_reply_decorated:
             result.set_result_content_type(ResultContentType.GENERAL_RESULT)
+        await self._meme_runtime.on_decorating_result(event)
+
+    @filter.after_message_sent(desc="发送后补发未混入同一消息链的本地表情图片，并清理临时文件。")
+    async def meme_manager_after_message_sent(self, event: AstrMessageEvent):
+        await self._meme_runtime.after_message_sent(event)
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=2000, desc="直接叫到 bot 的群聊长消息短路回复。")
     async def handle_too_long_direct_group_message(self, event: AstrMessageEvent):
@@ -912,6 +932,35 @@ class QQBotFeaturesPlugin(Star):
             logger.exception("[QQBotFeatures] failed to render feature menu image: %s", exc)
             yield event.plain_result(build_feature_menu_text(menu_item))
         event.stop_event()
+
+    @filter.event_message_type(EventMessageType.ALL, desc="统一表情管理固定指令入口，例如“表情管理 开启管理后台”。")
+    async def meme_manager_command(self, event: AstrMessageEvent):
+        text = extract_plain_text(event).strip()
+        command = parse_meme_manager_command(text)
+        if command is None:
+            return
+        if not _should_handle_migrated_command(
+            event,
+            self._feature_mode,
+            command_type=f"meme_manager:{command.action}",
+        ):
+            return
+        async for result in self._meme_runtime.handle_command(
+            event,
+            command,
+            is_admin=is_bot_admin_or_self(event),
+        ):
+            yield result
+        event.stop_event()
+
+    @filter.event_message_type(EventMessageType.ALL, desc="表情管理添加表情后的图片上传等待入口。")
+    async def meme_manager_upload_image(self, event: AstrMessageEvent):
+        handled = False
+        async for result in self._meme_runtime.handle_upload_image(event):
+            handled = True
+            yield result
+        if handled:
+            event.stop_event()
 
     @filter.platform_adapter_type("aiocqhttp")
     @filter.regex(GROUP_FILE_CLEANUP_PATTERN, desc="群文件清理通知命令，作者或机器人自身可触发，用于扫描并提醒清理超期外层群文件。")
@@ -1879,6 +1928,8 @@ def looks_like_qqbot_fixed_command(text: str) -> bool:
     if looks_like_rightcodes_draw_feature_request(normalized):
         return True
     if looks_like_sub2api_usage_command(normalized):
+        return True
+    if looks_like_meme_manager_command(normalized):
         return True
     return any(pattern.search(normalized) for pattern in FIXED_COMMAND_PATTERNS)
 

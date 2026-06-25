@@ -23,7 +23,8 @@ $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
 $LocalPluginRoot = Join-Path $WorkspaceRoot "astrbot-local-plugins"
 $RuntimePluginRoot = Join-Path $AstrRoot "data\plugins"
 $ManagedLocalPluginPrefixes = @("astrbot_plugin_")
-$ManagedLocalPluginNames = @("meme_manager")
+$ManagedLocalPluginNames = @()
+$StaleManagedLocalPluginNames = @("meme_manager")
 $LocalPluginCopyExcludes = @("__pycache__", "*.pyc", ".pytest_cache")
 $PreservedRuntimePluginNames = @(
     "astrbot_plugin_hapi_connector"
@@ -259,7 +260,7 @@ if (Test-Path $LocalPluginRoot) {
                 break
             }
         }
-        if (-not $isManaged -and $ManagedLocalPluginNames -contains $runtimeName) {
+        if (-not $isManaged -and ($ManagedLocalPluginNames -contains $runtimeName -or $StaleManagedLocalPluginNames -contains $runtimeName)) {
             $isManaged = $true
         }
         if (-not $isManaged) {

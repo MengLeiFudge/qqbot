@@ -5,15 +5,15 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PLUGIN_SOURCE_ROOT = REPO_ROOT / "astrbot-local-plugins" / "meme_manager"
+PLUGIN_SOURCE_ROOT = REPO_ROOT / "astrbot-local-plugins"
 DEFAULT_SOURCE_INDEX = REPO_ROOT / "data" / "memes" / "mlj_pack" / "index.json"
 
 
 def main() -> int:
     if str(PLUGIN_SOURCE_ROOT) not in sys.path:
-        sys.path.insert(0, str(PLUGIN_SOURCE_ROOT.parent))
+        sys.path.insert(0, str(PLUGIN_SOURCE_ROOT))
 
-    from meme_manager.local_index import migrate_mlj_pack_index
+    from astrbot_plugin_qqbot_features.meme_manager.local_index import migrate_mlj_pack_index
 
     source_index = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SOURCE_INDEX
     result = migrate_mlj_pack_index(source_index)

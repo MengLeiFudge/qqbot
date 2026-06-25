@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""兼容旧命令名：把 mlj_pack 迁移进 meme_manager 本地索引。
+"""兼容旧命令名：把 mlj_pack 迁移进表情管理本地索引。
 
 日常事实源已经迁到 data/astrbot/data/plugin_data/meme_manager/。
 这个脚本只保留给旧命令习惯和一次性迁移，不再维护两套表情目录。
@@ -11,15 +11,15 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PLUGIN_SOURCE_ROOT = REPO_ROOT / "astrbot-local-plugins" / "meme_manager"
+PLUGIN_SOURCE_ROOT = REPO_ROOT / "astrbot-local-plugins"
 DEFAULT_SOURCE_INDEX = REPO_ROOT / "data" / "memes" / "mlj_pack" / "index.json"
 
 
 def main() -> int:
-    if str(PLUGIN_SOURCE_ROOT.parent) not in sys.path:
-        sys.path.insert(0, str(PLUGIN_SOURCE_ROOT.parent))
+    if str(PLUGIN_SOURCE_ROOT) not in sys.path:
+        sys.path.insert(0, str(PLUGIN_SOURCE_ROOT))
 
-    from meme_manager.local_index import MEME_INDEX_PATH, MEMES_DIR, migrate_mlj_pack_index
+    from astrbot_plugin_qqbot_features.meme_manager.local_index import MEME_INDEX_PATH, MEMES_DIR, migrate_mlj_pack_index
 
     source_index = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SOURCE_INDEX
     result = migrate_mlj_pack_index(source_index)

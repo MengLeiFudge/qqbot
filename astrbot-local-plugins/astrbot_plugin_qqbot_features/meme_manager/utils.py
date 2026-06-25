@@ -9,8 +9,6 @@ import shutil
 import string
 from typing import Any
 
-import aiohttp
-
 from .config import CURRENT_DIR, DEFAULT_MEMES_INIT_MARKER, MEMES_DATA_PATH, MEMES_DIR
 
 logger = logging.getLogger(__name__)
@@ -207,6 +205,8 @@ def generate_secret_key(length=8):
 
 async def get_public_ip():
     """异步获取公网IPv4地址"""
+    import aiohttp
+
     ipv4_apis = [
         "http://ipv4.ifconfig.me/ip",  # IPv4专用接口
         "http://api-ipv4.ip.sb/ip",  # 樱花云IPv4接口

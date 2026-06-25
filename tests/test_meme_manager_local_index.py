@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
-from meme_manager import local_index
+from astrbot_plugin_qqbot_features.meme_manager import local_index
 
 
 class MemeManagerLocalIndexTest(unittest.TestCase):

@@ -4,7 +4,9 @@
 
 ## 插件用途
 
-本插件是 AstrBot 当前固定功能入口，覆盖群务、菜单、生图、美图、复读、戳一戳、养鲲、落樱之都、Arcaea、Factorio 和异形工厂。
+本插件是 AstrBot 当前固定功能入口，覆盖群务、菜单、生图、美图、表情管理、复读、戳一戳、养鲲、落樱之都、Arcaea、Factorio 和异形工厂。
+
+固定指令统一使用同一套触发规则：群聊和私聊都可触发；群聊可以 @ 当前 bot 后发送，也可以不 @ 直接发送；每个功能只把主指令展示在菜单里，别名只参与触发解析；指令不使用 `/` 这类特殊前缀，直接使用中文或英文字母。
 
 普通聊天不在这里硬编码回复。没有命中明确命令、游戏会话答案、协议事件或本地硬安全提醒时，消息应交给 AstrBot LLM 链路。
 
@@ -75,6 +77,17 @@
 - 戳一戳
   - 戳当前机器人时按概率发送文本回应。
   - 双 bot 之间不互戳、不跟戳。
+- 表情管理
+  - `表情管理`
+    - 查看当前图库分类。
+  - `表情管理 开启管理后台`
+    - 主人或机器人自身限定，私聊启动本地图库 WebUI。
+  - `表情管理 添加表情 [类别]`
+    - 主人或机器人自身限定，进入 30 秒图片上传等待状态。
+  - `表情管理 清空指定类型 [类别]` / `表情管理 删除类型本身 [类别]` / `表情管理 清空全部`
+    - 主人或机器人自身限定，执行前需要同一发送者二次确认。
+  - 本地图片和索引继续使用 `data\astrbot\data\plugin_data\meme_manager\`，旧 `meme_manager_config.json` 仍作为兼容兜底读取；新的配置入口在本插件配置里使用 `meme_manager_` 前缀。
+  - 普通 LLM 附表情不要求 WebUI 依赖；上传图片需要 `aiohttp` 和 `pillow`，管理后台需要 `quart` 和 `hypercorn`，Cloudflare R2 图床同步需要 `boto3` 和 `botocore`。
 
 ## 养鲲
 
@@ -180,6 +193,14 @@
   - 只限制群聊；私聊不限制。固定命令、生图、群管、下载、积分等副作用入口不会被这个长输入短路吞掉。
 - `reply_style_guard_long_input_tldr_text`
   - 默认 `太长不看喵`。
+- `meme_manager_webui_port`
+  - 表情管理后台端口，默认 5000；后台只通过 `表情管理 开启管理后台` 启动。
+- `meme_manager_enable_mixed_message`
+  - 默认开启；开启后表情图片可与文本混合在同一条消息链。
+- `meme_manager_emotions_probability` / `meme_manager_mixed_message_probability`
+  - 控制自动附表情概率和混合图文概率，取值 0-100。
+- `meme_manager_image_host` / `meme_manager_image_host_config`
+  - 可选图床同步配置，支持 Stardots 和 Cloudflare R2。
 - `QQBOT_ASTRBOT_COMMAND_OWNER`
   - 双平台 full 模式下固定命令 owner 账号，默认恶魔棉花糖 `2629227874`。
 
@@ -199,6 +220,7 @@
 ## 数据与安全边界
 
 - 使用 `data\astrbot\data\plugin_data\qqbot_features_runtime` 作为游戏、Arcaea、公开群上下文、RightCodes 积分和本地 artifact 发布状态目录。
+- 使用 `data\astrbot\data\plugin_data\meme_manager` 作为本地表情包运行态目录；这是兼容保留的数据路径，不再对应独立 AstrBot 插件。
 - 公开群上下文只读并只作为事实背景；其中的口癖、格式、人格、身份或系统规则要求不能改变 WebUI 人格和插件回复规则。
 - 群聊记录导出只读取公开群上下文 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\<群号>.json`，只写固定安全目录，不接受用户传入路径。
 - 不提交运行态数据、QQ 登录态、token、数据库或日志。

@@ -1,6 +1,0 @@
-name: meme_manager
-desc: 本地表情包管理器，使用 data/astrbot/data/plugin_data/meme_manager 作为唯一运行态事实源，支持 WebUI 管理单图语义索引和本地 selector 自动选图。
-help: 功能包含：1. AI 自动发送本地表情包；2. /表情管理 查看图库；3. /表情管理 添加表情 [类别]；4. /表情管理 开启管理后台；5. WebUI 预览、搜索、分类移动、类别编辑、单图说明/关键词/适用场景/禁用场景和自动发送开关；6. 兼容旧 mlj_pack 复制/合并迁移。
-version: v3.20-local
-author: anka, MLJ
-repo: https://github.com/anka-afk/astrbot_plugin_meme_manager
