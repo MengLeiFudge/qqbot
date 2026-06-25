@@ -38,6 +38,7 @@ from .note_export import export_group_notes_markdown
 from .onebot_api import OneBotCallApiAdapter
 from .rightcodes_draw_logic import RightCodesDrawClient
 from .rightcodes_draw_logic import RightCodesDrawQuotaStore
+from .rightcodes_draw_logic import RightCodesDrawRequest
 from .rightcodes_draw_logic import format_draw_quota_exceeded_message
 from .rightcodes_draw_logic import format_draw_start_message
 from .rightcodes_draw_logic import format_rightcodes_draw_failure
@@ -58,9 +59,18 @@ from .rightcodes_draw_logic import looks_like_rightcodes_draw_suggestion
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
 from .rightcodes_draw_catalog import format_rightcodes_draw_catalog_injection
 from .rightcodes_draw_catalog import should_inject_rightcodes_draw_catalog
+from .rightcodes_draw_rewrite import RIGHTCODES_DRAW_REWRITE_SYSTEM_PROMPT
+from .rightcodes_draw_rewrite import RightCodesDrawRewriteInput
+from .rightcodes_draw_rewrite import build_rightcodes_draw_rewrite_prompt
+from .rightcodes_draw_rewrite import format_rightcodes_draw_rewrite_failure
+from .rightcodes_draw_rewrite import format_rightcodes_draw_rewrite_missing_context
+from .rightcodes_draw_rewrite import merge_rewritten_draw_request
+from .rightcodes_draw_rewrite import parse_rightcodes_draw_rewrite_response
+from .rightcodes_draw_rewrite import should_rewrite_rightcodes_draw_prompt
 from .request_context import build_current_request_context
 from .request_context import canonical_event_claim_key
 from .request_context import extract_at_ids
+from .request_context import extract_image_sources
 from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
@@ -1236,6 +1246,29 @@ class QQBotFeaturesPlugin(Star):
                 event.stop_event()
                 return
             return
+        request_context = build_current_request_context(event, text)
+        reference_image_urls = extract_image_sources(event)
+        if should_rewrite_rightcodes_draw_prompt(
+            draw_request,
+            reply_texts=request_context.reply_texts,
+            image_urls=reference_image_urls,
+        ):
+            rewritten_request = await self._rewrite_rightcodes_draw_request(
+                event,
+                draw_request,
+                current_text=request_context.current_text,
+                reply_texts=request_context.reply_texts,
+                reference_image_urls=reference_image_urls,
+                unresolved_media_context=request_context.unresolved_media_context,
+            )
+            if rewritten_request is None:
+                if request_context.unresolved_media_context and not reference_image_urls:
+                    yield event.plain_result(format_rightcodes_draw_rewrite_missing_context())
+                else:
+                    yield event.plain_result(format_rightcodes_draw_rewrite_failure())
+                event.stop_event()
+                return
+            draw_request = rewritten_request
         quota = await asyncio.to_thread(store.reserve, user_id, model=draw_request.model)
         if not quota.allowed:
             yield event.plain_result(format_draw_quota_exceeded_message(quota))
@@ -1280,6 +1313,70 @@ class QQBotFeaturesPlugin(Star):
         else:
             yield _chain_result_with_reply(event, [Plain(f"{message}\n{result.image_url}")])
         event.stop_event()
+
+    async def _rewrite_rightcodes_draw_request(
+        self,
+        event: AstrMessageEvent,
+        draw_request: RightCodesDrawRequest,
+        *,
+        current_text: str,
+        reply_texts: tuple[str, ...],
+        reference_image_urls: tuple[str, ...],
+        unresolved_media_context: bool,
+    ) -> RightCodesDrawRequest | None:
+        if unresolved_media_context and not reference_image_urls:
+            logger.info(
+                "[QQBotFeatures] skip draw prompt rewrite because media context is unresolved: session=%s",
+                getattr(event, "unified_msg_origin", ""),
+            )
+            return None
+        try:
+            provider = self.context.get_using_provider(event.unified_msg_origin)
+        except Exception as exc:
+            logger.warning("[QQBotFeatures] failed to get draw rewrite provider: %s", exc)
+            return None
+        if provider is None:
+            logger.info("[QQBotFeatures] no provider for draw prompt rewrite")
+            return None
+        rewrite_prompt = build_rightcodes_draw_rewrite_prompt(
+            RightCodesDrawRewriteInput(
+                prompt=draw_request.prompt,
+                model=draw_request.model,
+                current_text=current_text,
+                reply_texts=reply_texts,
+                image_urls=reference_image_urls,
+                unresolved_media_context=unresolved_media_context,
+            )
+        )
+        try:
+            response = await provider.text_chat(
+                prompt=rewrite_prompt,
+                session_id=f"rightcodes_draw_rewrite:{event.unified_msg_origin}",
+                image_urls=list(reference_image_urls),
+                contexts=[],
+                system_prompt=RIGHTCODES_DRAW_REWRITE_SYSTEM_PROMPT,
+                persist=False,
+            )
+        except Exception as exc:
+            logger.warning("[QQBotFeatures] draw prompt rewrite provider failed: %s", exc)
+            return None
+        rewrite_result = parse_rightcodes_draw_rewrite_response(
+            getattr(response, "completion_text", ""),
+            fallback_image_urls=reference_image_urls,
+        )
+        if rewrite_result is None:
+            logger.info(
+                "[QQBotFeatures] draw prompt rewrite returned no usable prompt: session=%s",
+                getattr(event, "unified_msg_origin", ""),
+            )
+            return None
+        logger.info(
+            "[QQBotFeatures] draw prompt rewritten before RightCodes call: session=%s images=%s prompt_chars=%s",
+            getattr(event, "unified_msg_origin", ""),
+            len(rewrite_result.image_urls),
+            len(rewrite_result.prompt),
+        )
+        return merge_rewritten_draw_request(draw_request, rewrite_result)
 
     @filter.regex(ARC_RECOMMEND_PATTERN, desc="Arcaea PTT 推荐命令，例如 arctj10.5，按本地曲库和定数缓存推荐谱面。")
     async def arc_recommend(self, event: AstrMessageEvent):

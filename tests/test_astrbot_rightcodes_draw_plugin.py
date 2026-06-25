@@ -33,6 +33,14 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_catalog import (
     format_rightcodes_draw_catalog_injection,
     should_inject_rightcodes_draw_catalog,
 )
+from astrbot_plugin_qqbot_features.rightcodes_draw_rewrite import (
+    RightCodesDrawRewriteInput,
+    build_rightcodes_draw_rewrite_prompt,
+    format_rightcodes_draw_rewrite_missing_context,
+    merge_rewritten_draw_request,
+    parse_rightcodes_draw_rewrite_response,
+    should_rewrite_rightcodes_draw_prompt,
+)
 
 
 class StubDrawHttpClient:
@@ -183,6 +191,69 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
                 "response_format": "url",
             },
         )
+
+    def test_draw_prompt_rewrite_only_triggers_for_contextual_prompt(self) -> None:
+        plain = RightCodesDrawRequest(prompt="一只白猫，水彩风，干净背景")
+        contextual = RightCodesDrawRequest(prompt="仿照上面的图片生成头像")
+        short_with_quote = RightCodesDrawRequest(prompt="照这个")
+
+        self.assertFalse(should_rewrite_rightcodes_draw_prompt(plain))
+        self.assertTrue(should_rewrite_rightcodes_draw_prompt(contextual))
+        self.assertTrue(
+            should_rewrite_rightcodes_draw_prompt(
+                short_with_quote,
+                reply_texts=("一只戴红围巾的白猫",),
+            )
+        )
+        self.assertTrue(
+            should_rewrite_rightcodes_draw_prompt(
+                plain,
+                image_urls=("https://example.invalid/ref.png",),
+            )
+        )
+
+    def test_draw_prompt_rewrite_prompt_contains_context_and_reference_images(self) -> None:
+        prompt = build_rightcodes_draw_rewrite_prompt(
+            RightCodesDrawRewriteInput(
+                prompt="仿照上面的图片生成",
+                model="nano-banana-pro",
+                current_text="棉花生图 仿照上面的图片生成",
+                reply_texts=("群友：做成复古海报风",),
+                image_urls=("https://example.invalid/ref.png",),
+            )
+        )
+
+        self.assertIn("用户原始生图提示词：仿照上面的图片生成", prompt)
+        self.assertIn("被引用消息1：群友：做成复古海报风", prompt)
+        self.assertIn("https://example.invalid/ref.png", prompt)
+
+    def test_parse_draw_prompt_rewrite_json_response(self) -> None:
+        result = parse_rightcodes_draw_rewrite_response(
+            '{"prompt":"参考图中的白猫，改成赛博朋克头像","image_urls":["https://example.invalid/ref.png"]}'
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.prompt, "参考图中的白猫，改成赛博朋克头像")
+        self.assertEqual(result.image_urls, ("https://example.invalid/ref.png",))
+
+    def test_parse_draw_prompt_rewrite_error_response_blocks_draw(self) -> None:
+        self.assertIsNone(parse_rightcodes_draw_rewrite_response('{"error":"缺少可用参考图"}'))
+        self.assertIn("拿不到可用引用", format_rightcodes_draw_rewrite_missing_context())
+
+    def test_merge_rewritten_draw_request_keeps_model_and_updates_prompt(self) -> None:
+        original = RightCodesDrawRequest(prompt="仿照上面", model="nano-banana-pro")
+        rewrite = parse_rightcodes_draw_rewrite_response(
+            '{"prompt":"参考图中的白猫，改成油画头像","image_urls":["https://example.invalid/ref.png"]}'
+        )
+
+        self.assertIsNotNone(rewrite)
+        assert rewrite is not None
+        merged = merge_rewritten_draw_request(original, rewrite)
+
+        self.assertEqual(merged.model, "nano-banana-pro")
+        self.assertEqual(merged.prompt, "参考图中的白猫，改成油画头像")
+        self.assertEqual(merged.image_urls, ("https://example.invalid/ref.png",))
 
 
 if __name__ == "__main__":

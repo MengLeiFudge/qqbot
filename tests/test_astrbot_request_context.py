@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
 
 from astrbot_plugin_qqbot_features.request_context import build_current_request_context
 from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
+from astrbot_plugin_qqbot_features.request_context import extract_image_sources
 
 
 class Plain:
@@ -18,16 +19,23 @@ class Plain:
 
 
 class Reply:
-    def __init__(self, *, message_str: str = "", reply_id: str = "") -> None:
+    def __init__(self, *, message_str: str = "", reply_id: str = "", chain: list[object] | None = None) -> None:
         self.message_str = message_str
         self.text = message_str
         self.id = reply_id
-        self.chain = []
+        self.chain = chain or []
 
 
 class At:
     def __init__(self, qq: str) -> None:
         self.qq = qq
+
+
+class Image:
+    def __init__(self, *, url: str = "", file: str = "", path: str = "") -> None:
+        self.url = url
+        self.file = file
+        self.path = path
 
 
 class MessageObj:
@@ -91,6 +99,24 @@ class AstrBotRequestContextTest(unittest.TestCase):
         context = build_current_request_context(event)
 
         self.assertTrue(context.named_call)
+
+    def test_extract_image_sources_from_current_and_quoted_message(self) -> None:
+        event = StubEvent(
+            [
+                Reply(chain=[Image(url="https://example.invalid/quoted.png")]),
+                Plain("棉花生图 仿照上面的图片"),
+                Image(file="https://example.invalid/current.png"),
+                Image(file="https://example.invalid/current.png"),
+            ]
+        )
+
+        self.assertEqual(
+            extract_image_sources(event),
+            (
+                "https://example.invalid/quoted.png",
+                "https://example.invalid/current.png",
+            ),
+        )
 
     def test_canonical_claim_key_ignores_platform_specific_message_id_when_text_exists(self) -> None:
         first = StubEvent([At("1443944862"), Plain("回答一下")], message_id="demon-msg", timestamp=100)

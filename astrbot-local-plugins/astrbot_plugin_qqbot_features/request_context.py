@@ -8,10 +8,10 @@ import re
 from typing import Any
 
 try:
-    from astrbot.api.message_components import At, Plain, Reply
+    from astrbot.api.message_components import At, Image, Plain, Reply
     _ASTRBOT_COMPONENTS_AVAILABLE = True
 except Exception:  # pragma: no cover - imported by lightweight unit tests.
-    At = Plain = Reply = object  # type: ignore[assignment]
+    At = Image = Plain = Reply = object  # type: ignore[assignment]
     _ASTRBOT_COMPONENTS_AVAILABLE = False
 
 
@@ -179,6 +179,50 @@ def extract_at_ids(event: object) -> tuple[str, ...]:
     return tuple(ids)
 
 
+def extract_image_sources(event: object) -> tuple[str, ...]:
+    sources: list[str] = []
+    for segment in safe_get_messages(event):
+        sources.extend(image_sources_from_segment(segment))
+    return tuple(dedupe_keep_order(sources))
+
+
+def image_sources_from_segment(segment: object) -> list[str]:
+    if is_image_segment(segment):
+        return image_segment_sources(segment)
+    if not is_reply_segment(segment):
+        return []
+    sources: list[str] = []
+    for item in getattr(segment, "chain", None) or []:
+        if is_image_segment(item):
+            sources.extend(image_segment_sources(item))
+    return sources
+
+
+def image_segment_sources(segment: object) -> list[str]:
+    return [
+        value
+        for value in (
+            getattr(segment, "url", ""),
+            getattr(segment, "file", ""),
+            getattr(segment, "path", ""),
+        )
+        if looks_like_image_source(value)
+    ]
+
+
+def looks_like_image_source(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return (
+        text.startswith("http://")
+        or text.startswith("https://")
+        or text.startswith("file:///")
+        or text.startswith("/")
+        or re.match(r"^[A-Za-z]:[\\/]", text) is not None
+    )
+
+
 def extract_reply_ids(event: object) -> tuple[str, ...]:
     ids: list[str] = []
     for segment in safe_get_messages(event):
@@ -288,6 +332,10 @@ def is_media_segment(segment: object) -> bool:
         "xml",
         "json",
     }
+
+
+def is_image_segment(segment: object) -> bool:
+    return (_ASTRBOT_COMPONENTS_AVAILABLE and isinstance(segment, Image)) or segment.__class__.__name__.lower() == "image"
 
 
 def is_reply_segment(segment: object) -> bool:
