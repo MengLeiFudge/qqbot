@@ -23,7 +23,7 @@
   "emotion_llm_enabled": false,
   "convert_static_to_gif": false,
   "max_emotions_per_message": 1,
-  "emotions_probability": 95,
+  "emotions_probability": 100,
   "strict_max_emotions_per_message": true,
   "enable_loose_emotion_matching": true,
   "enable_alternative_markup": true,
@@ -63,6 +63,6 @@
   ],
   "content_cleanup_rule": "&&[a-zA-Z0-9_\\-]+&&",
   "enable_mixed_message": true,
-  "mixed_message_probability": 95,
+  "mixed_message_probability": 100,
   "streaming_compatibility": false
 }

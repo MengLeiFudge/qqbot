@@ -124,7 +124,7 @@
   "emotions_probability": {
     "description": "表情出现概率",
     "type": "int",
-    "default": 50,
+    "default": 100,
     "hint": "每次发送表情出现的概率，范围为1-100",
     "slider": {
       "min": 1,
@@ -202,7 +202,7 @@
   "mixed_message_probability": {
     "description": "回复带图概率",
     "type": "int",
-    "default": 50,
+    "default": 100,
     "hint": "启用回复带图时的发送概率，范围为1-100",
     "slider": {
       "min": 1,

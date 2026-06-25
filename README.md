@@ -62,7 +62,7 @@ AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参
 
 普通聊天文本不会因为 `在吗`、`111`、`真的吗`、`回复慢`、`低信息` 或测试探活这类启发式在本地插件里直接生成固定回复；没有命中明确命令、游戏会话答案、协议事件处理或本地硬安全提醒时，统一交给 LLM 链路。
 
-本地表情包统一由 AstrBot 本地插件 `meme_manager` 管理。插件源码在 `astrbot-local-plugins/meme_manager/`，启动前同步到 `data\astrbot\data\plugins\meme_manager\`；运行态图片和单图语义索引以 `data\astrbot\data\plugin_data\meme_manager\memes\` 与 `meme_index.json` 为准。私聊发送 `表情管理 开启管理后台` 后，可在 WebUI 中预览、搜索、移动分类、编辑单图说明/关键词/适用场景/禁用场景和自动发送开关。旧 `data\memes\mlj_pack\index.json` 只作为迁移来源，可用 `tools\maintenance-scripts\migrate-meme-pack-to-manager.py` 或兼容命令 `tools\maintenance-scripts\sync-meme-pack.py` 复制/合并进 `meme_manager`，不会删除旧目录。自动发送仍遵守 `auto_send_enabled=false`：敏感支付、涩涩慎用、待复核类别不得自动发送；轻松日常、玩梗、吐槽、撒娇和短情绪回复优先使用表情，技术、报错、安全、群管理和长解释场景不自动附图。
+本地表情包统一由 AstrBot 本地插件 `meme_manager` 管理。插件源码在 `astrbot-local-plugins/meme_manager/`，启动前同步到 `data\astrbot\data\plugins\meme_manager\`；运行态图片和单图语义索引以 `data\astrbot\data\plugin_data\meme_manager\memes\` 与 `meme_index.json` 为准。私聊发送 `表情管理 开启管理后台` 后，可在 WebUI 中预览、搜索、移动分类、编辑单图说明/关键词/适用场景/禁用场景和自动发送开关。旧 `data\memes\mlj_pack\index.json` 只作为迁移来源，可用 `tools\maintenance-scripts\migrate-meme-pack-to-manager.py` 或兼容命令 `tools\maintenance-scripts\sync-meme-pack.py` 复制/合并进 `meme_manager`，不会删除旧目录。自动发送仍遵守 `auto_send_enabled=false`：敏感支付、涩涩慎用、待复核类别不得自动发送；轻松日常、玩梗、吐槽、撒娇和短情绪回复优先使用表情，技术、报错、安全、群管理和长解释场景不自动附图。LLM 输出的 `&&标签&&` 和可识别的半截/畸形表情标签会在发送前清理，不能把裸标签文本发到群聊。
 
 ## 启动
 

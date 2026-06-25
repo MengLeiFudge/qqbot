@@ -44,6 +44,7 @@ from .config import DEFAULT_CATEGORY_DESCRIPTIONS, MEMES_DATA_PATH, MEMES_DIR
 from .image_host.img_sync import ImageSync
 from .init import init_plugin
 from .local_index import select_meme_for_emotion
+from .meme_markup import clean_meme_markup_text, extract_wrapped_meme_markups
 from .utils import (
     dict_to_string,
     generate_secret_key,
@@ -890,29 +891,12 @@ class MemeSender(Star):
 
         clean_text = text
 
-        # 第一阶段：严格匹配符号包裹的表情
-        hex_pattern = r"&&([^&&]+)&&"
-        matches = re.finditer(hex_pattern, clean_text)
-
-        # 严格模式处理
-        temp_replacements = []
-        strict_emotions = []
-        for match in matches:
-            original = match.group(0)
-            emotion = match.group(1).strip()
-
-            # 合法性验证
-            if emotion in valid_emoticons:
-                temp_replacements.append((original, emotion))
-                strict_emotions.append(emotion)
-            else:
-                temp_replacements.append((original, ""))  # 非法表情静默移除
-
-        # 保持原始顺序替换
-        for original, emotion in temp_replacements:
-            clean_text = clean_text.replace(original, "", 1)  # 每次替换第一个匹配项
-            if emotion:
-                self.found_emotions.append(emotion)
+        # 第一阶段：严格匹配符号包裹的表情，同时容错 &Atag 这类半截标记。
+        clean_text, strict_emotions = extract_wrapped_meme_markups(
+            clean_text,
+            valid_emoticons,
+        )
+        self.found_emotions.extend(strict_emotions)
 
         # 第二阶段：替代标记处理（如[emotion]、(emotion)等）
         if self.config.get("enable_alternative_markup", True):
@@ -1101,8 +1085,7 @@ class MemeSender(Star):
         logger.info(f"[meme_manager] 去重后的最终表情列表: {self.found_emotions}")
 
         # 防御性清理残留符号
-        clean_text = re.sub(r"&&+", "", clean_text)  # 清除未成对的&&符号
-        response.completion_text = clean_text.strip()
+        response.completion_text = self._clean_meme_text(clean_text)
         logger.debug(
             f"[meme_manager] 清理后的最终文本内容长度: {len(response.completion_text)}"
         )
@@ -1250,6 +1233,17 @@ class MemeSender(Star):
 
         return "\n".join(parts)
 
+    def _clean_meme_text(self, text: str) -> str:
+        """清理完整和畸形表情标签，避免残留标签发到群聊。"""
+        valid_emoticons = set(getattr(self, "category_mapping", {}) or {})
+        cleaned = clean_meme_markup_text(text, valid_emoticons)
+        if self.content_cleanup_rule:
+            try:
+                cleaned = re.sub(self.content_cleanup_rule, "", cleaned)
+            except re.error as exc:
+                logger.warning(f"[meme_manager] content_cleanup_rule 无效: {exc}")
+        return clean_meme_markup_text(cleaned, valid_emoticons)
+
     async def _send_memes_streaming(self, event: AstrMessageEvent):
         """流式传输兼容模式：在流式消息发送完成后，主动发送表情图片作为独立消息。"""
         if not self.found_emotions:
@@ -1322,11 +1316,7 @@ class MemeSender(Star):
                 # 处理不同类型的消息链
                 if isinstance(original_chain, str):
                     # 字符串类型：清理后转为 Plain 组件
-                    cleaned = (
-                        re.sub(self.content_cleanup_rule, "", original_chain)
-                        if self.content_cleanup_rule
-                        else original_chain
-                    )
+                    cleaned = self._clean_meme_text(original_chain)
                     if cleaned.strip():
                         cleaned_components.append(Plain(cleaned.strip()))
 
@@ -1334,11 +1324,7 @@ class MemeSender(Star):
                     # MessageChain 类型：遍历清理 Plain 组件
                     for component in original_chain.chain:
                         if isinstance(component, Plain):
-                            cleaned = (
-                                re.sub(self.content_cleanup_rule, "", component.text)
-                                if self.content_cleanup_rule
-                                else component.text
-                            )
+                            cleaned = self._clean_meme_text(component.text)
                             if cleaned.strip():
                                 cleaned_components.append(Plain(cleaned.strip()))
                         else:
@@ -1349,11 +1335,7 @@ class MemeSender(Star):
                     # 列表类型：遍历清理 Plain 组件
                     for component in original_chain:
                         if isinstance(component, Plain):
-                            cleaned = (
-                                re.sub(self.content_cleanup_rule, "", component.text)
-                                if self.content_cleanup_rule
-                                else component.text
-                            )
+                            cleaned = self._clean_meme_text(component.text)
                             if cleaned.strip():
                                 cleaned_components.append(Plain(cleaned.strip()))
                         else:
@@ -1431,9 +1413,7 @@ class MemeSender(Star):
                 # 如果原本有内容但清理后为空，也要更新（避免发送带标签的空消息）
                 # 进行最后的防御性清理
                 if isinstance(original_chain, str):
-                    final_cleaned = re.sub(
-                        r"&&+", "", original_chain
-                    )  # 清除残留的&&符号
+                    final_cleaned = self._clean_meme_text(original_chain)
                     if final_cleaned.strip():
                         result.chain = [Plain(final_cleaned.strip())]
                 elif isinstance(original_chain, MessageChain):
@@ -1441,7 +1421,7 @@ class MemeSender(Star):
                     final_components = []
                     for component in original_chain.chain:
                         if isinstance(component, Plain):
-                            final_cleaned = re.sub(r"&&+", "", component.text)
+                            final_cleaned = self._clean_meme_text(component.text)
                             if final_cleaned.strip():
                                 final_components.append(Plain(final_cleaned.strip()))
                         else:
