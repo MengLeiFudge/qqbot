@@ -77,6 +77,7 @@ from .reply_style_guard_logic import should_disable_model_regex_segmenting
 from .reply_style_guard_logic import should_reply_too_long_to_read
 from .reply_style_guard_logic import split_chat_bubble_lines
 from .reply_style_guard_runtime import build_folded_reply_chain
+from .reply_style_guard_runtime import decorate_active_reply_source
 from .reply_style_guard_runtime import extract_onebot_forward_text
 from .reply_style_guard_runtime import has_forward_message
 from .social_events import GROUP_MEMBER_WELCOME_EXPRESSIONS
@@ -193,6 +194,8 @@ LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
 LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
 DELEGATED_FROM_EXTRA = "_qqbot_twin_llm_delegated_from"
 BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
+ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA = "_qqbot_active_reply_quote_message_id"
+ACTIVE_REPLY_AT_USER_ID_EXTRA = "_qqbot_active_reply_at_user_id"
 DEFAULT_TWIN_MAX_CONTEXT_MESSAGES = 4
 DEFAULT_TWIN_MAX_CONTEXT_CHARS = 1200
 INTERNAL_ERROR_PREFIXES = (
@@ -369,7 +372,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.10.4",
+    "0.10.5",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -687,6 +690,16 @@ class QQBotFeaturesPlugin(Star):
                 "[QQBotFeatures] folded long reply into AstrBot Nodes chain: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
+        active_reply_decorated = False
+        if not folded:
+            active_reply_decorated = _decorate_active_reply_result(event, result)
+            if active_reply_decorated:
+                logger.info(
+                    "[QQBotFeatures] decorated active reply source: session=%s quote=%s at=%s",
+                    getattr(event, "unified_msg_origin", ""),
+                    event.get_extra(ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA, ""),
+                    event.get_extra(ACTIVE_REPLY_AT_USER_ID_EXTRA, ""),
+                )
         if not bubbled and _should_disable_segmented_reply_for_result(
             self.context,
             result,
@@ -697,6 +710,8 @@ class QQBotFeaturesPlugin(Star):
                 "[QQBotFeatures] plugin override disabled AstrBot segmented reply for LLM result: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
+        elif active_reply_decorated:
+            result.set_result_content_type(ResultContentType.GENERAL_RESULT)
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=2000, desc="直接叫到 bot 的群聊长消息短路回复。")
     async def handle_too_long_direct_group_message(self, event: AstrMessageEvent):
@@ -2016,6 +2031,22 @@ def _should_disable_segmented_reply_for_result(
         is_model_result=True,
         override_enabled=override_enabled,
     )
+
+
+def _decorate_active_reply_result(event: AstrMessageEvent, result) -> bool:
+    if event.get_platform_name() != "aiocqhttp":
+        return False
+    if result is None or not result.is_model_result():
+        return False
+    decorated = decorate_active_reply_source(
+        result.chain,
+        quote_message_id=event.get_extra(ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA, ""),
+        at_user_id=event.get_extra(ACTIVE_REPLY_AT_USER_ID_EXTRA, ""),
+    )
+    if decorated is None:
+        return False
+    result.chain = decorated
+    return True
 
 
 def _read_segmented_reply_config(context: Context) -> dict:

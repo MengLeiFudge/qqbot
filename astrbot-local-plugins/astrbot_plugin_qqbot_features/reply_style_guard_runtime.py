@@ -5,9 +5,11 @@ import inspect
 from typing import Any
 
 from astrbot.core.message.components import Forward as CoreForward
+from astrbot.core.message.components import At as CoreAt
 from astrbot.core.message.components import Node as CoreNode
 from astrbot.core.message.components import Nodes as CoreNodes
 from astrbot.core.message.components import Plain as CorePlain
+from astrbot.core.message.components import Reply as CoreReply
 from astrbot.core.utils.quoted_message.chain_parser import OneBotPayloadParser
 
 from .reply_style_guard_logic import should_fold_long_reply
@@ -19,6 +21,23 @@ class FoldedReplyChain:
     chain: list[object]
     text_chars: int
     node_count: int
+
+
+def decorate_active_reply_source(
+    chain: list[object],
+    *,
+    quote_message_id: object,
+    at_user_id: object,
+) -> list[object] | None:
+    message_id = str(quote_message_id or "").strip()
+    user_id = str(at_user_id or "").strip()
+    if not message_id or not user_id or not chain:
+        return None
+    if any(isinstance(item, CoreReply) for item in chain):
+        return None
+    if not all(isinstance(item, CorePlain) for item in chain):
+        return None
+    return [CoreReply(id=message_id), CoreAt(qq=user_id), *chain]
 
 
 def build_folded_reply_chain(

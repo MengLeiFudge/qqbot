@@ -82,6 +82,8 @@ _BATCH_DECISION_AT: dict[str, float] = {}
 LLM_WORKER_SELECTED_EXTRA = "_qqbot_twin_llm_worker_selected"
 LLM_WORKER_CLAIM_KEY_EXTRA = "_qqbot_twin_llm_worker_claim_key"
 LLM_WORKER_BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
+ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA = "_qqbot_active_reply_quote_message_id"
+ACTIVE_REPLY_AT_USER_ID_EXTRA = "_qqbot_active_reply_at_user_id"
 DELEGATED_COMMENT_EXTRA = "_qqbot_twin_delegated_comment"
 
 
@@ -89,7 +91,7 @@ DELEGATED_COMMENT_EXTRA = "_qqbot_twin_delegated_comment"
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖普通群聊主动接话门控。",
-    "0.3.12",
+    "0.3.13",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -315,6 +317,7 @@ class TopicConcentrationPlugin(Star):
             if _should_force_named_call_reply(record.window):
                 event.is_wake = True
                 event.is_at_or_wake_command = True
+                _mark_active_reply_quote_target(event)
                 logger.info(
                     "[TopicConcentration] allow active reply: "
                     f"group={event.get_group_id()} topic=direct_named_call "
@@ -395,6 +398,7 @@ class TopicConcentrationPlugin(Star):
                 _COOLDOWNS[cooldown_key] = now + COOLDOWN_SECONDS
                 _GROUP_COOLDOWNS[scope_key] = now + GROUP_COOLDOWN_SECONDS
                 _set_interest(scope_key, decision)
+                _mark_active_reply_quote_target(event)
                 logger.info(
                     "[TopicConcentration] allow active reply: "
                     f"group={event.get_group_id()} topic={decision.topic_key} "
@@ -440,6 +444,15 @@ def _record_message(event, *, scope_key: str | None = None) -> TopicRecordResult
     while len(window) > MAX_WINDOW_MESSAGES:
         window.popleft()
     return TopicRecordResult(window=window, duplicate=False)
+
+
+def _mark_active_reply_quote_target(event) -> None:
+    message_id = str(getattr(getattr(event, "message_obj", None), "message_id", "") or "").strip()
+    sender_id = str(event.get_sender_id() or "").strip()
+    if message_id:
+        event.set_extra(ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA, message_id)
+    if sender_id:
+        event.set_extra(ACTIVE_REPLY_AT_USER_ID_EXTRA, sender_id)
 
 
 def _should_consider_window(window: deque[TopicWindowMessage], *, event=None) -> bool:

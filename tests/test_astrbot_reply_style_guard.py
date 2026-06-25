@@ -2,11 +2,69 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import types
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
+
+
+class Plain:
+    def __init__(self, text: str = "") -> None:
+        self.text = text
+
+
+class Reply:
+    def __init__(self, **kwargs) -> None:
+        self.id = kwargs.get("id", "")
+
+
+class At:
+    def __init__(self, **kwargs) -> None:
+        self.qq = kwargs.get("qq", "")
+
+
+class Nodes:
+    def __init__(self, nodes=None) -> None:
+        self.nodes = nodes or []
+
+
+class Forward:
+    pass
+
+
+class Node:
+    pass
+
+
+components_stub = types.ModuleType("astrbot.core.message.components")
+components_stub.Plain = Plain
+components_stub.Reply = Reply
+components_stub.At = At
+components_stub.Nodes = Nodes
+components_stub.Node = Node
+components_stub.Forward = Forward
+sys.modules.setdefault("astrbot", types.ModuleType("astrbot"))
+sys.modules.setdefault("astrbot.core", types.ModuleType("astrbot.core"))
+sys.modules.setdefault("astrbot.core.message", types.ModuleType("astrbot.core.message"))
+sys.modules["astrbot.core.message.components"] = components_stub
+
+chain_parser_stub = types.ModuleType("astrbot.core.utils.quoted_message.chain_parser")
+
+
+class OneBotPayloadParser:
+    def parse_get_forward_payload(self, payload):
+        return {"text": "", "forward_ids": []}
+
+
+chain_parser_stub.OneBotPayloadParser = OneBotPayloadParser
+sys.modules.setdefault("astrbot.core.utils", types.ModuleType("astrbot.core.utils"))
+sys.modules.setdefault(
+    "astrbot.core.utils.quoted_message",
+    types.ModuleType("astrbot.core.utils.quoted_message"),
+)
+sys.modules["astrbot.core.utils.quoted_message.chain_parser"] = chain_parser_stub
 
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import sanitize_reply_plain_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_reply_too_long_to_read
@@ -25,9 +83,43 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_reply_instruction_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_both_targeted_reply_instruction_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
+from astrbot_plugin_qqbot_features.reply_style_guard_runtime import decorate_active_reply_source
 
 
 class AstrBotReplyStyleGuardTest(unittest.TestCase):
+    def test_active_reply_source_decorator_prepends_quote_and_at(self) -> None:
+        chain = decorate_active_reply_source(
+            [Plain("第一条消息"), Plain("第二条消息")],
+            quote_message_id="m-100",
+            at_user_id="3062317151",
+        )
+
+        self.assertIsNotNone(chain)
+        self.assertIsInstance(chain[0], Reply)
+        self.assertEqual(chain[0].id, "m-100")
+        self.assertIsInstance(chain[1], At)
+        self.assertEqual(chain[1].qq, "3062317151")
+        self.assertEqual(chain[2].text, "第一条消息")
+        self.assertEqual(chain[3].text, "第二条消息")
+
+    def test_active_reply_source_decorator_skips_non_plain_chain(self) -> None:
+        self.assertIsNone(
+            decorate_active_reply_source(
+                [Nodes([])],
+                quote_message_id="m-100",
+                at_user_id="3062317151",
+            )
+        )
+
+    def test_active_reply_source_decorator_does_not_duplicate_reply(self) -> None:
+        self.assertIsNone(
+            decorate_active_reply_source(
+                [Reply(id="existing"), Plain("正文")],
+                quote_message_id="m-100",
+                at_user_id="3062317151",
+            )
+        )
+
     def test_stripping_only_followup_question_returns_empty_text(self) -> None:
         self.assertEqual(strip_followup_tail("你把具体名字发我。"), "")
         self.assertEqual(strip_followup_tail("是不是更安全？"), "")
