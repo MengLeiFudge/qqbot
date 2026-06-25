@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from astrbot.api import logger
 
 
 DEFAULT_MAX_MESSAGES = 12
 DEFAULT_MAX_CHARS = 1800
+CONTEXT_TIMEZONE_NAME = "Asia/Shanghai"
 ANGEL_BOT_ID = "1443944862"
 DEMON_BOT_ID = "2629227874"
 DOMAIN_HINTS = {
@@ -118,9 +121,18 @@ def build_group_context_injection(group_id: str, config: BridgeConfig) -> str:
     domain_hint = DOMAIN_HINTS.get(group_id)
     if domain_hint:
         lines.append(f"领域规则：{domain_hint}")
-    lines.append("最近公开群聊：")
-    for record in records[-config.max_messages :]:
-        line = format_context_record(record)
+    visible_records = [
+        record for record in records if normalize_context_record_text(record.get("text"))
+    ][-config.max_messages :]
+    if not visible_records:
+        return ""
+    lines.append(
+        "最近公开群聊（按时间从早到晚；序号1是本轮可见的最早一条，"
+        "序号最大的为最新一条；用户问“当前消息之前第N条/几条之前”时，"
+        "按可见历史倒数第N条回答；只按下面这些可见消息回答最早、第几条或几条之前的问题）："
+    )
+    for index, record in enumerate(visible_records, start=1):
+        line = format_context_record(record, index=index, total=len(visible_records))
         if line:
             lines.append(line)
     return trim_text("\n".join(lines), config.max_chars)
@@ -149,16 +161,51 @@ def load_group_context_records(path: Path) -> list[dict[str, Any]]:
     return [item for item in payload if isinstance(item, dict)]
 
 
-def format_context_record(record: dict[str, Any]) -> str:
+def format_context_record(record: dict[str, Any], *, index: int, total: int) -> str:
     user_id = str(record.get("user_id") or "").strip()
     sender_name = str(record.get("sender_name") or user_id or "unknown").strip()
-    text = " ".join(str(record.get("text") or "").split())
+    text = normalize_context_record_text(record.get("text"))
     if not text:
         return ""
     speaker = "天使棉花糖" if user_id == ANGEL_BOT_ID else "恶魔棉花糖" if user_id == DEMON_BOT_ID else sender_name
     message_id = str(record.get("message_id") or "").strip()
-    suffix = f" #{message_id}" if message_id else ""
-    return f"- {speaker}{suffix}: {text}"
+    timestamp_text = format_context_timestamp(record.get("timestamp"))
+    parts = [
+        f"序号 {index}/{total}",
+        f"时间={timestamp_text or '未知'}",
+        f"发言人={speaker}",
+    ]
+    if message_id:
+        parts.append(f"message_id={message_id}")
+    parts.append(f"内容={text}")
+    return "；".join(parts)
+
+
+def normalize_context_record_text(raw_text: object) -> str:
+    return " ".join(str(raw_text or "").split())
+
+
+def format_context_timestamp(raw_timestamp: object) -> str:
+    try:
+        timestamp = float(raw_timestamp)
+    except (TypeError, ValueError):
+        return ""
+    if timestamp <= 0:
+        return ""
+    if timestamp > 10_000_000_000:
+        timestamp /= 1000
+    try:
+        current = datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(resolve_context_timezone())
+    except (OSError, ValueError, OverflowError):
+        return ""
+    return f"{current:%Y-%m-%d %H:%M:%S} {CONTEXT_TIMEZONE_NAME} (timestamp={raw_timestamp})"
+
+
+def resolve_context_timezone():
+    try:
+        return ZoneInfo(CONTEXT_TIMEZONE_NAME)
+    except ZoneInfoNotFoundError:
+        return timezone(timedelta(hours=8), name=CONTEXT_TIMEZONE_NAME)
 
 
 def trim_text(text: str, max_chars: int) -> str:
