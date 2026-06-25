@@ -102,9 +102,17 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
 
         self.assertIn("你要用当前 bot 身份完成自己的那份请求", injection)
         self.assertIn("不要转给另一个 bot", injection)
+        self.assertIn("是不是该睡觉了", injection)
+        self.assertIn("直接给用户一句建议", injection)
+        self.assertIn("不要把问题改成评价另一个 bot", injection)
+        self.assertIn("最多两句短句", injection)
+        self.assertIn("不要展开长理由", injection)
+        self.assertIn("晚安收尾或颜文字", injection)
+        self.assertIn("该睡。再拖明天就起不来了。", injection)
         self.assertIn("只能代表当前 bot 作出自己的回应", injection)
         self.assertIn("不要追加“不过/但是”转折", injection)
         self.assertIn("不要把普通请求说成要另一个 bot 自己回应", injection)
+        self.assertIn("绝对不要输出括号舞台说明", injection)
 
     def test_bot_sender_ids_are_never_eligible_for_direct_handling(self) -> None:
         profile = read_profile("angel")

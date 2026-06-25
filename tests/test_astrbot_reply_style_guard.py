@@ -226,6 +226,17 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("直接完成用户这次请求", instruction)
         self.assertIn("如果用户让讲笑话", instruction)
         self.assertIn("不要把任务转给另一个 bot", instruction)
+        self.assertIn("是不是该睡觉了", instruction)
+        self.assertIn("不要 @ 另一个 bot", instruction)
+        self.assertIn("不要把问题改成评价另一个 bot", instruction)
+        self.assertIn("最多两句短句", instruction)
+        self.assertIn("不要展开长理由", instruction)
+        self.assertIn("滚去睡/滚去躺平/赶紧滚", instruction)
+        self.assertIn("晚安", instruction)
+        self.assertIn("颜文字", instruction)
+        self.assertIn("给完建议就停", instruction)
+        self.assertIn("黑眼圈", instruction)
+        self.assertIn("该睡。再拖明天就起不来了。", instruction)
         self.assertIn("我喜欢你们", instruction)
         self.assertIn("只能代表当前 bot 独立回应", instruction)
         self.assertIn("必须使用单数第一人称", instruction)
@@ -235,6 +246,8 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("不要提另一个 bot 的名字", instruction)
         self.assertIn("不要猜测另一个 bot 的心情", instruction)
         self.assertIn("不要说“让她来讲/让对方回应/我不替她讲”", instruction)
+        self.assertIn("绝对不要输出括号舞台说明", instruction)
+        self.assertIn("用户只点名了另一个 bot 没叫我", instruction)
 
     def test_delegated_comment_prompt_uses_current_target_viewpoint(self) -> None:
         prompt = build_delegated_comment_prompt_text(
