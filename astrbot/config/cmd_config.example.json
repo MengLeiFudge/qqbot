@@ -18,7 +18,7 @@
     "reply_with_quote": false,
     "path_mapping": [],
     "segmented_reply": {
-      "enable": false,
+      "enable": true,
       "only_llm_result": true,
       "interval_method": "log",
       "interval": "1.5,3.5",
@@ -48,7 +48,7 @@
     "agents": [
       {
         "name": "subagent1",
-        "persona_id": "恶魔棉花糖",
+        "persona_id": "default",
         "public_description": "",
         "enabled": true
       }
@@ -112,6 +112,17 @@
     "host": "0.0.0.0",
     "port": 6185,
     "disable_access_log": true,
+    "trust_proxy_headers": false,
+    "auth_rate_limit": {
+      "enable": true,
+      "average_interval": 1.0,
+      "max_burst": 3
+    },
+    "totp": {
+      "enable": false,
+      "secret": "",
+      "recovery_code_hash": ""
+    },
     "ssl": {
       "enable": false,
       "cert_file": "",

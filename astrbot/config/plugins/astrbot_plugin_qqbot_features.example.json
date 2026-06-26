@@ -3,15 +3,22 @@
   "auto_approve_friend_requests": true,
   "auto_approve_group_invites": true,
   "data_root": "",
+  "api_key": "",
   "point_multiplier": 1000,
   "draw_timeout_seconds": 240,
-  "api_key": "",
-  "sub2api_base_url": "",
+  "sub2api_base_url": "https://ai.kripto.life",
   "sub2api_admin_api_key": "",
   "sub2api_default_account_name": "Pro",
   "sub2api_timeout_seconds": 90,
   "sub2api_refresh_interval_seconds": 300,
   "sub2api_alert_group_ids": "",
+  "context_bridge_enabled_groups": "",
+  "context_bridge_max_messages": 12,
+  "context_bridge_max_chars": 1800,
+  "reply_style_guard_long_reply_fold_threshold_chars": 300,
+  "reply_style_guard_disable_astrbot_segmented_reply": true,
+  "reply_style_guard_long_input_tldr_threshold_chars": 300,
+  "reply_style_guard_long_input_tldr_text": "太长不看喵",
   "meme_manager_webui_port": 5000,
   "meme_manager_prompt": {
     "prompt_head": "表情规则：轻松日常、玩梗、吐槽、撒娇、短情绪回复应优先使用 1 个 &&标签&&；当只需要表达态度、情绪或敷衍短应答时，可以只输出 1 个 &&标签&& 作为纯表情回复，不要再配文字；只有从下列标签中选择，不能编造标签。",
@@ -62,7 +69,6 @@
   ],
   "meme_manager_content_cleanup_rule": "&&[a-zA-Z0-9_\\-]+&&",
   "meme_manager_emotion_llm_enabled": false,
-  "meme_manager_emotion_llm_provider_id": "",
   "meme_manager_image_host": "stardots",
   "meme_manager_streaming_compatibility": false,
   "meme_manager_image_host_config": {
@@ -78,5 +84,16 @@
       "bucket_name": "",
       "public_url": ""
     }
-  }
+  },
+  "source_knowledge_enabled_groups": "",
+  "source_knowledge_source_roots": "",
+  "source_knowledge_max_results": 4,
+  "source_knowledge_max_chars": 2600,
+  "source_knowledge_max_files_per_domain": 80,
+  "source_knowledge_max_file_bytes": 220000,
+  "source_knowledge_refresh_seconds": 600,
+  "twin_interaction_enabled_groups": "",
+  "twin_interaction_direct_handler_enabled": true,
+  "twin_interaction_max_context_messages": 4,
+  "twin_interaction_max_context_chars": 1200
 }
