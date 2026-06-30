@@ -19,6 +19,7 @@ class StartAllContractTest(unittest.TestCase):
         self.assertRegex(script, r'\[string\]\$Target\s*=\s*"astrbot"')
         self.assertIn("[int]$AstrBotOneBotPort = 6201", script)
         self.assertIn("[int]$AstrBotAngelOneBotPort = 6200", script)
+        self.assertIn("[switch]$UseChildWindows", script)
         self.assertIn('if ($Target -eq "astrbot")', script)
         self.assertIn('$FeatureMode = "full"', script)
         self.assertIn('$AstrBotProfile = "both"', script)
@@ -110,9 +111,26 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("[int]$AngelAiocqhttpPort = 6200", script)
         self.assertIn("AstrBot launch mode: direct uv tool executable", script)
         self.assertIn("AstrBot launch mode: PATH astrbot command", script)
+        self.assertIn("[switch]$AllowUvToolRun", script)
         self.assertIn("AstrBot launch mode: uv tool run", script)
-        self.assertIn("AstrBot launch mode: py -$PythonVersion -m uv", script)
-        self.assertIn("make astrbot/uv/py available on PATH", script)
+        self.assertIn("Run scripts\\update-all.bat first", script)
+        self.assertIn("To bootstrap from PyPI during startup, rerun with -AllowUvToolRun", script)
+
+    def test_start_all_defaults_to_single_terminal_with_component_prefixes(self) -> None:
+        script = START_ALL.read_text(encoding="utf-8-sig")
+
+        self.assertIn("Display mode: single terminal with component prefixes.", script)
+        self.assertIn("Display mode: child windows.", script)
+        self.assertIn("function Get-ComponentConsolePrefix", script)
+        self.assertIn('"astrbot" { return "[AstrBot]" }', script)
+        self.assertIn('"napcat-astrbot-angel" { return "[NapCat] [Angel]" }', script)
+        self.assertIn('"napcat-astrbot-demon" { return "[NapCat] [Demon]" }', script)
+        self.assertIn("[Launcher]", script)
+        self.assertIn("Start-ChildProcess", script)
+        self.assertIn("-NoPauseOnFailure", script)
+        self.assertIn("supervisor_stdout.log", script)
+        self.assertIn("supervisor_stderr.log", script)
+        self.assertIn("Flush-ComponentsLauncherLogs", script)
 
 
 if __name__ == "__main__":

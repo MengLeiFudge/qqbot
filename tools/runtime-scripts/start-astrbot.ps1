@@ -6,7 +6,8 @@ param(
     [ValidateSet("", "dual", "full")]
     [string]$FeatureMode = "",
     [ValidateSet("demon", "angel", "both")]
-    [string]$BotProfile = "demon"
+    [string]$BotProfile = "demon",
+    [switch]$AllowUvToolRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -305,17 +306,21 @@ if ($pathAstrBot) {
 }
 
 $pathUv = Get-Command uv -ErrorAction SilentlyContinue
-if ($pathUv) {
+if ($AllowUvToolRun -and $pathUv) {
     Write-Host "AstrBot launch mode: uv tool run ($($pathUv.Source))"
     & $pathUv.Source tool run --from astrbot --python $PythonVersion astrbot run -p $Port
     exit $LASTEXITCODE
 }
 
 $pathPy = Get-Command py -ErrorAction SilentlyContinue
-if ($pathPy) {
+if ($AllowUvToolRun -and $pathPy) {
     Write-Host "AstrBot launch mode: py -$PythonVersion -m uv ($($pathPy.Source))"
     & $pathPy.Source "-$PythonVersion" -m uv tool run --from astrbot --python $PythonVersion astrbot run -p $Port
     exit $LASTEXITCODE
 }
 
-throw "AstrBot uv tool is not available. Install or update with scripts\update-all.bat, or make astrbot/uv/py available on PATH."
+if ($pathUv -or $pathPy) {
+    throw "AstrBot tool is not installed. Run scripts\update-all.bat first. To bootstrap from PyPI during startup, rerun with -AllowUvToolRun."
+}
+
+throw "AstrBot tool is not available. Run scripts\update-all.bat first, or make astrbot available on PATH."
