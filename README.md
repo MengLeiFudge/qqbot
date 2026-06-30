@@ -91,10 +91,10 @@ Set-Location D:\project\qqbot
 .\scripts\update-all.bat
 ```
 
-`update-all.bat` 会按顺序更新 NapCat 和 AstrBot Core；内部实现放在 `tools\runtime-scripts\update-napcat.ps1` 和 `tools\runtime-scripts\update-astrbot.ps1`。
+`update-all.bat` 会按顺序更新 NapCat 和 AstrBot Core；内部实现放在 `tools\runtime-scripts\update-napcat.ps1` 和 `tools\runtime-scripts\update-astrbot.ps1`。默认是交互式更新：NapCat 下载前会显示当前版本、目标 release、asset 名称、下载 URL、本地 zip 路径和后续替换动作并询问；AstrBot install/upgrade 前会显示当前 tool 状态、计划执行的 uv 命令和会处理的运行进程并询问。无人值守时可给 PowerShell 入口加 `-AssumeYes` 自动确认。
 
-NapCat 更新会先从 GitHub 最新 release 下载 Windows Shell OneKey zip 并解压到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换程序包后自动迁移 `napcat_*.json`、`napcat_protocol_*.json` 和 `onebot11_*.json` 账号配置。
+NapCat 更新会先查询 GitHub 最新 release；如果本地记录已经是最新 release，则直接跳过下载和替换。本地旧包没有 release 标记时，会回看最近成功的 NapCat 更新日志作为版本来源；仍无法确认时显示当前版本为 unknown，并在下载前询问。确认后才下载 Windows Shell OneKey zip 并解压到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换程序包后自动迁移 `napcat_*.json`、`napcat_protocol_*.json` 和 `onebot11_*.json` 账号配置。
 
-AstrBot 更新会先停止本工作区正在运行的 AstrBot uv tool 进程，再使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会先用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
+AstrBot 更新在用户确认后，会停止本工作区正在运行的 AstrBot uv tool 进程，再使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会在确认后用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
 
 更新后使用 `scripts\start-all.bat` 启动 bot2。修改 `astrbot/` 里的源码快照不会影响实际运行的 bot2，除非重新切换回源码模式。

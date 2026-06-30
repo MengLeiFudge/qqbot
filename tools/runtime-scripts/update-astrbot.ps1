@@ -1,7 +1,8 @@
 param(
     [string]$PythonVersion = "3.14",
     [switch]$DryRun,
-    [switch]$NoStopProcesses
+    [switch]$NoStopProcesses,
+    [switch]$AssumeYes
 )
 
 $ErrorActionPreference = "Stop"
@@ -183,26 +184,46 @@ function Stop-AstrBotProcesses {
     throw "Some AstrBot processes are still running: $(Format-ProcessSummary $remaining)"
 }
 
+function Resolve-CommandItems {
+    param([string[]]$Command)
+
+    $items = @()
+    foreach ($item in @($Command)) {
+        if ($null -ne $item -and -not [string]::IsNullOrWhiteSpace([string]$item)) {
+            $items += [string]$item
+        }
+    }
+    if ($items.Count -eq 0) {
+        throw "Command is empty."
+    }
+    return $items
+}
+
 function Invoke-LoggedCommand {
     param([string[]]$Command)
 
-    Write-Step ("> " + ($Command -join " "))
-    $exe = $Command[0]
+    $commandItems = @(Resolve-CommandItems -Command $Command)
+    Write-Step ("> " + ($commandItems -join " "))
+    $exe = $commandItems[0]
     $arguments = @()
-    if ($Command.Count -gt 1) {
-        $arguments = $Command[1..($Command.Count - 1)]
+    if ($commandItems.Count -gt 1) {
+        $arguments = @($commandItems[1..($commandItems.Count - 1)])
     }
 
     $stdoutFile = Join-Path $env:TEMP ("qqbot-update-stdout-{0}.log" -f ([guid]::NewGuid().ToString("N")))
     $stderrFile = Join-Path $env:TEMP ("qqbot-update-stderr-{0}.log" -f ([guid]::NewGuid().ToString("N")))
-    $process = Start-Process `
-        -FilePath $exe `
-        -ArgumentList $arguments `
-        -NoNewWindow `
-        -Wait `
-        -PassThru `
-        -RedirectStandardOutput $stdoutFile `
-        -RedirectStandardError $stderrFile
+    $startArgs = @{
+        FilePath = $exe
+        NoNewWindow = $true
+        Wait = $true
+        PassThru = $true
+        RedirectStandardOutput = $stdoutFile
+        RedirectStandardError = $stderrFile
+    }
+    if ($arguments.Count -gt 0) {
+        $startArgs.ArgumentList = $arguments
+    }
+    $process = Start-Process @startArgs
 
     foreach ($path in @($stdoutFile, $stderrFile)) {
         if (Test-Path $path) {
@@ -215,29 +236,34 @@ function Invoke-LoggedCommand {
     }
 
     if ($process.ExitCode -ne 0) {
-        throw "Command failed with exit code $($process.ExitCode): $($Command -join ' ')"
+        throw "Command failed with exit code $($process.ExitCode): $($commandItems -join ' ')"
     }
 }
 
 function Invoke-CapturedCommand {
     param([string[]]$Command)
 
-    $exe = $Command[0]
+    $commandItems = @(Resolve-CommandItems -Command $Command)
+    $exe = $commandItems[0]
     $arguments = @()
-    if ($Command.Count -gt 1) {
-        $arguments = $Command[1..($Command.Count - 1)]
+    if ($commandItems.Count -gt 1) {
+        $arguments = @($commandItems[1..($commandItems.Count - 1)])
     }
 
     $stdoutFile = Join-Path $env:TEMP ("qqbot-update-stdout-{0}.log" -f ([guid]::NewGuid().ToString("N")))
     $stderrFile = Join-Path $env:TEMP ("qqbot-update-stderr-{0}.log" -f ([guid]::NewGuid().ToString("N")))
-    $process = Start-Process `
-        -FilePath $exe `
-        -ArgumentList $arguments `
-        -NoNewWindow `
-        -Wait `
-        -PassThru `
-        -RedirectStandardOutput $stdoutFile `
-        -RedirectStandardError $stderrFile
+    $startArgs = @{
+        FilePath = $exe
+        NoNewWindow = $true
+        Wait = $true
+        PassThru = $true
+        RedirectStandardOutput = $stdoutFile
+        RedirectStandardError = $stderrFile
+    }
+    if ($arguments.Count -gt 0) {
+        $startArgs.ArgumentList = $arguments
+    }
+    $process = Start-Process @startArgs
 
     $stdout = ""
     $stderr = ""
@@ -257,6 +283,110 @@ function Invoke-CapturedCommand {
     }
 }
 
+function Test-PyUvAvailable {
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    $moduleCheck = Invoke-CapturedCommand @("py", "-$PythonVersion", "-m", "uv", "--version")
+    return ($moduleCheck.ExitCode -eq 0)
+}
+
+function Get-UvToolInstalledState {
+    param([string[]]$UvCommand)
+
+    if (-not $UvCommand -or $UvCommand.Count -eq 0) {
+        return [pscustomobject]@{
+            IsInstalled = $false
+            ToolList = ""
+        }
+    }
+
+    $toolListCommand = @($UvCommand) + @("tool", "list", "--show-paths")
+    $toolListResult = Invoke-CapturedCommand $toolListCommand
+    $toolList = (($toolListResult.Stdout, $toolListResult.Stderr) -join "`n").Trim()
+    if ($toolListResult.ExitCode -ne 0 -and $toolList -notmatch "No tools installed") {
+        Add-Content -Path $logFile -Value $toolList -Encoding UTF8
+        throw "Command failed with exit code $($toolListResult.ExitCode): $($toolListCommand -join ' ')"
+    }
+    Add-Content -Path $logFile -Value $toolList -Encoding UTF8
+
+    return [pscustomobject]@{
+        IsInstalled = ($toolList -match "(?m)^astrbot\s")
+        ToolList = $toolList
+    }
+}
+
+function Confirm-AstrBotUpdate {
+    param(
+        [array]$RunningProcesses,
+        [bool]$CanUsePathUv,
+        [bool]$CanUsePyUv,
+        [bool]$CanUsePyLauncher,
+        [bool]$IsInstalled,
+        [bool]$WillInstallUv,
+        [string]$Action
+    )
+
+    $uvInvoker = if ($CanUsePathUv) {
+        "uv"
+    }
+    elseif ($CanUsePyUv -or $WillInstallUv) {
+        "py -$PythonVersion -m uv"
+    }
+    else {
+        "(not available)"
+    }
+    $commandPreview = if ($Action -eq "upgrade") {
+        "$uvInvoker tool upgrade astrbot --python $PythonVersion"
+    }
+    else {
+        "$uvInvoker tool install astrbot --python $PythonVersion"
+    }
+
+    Write-Step "AstrBot update confirmation:"
+    Write-Step "  Python version: $PythonVersion"
+    Write-Step "  uv command: $uvInvoker"
+    Write-Step "  Existing uv tool package: $(if ($IsInstalled) { 'astrbot installed' } else { 'astrbot not installed' })"
+    Write-Step "  Planned action: $Action"
+    Write-Step "  Planned command: $commandPreview"
+    if ($WillInstallUv) {
+        Write-Step "  uv bootstrap command before update: py -$PythonVersion -m pip install --user -U uv"
+    }
+    elseif (-not $CanUsePathUv -and -not $CanUsePyUv -and -not $CanUsePyLauncher) {
+        Write-Step "  uv bootstrap is unavailable because Windows py launcher was not found."
+    }
+    if ($RunningProcesses.Count -gt 0) {
+        if ($NoStopProcesses) {
+            Write-Step "  Running AstrBot processes must be closed manually: $(Format-ProcessSummary $RunningProcesses)"
+        }
+        else {
+            Write-Step "  Related AstrBot processes in this workspace will be stopped: $(Format-ProcessSummary $RunningProcesses)"
+        }
+    }
+    else {
+        Write-Step "  Running AstrBot processes: (none)"
+    }
+
+    if ($AssumeYes) {
+        Write-Step "AssumeYes enabled; auto-confirming AstrBot update."
+        return $true
+    }
+    if ($DryRun) {
+        Write-Step "DryRun enabled; would ask for AstrBot confirmation here."
+        return $true
+    }
+
+    $answer = Read-Host "Proceed with AstrBot $Action? Type Y to continue"
+    if ($answer -match '(?i)^(y|yes)$') {
+        Write-Step "User confirmed AstrBot update."
+        return $true
+    }
+
+    Write-Step "AstrBot update skipped by user before install or upgrade."
+    return $false
+}
+
 function Get-UvCommand {
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         return @("uv")
@@ -266,8 +396,7 @@ function Get-UvCommand {
         throw "uv not found and Windows py launcher is not available. Install uv first: https://docs.astral.sh/uv/"
     }
 
-    $moduleCheck = Invoke-CapturedCommand @("py", "-$PythonVersion", "-m", "uv", "--version")
-    if ($moduleCheck.ExitCode -eq 0) {
+    if (Test-PyUvAvailable) {
         return @("py", "-$PythonVersion", "-m", "uv")
     }
 
@@ -290,6 +419,39 @@ if ($DryRun) {
 }
 
 $running = @(Get-AstrBotProcesses)
+$canUsePathUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
+$canUsePyLauncher = [bool](Get-Command py -ErrorAction SilentlyContinue)
+$canUsePyUv = $false
+if (-not $canUsePathUv -and $canUsePyLauncher) {
+    $canUsePyUv = Test-PyUvAvailable
+}
+$willInstallUv = (-not $canUsePathUv -and -not $canUsePyUv -and $canUsePyLauncher)
+
+if ($canUsePathUv) {
+    $precheckUvCommand = @("uv")
+}
+elseif ($canUsePyUv) {
+    $precheckUvCommand = @("py", "-$PythonVersion", "-m", "uv")
+}
+else {
+    $precheckUvCommand = @()
+}
+
+$toolState = Get-UvToolInstalledState -UvCommand $precheckUvCommand
+$isInstalled = [bool]$toolState.IsInstalled
+$action = if ($isInstalled) { "upgrade" } else { "install" }
+
+if (-not (Confirm-AstrBotUpdate `
+    -RunningProcesses $running `
+    -CanUsePathUv $canUsePathUv `
+    -CanUsePyUv $canUsePyUv `
+    -CanUsePyLauncher $canUsePyLauncher `
+    -IsInstalled $isInstalled `
+    -WillInstallUv $willInstallUv `
+    -Action $action)) {
+    exit 0
+}
+
 if ($running.Count -gt 0) {
     if ($DryRun) {
         if ($NoStopProcesses) {
@@ -308,23 +470,7 @@ if ($running.Count -gt 0) {
     }
 }
 
-$uvCommand = Get-UvCommand
-$canUseUv = $uvCommand.Count -gt 0
-
-if ($canUseUv) {
-    $toolListCommand = @($uvCommand + @("tool", "list", "--show-paths"))
-    $toolListResult = Invoke-CapturedCommand $toolListCommand
-    $toolList = (($toolListResult.Stdout, $toolListResult.Stderr) -join "`n").Trim()
-    if ($toolListResult.ExitCode -ne 0 -and $toolList -notmatch "No tools installed") {
-        Add-Content -Path $logFile -Value $toolList -Encoding UTF8
-        throw "Command failed with exit code $($toolListResult.ExitCode): $($toolListCommand -join ' ')"
-    }
-    Add-Content -Path $logFile -Value $toolList -Encoding UTF8
-    $isInstalled = $toolList -match "(?m)^astrbot\s"
-}
-else {
-    $isInstalled = $false
-}
+$uvCommand = @(Get-UvCommand)
 
 if ($isInstalled) {
     Write-Step "Existing uv tool package found: astrbot"
@@ -332,7 +478,7 @@ if ($isInstalled) {
         Write-Step "Would run: uv tool upgrade astrbot --python $PythonVersion"
     }
     else {
-        Invoke-LoggedCommand @($uvCommand + @("tool", "upgrade", "astrbot", "--python", $PythonVersion))
+        Invoke-LoggedCommand (@($uvCommand) + @("tool", "upgrade", "astrbot", "--python", $PythonVersion))
     }
 }
 else {
@@ -341,7 +487,7 @@ else {
         Write-Step "Would run: uv tool install astrbot --python $PythonVersion"
     }
     else {
-        Invoke-LoggedCommand @($uvCommand + @("tool", "install", "astrbot", "--python", $PythonVersion))
+        Invoke-LoggedCommand (@($uvCommand) + @("tool", "install", "astrbot", "--python", $PythonVersion))
     }
 }
 
@@ -354,7 +500,7 @@ else {
         Invoke-LoggedCommand @("astrbot", "--version")
     }
     else {
-        $versionCommand = @($uvCommand + @("tool", "run", "--from", "astrbot", "--python", $PythonVersion, "astrbot", "--version"))
+        $versionCommand = @($uvCommand) + @("tool", "run", "--from", "astrbot", "--python", $PythonVersion, "astrbot", "--version")
         Invoke-LoggedCommand $versionCommand
     }
 }

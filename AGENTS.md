@@ -81,9 +81,10 @@
 ## 更新
 
 - 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat 和 AstrBot 更新实现。
-- NapCat 更新由 `tools\runtime-scripts\update-napcat.ps1` 实现；正式更新会先下载并解压新包到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换后迁移账号 OneBot 配置。
+- 更新入口默认交互式：NapCat 下载前提示当前版本、目标 release、asset、下载 URL、zip 路径和后续替换动作；AstrBot install/upgrade 前提示当前 tool 状态、计划 uv 命令和会处理的运行进程。用户拒绝某组件时该组件跳过并退出 0；无人值守才显式传 `-AssumeYes` 自动确认。
+- NapCat 更新由 `tools\runtime-scripts\update-napcat.ps1` 实现；会先查询 GitHub 最新 release，本地已是最新 release 时直接跳过下载和替换。本地版本优先读 `napcat\onekey\.qqbot-napcat-release.json`，旧包无标记时回看最近成功的 NapCat 更新日志；需要更新时，确认后才下载并解压新包到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，把旧 `napcat\onekey` 备份到 `data\napcat\archives\`，替换后迁移账号 OneBot 配置。
 - OneBot v11 本身是协议；本仓库实际更新对象是 NapCat 协议端和 AstrBot Core。
-- AstrBot 更新由 `tools\runtime-scripts\update-astrbot.ps1` 实现，会先停止本工作区正在运行的 AstrBot uv tool 进程，再默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
+- AstrBot 更新由 `tools\runtime-scripts\update-astrbot.ps1` 实现；用户确认后会停止本工作区正在运行的 AstrBot uv tool 进程，再默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
 - Windows PATH 找不到 `uv` 时，更新脚本可以用 `py -3.14 -m pip install --user -U uv` 自举用户级 uv。
 - 更新日志写入 `data\astrbot\logs\updates\`，真实数据仍在 `data\astrbot\data\`。
 - 切换到 uv tool 后，修改 `astrbot\` 源码快照不会影响实际运行的 bot2；不要用 `astrbot\` 的源码 diff 判断线上 AstrBot Core 是否已更新。
