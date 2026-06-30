@@ -31,6 +31,12 @@ $PreservedRuntimePluginNames = @(
     "astrbot_plugin_hapi_connector"
 )
 
+function Write-StartupPhase {
+    param([string]$Message)
+
+    Write-Host ("AstrBot startup phase [{0}]: {1}" -f (Get-Date -Format "HH:mm:ss.fff"), $Message)
+}
+
 function Join-CodePoints {
     param([int[]]$CodePoints)
     return -join ($CodePoints | ForEach-Object { [string][char]$_ })
@@ -240,9 +246,12 @@ function Invoke-LocalPythonScript {
     throw "No Python runtime is available for $ScriptPath"
 }
 
+Write-StartupPhase "sync profile config begin"
 Sync-AstrBotProfileConfig -ConfigPath (Join-Path $AstrRoot "data\cmd_config.json") -Profile $BotProfile -OneBotPort $AiocqhttpPort
+Write-StartupPhase "sync profile config done"
 
 if (Test-Path $LocalPluginRoot) {
+    Write-StartupPhase "sync local plugins begin"
     $localPluginNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     Get-ChildItem -Path $LocalPluginRoot -Directory | ForEach-Object {
         [void]$localPluginNames.Add($_.Name)
@@ -273,6 +282,10 @@ if (Test-Path $LocalPluginRoot) {
         Remove-Item -Path $_.FullName -Recurse -Force
         Write-Host "Removed stale AstrBot local plugin: $runtimeName"
     }
+    Write-StartupPhase "sync local plugins done"
+}
+else {
+    Write-StartupPhase "sync local plugins skipped"
 }
 
 $env:ASTRBOT_ROOT = $AstrRoot
@@ -288,12 +301,15 @@ if ($BotProfile -eq "both") {
 else {
     $env:QQBOT_ASTRBOT_ACCOUNT = $ProfileAccounts[$BotProfile]
 }
+Write-StartupPhase "environment configured"
 
 Set-Location $AstrRoot
+Write-StartupPhase "working directory set to $AstrRoot"
 
 $directAstrBot = Join-Path $env:APPDATA "uv\tools\astrbot\Scripts\astrbot.exe"
 if (Test-Path $directAstrBot) {
     Write-Host "AstrBot launch mode: direct uv tool executable ($directAstrBot)"
+    Write-StartupPhase "invoke astrbot run"
     & $directAstrBot run -p $Port
     exit $LASTEXITCODE
 }
@@ -301,6 +317,7 @@ if (Test-Path $directAstrBot) {
 $pathAstrBot = Get-Command astrbot -ErrorAction SilentlyContinue
 if ($pathAstrBot) {
     Write-Host "AstrBot launch mode: PATH astrbot command ($($pathAstrBot.Source))"
+    Write-StartupPhase "invoke astrbot run"
     & $pathAstrBot.Source run -p $Port
     exit $LASTEXITCODE
 }
@@ -308,6 +325,7 @@ if ($pathAstrBot) {
 $pathUv = Get-Command uv -ErrorAction SilentlyContinue
 if ($AllowUvToolRun -and $pathUv) {
     Write-Host "AstrBot launch mode: uv tool run ($($pathUv.Source))"
+    Write-StartupPhase "invoke uv tool run astrbot"
     & $pathUv.Source tool run --from astrbot --python $PythonVersion astrbot run -p $Port
     exit $LASTEXITCODE
 }
@@ -315,6 +333,7 @@ if ($AllowUvToolRun -and $pathUv) {
 $pathPy = Get-Command py -ErrorAction SilentlyContinue
 if ($AllowUvToolRun -and $pathPy) {
     Write-Host "AstrBot launch mode: py -$PythonVersion -m uv ($($pathPy.Source))"
+    Write-StartupPhase "invoke py -m uv tool run astrbot"
     & $pathPy.Source "-$PythonVersion" -m uv tool run --from astrbot --python $PythonVersion astrbot run -p $Port
     exit $LASTEXITCODE
 }

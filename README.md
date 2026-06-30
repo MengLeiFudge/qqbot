@@ -44,7 +44,7 @@ Sub2API 账号用量查询归入 `astrbot_plugin_qqbot_features` 固定命令：
 
 AstrBot 启动入口支持显式选择 bot 身份：日常默认是 `both/full`，在同一个 AstrBot 管理端里同步两个 `aiocqhttp` 平台，天使默认反连 `ws://127.0.0.1:6200/ws`，恶魔默认反连 `ws://127.0.0.1:6201/ws`；只有显式 `-AstrBotProfile demon` 才使用恶魔棉花糖账号 `2629227874` 单平台，显式 `-AstrBotProfile angel -FeatureMode full` 才使用天使账号 `1443944862` 单平台。`scripts\start-all.bat` 和直接运行 `tools\runtime-scripts\start-all.ps1` 默认都是 `both/full`。本地插件会按每条消息的 `self_id` 区分天使或恶魔身份。
 
-`tools\runtime-scripts\start-all.ps1` 默认在单个入口终端中显示启动进度，控制台摘要带固定前缀，例如 `[Launcher]`、`[AstrBot]`、`[NapCat] [Angel]`、`[NapCat] [Demon]`；完整原始日志仍写入对应 `data\astrbot\logs\start_all\<runId>\*\*.log` 文件。需要恢复旧的多子窗口观察方式时，可显式加 `-UseChildWindows`。启动器会先让 bot 子流程完成旧端口清理，再启动对应 NapCat 子流程；NapCat 子流程等待目标 OneBot 端口监听后立即连接。双平台 `both/full` 下，启动器用 `data\launcher\napcat-quick-login\<account>.ready` 标记账号是否已确认过快速登录：任一账号缺少标记时按天使优先串行启动，避免两个账号同时生成二维码并覆盖共享的 `napcat\onekey\napcat\cache\qrcode.png`；两个账号标记都存在时按天使优先并行启动以缩短重启时间；并行或串行中某账号没有成功反连时会清除该账号标记，下次启动自动退回串行。启动器控制台状态和失败停窗提示使用英文/ASCII 摘要，避免 Windows 控制台无法正确显示 NapCat 中文日志时出现乱码；AstrBot 反向 WebSocket 端口如果出现 `WinError 10013`、`PermissionError` 等平台绑定错误，启动器会从日志中快速识别并失败，不再等满长超时。
+`tools\runtime-scripts\start-all.ps1` 默认在单个入口终端中显示启动进度，控制台摘要带固定前缀，例如 `[Launcher]`、`[AstrBot]`、`[NapCat] [Angel]`、`[NapCat] [Demon]`；完整原始日志仍写入对应 `data\astrbot\logs\start_all\<runId>\*\*.log` 文件。需要恢复旧的多子窗口观察方式时，可显式加 `-UseChildWindows`。启动器会先让 bot 子流程完成旧端口清理，再等待 AstrBot 的 `6185`、`6200/6201` 和 `8080` 全部通过 ready 验证，然后启动对应 NapCat 子流程；NapCat 子流程启动后等待目标 OneBot established 连接。AstrBot stdout 会写入 `AstrBot startup phase: ...` 预启动阶段日志，启动器等待摘要会识别 Core、插件、provider、KnowledgeBase 和 WebUI 等阶段，方便区分是 AstrBot 自身启动慢还是 NapCat 登录慢。双平台 `both/full` 下，启动器用 `data\launcher\napcat-quick-login\<account>.ready` 标记账号是否已确认过快速登录：任一账号缺少标记时按天使优先串行启动，避免两个账号同时生成二维码并覆盖共享的 `napcat\onekey\napcat\cache\qrcode.png`；两个账号标记都存在时按天使优先并行启动以缩短重启时间；并行或串行中某账号没有成功反连时会清除该账号标记，下次启动自动退回串行。启动器控制台状态和失败停窗提示使用英文/ASCII 摘要，避免 Windows 控制台无法正确显示 NapCat 中文日志时出现乱码；AstrBot 反向 WebSocket 端口如果出现 `WinError 10013`、`PermissionError` 等平台绑定错误，启动器会从日志中快速识别并失败，不再等满长超时。
 
 AstrBot 双平台下，普通闲聊和主动接话允许两个棉花糖共同参与；群聊固定命令只由一个账号执行。没有明确 @ 或私聊时，固定命令默认由恶魔账号 `2629227874` 处理，可用 `QQBOT_ASTRBOT_COMMAND_OWNER` 覆盖；明确 @ 天使/恶魔时，由当前被叫到的 bot 处理；私聊由当前收到私聊的 bot 独立处理，命中固定命令就执行对应命令，未命中固定命令就进入当前 bot 的 LLM 链路。`菜单`、`帮助`、`指令` 会发送统一图片菜单，总览按 `群务管理`、`棉花糖互动`、`养鲲`、`落樱之都`、`Arcaea`、`Factorio`、`异形工厂` 分组；`菜单模块名` 会发送模块详情图。
 
@@ -73,7 +73,7 @@ Set-Location D:\project\qqbot
 .\scripts\start-all.bat
 ```
 
-日常入口只有 `scripts\start-all.bat`，默认启动 AstrBot 的天使+恶魔双平台；直接运行 `tools\runtime-scripts\start-all.ps1` 时默认也是 AstrBot `both/full`。入口默认只保留一个终端窗口，按组件前缀输出 AstrBot 和 NapCat 的阶段摘要；双账号 NapCat 在缺少快速登录标记或上次失败后按天使优先串行启动，两个账号都确认过快速登录后按天使优先并行启动。
+日常入口只有 `scripts\start-all.bat`，默认启动 AstrBot 的天使+恶魔双平台；直接运行 `tools\runtime-scripts\start-all.ps1` 时默认也是 AstrBot `both/full`。入口默认只保留一个终端窗口，按组件前缀输出 AstrBot 和 NapCat 的阶段摘要；NapCat 会在 AstrBot WebUI、双 OneBot 端口和 artifact API 都 ready 后再启动；双账号 NapCat 在缺少快速登录标记或上次失败后按天使优先串行启动，两个账号都确认过快速登录后按天使优先并行启动。
 
 默认账号链路：
 

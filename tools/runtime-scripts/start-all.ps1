@@ -310,8 +310,41 @@ function Get-StartupLogSignalSummary {
     if ($cleanTail -match "AstrBot started\.") {
         [void]$signals.Add("AstrBot started")
     }
+    if ($cleanTail -match "AstrBot startup phase(?:\s+\[[^\]]+\])?:\s*([^\r\n]+)") {
+        [void]$signals.Add("AstrBot preflight: $(Limit-LogText -Text $Matches[1] -MaxLength 120)")
+    }
+    if ($cleanTail -match "AstrBot launch mode:\s*([^\r\n]+)") {
+        [void]$signals.Add("AstrBot launch mode: $(Limit-LogText -Text $Matches[1] -MaxLength 160)")
+    }
+    if ($cleanTail -match "AstrBot v[0-9][^\r\n]*") {
+        [void]$signals.Add("AstrBot Core lifecycle started")
+    }
+    if ($cleanTail -match "Loaded\s+\d+\s+personas\.") {
+        [void]$signals.Add("AstrBot personas loaded")
+    }
+    if ($cleanTail -match "Loading plugin\s+([^\r\n]+?)\s+\.\.\.") {
+        [void]$signals.Add("AstrBot loading plugin: $(Limit-LogText -Text $Matches[1] -MaxLength 120)")
+    }
+    if ($cleanTail -match "Plugin\s+([^\s]+)\s+\([^)]+\)") {
+        [void]$signals.Add("AstrBot plugin loaded: $(Limit-LogText -Text $Matches[1] -MaxLength 120)")
+    }
+    if ($cleanTail -match "Loading model\s+([^\r\n]+?)\s+\.\.\.") {
+        [void]$signals.Add("AstrBot loading provider: $(Limit-LogText -Text $Matches[1] -MaxLength 120)")
+    }
+    if ($cleanTail -match "Selected\s+([^\r\n]+?)\s+as default chat model provider") {
+        [void]$signals.Add("AstrBot default provider selected: $(Limit-LogText -Text $Matches[1] -MaxLength 120)")
+    }
+    if ($cleanTail -match "KnowledgeBase database initialized") {
+        [void]$signals.Add("AstrBot knowledge base initialized")
+    }
+    if ($cleanTail -match "Starting WebUI at\s+([^\r\n]+)") {
+        [void]$signals.Add("AstrBot WebUI starting: $(Limit-LogText -Text $Matches[1] -MaxLength 120)")
+    }
     if ($cleanTail -match "WebUI is ready") {
         [void]$signals.Add("AstrBot WebUI is ready")
+    }
+    if ($cleanTail -match "Running on http://0\.0\.0\.0:(\d+)") {
+        [void]$signals.Add("AstrBot server listening on port $($Matches[1])")
     }
     if ($cleanTail -match "Loading IM platform adapter[^\r\n]*") {
         [void]$signals.Add("AstrBot is loading IM platform adapters")
@@ -962,6 +995,7 @@ function Start-AstrBotComponent {
             throw "AstrBot full mode did not open local artifact API port 8080. Logs: stdout=$stdoutLog stderr=$stderrLog"
         }
     }
+    Complete-ChildStage -RunId $RunId -Component "astrbot" -Stage "ports-ready"
 }
 
 function Start-NapCatComponent {
@@ -1423,6 +1457,8 @@ function Invoke-Parent {
     $startedNapCatInParallel = $false
     if ($napcatComponents.Count -gt 0) {
         Wait-ChildStages -RunId $runId -Components $botComponents -Stage "ports-cleared" -TimeoutSeconds 90 -Processes $processes
+        Write-LauncherStatus "Waiting for bot ports before starting NapCat accounts."
+        Wait-ChildStages -RunId $runId -Components $botComponents -Stage "ports-ready" -TimeoutSeconds 420 -Processes $processes
         Write-LauncherStatus "Starting NapCat accounts: $($napcatComponents -join ', ')"
         if ($AstrBotProfile -eq "both" -and (Test-AllNapCatQuickLoginReady -Components $napcatComponents)) {
             Write-LauncherStatus "NapCat quick-login markers are complete; starting accounts in parallel."
