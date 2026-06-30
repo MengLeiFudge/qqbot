@@ -132,6 +132,19 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("supervisor_stderr.log", script)
         self.assertIn("Flush-ComponentsLauncherLogs", script)
 
+    def test_start_all_writes_structured_child_failure_details(self) -> None:
+        script = START_ALL.read_text(encoding="utf-8-sig")
+
+        self.assertIn("Logging must never abort startup", script)
+        self.assertIn("[object]$ErrorRecord = $null", script)
+        self.assertIn("fully_qualified_error_id=", script)
+        self.assertIn("$ErrorRecord.InvocationInfo.ScriptLineNumber", script)
+        self.assertIn("$ErrorRecord.ScriptStackTrace", script)
+        self.assertIn("Failure detail: type=$errorType id=$errorId", script)
+        self.assertIn("Failure stack:", script)
+        self.assertIn("Fail-Child -RunId $RunId -Component $Component -Message $message -ErrorRecord $_", script)
+        self.assertIn("Select-Object -First 1", script)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -67,16 +67,25 @@ function Write-LauncherLog {
         [switch]$NoConsole
     )
 
-    $parent = Split-Path -Parent $LogFile
-    New-Item -ItemType Directory -Path $parent -Force | Out-Null
     $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
-    Add-Content -Path $LogFile -Value $line -Encoding UTF8
+    try {
+        $parent = Split-Path -Parent $LogFile
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        Add-Content -Path $LogFile -Value $line -Encoding UTF8
+    }
+    catch {
+        # Logging must never abort startup; the parent process still reports child failures.
+    }
     if (-not $NoConsole) {
-        if ($ConsolePrefix) {
-            Write-Host "$ConsolePrefix $line"
+        try {
+            if ($ConsolePrefix) {
+                Write-Host "$ConsolePrefix $line"
+            }
+            else {
+                Write-Host $line
+            }
         }
-        else {
-            Write-Host $line
+        catch {
         }
     }
 }
@@ -100,13 +109,21 @@ function Write-ComponentStatus {
     )
 
     $prefix = Get-ComponentConsolePrefix -ComponentName $ComponentName
-    Write-Host "$prefix $Message"
+    try {
+        Write-Host "$prefix $Message"
+    }
+    catch {
+    }
 }
 
 function Write-LauncherStatus {
     param([string]$Message)
 
-    Write-Host "[Launcher] $Message"
+    try {
+        Write-Host "[Launcher] $Message"
+    }
+    catch {
+    }
 }
 
 function Test-AsciiText {
@@ -785,8 +802,11 @@ function Stop-NapCatAccountProcesses {
         }
     }
     catch {
-        $message = "NapCat account process cleanup failed for {0}: {1}" -f $Account, $_.Exception.Message
+        $message = "NapCat account process cleanup skipped for {0}: {1}: {2}" -f $Account, $_.Exception.GetType().FullName, $_.Exception.Message
         Write-LauncherLog -LogFile $LogFile -Message $message -ConsolePrefix $ConsolePrefix
+        if ($_.ScriptStackTrace) {
+            Write-LauncherLog -LogFile $LogFile -Message "NapCat account process cleanup stack: $($_.ScriptStackTrace)" -ConsolePrefix $ConsolePrefix
+        }
     }
 }
 
@@ -1034,12 +1054,26 @@ function Fail-Child {
     param(
         [string]$RunId,
         [string]$Component,
-        [string]$Message
+        [string]$Message,
+        [object]$ErrorRecord = $null
     )
 
     $controlRoot = Get-ControlRoot -RunId $RunId
     New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null
-    Set-Content -Path (Join-Path $controlRoot "$Component.failed") -Value $Message -Encoding UTF8
+    $lines = @($Message)
+    if ($ErrorRecord) {
+        $lines += "type=$($ErrorRecord.Exception.GetType().FullName)"
+        $lines += "fully_qualified_error_id=$($ErrorRecord.FullyQualifiedErrorId)"
+        if ($ErrorRecord.InvocationInfo) {
+            $lines += "script=$($ErrorRecord.InvocationInfo.ScriptName)"
+            $lines += "line=$($ErrorRecord.InvocationInfo.ScriptLineNumber)"
+            $lines += "position=$($ErrorRecord.InvocationInfo.OffsetInLine)"
+        }
+        if ($ErrorRecord.ScriptStackTrace) {
+            $lines += "stack=$($ErrorRecord.ScriptStackTrace)"
+        }
+    }
+    Set-Content -Path (Join-Path $controlRoot "$Component.failed") -Value ($lines -join "`n") -Encoding UTF8
 }
 
 function Wait-ChildStages {
@@ -1060,7 +1094,7 @@ function Wait-ChildStages {
             $failedPath = Join-Path $controlRoot "$componentName.failed"
             if (Test-Path $failedPath) {
                 Flush-ComponentsLauncherLogs -RunId $RunId -Components $Components
-                $message = Get-Content -Raw -Path $failedPath
+                $message = (Get-Content -Path $failedPath -Encoding UTF8 | Select-Object -First 1)
                 throw "$componentName failed: $message"
             }
             if ($Processes -and $Processes.ContainsKey($componentName)) {
@@ -1118,6 +1152,8 @@ function Invoke-Child {
     }
     catch {
         $message = $_.Exception.Message
+        $errorType = $_.Exception.GetType().FullName
+        $errorId = $_.FullyQualifiedErrorId
         if ($Component -like "napcat-*") {
             try {
                 $account = Get-NapCatAccountForComponent -ComponentName $Component
@@ -1129,7 +1165,11 @@ function Invoke-Child {
             }
         }
         Write-ComponentStatus -ComponentName $Component -Message "Startup failed: $message"
-        Fail-Child -RunId $RunId -Component $Component -Message $message
+        Write-ComponentStatus -ComponentName $Component -Message "Failure detail: type=$errorType id=$errorId"
+        if ($_.ScriptStackTrace) {
+            Write-ComponentStatus -ComponentName $Component -Message "Failure stack: $($_.ScriptStackTrace)"
+        }
+        Fail-Child -RunId $RunId -Component $Component -Message $message -ErrorRecord $_
         if (-not $NoPauseOnFailure) {
             Read-Host "Press Enter to close this window"
         }
@@ -1315,7 +1355,7 @@ function Wait-Children {
             $failedPath = Join-Path $controlRoot "$componentName.failed"
             if (Test-Path $failedPath) {
                 Flush-ComponentsLauncherLogs -RunId $RunId -Components $Components
-                $message = Get-Content -Raw -Path $failedPath
+                $message = (Get-Content -Path $failedPath -Encoding UTF8 | Select-Object -First 1)
                 throw "$componentName failed: $message"
             }
             if (Test-Path $donePath) {
