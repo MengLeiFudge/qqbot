@@ -4,6 +4,7 @@ param(
     [switch]$SkipInstall,
     [switch]$Child,
     [switch]$UseChildWindows,
+    [switch]$ForceRestart,
     [switch]$NoPauseOnFailure,
     [ValidateSet("", "astrbot", "napcat-astrbot", "napcat-astrbot-demon", "napcat-astrbot-angel")]
     [string]$Component = "",
@@ -467,6 +468,18 @@ function Test-TcpPort {
     }
 }
 
+function Test-EstablishedTcpConnection {
+    param([int]$Port)
+
+    try {
+        $connection = Get-NetTCPConnection -LocalPort $Port -State Established -ErrorAction SilentlyContinue | Select-Object -First 1
+        return [bool]$connection
+    }
+    catch {
+        return $false
+    }
+}
+
 function Get-BackgroundProcessDiagnostic {
     param([System.Diagnostics.Process]$Process = $null)
 
@@ -649,6 +662,28 @@ function Wait-EstablishedConnection {
     Write-WaitDiagnostic -LogFile $LogFile -Phase "Final status before timeout waiting for established TCP connection on local port $Port." -Port $Port -Process $Process -StatusLogFile $StatusLogFile -ConsolePrefix $ConsolePrefix
     Write-LauncherLog -LogFile $LogFile -Message "Timed out waiting for established TCP connection on local port $Port." -ConsolePrefix $ConsolePrefix
     return $false
+}
+
+function Stop-BackgroundWrapperProcess {
+    param(
+        [System.Diagnostics.Process]$Process = $null,
+        [string]$Name,
+        [string]$LogFile,
+        [string]$ConsolePrefix = ""
+    )
+
+    if (-not $Process) {
+        return
+    }
+    try {
+        if (-not $Process.HasExited) {
+            Write-LauncherLog -LogFile $LogFile -Message "Stopping $Name wrapper pid=$($Process.Id) after readiness was confirmed." -ConsolePrefix $ConsolePrefix
+            Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    catch {
+        Write-LauncherLog -LogFile $LogFile -Message "Failed to stop $Name wrapper pid=$($Process.Id): $($_.Exception.Message)" -ConsolePrefix $ConsolePrefix
+    }
 }
 
 function Stop-ProcessByPort {
@@ -853,6 +888,67 @@ function Get-AstrBotAccount {
     return "2629227874"
 }
 
+function Get-RequiredAstrBotPorts {
+    $ports = @(
+        6185,
+        $AstrBotOneBotPort
+    )
+    if ($AstrBotProfile -eq "both") {
+        $ports += $AstrBotAngelOneBotPort
+    }
+    if ($FeatureMode -eq "full") {
+        $ports += 8080
+    }
+    return @($ports | Select-Object -Unique)
+}
+
+function Get-MissingAstrBotReadyPorts {
+    $missing = @()
+    foreach ($port in Get-RequiredAstrBotPorts) {
+        if (-not (Test-TcpPort -HostName "127.0.0.1" -Port $port)) {
+            $missing += $port
+        }
+    }
+    return $missing
+}
+
+function Get-BotPortForNapCatComponent {
+    param([string]$ComponentName)
+
+    switch ($ComponentName) {
+        "napcat-astrbot-demon" { return $AstrBotOneBotPort }
+        "napcat-astrbot-angel" { return $AstrBotAngelOneBotPort }
+        "napcat-astrbot" { return $AstrBotOneBotPort }
+        default { throw "Unknown NapCat component: $ComponentName" }
+    }
+}
+
+function Get-MissingNapCatConnectionComponents {
+    param([string[]]$Components)
+
+    $missing = @()
+    foreach ($componentName in $Components) {
+        $botPort = Get-BotPortForNapCatComponent -ComponentName $componentName
+        if (-not (Test-EstablishedTcpConnection -Port $botPort)) {
+            $missing += $componentName
+        }
+    }
+    return $missing
+}
+
+function Write-ExistingRuntimeDiagnostics {
+    param([string[]]$NapCatComponents)
+
+    foreach ($port in Get-RequiredAstrBotPorts) {
+        Write-LauncherStatus (Get-TcpPortDiagnostic -Port $port)
+    }
+    foreach ($componentName in $NapCatComponents) {
+        $botPort = Get-BotPortForNapCatComponent -ComponentName $componentName
+        $account = Get-NapCatAccountForComponent -ComponentName $componentName
+        Write-LauncherStatus "NapCat account $account connection check on port ${botPort}: $(Get-TcpPortDiagnostic -Port $botPort)"
+    }
+}
+
 function Get-AstrBotTitle {
     if ($AstrBotProfile -eq "both") {
         return "AstrBot-both"
@@ -893,11 +989,14 @@ function Start-BackgroundPowerShell {
         "-Command",
         $wrappedCommand
     )
+    $stdinPath = Join-Path (Split-Path -Parent $StdoutLog) "stdin.empty"
+    New-Item -ItemType File -Path $stdinPath -Force | Out-Null
     $process = Start-Process `
         -FilePath "powershell.exe" `
         -ArgumentList $arguments `
         -WorkingDirectory $WorkingDirectory `
         -WindowStyle Hidden `
+        -RedirectStandardInput $stdinPath `
         -RedirectStandardOutput $StdoutLog `
         -RedirectStandardError $StderrLog `
         -PassThru
@@ -995,6 +1094,7 @@ function Start-AstrBotComponent {
             throw "AstrBot full mode did not open local artifact API port 8080. Logs: stdout=$stdoutLog stderr=$stderrLog"
         }
     }
+    Stop-BackgroundWrapperProcess -Process $process -Name "AstrBot background launcher" -LogFile $launcherLog -ConsolePrefix $consolePrefix
     Complete-ChildStage -RunId $RunId -Component "astrbot" -Stage "ports-ready"
 }
 
@@ -1059,6 +1159,7 @@ function Start-NapCatComponent {
     }
 
     Set-NapCatQuickLoginReady -Account $Account -Ready $true -Reason "established-connection" -LogFile $launcherLog
+    Stop-BackgroundWrapperProcess -Process $process -Name "NapCat account $Account background launcher" -LogFile $launcherLog -ConsolePrefix $consolePrefix
 }
 
 function Complete-Child {
@@ -1283,14 +1384,17 @@ function Start-ChildProcess {
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
     $supervisorStdout = Join-Path $logRoot "supervisor_stdout.log"
     $supervisorStderr = Join-Path $logRoot "supervisor_stderr.log"
+    $supervisorStdin = Join-Path $logRoot "supervisor_stdin.empty"
     New-Item -ItemType File -Path $supervisorStdout -Force | Out-Null
     New-Item -ItemType File -Path $supervisorStderr -Force | Out-Null
+    New-Item -ItemType File -Path $supervisorStdin -Force | Out-Null
 
     $process = Start-Process `
         -FilePath "powershell.exe" `
         -ArgumentList $arguments `
         -WorkingDirectory $WorkspaceRoot `
         -WindowStyle Hidden `
+        -RedirectStandardInput $supervisorStdin `
         -RedirectStandardOutput $supervisorStdout `
         -RedirectStandardError $supervisorStderr `
         -PassThru
@@ -1447,22 +1551,57 @@ function Invoke-Parent {
     else {
         Write-LauncherStatus "Display mode: single terminal with component prefixes."
     }
-    Write-LauncherStatus "Starting bot services: $($botComponents -join ', ')"
-    foreach ($componentName in $botComponents) {
-        $process = Start-Component -RunId $runId -Component $componentName
-        if ($process) {
-            $processes[$componentName] = $process
+
+    $startBotComponents = @($botComponents)
+    $startNapCatComponents = @($napcatComponents)
+    if ($ForceRestart) {
+        Write-LauncherStatus "Startup mode: force restart."
+    }
+    else {
+        Write-LauncherStatus "Startup mode: ensure running; existing ready runtime will be reused."
+        $missingAstrBotPorts = @(Get-MissingAstrBotReadyPorts)
+        if ($missingAstrBotPorts.Count -eq 0) {
+            $missingNapCatComponents = @(Get-MissingNapCatConnectionComponents -Components $napcatComponents)
+            if ($missingNapCatComponents.Count -eq 0) {
+                Write-LauncherStatus "Existing AstrBot ports and NapCat connections are ready; reusing current runtime."
+                Write-ExistingRuntimeDiagnostics -NapCatComponents $napcatComponents
+                return
+            }
+            $startBotComponents = @()
+            $startNapCatComponents = @($missingNapCatComponents)
+            Write-LauncherStatus "Existing AstrBot ports are ready; starting missing NapCat accounts only: $($startNapCatComponents -join ', ')"
+        }
+        else {
+            Write-LauncherStatus "AstrBot ports missing or not ready: $($missingAstrBotPorts -join ', '); starting bot service."
         }
     }
+
+    if ($startBotComponents.Count -gt 0) {
+        Write-LauncherStatus "Starting bot services: $($startBotComponents -join ', ')"
+        foreach ($componentName in $startBotComponents) {
+            $process = Start-Component -RunId $runId -Component $componentName
+            if ($process) {
+                $processes[$componentName] = $process
+            }
+        }
+    }
+    else {
+        Write-LauncherStatus "Bot services already ready; AstrBot will not be restarted."
+    }
     $startedNapCatInParallel = $false
-    if ($napcatComponents.Count -gt 0) {
-        Wait-ChildStages -RunId $runId -Components $botComponents -Stage "ports-cleared" -TimeoutSeconds 90 -Processes $processes
-        Write-LauncherStatus "Waiting for bot ports before starting NapCat accounts."
-        Wait-ChildStages -RunId $runId -Components $botComponents -Stage "ports-ready" -TimeoutSeconds 420 -Processes $processes
-        Write-LauncherStatus "Starting NapCat accounts: $($napcatComponents -join ', ')"
-        if ($AstrBotProfile -eq "both" -and (Test-AllNapCatQuickLoginReady -Components $napcatComponents)) {
+    if ($startNapCatComponents.Count -gt 0) {
+        if ($startBotComponents.Count -gt 0) {
+            Wait-ChildStages -RunId $runId -Components $startBotComponents -Stage "ports-cleared" -TimeoutSeconds 90 -Processes $processes
+            Write-LauncherStatus "Waiting for bot ports before starting NapCat accounts."
+            Wait-ChildStages -RunId $runId -Components $startBotComponents -Stage "ports-ready" -TimeoutSeconds 420 -Processes $processes
+        }
+        else {
+            Write-LauncherStatus "Using existing bot ports before starting NapCat accounts."
+        }
+        Write-LauncherStatus "Starting NapCat accounts: $($startNapCatComponents -join ', ')"
+        if ($AstrBotProfile -eq "both" -and (Test-AllNapCatQuickLoginReady -Components $startNapCatComponents)) {
             Write-LauncherStatus "NapCat quick-login markers are complete; starting accounts in parallel."
-            foreach ($componentName in $napcatComponents) {
+            foreach ($componentName in $startNapCatComponents) {
                 $process = Start-Component -RunId $runId -Component $componentName
                 if ($process) {
                     $processes[$componentName] = $process
@@ -1471,9 +1610,9 @@ function Invoke-Parent {
             $startedNapCatInParallel = $true
         }
         elseif ($AstrBotProfile -eq "both") {
-            $missingMarkers = Get-NapCatComponentsMissingQuickLogin -Components $napcatComponents
+            $missingMarkers = Get-NapCatComponentsMissingQuickLogin -Components $startNapCatComponents
             Write-LauncherStatus "NapCat quick-login marker missing for $($missingMarkers -join ', '); starting accounts serially to protect shared QR image."
-            foreach ($componentName in $napcatComponents) {
+            foreach ($componentName in $startNapCatComponents) {
                 $process = Start-Component -RunId $runId -Component $componentName
                 if ($process) {
                     $processes[$componentName] = $process
@@ -1483,7 +1622,7 @@ function Invoke-Parent {
             }
         }
         else {
-            foreach ($componentName in $napcatComponents) {
+            foreach ($componentName in $startNapCatComponents) {
                 $process = Start-Component -RunId $runId -Component $componentName
                 if ($process) {
                     $processes[$componentName] = $process
@@ -1492,9 +1631,9 @@ function Invoke-Parent {
             $startedNapCatInParallel = $true
         }
     }
-    $remainingComponents = @($botComponents)
+    $remainingComponents = @($startBotComponents)
     if ($startedNapCatInParallel) {
-        $remainingComponents += $napcatComponents
+        $remainingComponents += $startNapCatComponents
     }
     if ($remainingComponents.Count -gt 0) {
         Wait-Children -RunId $runId -Components $remainingComponents -Processes $processes

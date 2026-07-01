@@ -20,6 +20,7 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("[int]$AstrBotOneBotPort = 6201", script)
         self.assertIn("[int]$AstrBotAngelOneBotPort = 6200", script)
         self.assertIn("[switch]$UseChildWindows", script)
+        self.assertIn("[switch]$ForceRestart", script)
         self.assertIn('if ($Target -eq "astrbot")', script)
         self.assertIn('$FeatureMode = "full"', script)
         self.assertIn('$AstrBotProfile = "both"', script)
@@ -104,10 +105,10 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("starting accounts serially to protect shared QR image", script)
         self.assertIn("Waiting for NapCat account startup before launching the next account", script)
         self.assertIn('Complete-ChildStage -RunId $RunId -Component "astrbot" -Stage "ports-ready"', script)
-        self.assertIn('Wait-ChildStages -RunId $runId -Components $botComponents -Stage "ports-ready"', script)
+        self.assertIn('Wait-ChildStages -RunId $runId -Components $startBotComponents -Stage "ports-ready"', script)
         self.assertIn("Waiting for bot ports before starting NapCat accounts.", script)
         self.assertLess(
-            script.index('Wait-ChildStages -RunId $runId -Components $botComponents -Stage "ports-ready"'),
+            script.index('Wait-ChildStages -RunId $runId -Components $startBotComponents -Stage "ports-ready"'),
             script.index("Starting NapCat accounts:"),
         )
         self.assertIn("Wait-Children -RunId $runId -Components @($componentName)", script)
@@ -153,9 +154,33 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("[Launcher]", script)
         self.assertIn("Start-ChildProcess", script)
         self.assertIn("-NoPauseOnFailure", script)
+        self.assertIn("-RedirectStandardInput $supervisorStdin", script)
         self.assertIn("supervisor_stdout.log", script)
         self.assertIn("supervisor_stderr.log", script)
         self.assertIn("Flush-ComponentsLauncherLogs", script)
+        self.assertIn("function Stop-BackgroundWrapperProcess", script)
+        self.assertIn("Stopping $Name wrapper pid=$($Process.Id) after readiness was confirmed.", script)
+        self.assertIn('Stop-BackgroundWrapperProcess -Process $process -Name "AstrBot background launcher"', script)
+        self.assertIn("Stop-BackgroundWrapperProcess -Process $process -Name \"NapCat account $Account background launcher\"", script)
+
+    def test_start_all_reuses_existing_ready_runtime_by_default(self) -> None:
+        script = START_ALL.read_text(encoding="utf-8-sig")
+
+        self.assertIn("function Get-MissingAstrBotReadyPorts", script)
+        self.assertIn("function Get-MissingNapCatConnectionComponents", script)
+        self.assertIn("function Test-EstablishedTcpConnection", script)
+        self.assertIn("Startup mode: ensure running; existing ready runtime will be reused.", script)
+        self.assertIn("Startup mode: force restart.", script)
+        self.assertIn("Existing AstrBot ports and NapCat connections are ready; reusing current runtime.", script)
+        self.assertIn("Bot services already ready; AstrBot will not be restarted.", script)
+        self.assertIn("Using existing bot ports before starting NapCat accounts.", script)
+        self.assertIn("Write-ExistingRuntimeDiagnostics", script)
+        self.assertIn("$startBotComponents = @()", script)
+        self.assertIn("$startNapCatComponents = @($missingNapCatComponents)", script)
+        self.assertLess(
+            script.index("Startup mode: ensure running; existing ready runtime will be reused."),
+            script.index("Starting bot services:"),
+        )
 
     def test_start_all_writes_structured_child_failure_details(self) -> None:
         script = START_ALL.read_text(encoding="utf-8-sig")
