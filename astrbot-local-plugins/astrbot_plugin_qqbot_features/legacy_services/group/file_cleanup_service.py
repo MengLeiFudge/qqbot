@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,13 +84,18 @@ class ShapezGroupFileCleanupState:
 class ShapezGroupFileCleanupStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
+        self.runtime_root = infer_runtime_root_from_path(self.path)
+        self.legacy_path = self.runtime_root / "data" / self.path.name
+        self.store = RuntimeJsonStore(self.runtime_root)
 
     def load(self) -> ShapezGroupFileCleanupState:
-        if not self.path.exists():
-            return ShapezGroupFileCleanupState()
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            raw = self.store.read_with_legacy(
+                "shapez.file_cleanup_state",
+                {},
+                lambda: self._load_legacy_state(),
+            )
+        except (OSError, json.JSONDecodeError, TypeError):
             return ShapezGroupFileCleanupState()
         pending: dict[str, ShapezPendingCleanup] = {}
         raw_pending = raw.get("pending", {})
@@ -113,7 +122,6 @@ class ShapezGroupFileCleanupStore:
         )
 
     def save(self, state: ShapezGroupFileCleanupState) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "last_scan_date": state.last_scan_date,
             "last_scan_at": state.last_scan_at,
@@ -126,7 +134,13 @@ class ShapezGroupFileCleanupStore:
                 for user_id, item in state.pending.items()
             },
         }
-        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.store.write("shapez.file_cleanup_state", payload)
+
+    def _load_legacy_state(self) -> dict | None:
+        for path in (self.path, self.legacy_path):
+            if path.exists():
+                return read_json_file(path, {})
+        return None
 
 
 class ShapezGroupFileCleanupService:

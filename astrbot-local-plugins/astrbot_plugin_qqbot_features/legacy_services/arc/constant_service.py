@@ -7,6 +7,9 @@ import re
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
 from .alias_service import EN_WIKI_API_URL
 
 DIFFICULTY_CC_FIELDS = {
@@ -49,6 +52,9 @@ class ArcConstantService:
     def __init__(self, cache_path: Path, wiki_text_fetcher=None) -> None:
         self.cache_path = Path(cache_path)
         self.wiki_text_fetcher = wiki_text_fetcher or fetch_en_wiki_wikitext
+        self.runtime_root = infer_runtime_root_from_path(self.cache_path)
+        self.legacy_cache_path = self.runtime_root / "data" / "arc" / self.cache_path.name
+        self.store = RuntimeJsonStore(self.runtime_root)
 
     def sync_constant_cache(self, songs: list[dict[str, str]], now: datetime | None = None) -> dict:
         current = now or datetime.now()
@@ -66,11 +72,7 @@ class ArcConstantService:
                 "title": title,
                 "constants": self.parse_constants(wikitext),
             }
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self.store.write("arc.constants", payload)
         return payload
 
     def sync_missing_constants(
@@ -103,17 +105,21 @@ class ArcConstantService:
             }
             synced_count += 1
         payload["updated_at"] = current.isoformat()
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self.store.write("arc.constants", payload)
         return payload
 
     def load_constant_cache(self) -> dict:
-        if not self.cache_path.exists():
-            return {"updated_at": "", "songs": {}}
-        return json.loads(self.cache_path.read_text(encoding="utf-8"))
+        return self.store.read_with_legacy(
+            "arc.constants",
+            {"updated_at": "", "songs": {}},
+            lambda: self._load_legacy_constants(),
+        )
+
+    def _load_legacy_constants(self) -> dict | None:
+        for path in (self.cache_path, self.legacy_cache_path):
+            if path.exists():
+                return read_json_file(path, {"updated_at": "", "songs": {}})
+        return None
 
     def parse_constants(self, wikitext: str) -> dict[str, float]:
         constants: dict[str, float] = {}

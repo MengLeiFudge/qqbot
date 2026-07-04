@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
 from .arcaea_record_apk_downloader import ArcaeaRecordApkDownloader
 
 
@@ -34,6 +37,9 @@ class ArcApkUpdateManager:
         self.zone = self._resolve_zone(timezone_name)
         self.status = ArcApkUpdateStatus()
         self._task: asyncio.Task | None = None
+        self.runtime_root = infer_runtime_root_from_path(self.state_path)
+        self.legacy_state_path = self.runtime_root / "data" / "arc" / self.state_path.name
+        self.store = RuntimeJsonStore(self.runtime_root)
 
     async def query_and_update(self) -> str:
         if self._task is not None and not self._task.done():
@@ -104,16 +110,20 @@ class ArcApkUpdateManager:
         self._save_raw_state(raw)
 
     def _load_raw_state(self) -> dict:
-        if not self.state_path.exists():
-            return {}
-        return json.loads(self.state_path.read_text(encoding="utf-8"))
+        return self.store.read_with_legacy(
+            "arc.background_state",
+            {},
+            lambda: self._load_legacy_state(),
+        )
 
     def _save_raw_state(self, raw: dict) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(
-            json.dumps(raw, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self.store.write("arc.background_state", raw)
+
+    def _load_legacy_state(self) -> dict | None:
+        for path in (self.state_path, self.legacy_state_path):
+            if path.exists():
+                return read_json_file(path, {})
+        return None
 
     @staticmethod
     def _resolve_zone(timezone_name: str):

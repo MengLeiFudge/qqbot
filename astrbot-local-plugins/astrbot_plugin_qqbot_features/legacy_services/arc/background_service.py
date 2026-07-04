@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
 from ..feature_catalog import FeatureDefinition
 from ..settings_store import SettingsStore
 
@@ -70,6 +73,9 @@ class ArcBackgroundService:
         self.constant_song_loader = constant_song_loader
         self.zone = self._resolve_zone(timezone_name)
         self.sleep_func = sleep_func or asyncio.sleep
+        self.runtime_root = infer_runtime_root_from_path(self.state_path)
+        self.legacy_state_path = self.runtime_root / "data" / "arc" / self.state_path.name
+        self.store = RuntimeJsonStore(self.runtime_root)
         self.state = self._load()
 
     async def run_once(self, bot, now: datetime | None = None) -> None:
@@ -206,9 +212,11 @@ class ArcBackgroundService:
         return datetime.fromisoformat(raw).astimezone(self.zone)
 
     def _load(self) -> ArcBackgroundState:
-        if not self.state_path.exists():
-            return ArcBackgroundState()
-        raw = json.loads(self.state_path.read_text(encoding="utf-8"))
+        raw = self.store.read_with_legacy(
+            "arc.background_state",
+            {},
+            lambda: self._load_legacy_state(),
+        )
         return ArcBackgroundState(
             alias_last_synced_at=str(raw.get("alias_last_synced_at", "")),
             constants_last_synced_at=str(raw.get("constants_last_synced_at", "")),
@@ -220,11 +228,13 @@ class ArcBackgroundService:
         )
 
     def _save(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(
-            json.dumps(asdict(self.state), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self.store.write("arc.background_state", asdict(self.state))
+
+    def _load_legacy_state(self) -> dict | None:
+        for path in (self.state_path, self.legacy_state_path):
+            if path.exists():
+                return read_json_file(path, {})
+        return None
 
     def _resolve_zone(self, timezone_name: str):
         try:

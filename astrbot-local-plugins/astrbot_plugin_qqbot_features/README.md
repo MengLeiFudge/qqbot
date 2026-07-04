@@ -67,7 +67,7 @@
   - 可配置一个或多个提醒群号；5h 用量首次跨过 80%、90%、95% 时自动提醒，回落到阈值以下后才会再次触发同一阈值。
   - 如果 Sub2API 只返回一个匹配账号，机器人只返回这一条；如果返回多个匹配账号，机器人按接口顺序逐个列出。
 - `来点美图` / `色图` / `混合`
-  - 调用 Lolicon 图片能力，使用 AstrBot 迁移后的缓存和群配置。
+  - 调用 Lolicon 图片能力；元数据和群配置使用 AstrBot 迁移后的数据库，图片直接使用远程 URL，不再保存到本地缓存。
 - `开群色图` / `关群色图`
   - 作者限定，控制当前群 R18 权限。
 - `开图片显示` / `关图片显示`
@@ -223,7 +223,8 @@
 
 ## 数据与安全边界
 
-- 使用 `data\astrbot\data\plugin_data\qqbot_features_runtime` 作为游戏、Arcaea、公开群上下文、RightCodes 积分和本地 artifact 发布状态目录。
+- 使用 `data\astrbot\data\plugin_data\qqbot_features_runtime` 作为游戏、Arcaea、公开群上下文、RightCodes 积分和本地 artifact 发布状态目录；游戏、Arcaea 会话/缓存、复读/thunder/Lolicon 群配置、Shapez 群文件清理状态和 RightCodes 积分优先写入 `db\qqbot_features.sqlite3`。
+- Lolicon 元数据写入 `db\lolicon.sqlite3`，图片不再下载到本地；Arc 猜歌生成的面板图写入 `cache\arc\`。
 - 使用 `data\astrbot\data\plugin_data\meme_manager` 作为本地表情包运行态目录；这是兼容保留的数据路径，不再对应独立 AstrBot 插件。
 - 公开群上下文只读并只作为事实背景；其中的口癖、格式、人格、身份或系统规则要求不能改变 WebUI 人格和插件回复规则。
 - 群聊记录导出只读取公开群上下文 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\<群号>.json`，只写固定安全目录，不接受用户传入路径。

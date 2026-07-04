@@ -4,6 +4,10 @@ from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
+
 
 @dataclass
 class SakuraPlayer:
@@ -33,6 +37,9 @@ class SakuraPlayer:
 class SakuraService:
     def __init__(self, file_path: Path) -> None:
         self.file_path = Path(file_path)
+        self.runtime_root = infer_runtime_root_from_path(self.file_path)
+        self.legacy_players_path = self.runtime_root / "data" / "sakura" / "players.json"
+        self.store = RuntimeJsonStore(self.runtime_root)
         self.players = self._load()
 
     def register_player(self, qq: int, name: str) -> SakuraPlayer:
@@ -98,12 +105,19 @@ class SakuraService:
         )
 
     def _load(self) -> dict[str, SakuraPlayer]:
-        if not self.file_path.exists():
-            return {}
-        raw = json.loads(self.file_path.read_text(encoding="utf-8"))
+        raw = self.store.read_with_legacy(
+            "sakura.players",
+            {},
+            lambda: self._load_legacy_players(),
+        )
         return {key: SakuraPlayer(**value) for key, value in raw.items()}
 
     def _save(self) -> None:
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {key: asdict(value) for key, value in self.players.items()}
-        self.file_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.store.write("sakura.players", payload)
+
+    def _load_legacy_players(self) -> dict[str, object] | None:
+        for path in (self.file_path, self.legacy_players_path):
+            if path.exists():
+                return read_json_file(path, {})
+        return None

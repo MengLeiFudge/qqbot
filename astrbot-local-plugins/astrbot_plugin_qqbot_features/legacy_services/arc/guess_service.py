@@ -9,6 +9,10 @@ import random
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
+
 
 DIFFICULTY_LABELS = {
     0: "PST",
@@ -62,12 +66,19 @@ class ArcGuessService:
         assets_root: Path,
         alias_cache_path: Path,
         state_path: Path,
+        output_root: Path | None = None,
         timeout: timedelta = timedelta(minutes=5),
     ) -> None:
         self.assets_root = Path(assets_root)
         self.chart_root = self.assets_root / "官谱"
         self.alias_cache_path = Path(alias_cache_path)
         self.state_path = Path(state_path)
+        runtime_root = infer_runtime_root_from_path(self.state_path)
+        self.output_root = Path(output_root) if output_root is not None else runtime_root / "cache" / "arc"
+        self.store = RuntimeJsonStore(runtime_root)
+        self.legacy_alias_cache_path = runtime_root / "data" / "arc" / self.alias_cache_path.name
+        self.legacy_state_path = runtime_root / "data" / "arc" / self.state_path.name
+        self.legacy_constants_path = runtime_root / "data" / "arc" / "constants.json"
         self.timeout = timeout
         self.sessions = self._load()
 
@@ -380,7 +391,7 @@ class ArcGuessService:
     def _render_art_panel(self, room_id: int, session: ArcGuessSession) -> Path:
         jacket_path = Path(session.art_jacket_path)
         grid_size = session.art_grid_size
-        output = self.state_path.parent / "guess_art_tiles" / str(room_id) / "panel.png"
+        output = self.output_root / "guess_art_tiles" / str(room_id) / "panel.png"
         output.parent.mkdir(parents=True, exist_ok=True)
         with Image.open(jacket_path) as source:
             image = source.convert("RGB")
@@ -417,7 +428,7 @@ class ArcGuessService:
         return max(1, min(width, height))
 
     def _render_letter_answer_image(self, room_id: int, session: ArcGuessSession) -> Path:
-        output = self.state_path.parent / "guess_answer_panels" / str(room_id) / "answers.png"
+        output = self.output_root / "guess_answer_panels" / str(room_id) / "answers.png"
         output.parent.mkdir(parents=True, exist_ok=True)
 
         row_height = 140
@@ -489,9 +500,15 @@ class ArcGuessService:
 
     def _load_constants_payload(self) -> dict[str, dict]:
         constants_path = self.alias_cache_path.with_name("constants.json")
-        if not constants_path.exists():
-            return {}
-        payload = json.loads(constants_path.read_text(encoding="utf-8"))
+        payload = self.store.read_with_legacy(
+            "arc.constants",
+            {"updated_at": "", "songs": {}},
+            lambda: self._load_legacy_json(
+                constants_path,
+                self.legacy_constants_path,
+                {"updated_at": "", "songs": {}},
+            ),
+        )
         return dict(payload.get("songs", {}))
 
     def _load_font(self, size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -567,9 +584,11 @@ class ArcGuessService:
         return entries
 
     def _load_alias_payload(self) -> dict[str, dict]:
-        if not self.alias_cache_path.exists():
-            return {}
-        payload = json.loads(self.alias_cache_path.read_text(encoding="utf-8"))
+        payload = self.store.read_with_legacy(
+            "arc.guess_aliases",
+            {},
+            lambda: self._load_legacy_json(self.alias_cache_path, self.legacy_alias_cache_path, {}),
+        )
         return dict(payload.get("songs", {}))
 
     def _is_expired(self, session: ArcGuessSession, now: datetime) -> bool:
@@ -630,9 +649,11 @@ class ArcGuessService:
         return now or datetime.now()
 
     def _load(self) -> dict[str, ArcGuessSession]:
-        if not self.state_path.exists():
-            return {}
-        raw = json.loads(self.state_path.read_text(encoding="utf-8"))
+        raw = self.store.read_with_legacy(
+            "arc.guess_sessions",
+            {},
+            lambda: self._load_legacy_json(self.state_path, self.legacy_state_path, {}),
+        )
         return {
             key: ArcGuessSession(
                 started_at=value["started_at"],
@@ -660,9 +681,11 @@ class ArcGuessService:
         }
 
     def _save(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {key: asdict(value) for key, value in self.sessions.items()}
-        self.state_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self.store.write("arc.guess_sessions", payload)
+
+    def _load_legacy_json(self, primary_path: Path, legacy_path: Path, default: dict) -> dict | None:
+        for path in (primary_path, legacy_path):
+            if path.exists():
+                return read_json_file(path, default)
+        return None

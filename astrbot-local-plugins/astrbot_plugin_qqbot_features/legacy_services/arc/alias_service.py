@@ -7,6 +7,10 @@ import re
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
+
 
 EN_WIKI_API_URL = "https://arcaea.fandom.com/api.php"
 
@@ -53,6 +57,10 @@ class ArcAliasService:
             "guess_manual_aliases.json"
         )
         self.wiki_redirect_fetcher = wiki_redirect_fetcher or fetch_en_wiki_redirects
+        self.runtime_root = infer_runtime_root_from_path(self.cache_path)
+        self.legacy_cache_path = self.runtime_root / "data" / "arc" / self.cache_path.name
+        self.legacy_manual_alias_path = self.runtime_root / "data" / "arc" / self.manual_alias_path.name
+        self.store = RuntimeJsonStore(self.runtime_root)
 
     def build_alias_cache(self, now: datetime | None = None) -> dict:
         current = now or datetime.now()
@@ -79,17 +87,16 @@ class ArcAliasService:
 
     def sync_alias_cache(self, now: datetime | None = None) -> dict:
         payload = self.build_alias_cache(now=now)
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self.store.write("arc.guess_aliases", payload)
         return payload
 
     def load_alias_cache(self) -> dict:
-        if self.cache_path.exists():
-            return json.loads(self.cache_path.read_text(encoding="utf-8"))
-        return self.sync_alias_cache()
+        payload = self.store.read_with_legacy(
+            "arc.guess_aliases",
+            {},
+            lambda: self._load_legacy_json(self.cache_path, self.legacy_cache_path, {}),
+        )
+        return payload or self.sync_alias_cache()
 
     def _load_song_titles(self) -> list[dict[str, str | list[str]]]:
         return load_song_titles(self.chart_root / "songlist")
@@ -106,9 +113,11 @@ class ArcAliasService:
         return aliases
 
     def _load_manual_aliases(self) -> dict[str, list[str]]:
-        if not self.manual_alias_path.exists():
-            return {}
-        payload = json.loads(self.manual_alias_path.read_text(encoding="utf-8"))
+        payload = self.store.read_with_legacy(
+            "arc.guess_manual_aliases",
+            {},
+            lambda: self._load_legacy_json(self.manual_alias_path, self.legacy_manual_alias_path, {}),
+        )
         songs = payload.get("songs", {})
         if not isinstance(songs, dict):
             return {}
@@ -130,6 +139,12 @@ class ArcAliasService:
             alias = str(candidate).strip()
             if alias and alias not in aliases:
                 aliases.append(alias)
+
+    def _load_legacy_json(self, primary_path: Path, legacy_path: Path, default: dict) -> dict | None:
+        for path in (primary_path, legacy_path):
+            if path.exists():
+                return read_json_file(path, default)
+        return None
 
 
 def load_song_titles(songlist_path: Path) -> list[dict[str, str | list[str]]]:

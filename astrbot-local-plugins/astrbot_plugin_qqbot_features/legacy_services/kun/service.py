@@ -8,6 +8,10 @@ from pathlib import Path
 import random
 import re
 
+from ...runtime_storage import RuntimeJsonStore
+from ...runtime_storage import infer_runtime_root_from_path
+from ...runtime_storage import read_json_file
+
 
 LEGACY_USER_KEYS = {
     "openNewSeasonTip": "open_new_season_tip",
@@ -89,6 +93,9 @@ class KunService:
         self.kun_root = self.file_path.parent
         self.boss_file_path = self.kun_root / "boss.json"
         self.now_season_path = self.kun_root / "nowSeason.txt"
+        self.runtime_root = infer_runtime_root_from_path(self.file_path)
+        self.legacy_kun_root = self.runtime_root / "data" / "kun"
+        self.store = RuntimeJsonStore(self.runtime_root)
         self.now_season = self._load_now_season()
         self.users = self._load_users()
         self.boss = self._load_boss()
@@ -601,8 +608,7 @@ class KunService:
         if (legacy_root / "nowSeason.txt").exists():
             now_season_text = (legacy_root / "nowSeason.txt").read_text(encoding="utf-8")
             self.now_season = self._parse_now_season_text(now_season_text)
-            self.now_season_path.parent.mkdir(parents=True, exist_ok=True)
-            self.now_season_path.write_text(now_season_text, encoding="utf-8")
+            self._save_now_season()
         else:
             self._save_now_season()
 
@@ -931,36 +937,57 @@ class KunService:
         }
 
     def _load_users(self) -> dict[str, KunUser]:
-        if not self.file_path.exists():
-            return {}
-        raw = json.loads(self.file_path.read_text(encoding="utf-8"))
+        raw = self.store.read_with_legacy(
+            "kun.users",
+            {},
+            lambda: self._load_legacy_json(self.file_path, self.legacy_kun_root / "users.json", {}),
+        )
         return {key: self._payload_to_user(value) for key, value in raw.items()}
 
     def _save(self) -> None:
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {key: self._user_to_payload(value) for key, value in self.users.items()}
-        self.file_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.store.write("kun.users", payload)
 
     def _load_boss(self) -> KunBoss:
-        if not self.boss_file_path.exists():
+        payload = self.store.read_with_legacy(
+            "kun.boss",
+            {},
+            lambda: self._load_legacy_json(self.boss_file_path, self.legacy_kun_root / "boss.json", {}),
+        )
+        if not payload:
             boss = self._new_boss()
             self._save_boss_data(boss)
             return boss
-        return self._payload_to_boss(json.loads(self.boss_file_path.read_text(encoding="utf-8")))
+        return self._payload_to_boss(payload)
 
     def _save_boss(self) -> None:
         self._save_boss_data(self.boss)
 
     def _save_boss_data(self, boss: KunBoss) -> None:
-        self.boss_file_path.parent.mkdir(parents=True, exist_ok=True)
-        self.boss_file_path.write_text(json.dumps(self._boss_to_payload(boss), ensure_ascii=False, indent=2), encoding="utf-8")
+        self.store.write("kun.boss", self._boss_to_payload(boss))
 
     def _load_now_season(self) -> int:
-        if not self.now_season_path.exists():
-            self.now_season_path.parent.mkdir(parents=True, exist_ok=True)
-            self.now_season_path.write_text("1=1\n", encoding="utf-8")
-            return 1
-        return self._parse_now_season_text(self.now_season_path.read_text(encoding="utf-8"))
+        payload = self.store.read_with_legacy(
+            "kun.meta",
+            {},
+            self._load_legacy_now_season_payload,
+        )
+        value = int(payload.get("now_season", 1) or 1) if isinstance(payload, dict) else 1
+        if not payload:
+            self.store.write("kun.meta", {"now_season": value})
+        return value
+
+    def _load_legacy_now_season_payload(self) -> dict[str, int] | None:
+        for path in (self.now_season_path, self.legacy_kun_root / "nowSeason.txt"):
+            if path.exists():
+                return {"now_season": self._parse_now_season_text(path.read_text(encoding="utf-8"))}
+        return None
+
+    def _load_legacy_json(self, primary_path: Path, legacy_path: Path, default: dict[str, object]) -> dict[str, object] | None:
+        for path in (primary_path, legacy_path):
+            if path.exists():
+                return read_json_file(path, default)
+        return None
 
     def _parse_now_season_text(self, text: str) -> int:
         match = re.search(r"1\s*=\s*(\d+)", text)
@@ -969,8 +996,7 @@ class KunService:
         return 1
 
     def _save_now_season(self) -> None:
-        self.now_season_path.parent.mkdir(parents=True, exist_ok=True)
-        self.now_season_path.write_text(f"1={self.now_season}\n", encoding="utf-8")
+        self.store.write("kun.meta", {"now_season": self.now_season})
 
     def _settle_all_users(self) -> None:
         changed = False

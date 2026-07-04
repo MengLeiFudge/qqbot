@@ -282,7 +282,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         name="Lolicon美图",
         aliases=("Lolicon", "美图", "色图"),
         lines=(
-            "来点美图 / 色图 / 混合：使用 AstrBot 迁移后的 Lolicon API、图片缓存和元数据存储",
+            "来点美图 / 色图 / 混合：使用 AstrBot 迁移后的 Lolicon API、远程图片和元数据存储",
             "开群色图 / 关群色图：作者限定，控制当前群是否允许 R18",
             "开图片显示 / 关图片显示：作者限定，控制 R18 结果是否直接发图",
         ),
@@ -366,6 +366,14 @@ class LoliconRenderResult:
     image_path: Path | None = None
     image_url: str = ""
     image_text: str = ""
+
+
+def get_runtime_db_root() -> Path:
+    return get_qqbot_runtime_root() / "db"
+
+
+def get_runtime_cache_root() -> Path:
+    return get_qqbot_runtime_root() / "cache"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1172,7 +1180,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(response)
         event.stop_event()
 
-    @filter.regex(LOLICON_PATTERN, desc="Lolicon 美图命令，支持美图、色图、混合等关键词，并使用迁移后的图片缓存和群配置。")
+    @filter.regex(LOLICON_PATTERN, desc="Lolicon 美图命令，支持美图、色图、混合等关键词，并使用迁移后的元数据和群配置。")
     async def lolicon_image(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode, command_type="lolicon_image"):
             return
@@ -2347,7 +2355,7 @@ async def run_group_file_cleanup(event: AstrMessageEvent) -> dict[str, object]:
     group_id = int(event.get_group_id())
     service = ShapezGroupFileCleanupService(
         store=ShapezGroupFileCleanupStore(
-            get_qqbot_runtime_root() / "data" / "shapez_file_cleanup_state.json"
+            get_runtime_db_root() / "shapez_file_cleanup_state.json"
         ),
         group_id=str(group_id),
         timezone_name=get_qqbot_config_value("bot", "timezone", "Asia/Shanghai"),
@@ -2379,7 +2387,7 @@ def build_arc_recommendation(text: str) -> ArcRecommendationResult:
     assets_root = get_arc_assets_root()
     service = ArcService(assets_root)
     constant_service = ArcConstantService(
-        get_qqbot_runtime_root() / "data" / "arc" / "constants.json"
+        get_runtime_db_root() / "arc" / "constants.json"
     )
     song_titles = load_song_titles(assets_root / "官谱" / "songlist")
     constant_service.sync_missing_constants(song_titles)
@@ -2413,11 +2421,11 @@ def build_arc_background_service():
     assets_root = get_arc_assets_root()
     alias_service = ArcAliasService(
         assets_root,
-        data_root / "data" / "arc" / "guess_aliases.json",
+        data_root / "db" / "arc" / "guess_aliases.json",
     )
-    constant_service = ArcConstantService(data_root / "data" / "arc" / "constants.json")
+    constant_service = ArcConstantService(data_root / "db" / "arc" / "constants.json")
     return ArcBackgroundService(
-        state_path=data_root / "data" / "arc" / "background_state.json",
+        state_path=data_root / "db" / "arc" / "background_state.json",
         settings_store=SettingsStore(data_root, get_author_qq()),
         arc_feature=get_feature_by_menu_key("arc"),
         author_qq=get_author_qq(),
@@ -2554,7 +2562,7 @@ def get_arc_apk_update_manager(plugin: QQBotFeaturesPlugin):
     if plugin._arc_apk_update_manager is None:
         data_root = get_qqbot_runtime_root()
         plugin._arc_apk_update_manager = ArcApkUpdateManager(
-            state_path=data_root / "data" / "arc" / "background_state.json",
+            state_path=data_root / "db" / "arc" / "background_state.json",
             version_fetcher=_fetch_latest_arc_version,
             downloader=ArcaeaRecordApkDownloader(
                 project_root=get_required_qqbot_config_path(
@@ -2573,11 +2581,11 @@ def get_arc_apk_update_manager(plugin: QQBotFeaturesPlugin):
 def get_arc_guess_service():
     from .legacy_services.arc.guess_service import ArcGuessService
 
-    data_root = get_qqbot_runtime_root()
     return ArcGuessService(
         assets_root=get_arc_assets_root(),
-        alias_cache_path=data_root / "data" / "arc" / "guess_aliases.json",
-        state_path=data_root / "data" / "arc" / "guess_sessions.json",
+        alias_cache_path=get_runtime_db_root() / "arc" / "guess_aliases.json",
+        state_path=get_runtime_db_root() / "arc" / "guess_sessions.json",
+        output_root=get_runtime_cache_root() / "arc",
     )
 
 
@@ -2710,7 +2718,7 @@ def get_author_qq() -> int:
 def handle_kun_command(event: AstrMessageEvent) -> str | None:
     from .legacy_services.kun.service import KunService
 
-    service = KunService(get_qqbot_runtime_root() / "data" / "kun" / "users.json")
+    service = KunService(get_runtime_db_root() / "kun" / "users.json")
     at_ids = [int(segment.qq) for segment in event.get_messages() if isinstance(segment, At) and str(segment.qq).isdigit()]
     return service.handle_command(
         event.get_message_str().strip(),
@@ -2729,7 +2737,7 @@ def handle_sakura_command(event: AstrMessageEvent) -> str | None:
 
     text = event.get_message_str().strip()
     user_id = int(event.get_sender_id())
-    service = SakuraService(get_qqbot_runtime_root() / "data" / "sakura" / "players.json")
+    service = SakuraService(get_runtime_db_root() / "sakura" / "players.json")
     player = service.get_player(user_id)
 
     if text == "落樱之都":

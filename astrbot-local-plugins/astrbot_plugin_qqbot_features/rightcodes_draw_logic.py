@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,9 @@ from typing import Any, Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .runtime_storage import RuntimeJsonStore
+from .runtime_storage import read_json_file
 
 
 RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
@@ -185,6 +189,7 @@ class RightCodesDrawQuotaStore:
         self.data_root = Path(data_root)
         self.multiplier = max(1, int(multiplier))
         self.path = self.data_root / "ai" / "draw_points.json"
+        self.store = RuntimeJsonStore(self.data_root)
 
     def record_group_message(self, user_id: int | str, *, amount: int = 1) -> int:
         user_key = str(user_id).strip()
@@ -289,19 +294,30 @@ class RightCodesDrawQuotaStore:
             self._write(payload)
 
     def _read(self) -> dict[str, object]:
-        if not self.path.exists():
-            return {"schema_version": 1, "users": {}}
-        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        raw = self.store.read("rightcodes.draw_points", {"schema_version": 1, "users": {}})
         if not isinstance(raw, dict):
-            return {"schema_version": 1, "users": {}}
-        raw.setdefault("schema_version", 1)
-        raw.setdefault("users", {})
-        return raw
+            raw = {"schema_version": 1, "users": {}}
+        raw = normalize_draw_points_payload(raw)
+        if not self.path.exists():
+            return raw
+        fingerprint = fingerprint_file(self.path)
+        imports = self.store.read("rightcodes.draw_points_legacy_imports", {"files": {}})
+        imported_files = imports.get("files") if isinstance(imports, dict) else {}
+        if isinstance(imported_files, dict) and imported_files.get(str(self.path)) == fingerprint:
+            return raw
+        legacy_raw = read_json_file(self.path, {"schema_version": 1, "users": {}})
+        merged = merge_draw_points_payload(raw, legacy_raw)
+        if merged != raw:
+            self.store.write("rightcodes.draw_points", merged)
+        if not isinstance(imported_files, dict):
+            imported_files = {}
+        imported_files[str(self.path)] = fingerprint
+        self.store.write("rightcodes.draw_points_legacy_imports", {"files": imported_files})
+        return merged
 
     def _write(self, payload: dict[str, object]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = normalize_draw_points_payload(payload)
-        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.store.write("rightcodes.draw_points", payload)
 
 
 def load_rightcodes_config(config=None) -> RightCodesConfig:
@@ -724,6 +740,31 @@ def normalize_draw_points_payload(payload: dict[str, object]) -> dict[str, objec
         users[user_id] = get_user_payload({user_id: raw_user}, user_id)
     normalized["users"] = users
     return normalized
+
+
+def merge_draw_points_payload(current: dict[str, object], legacy: dict[str, object]) -> dict[str, object]:
+    merged = normalize_draw_points_payload(current)
+    users = get_users_payload(merged)
+    for user_id, legacy_user in get_users_payload(normalize_draw_points_payload(legacy)).items():
+        current_user = get_user_payload(users, user_id)
+        legacy_payload = get_user_payload({user_id: legacy_user}, user_id)
+        current_points = safe_int(current_user.get("points"), 0)
+        legacy_points = safe_int(legacy_payload.get("points"), 0)
+        if legacy_points > current_points:
+            current_user["points"] = legacy_points
+        current_free_date = str(current_user.get("free_gpt_image_2_date", "") or "")
+        legacy_free_date = str(legacy_payload.get("free_gpt_image_2_date", "") or "")
+        if legacy_free_date > current_free_date:
+            current_user["free_gpt_image_2_date"] = legacy_free_date
+        users[user_id] = current_user
+    merged["users"] = users
+    return merged
+
+
+def fingerprint_file(path: Path) -> str:
+    stat = path.stat()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return f"{stat.st_size}:{stat.st_mtime_ns}:{digest}"
 
 
 def get_config_value(config, key: str, default):

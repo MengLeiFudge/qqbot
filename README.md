@@ -15,7 +15,7 @@
 `data/` 存放真实配置、数据库、日志、QQ 登录态、AI 会话、插件数据和更新备份。
 
 - `data/astrbot/data/`：AstrBot 的 `cmd_config.json`、`data_v4.db`、插件和插件数据。
-- `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的游戏、Arcaea、公开群上下文、RightCodes 积分和本地 artifact 发布状态。
+- `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的运行态。插件业务状态优先存放在 `db/qqbot_features.sqlite3` 和 `db/lolicon.sqlite3`；生成图片等临时文件放在 `cache/`；公开群上下文、AI 记忆和本地 artifact 发布状态仍按各自目录保存。
 - `data/astrbot/data/plugin_data/qqbot_features_config/`：从旧 qqbot 迁入的 `.env` 和 `qqbot.toml`，供 AstrBot 本地插件读取必要本机配置。
 - `data/astrbot/data/plugin_data/meme_manager/`：`astrbot_plugin_qqbot_features` 内部表情管理模块的运行态事实源，包含 `memes/` 图片目录、`meme_index.json` 单图语义索引和兼容的 `memes_data.json` 类别描述。
 - `data/memes/mlj_pack/`：旧本地表情包整理结果，仅作为迁移来源保留；不再作为日常运行事实源。
@@ -34,7 +34,7 @@ AstrBot Core 不再从 `astrbot/` 源码快照启动；`tools/runtime-scripts/st
 `astrbot_plugin_local_artifact_api` 负责 AstrBot 的本地构建产物发布兼容入口。AstrBot `full` 模式下会在 `127.0.0.1:8080` 提供 `POST /admin/api/artifacts/publish-local`，保持原 NoneBot2 localhost-only 请求体、Git 上下文校验和 OneBot 群文件上传行为，供 `AfterBuildEvent.exe 1` 这类本机白名单构建流程继续发布 zip 产物。服务端会独立读取 zip 内容计算内容 hash，并和自己的发布缓存比对；内容未变化时不删除旧文件、不上传、不发群消息。
 `tools\runtime-scripts\start-all.ps1` 日常默认等价于 `-Target astrbot -FeatureMode full -AstrBotProfile both`。默认模式是 ensure-running：如果现有 AstrBot WebUI `6185`、OneBot `6200/6201`、artifact API `8080` 和两路 NapCat 反连已经 ready，会直接复用当前运行态，避免无意义冷重启；如果端口或连接缺失，才启动缺失组件。需要强制应用插件、配置、脚本或 uv tool 运行包变更时，给 PowerShell 入口加 `-ForceRestart`，此时会清理旧端口和旧进程并重新等待 `6185`、`6200/6201` 和 `8080` 全部就绪；如果 artifact API 绑定失败，启动入口会失败而不是只报告 AstrBot WebUI ready。
 
-RightCodes 生图命令已归入 `astrbot_plugin_qqbot_features`。默认使用 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\draw_points.json` 积分存档；双平台 `both/full` 下只有固定命令 owner 账号累计普通群消息积分，避免天使和恶魔同群时同一消息重复记分。RightCodes API Key 直接填写在 AstrBot 插件配置 `astrbot_plugin_qqbot_features.api_key`，不再读取 `QQBOT_AI_KEY_RIGHTCODES` 或旧 `.env`。明确 `棉花糖生图` / `棉花生图` 命令里如果包含“仿照上面、这张图、参考、聊天记录”等上下文指代，插件会先用当前会话 AstrBot provider 把请求整理成准确生图提示词，再扣积分并调用 RightCodes；拿不到可用引用图片或上下文时不扣积分。生图成功、失败或超时失败都会引用原始请求；默认 240 秒总超时，超时失败会退回本次扣除的积分或免费次数。
+RightCodes 生图命令已归入 `astrbot_plugin_qqbot_features`。生图积分事实源使用 `data\astrbot\data\plugin_data\qqbot_features_runtime\db\qqbot_features.sqlite3`；旧 `ai\draw_points.json` 首次读取时会自动导入，之后不再作为写入事实源。双平台 `both/full` 下只有固定命令 owner 账号累计普通群消息积分，避免天使和恶魔同群时同一消息重复记分。RightCodes API Key 直接填写在 AstrBot 插件配置 `astrbot_plugin_qqbot_features.api_key`，不再读取 `QQBOT_AI_KEY_RIGHTCODES` 或旧 `.env`。明确 `棉花糖生图` / `棉花生图` 命令里如果包含“仿照上面、这张图、参考、聊天记录”等上下文指代，插件会先用当前会话 AstrBot provider 把请求整理成准确生图提示词，再扣积分并调用 RightCodes；拿不到可用引用图片或上下文时不扣积分。生图成功、失败或超时失败都会引用原始请求；默认 240 秒总超时，超时失败会退回本次扣除的积分或免费次数。
 
 RightCodes 生图接口问答也归入 `astrbot_plugin_qqbot_features` 的静态知识 catalog。用户问 RightCodes 画图接口、请求体、`size`、`1024x1024`、`/v1/images/generations` 或 `/v1/chat/completions` 时，插件会在 LLM 请求前注入官方文档摘要：`/v1/images/generations` 支持 `size` 字段，`/v1/chat/completions` 适合流式防超时。
 
