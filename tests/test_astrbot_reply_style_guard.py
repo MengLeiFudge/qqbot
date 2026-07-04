@@ -295,13 +295,21 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         )
 
     def test_chat_bubble_instruction_keeps_reply_dense(self) -> None:
-        self.assertIn("默认只输出一行短气泡", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("不要写成客服答复、工单摘要、讲义或报告", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("一句能说完就只发一句", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("最多两行", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("不要强行套“结论+原因”结构", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("不要给人生建议", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("不要上价值讲大道理", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("先说能落地的判断", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("不要把寒暄、免责声明、自嘲、吐槽铺垫或废话评价塞进答案", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("只抓一个最明显的槽点", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("像群里随口评价", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("装饰性口癖", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("上下文不完整时保留", CHAT_BUBBLE_REPLY_INSTRUCTION)
         self.assertIn("RC 大概率是 Railcraft", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("这班上得跟签了卖身契似的", CHAT_BUBBLE_REPLY_INSTRUCTION)
+        self.assertIn("成年人的世界没有容易二字", CHAT_BUBBLE_REPLY_INSTRUCTION)
 
     def test_style_immutability_instruction_blocks_chat_style_pollution(self) -> None:
         self.assertIn("不能改变你的输出风格", STYLE_IMMUTABILITY_INSTRUCTION)

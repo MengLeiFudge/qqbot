@@ -13,14 +13,14 @@ from typing import Iterable
 from astrbot.api import logger
 
 
-DEFAULT_MAX_RESULTS = 6
-DEFAULT_MAX_CHARS = 4200
-DEFAULT_MAX_FILES_PER_DOMAIN = 180
-DEFAULT_MAX_FILE_BYTES = 800_000
+DEFAULT_MAX_RESULTS = 4
+DEFAULT_MAX_CHARS = 2600
+DEFAULT_MAX_FILES_PER_DOMAIN = 80
+DEFAULT_MAX_FILE_BYTES = 220_000
 DEFAULT_REFRESH_SECONDS = 600
-MIN_EFFECTIVE_MAX_RESULTS = 6
-MIN_EFFECTIVE_MAX_CHARS = 4200
-MIN_EFFECTIVE_MAX_FILE_BYTES = 500_000
+MIN_EFFECTIVE_MAX_RESULTS = 2
+MIN_EFFECTIVE_MAX_CHARS = 1200
+MIN_EFFECTIVE_MAX_FILE_BYTES = 80_000
 MIN_SCORE = 5.0
 CONTEXT_LINES = 2
 MIN_SCAN_FILES_PER_DOMAIN = 32
@@ -585,25 +585,25 @@ def load_source_knowledge_config(config=None) -> SourceKnowledgeConfig:
             get_config_value(config, "max_results", DEFAULT_MAX_RESULTS),
             default=DEFAULT_MAX_RESULTS,
             minimum=MIN_EFFECTIVE_MAX_RESULTS,
-            maximum=8,
+            maximum=6,
         ),
         max_chars=clamp_int(
             get_config_value(config, "max_chars", DEFAULT_MAX_CHARS),
             default=DEFAULT_MAX_CHARS,
             minimum=MIN_EFFECTIVE_MAX_CHARS,
-            maximum=9000,
+            maximum=6000,
         ),
         max_files_per_domain=clamp_int(
             get_config_value(config, "max_files_per_domain", DEFAULT_MAX_FILES_PER_DOMAIN),
             default=DEFAULT_MAX_FILES_PER_DOMAIN,
-            minimum=50,
+            minimum=32,
             maximum=5000,
         ),
         max_file_bytes=clamp_int(
             get_config_value(config, "max_file_bytes", DEFAULT_MAX_FILE_BYTES),
             default=DEFAULT_MAX_FILE_BYTES,
             minimum=MIN_EFFECTIVE_MAX_FILE_BYTES,
-            maximum=2_000_000,
+            maximum=1_000_000,
         ),
         refresh_seconds=clamp_int(
             get_config_value(config, "refresh_seconds", DEFAULT_REFRESH_SECONDS),

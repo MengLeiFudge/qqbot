@@ -11,8 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from astrbot.api import logger
 
 
-DEFAULT_MAX_MESSAGES = 12
-DEFAULT_MAX_CHARS = 1800
+DEFAULT_MAX_MESSAGES = 8
+DEFAULT_MAX_CHARS = 1200
 CONTEXT_TIMEZONE_NAME = "Asia/Shanghai"
 ANGEL_BOT_ID = "1443944862"
 DEMON_BOT_ID = "2629227874"
@@ -39,13 +39,13 @@ def load_bridge_config(config=None) -> BridgeConfig:
         get_config_value(config, "max_messages", DEFAULT_MAX_MESSAGES),
         default=DEFAULT_MAX_MESSAGES,
         minimum=1,
-        maximum=40,
+        maximum=24,
     )
     max_chars = clamp_int(
         get_config_value(config, "max_chars", DEFAULT_MAX_CHARS),
         default=DEFAULT_MAX_CHARS,
         minimum=400,
-        maximum=6000,
+        maximum=3000,
     )
     return BridgeConfig(
         enabled_groups=enabled_groups,

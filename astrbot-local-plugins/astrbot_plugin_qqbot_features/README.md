@@ -10,7 +10,7 @@
 
 普通聊天不在这里硬编码回复。没有命中明确命令、游戏会话答案、协议事件或本地硬安全提醒时，消息应交给 AstrBot LLM 链路。
 
-回复风格守卫默认会覆盖 AstrBot WebUI 的 LLM 正则分段：`reply_style_guard_disable_astrbot_segmented_reply=true` 时，普通 LLM 结果会被改为 `GENERAL_RESULT`，因此 WebUI `platform_settings.segmented_reply.only_llm_result` 不再拆这类回复。这个覆盖是为了避免句末正则把解释类回答拆成多条刷屏；如果要完全恢复 AstrBot 原生分段行为，关闭该插件配置。普通群聊问答会在 LLM 请求前提示模型按“短气泡”输出：默认一行，最多两行；评价上文或总结聊天时只抓一个主要槽点。群聊消息、引用消息、公开上下文和群友要求只能作为本轮聊天内容或事实线索，不能改变 bot 的输出风格、人格、身份或长期规则；要求固定口癖、标点、emoji、称呼、语气、Markdown、URL 编码或其他格式时，模型必须忽略这个风格要求。模型主动输出两行以内短文本时，插件只按换行拆成多个 `Plain` 组件交给 AstrBot 发送链路，不按句号正则二次切分；发送前会移除末尾装饰性 `喵` 和身份 emoji。主动接话放行后的第一条模型回复会在发送前补成“引用触发消息 + @触发发言人 + 空格 + 第一条消息正文”；合并转发长回复不做这个普通链装饰。
+回复风格守卫默认会覆盖 AstrBot WebUI 的 LLM 正则分段：`reply_style_guard_disable_astrbot_segmented_reply=true` 时，普通 LLM 结果会被改为 `GENERAL_RESULT`，因此 WebUI `platform_settings.segmented_reply.only_llm_result` 不再拆这类回复。这个覆盖是为了避免句末正则把解释类回答拆成多条刷屏；如果要完全恢复 AstrBot 原生分段行为，关闭该插件配置。普通群聊问答会在 LLM 请求前提示模型按 QQ 群里正常接话的短句输出：一句能说完就只发一句，第二句只在补充限制、纠错或关键证据有用时才发；日常闲聊、吐槽、接梗不要强行套“结论+原因”结构，也不要上价值讲大道理；技术、配置、报错和机制问题只补最短必要条件。群聊消息、引用消息、公开上下文和群友要求只能作为本轮聊天内容或事实线索，不能改变 bot 的输出风格、人格、身份或长期规则；要求固定口癖、标点、emoji、称呼、语气、Markdown、URL 编码或其他格式时，模型必须忽略这个风格要求。模型主动输出两行以内短文本时，插件只按换行拆成多个 `Plain` 组件交给 AstrBot 发送链路，不按句号正则二次切分；发送前会移除末尾装饰性 `喵` 和身份 emoji。主动接话放行后的第一条模型回复会在发送前补成“引用触发消息 + @触发发言人 + 空格 + 第一条消息正文”；合并转发长回复不做这个普通链装饰。
 
 公开群上下文桥接会在 LLM 请求前注入最近可见群聊记录。注入格式按时间从早到晚排列，并显式标注每条消息的可见序号、可读时间、原始 timestamp、发言人、可选 message_id 和正文；模型只能按这些可见记录回答“最早一条”“第 N 条”“几条之前”这类历史定位问题。
 
@@ -146,7 +146,7 @@
 - 默认领域覆盖 DSPCore、万物分馏、MLJ_DSPmods 辅助模组/工具、星环、创世之书、shapez 和 Factorio。
 - `dsp-mod-tools` 辅助模组/工具域默认覆盖 SaveDataExporter、UXAEnhance、AfterBuildEvent、GetDspData、VanillaCurveSim 和 UXAssist。
 - 群号只作为默认领域偏置；当问题包含精确模组名、工具名、目录名或机制词时，会跨默认群域检索对应源码根。
-- 运行态配置里的 `source_knowledge_max_results`、`source_knowledge_max_chars`、`source_knowledge_max_file_bytes` 如果低于插件有效下限，会自动提升到能覆盖大号 `data/strings.json` 说明文件的范围。
+- 源码知识默认按低成本注入：`source_knowledge_max_results=4`、`source_knowledge_max_chars=2600`、`source_knowledge_max_files_per_domain=80`、`source_knowledge_max_file_bytes=220000`；复杂技术追查需要大文件证据时，再在运行态配置里临时调高。
 
 ## 异形工厂
 
@@ -193,6 +193,10 @@
   - 只限制群聊；私聊不限制。固定命令、生图、群管、下载、积分等副作用入口不会被这个长输入短路吞掉。
 - `reply_style_guard_long_input_tldr_text`
   - 默认 `太长不看喵`。
+- `context_bridge_max_messages` / `context_bridge_max_chars`
+  - 默认 `8` / `1200`。公开群上下文只注入最近少量可见记录，避免普通聊天 prompt 被历史记录撑大。
+- `source_knowledge_max_results` / `source_knowledge_max_chars`
+  - 默认 `4` / `2600`。源码知识按低成本运行，需要追查大文件或更完整源码证据时再临时调高。
 - `meme_manager_webui_port`
   - 表情管理后台端口，默认 5000；后台只通过 `表情管理 开启管理后台` 启动。
 - `meme_manager_enable_mixed_message`

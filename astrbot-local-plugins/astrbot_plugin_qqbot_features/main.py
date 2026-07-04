@@ -490,16 +490,22 @@ class QQBotFeaturesPlugin(Star):
             self._auto_approve_group_invites,
         )
         logger.info(
-            "[QQBotFeatures] merged guards loaded: context_groups=%s context_max_messages=%s "
+            "[QQBotFeatures] merged guards loaded: context_groups=%s context_max_messages=%s context_max_chars=%s "
             "reply_fold_chars=%s disable_astrbot_segmented=%s long_input_tldr_chars=%s "
-            "source_groups=%s source_roots=%s twin_profile=%s twin_groups=%s twin_direct=%s",
+            "source_groups=%s source_roots=%s source_max_results=%s source_max_chars=%s "
+            "source_max_files=%s source_max_file_bytes=%s twin_profile=%s twin_groups=%s twin_direct=%s",
             format_context_bridge_enabled_groups(self._context_bridge_config.enabled_groups),
             self._context_bridge_config.max_messages,
+            self._context_bridge_config.max_chars,
             self._reply_long_reply_fold_threshold_chars,
             self._reply_disable_astrbot_segmented_reply,
             self._reply_long_input_tldr_threshold_chars,
             format_source_enabled_groups(self._source_knowledge_config.enabled_groups),
             len(self._source_knowledge_config.roots),
+            self._source_knowledge_config.max_results,
+            self._source_knowledge_config.max_chars,
+            self._source_knowledge_config.max_files_per_domain,
+            self._source_knowledge_config.max_file_bytes,
             self._twin_fallback_profile,
             "*" if not self._twin_config.enabled_groups else ",".join(sorted(self._twin_config.enabled_groups)),
             self._twin_config.direct_handler_enabled,

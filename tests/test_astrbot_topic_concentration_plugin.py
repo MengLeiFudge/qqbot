@@ -54,6 +54,8 @@ from astrbot_plugin_topic_concentration.logic import (
 )
 from astrbot_plugin_qqbot_features.context_bridge import BridgeConfig
 from astrbot_plugin_qqbot_features.context_bridge import build_group_context_injection
+from astrbot_plugin_qqbot_features.context_bridge import load_bridge_config
+from astrbot_plugin_qqbot_features.source_knowledge import load_source_knowledge_config
 from astrbot_plugin_topic_concentration.twin_scheduler import (
     calculate_angel_probability,
     clear_scheduler_state,
@@ -276,6 +278,24 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertEqual(result.effective_count, 50)
         self.assertFalse(throttled.should_run)
         self.assertEqual(throttled.reason, "batch_interval")
+
+    def test_batch_decision_prompt_only_includes_recent_capped_messages(self) -> None:
+        window = deque(
+            TopicWindowMessage(
+                text=f"批量窗口第{i}句",
+                user_id=str(1000 + i % 5),
+                at_bot=False,
+                reply_bot=False,
+                created_at=float(i),
+            )
+            for i in range(50)
+        )
+
+        prompt = build_batch_active_reply_decision_prompt(window)
+
+        self.assertIn("effective_message_count=40", prompt)
+        self.assertNotIn("批量窗口第0句", prompt)
+        self.assertIn("批量窗口第49句", prompt)
 
     def test_batch_effective_messages_filter_low_info_media_and_direct_targets(self) -> None:
         effective = TopicWindowMessage(
@@ -933,6 +953,17 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertIn("发言人=甲；message_id=m1；内容=第一条", injection)
         self.assertIn("序号 2/2；时间=2024-03-10 00:01:00 Asia/Shanghai (timestamp=1710000060)", injection)
         self.assertIn("发言人=乙；message_id=m2；内容=第二条", injection)
+
+    def test_context_and_source_defaults_are_cost_capped(self) -> None:
+        bridge = load_bridge_config(None)
+        source = load_source_knowledge_config({"source_roots": "shapez=/tmp/not-exists"})
+
+        self.assertEqual(bridge.max_messages, 8)
+        self.assertEqual(bridge.max_chars, 1200)
+        self.assertEqual(source.max_results, 4)
+        self.assertEqual(source.max_chars, 2600)
+        self.assertEqual(source.max_files_per_domain, 80)
+        self.assertEqual(source.max_file_bytes, 220000)
 
 
 class StubLogger:

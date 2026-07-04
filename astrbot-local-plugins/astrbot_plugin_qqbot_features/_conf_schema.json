@@ -90,13 +90,13 @@
   "context_bridge_max_messages": {
     "description": "公开群上下文最大消息数",
     "type": "int",
-    "default": 12,
+    "default": 8,
     "hint": "LLM 请求前最多注入多少条 data/astrbot/data/plugin_data/qqbot_features_runtime/ai/group_context 里的公开群聊上下文。"
   },
   "context_bridge_max_chars": {
     "description": "公开群上下文最大字符数",
     "type": "int",
-    "default": 1800,
+    "default": 1200,
     "hint": "限制桥接上下文长度，避免 prompt 过长。"
   },
   "reply_style_guard_long_reply_fold_threshold_chars": {
@@ -367,26 +367,26 @@
   "source_knowledge_max_results": {
     "description": "源码知识最大结果数",
     "type": "int",
-    "default": 6,
-    "hint": "每轮 LLM 请求最多注入多少条源码检索结果。"
+    "default": 4,
+    "hint": "每轮 LLM 请求最多注入多少条源码检索结果；需要深查时再临时调高，避免普通聊天 prompt 过肥。"
   },
   "source_knowledge_max_chars": {
     "description": "源码知识最大字符数",
     "type": "int",
-    "default": 4200,
-    "hint": "限制源码证据注入长度；低于插件有效下限时会自动提升，保证大号源码邻近说明文件可召回。"
+    "default": 2600,
+    "hint": "限制源码证据注入长度；默认按低成本运行，复杂技术追查可在运行态配置中临时调高。"
   },
   "source_knowledge_max_files_per_domain": {
     "description": "源码知识每领域最大扫描文件数",
     "type": "int",
-    "default": 180,
+    "default": 80,
     "hint": "rg 不可用时的 Python 扫描上限；rg 可用时优先使用 rg。"
   },
   "source_knowledge_max_file_bytes": {
     "description": "源码知识单文件最大字节数",
     "type": "int",
-    "default": 800000,
-    "hint": "超过该大小的单个源码文件不读取；低于插件有效下限时会自动提升，用于覆盖 data/strings.json 这类说明资料。"
+    "default": 220000,
+    "hint": "超过该大小的单个源码文件不读取；复杂源码问答需要覆盖大文件时再临时调高。"
   },
   "source_knowledge_refresh_seconds": {
     "description": "源码知识索引刷新秒数",

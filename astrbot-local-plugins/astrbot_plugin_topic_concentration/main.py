@@ -55,10 +55,10 @@ except ModuleNotFoundError:  # AstrBot runtime imports plugins as data.plugins.<
     from data.plugins.astrbot_plugin_qqbot_features.twin_interaction_logic import should_allow_twin_delegation
 
 
-WINDOW_SECONDS = 600.0
-MAX_WINDOW_MESSAGES = 80
-MAX_ACTIVE_HISTORY_MESSAGES = 80
-MAX_ACTIVE_HISTORY_CHARS = 6000
+WINDOW_SECONDS = 480.0
+MAX_WINDOW_MESSAGES = 50
+MAX_ACTIVE_HISTORY_MESSAGES = 24
+MAX_ACTIVE_HISTORY_CHARS = 2400
 COOLDOWN_SECONDS = 480.0
 GROUP_COOLDOWN_SECONDS = 300.0
 INTEREST_SECONDS = 360.0
