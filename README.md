@@ -15,7 +15,7 @@
 `data/` 存放真实配置、数据库、日志、QQ 登录态、AI 会话、插件数据和更新备份。
 
 - `data/astrbot/data/`：AstrBot 的 `cmd_config.json`、`data_v4.db`、插件和插件数据。
-- `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的运行态。插件业务状态优先存放在 `db/qqbot_features.sqlite3` 和 `db/lolicon.sqlite3`；生成图片等临时文件放在 `cache/`；公开群上下文、AI 记忆和本地 artifact 发布状态仍按各自目录保存。
+- `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的轻量运行态。插件业务状态优先存放在 `db/qqbot_features.sqlite3` 和 `db/lolicon.sqlite3`；公开群上下文保留在 `ai/group_context/`；本地 artifact 发布去重状态保留在 `fe_artifacts/` 和 `local_artifacts/`；生成图片等临时文件只放 `cache/`，不再保留旧 AI 记忆、TTS、头像和 shapez 静态旧目录。
 - `data/astrbot/data/plugin_data/qqbot_features_config/`：从旧 qqbot 迁入的 `.env` 和 `qqbot.toml`，供 AstrBot 本地插件读取必要本机配置。
 - `data/astrbot/data/plugin_data/meme_manager/`：`astrbot_plugin_qqbot_features` 内部表情管理模块的运行态事实源，包含 `memes/` 图片目录、`meme_index.json` 单图语义索引和兼容的 `memes_data.json` 类别描述。
 - `data/memes/mlj_pack/`：旧本地表情包整理结果，仅作为迁移来源保留；不再作为日常运行事实源。

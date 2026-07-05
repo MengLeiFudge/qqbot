@@ -97,18 +97,18 @@ def render_shape_image(shape: ShapeCode, output: Path, size: int = 384) -> Path:
     return output
 
 
-def render_shape_code(data_root: Path, short_code: str) -> tuple[ShapeCode, Path]:
+def render_shape_code(output_root: Path, short_code: str) -> tuple[ShapeCode, Path]:
     shape = ShapeCode(short_code)
-    output = Path(data_root) / "shapez" / "img" / "shape" / (
+    output = Path(output_root) / "shapez" / "shape" / (
         shape.short_key.replace(":", "：") + ".png"
     )
     render_shape_image(shape, output)
     return shape, output
 
 
-def render_shape_chart(data_root: Path, short_code: str) -> tuple[ShapeCode, Path, str]:
+def render_shape_chart(output_root: Path, short_code: str) -> tuple[ShapeCode, Path, str]:
     shape = ShapeCode(short_code)
-    output = Path(data_root) / "shapez" / "img" / "chart" / (
+    output = Path(output_root) / "shapez" / "chart" / (
         shape.short_key.replace(":", "：") + ".png"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -116,8 +116,8 @@ def render_shape_chart(data_root: Path, short_code: str) -> tuple[ShapeCode, Pat
     return shape, output, describe_shape_layers(shape)
 
 
-def render_shape_path(data_root: Path, short_code: str):
-    return render_shape_path_image(data_root, short_code)
+def render_shape_path(output_root: Path, short_code: str):
+    return render_shape_path_image(output_root, short_code)
 
 
 def generate_shape_image(shape: ShapeCode, size: int = 384) -> Image.Image:

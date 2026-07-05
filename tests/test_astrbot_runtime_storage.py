@@ -163,6 +163,30 @@ class AstrBotRuntimeStorageMigrationTest(unittest.TestCase):
                 row = conn.execute("select title, url, local_path from images where pid=? and page=?", (123, 0)).fetchone()
             self.assertEqual(row, ("测试图", "https://example.invalid/image.jpg", ""))
 
+    def test_shapez_render_output_uses_cache_root(self) -> None:
+        service_source = (
+            ROOT / "astrbot-local-plugins" / "astrbot_plugin_qqbot_features" / "legacy_services" / "shapez" / "service.py"
+        ).read_text(encoding="utf-8")
+        path_source = (
+            ROOT
+            / "astrbot-local-plugins"
+            / "astrbot_plugin_qqbot_features"
+            / "legacy_services"
+            / "shapez"
+            / "path_renderer.py"
+        ).read_text(encoding="utf-8")
+        main_source = (ROOT / "astrbot-local-plugins" / "astrbot_plugin_qqbot_features" / "main.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('output_root = get_runtime_cache_root()', main_source)
+        self.assertIn('Path(output_root) / "shapez" / "shape"', service_source)
+        self.assertIn('Path(output_root) / "shapez" / "chart"', service_source)
+        self.assertIn('Path(output_root) / "shapez" / "path"', path_source)
+        self.assertNotIn('/ "shapez" / "img" / "shape"', service_source)
+        self.assertNotIn('/ "shapez" / "img" / "chart"', service_source)
+        self.assertNotIn('/ "shapez" / "img" / "path"', path_source)
+
 
 if __name__ == "__main__":
     unittest.main()

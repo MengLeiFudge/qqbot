@@ -24,10 +24,10 @@ PATH_COLOR_MAP = {
 }
 
 
-def render_shape_path_image(data_root: Path, short_code: str) -> tuple[ShapeTree, Path, str]:
+def render_shape_path_image(output_root: Path, short_code: str) -> tuple[ShapeTree, Path, str]:
     tree = solve_shape_path(short_code)
     image = generate_shape_path_image(tree)
-    output = Path(data_root) / "shapez" / "img" / "path" / (
+    output = Path(output_root) / "shapez" / "path" / (
         tree.shortcode.replace(":", "：") + ".png"
     )
     output.parent.mkdir(parents=True, exist_ok=True)

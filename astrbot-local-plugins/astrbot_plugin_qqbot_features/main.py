@@ -2614,20 +2614,20 @@ def get_required_qqbot_config_path(section: str, key: str) -> Path:
 def render_shapez_command(command: str, argument: str) -> ShapezRenderResult:
     from .legacy_services.shapez.service import render_shape_chart, render_shape_code, render_shape_path
 
-    data_root = get_qqbot_runtime_root()
+    output_root = get_runtime_cache_root()
     if command in {"path", "path1", "path2"}:
-        tree, output, path_text = render_shape_path(data_root, argument)
+        tree, output, path_text = render_shape_path(output_root, argument)
         return ShapezRenderResult(
             image_path=output,
             text=f"\n短代码：{tree.shortcode}\n{path_text}",
         )
     if command in {"chart", "chart1", "chart2"}:
-        shape, output, shape_text = render_shape_chart(data_root, argument)
+        shape, output, shape_text = render_shape_chart(output_root, argument)
         return ShapezRenderResult(
             image_path=output,
             text=f"\n短代码：{shape.short_key}\n{shape_text}",
         )
-    shape, output = render_shape_code(data_root, argument)
+    shape, output = render_shape_code(output_root, argument)
     return ShapezRenderResult(image_path=output, text=f"\n短代码：{shape.short_key}")
 
 
