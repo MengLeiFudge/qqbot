@@ -38,7 +38,7 @@ function New-RunId {
 
 function Get-ControlRoot {
     param([string]$RunId)
-    return Join-Path $WorkspaceRoot "data\launcher\$RunId"
+    return Join-Path $WorkspaceRoot "data\astrbot\logs\start_all\$RunId\control"
 }
 
 function Get-ComponentLogRoot {
@@ -51,7 +51,7 @@ function Get-ComponentLogRoot {
 }
 
 function Get-NapCatLoginMarkerRoot {
-    return Join-Path $WorkspaceRoot "data\launcher\napcat-quick-login"
+    return Join-Path $WorkspaceRoot "data\napcat\quick-login"
 }
 
 function Get-NapCatLoginMarkerPath {

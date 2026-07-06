@@ -71,13 +71,12 @@ async def get_meme_index():
 
 @api.route("/index/migrate_mlj_pack", methods=["POST"])
 async def migrate_mlj_pack():
-    """从旧 mlj_pack 索引复制/合并迁移到 meme_manager 运行态。"""
+    """从手动指定的旧 mlj_pack 索引复制/合并迁移到 meme_manager 运行态。"""
     data = await request.get_json(silent=True) or {}
     source_index = data.get("source_index")
-    if source_index:
-        source_path = Path(str(source_index))
-    else:
-        source_path = _find_default_mlj_pack_index()
+    if not source_index:
+        return jsonify({"message": "source_index is required"}), 400
+    source_path = Path(str(source_index))
 
     try:
         result = migrate_mlj_pack_index(source_path)
@@ -105,15 +104,6 @@ async def update_emoji_metadata():
 
     entry = upsert_image_metadata(category, filename, metadata)
     return jsonify({"message": "元数据已保存", "entry": entry}), 200
-
-
-def _find_default_mlj_pack_index() -> Path:
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        candidate = parent / "data" / "memes" / "mlj_pack" / "index.json"
-        if candidate.is_file():
-            return candidate
-    return current.parents[0] / "data" / "memes" / "mlj_pack" / "index.json"
 
 
 @api.route("/emoji/add", methods=["POST"])

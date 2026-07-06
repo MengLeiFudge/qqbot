@@ -16,7 +16,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const batchMoveBtn = document.getElementById("batch-move-btn");
   const batchDeleteBtn = document.getElementById("batch-delete-btn");
   const clearAllBtn = document.getElementById("clear-all-btn");
-  const migrateMljPackBtn = document.getElementById("migrate-mlj-pack-btn");
   const memeSearchInput = document.getElementById("meme-search-input");
   const memeSearchClearBtn = document.getElementById("meme-search-clear-btn");
   const selectionSummary = document.getElementById("selection-summary");
@@ -3036,12 +3035,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  if (migrateMljPackBtn) {
-    migrateMljPackBtn.addEventListener("click", async () => {
-      await migrateMljPack();
-    });
-  }
-
   if (memeSearchInput) {
     memeSearchInput.addEventListener("input", () => {
       applyMemeSearchFilter();
@@ -3654,45 +3647,6 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error("同步配置失败:", error);
       showToast(error.message, "error", "同步失败");
-    }
-  }
-
-  async function migrateMljPack() {
-    const confirmed = await showConfirm({
-      title: "导入旧 mlj_pack",
-      description:
-        "确认从 data/memes/mlj_pack/index.json 复制/合并图片和元数据到当前 meme_manager 本地索引？该操作不会删除旧目录。",
-      confirmLabel: "确认导入",
-    });
-    if (!confirmed) {
-      return;
-    }
-
-    setButtonBusy(migrateMljPackBtn, "导入中...");
-    try {
-      const result = await requestJson(
-        "/api/index/migrate_mlj_pack",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        },
-        { defaultErrorMessage: "导入 mlj_pack 失败" }
-      );
-      await refreshUi({ emojis: true, syncStatus: true });
-      showToast(
-        `导入完成：新增 ${result.copied || 0}，更新 ${result.updated || 0}，缺失 ${
-          result.skipped_missing || 0
-        }。`,
-        "success",
-        "导入完成",
-        5200
-      );
-    } catch (error) {
-      console.error("导入 mlj_pack 失败:", error);
-      showToast(error.message, "error", "导入失败");
-    } finally {
-      restoreButton(migrateMljPackBtn);
     }
   }
 
