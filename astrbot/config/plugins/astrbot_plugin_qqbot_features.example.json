@@ -12,9 +12,6 @@
   "sub2api_timeout_seconds": 90,
   "sub2api_refresh_interval_seconds": 300,
   "sub2api_alert_group_ids": "",
-  "context_bridge_enabled_groups": "",
-  "context_bridge_max_messages": 8,
-  "context_bridge_max_chars": 1200,
   "reply_style_guard_long_reply_fold_threshold_chars": 300,
   "reply_style_guard_disable_astrbot_segmented_reply": true,
   "reply_style_guard_long_input_tldr_threshold_chars": 300,
@@ -94,6 +91,5 @@
   "source_knowledge_refresh_seconds": 600,
   "twin_interaction_enabled_groups": "",
   "twin_interaction_direct_handler_enabled": true,
-  "twin_interaction_max_context_messages": 4,
   "twin_interaction_max_context_chars": 1200
 }

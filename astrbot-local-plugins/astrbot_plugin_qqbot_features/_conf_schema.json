@@ -81,24 +81,6 @@
     "default": "",
     "hint": "英文逗号分隔一个或多个 QQ 群号。5h 用量首次跨过 80%、90%、95% 时自动提醒；回落到阈值以下后才会再次触发同一阈值。"
   },
-  "context_bridge_enabled_groups": {
-    "description": "公开群上下文桥接群号",
-    "type": "string",
-    "default": "",
-    "hint": "英文逗号分隔群号；留空表示所有存在公开群上下文文件的群都允许注入。"
-  },
-  "context_bridge_max_messages": {
-    "description": "公开群上下文最大消息数",
-    "type": "int",
-    "default": 8,
-    "hint": "LLM 请求前最多注入多少条 data/astrbot/data/plugin_data/qqbot_features_runtime/ai/group_context 里的公开群聊上下文。"
-  },
-  "context_bridge_max_chars": {
-    "description": "公开群上下文最大字符数",
-    "type": "int",
-    "default": 1200,
-    "hint": "限制桥接上下文长度，避免 prompt 过长。"
-  },
   "reply_style_guard_long_reply_fold_threshold_chars": {
     "description": "长回复折叠阈值",
     "type": "int",
@@ -405,12 +387,6 @@
     "type": "bool",
     "default": true,
     "hint": "开启后，明确询问天使/恶魔/姐姐/妹妹/双子关系时由当前 bot 直接发起本轮 LLM 回复。"
-  },
-  "twin_interaction_max_context_messages": {
-    "description": "双子上下文最大消息数",
-    "type": "int",
-    "default": 4,
-    "hint": "最多注入另一个 bot 的近期公开群消息片段。"
   },
   "twin_interaction_max_context_chars": {
     "description": "双子上下文最大字符数",

@@ -63,7 +63,7 @@ def decide_llm_worker(
     original_text: object = "",
     private_chat: bool = False,
     allow_multi_target: bool = False,
-    allow_delegation: bool = True,
+    allow_delegation: bool = False,
     now: float | None = None,
     worker_ids: tuple[str, ...] = TWIN_WORKER_IDS,
     rng: random.Random | None = None,
@@ -173,7 +173,7 @@ def select_worker(
     now: float | None = None,
     group_key: str = "",
     worker_ids: tuple[str, ...] = TWIN_WORKER_IDS,
-    allow_delegation: bool = True,
+    allow_delegation: bool = False,
     rng: random.Random | None = None,
 ) -> str | None:
     current = time.monotonic() if now is None else now

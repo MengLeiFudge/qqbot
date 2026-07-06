@@ -26,9 +26,6 @@ from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
 from .command_guard import record_command_handled
 from .command_guard import try_claim_command
-from .context_bridge import build_group_context_injection
-from .context_bridge import format_enabled_groups as format_context_bridge_enabled_groups
-from .context_bridge import load_bridge_config
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
@@ -37,8 +34,6 @@ from .meme_manager.commands import MEME_MANAGER_COMMAND_PATTERN
 from .meme_manager.commands import looks_like_meme_manager_command
 from .meme_manager.commands import parse_meme_manager_command
 from .meme_manager.runtime import MemeManagerRuntime
-from .note_export import GroupNoteExportError
-from .note_export import export_group_notes_markdown
 from .onebot_api import OneBotCallApiAdapter
 from .rightcodes_draw_logic import RightCodesDrawClient
 from .rightcodes_draw_logic import RightCodesDrawQuotaStore
@@ -81,7 +76,6 @@ from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
 from .reply_style_guard_logic import build_both_targeted_reply_instruction_text
 from .reply_style_guard_logic import CHAT_BUBBLE_REPLY_INSTRUCTION
-from .reply_style_guard_logic import build_delegated_reply_instruction_text
 from .reply_style_guard_logic import STYLE_IMMUTABILITY_INSTRUCTION
 from .reply_style_guard_logic import normalize_long_input_tldr_threshold
 from .reply_style_guard_logic import is_dangerous_local_tool_name
@@ -91,7 +85,6 @@ from .reply_style_guard_logic import should_disable_model_regex_segmenting
 from .reply_style_guard_logic import should_reply_too_long_to_read
 from .reply_style_guard_logic import split_chat_bubble_lines
 from .reply_style_guard_runtime import build_folded_reply_chain
-from .reply_style_guard_runtime import decorate_active_reply_source
 from .reply_style_guard_runtime import extract_onebot_forward_text
 from .reply_style_guard_runtime import has_forward_message
 from .social_events import GROUP_MEMBER_WELCOME_EXPRESSIONS
@@ -142,10 +135,6 @@ FACTORIO_DOWNLOAD_PATTERN = (
 )
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单\s*(?!\d+$)\S+$"
-NOTE_EXPORT_PATTERN = (
-    r"^(?:棉花(?:记录|导出(?:md|MD)?)(?:\s*[0-9]{1,3})?|"
-    r"(?:记录|导出).*(?:对话|聊天记录|群聊记录).*(?:md|MD|markdown|Markdown|\.md|文件|当前目录).*)$"
-)
 GROUP_FILE_CLEANUP_PATTERN = r"^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
 SUB2API_USAGE_PATTERN = r"(?i)^用量$"
 LOLICON_ADMIN_PATTERN = r"^[开关](?:群色图|图片显示)$"
@@ -173,7 +162,6 @@ FIXED_COMMAND_PATTERNS = tuple(
     for pattern in (
         MENU_PATTERN,
         FEATURE_MENU_PATTERN,
-        NOTE_EXPORT_PATTERN,
         GROUP_FILE_CLEANUP_PATTERN,
         SUB2API_USAGE_PATTERN,
         FACTORIO_DOWNLOAD_PATTERN,
@@ -207,11 +195,7 @@ DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS = 300
 DEFAULT_LONG_INPUT_TLDR_TEXT = "太长不看喵"
 LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
 LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
-DELEGATED_FROM_EXTRA = "_qqbot_twin_llm_delegated_from"
 BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
-ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA = "_qqbot_active_reply_quote_message_id"
-ACTIVE_REPLY_AT_USER_ID_EXTRA = "_qqbot_active_reply_at_user_id"
-DEFAULT_TWIN_MAX_CONTEXT_MESSAGES = 4
 DEFAULT_TWIN_MAX_CONTEXT_CHARS = 1200
 INTERNAL_ERROR_PREFIXES = (
     "Error occurred while processing agent request:",
@@ -251,7 +235,6 @@ FEATURES: tuple[FeatureSpec, ...] = (
         aliases=("群管", "群管理", "群功能"),
         lines=(
             "通知清理文件：作者或机器人自身限定，统计超过一周的外层群文件并按大小禁言上传者",
-            "棉花记录 [数量] / 棉花导出md [数量]：主人限定，导出公开群上下文到固定 md 目录",
         ),
     ),
     FeatureSpec(
@@ -334,9 +317,9 @@ FEATURES: tuple[FeatureSpec, ...] = (
     ),
     FeatureSpec(
         name="AI对话",
-        aliases=("AI测试", "主动接话", "长期记忆"),
+        aliases=("AI测试", "显式呼叫", "follow-up"),
         status="使用 AstrBot 原生链路",
-        lines=("AI 对话使用 AstrBot provider、persona、记忆和主动接话链路",),
+        lines=("AI 对话使用 AstrBot provider、persona、记忆和显式呼叫链路",),
     ),
 )
 
@@ -429,13 +412,6 @@ class QQBotFeaturesPlugin(Star):
         self._sub2api_alerted_thresholds_by_account: dict[str, set[int]] = {}
         self._rightcodes_draw_lock = asyncio.Semaphore(2)
         self._group_inviter_by_group_id: dict[str, str] = {}
-        self._context_bridge_config = load_bridge_config(
-            ScopedPluginConfig(
-                config,
-                prefix="context_bridge",
-                legacy_plugin_name="astrbot_plugin_qqbot_context_bridge",
-            )
-        )
         reply_style_guard_config = ScopedPluginConfig(
             config,
             prefix="reply_style_guard",
@@ -498,13 +474,9 @@ class QQBotFeaturesPlugin(Star):
             self._auto_approve_group_invites,
         )
         logger.info(
-            "[QQBotFeatures] merged guards loaded: context_groups=%s context_max_messages=%s context_max_chars=%s "
-            "reply_fold_chars=%s disable_astrbot_segmented=%s long_input_tldr_chars=%s "
+            "[QQBotFeatures] merged guards loaded: reply_fold_chars=%s disable_astrbot_segmented=%s long_input_tldr_chars=%s "
             "source_groups=%s source_roots=%s source_max_results=%s source_max_chars=%s "
             "source_max_files=%s source_max_file_bytes=%s twin_profile=%s twin_groups=%s twin_direct=%s",
-            format_context_bridge_enabled_groups(self._context_bridge_config.enabled_groups),
-            self._context_bridge_config.max_messages,
-            self._context_bridge_config.max_chars,
             self._reply_long_reply_fold_threshold_chars,
             self._reply_disable_astrbot_segmented_reply,
             self._reply_long_input_tldr_threshold_chars,
@@ -541,21 +513,6 @@ class QQBotFeaturesPlugin(Star):
         self._arc_background_task = None
         await self._meme_runtime.terminate()
 
-    @filter.on_llm_request(desc="在 AstrBot 调用 LLM 前，按当前群号读取迁移后的公开群上下文并临时注入本轮请求。")
-    async def inject_migrated_group_context(self, event: AstrMessageEvent, req: ProviderRequest):
-        group_id = str(event.get_group_id() or "")
-        if self._context_bridge_config.enabled_groups and group_id not in self._context_bridge_config.enabled_groups:
-            return
-        injection = build_group_context_injection(group_id, self._context_bridge_config)
-        if not injection:
-            return
-        req.extra_user_content_parts.append(TextPart(text=injection).mark_as_temp())
-        logger.info(
-            "[QQBotFeatures] injected migrated group context: group=%s chars=%s",
-            group_id,
-            len(injection),
-        )
-
     @filter.on_llm_request(desc="在 LLM 请求前记录耗时、移除非主人私聊本机工具并注入纯文本回复边界。")
     async def inject_reply_style_guard(self, event: AstrMessageEvent, req: ProviderRequest):
         started = time.monotonic()
@@ -581,11 +538,6 @@ class QQBotFeaturesPlugin(Star):
                 ",".join(removed_tools),
             )
         req.extra_user_content_parts.append(TextPart(text=PLAIN_TEXT_REPLY_INSTRUCTION).mark_as_temp())
-        delegated_from = str(event.get_extra(DELEGATED_FROM_EXTRA, "") or "").strip()
-        if delegated_from:
-            req.extra_user_content_parts.append(
-                TextPart(text=build_delegated_reply_instruction(event, delegated_from)).mark_as_temp()
-            )
         if str(event.get_extra(BOTH_TARGETED_EXTRA, "") or "").strip():
             req.extra_user_content_parts.append(
                 TextPart(text=build_both_targeted_reply_instruction_text()).mark_as_temp()
@@ -729,16 +681,6 @@ class QQBotFeaturesPlugin(Star):
                 "[QQBotFeatures] folded long reply into AstrBot Nodes chain: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
-        active_reply_decorated = False
-        if not folded:
-            active_reply_decorated = _decorate_active_reply_result(event, result)
-            if active_reply_decorated:
-                logger.info(
-                    "[QQBotFeatures] decorated active reply source: session=%s quote=%s at=%s",
-                    getattr(event, "unified_msg_origin", ""),
-                    event.get_extra(ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA, ""),
-                    event.get_extra(ACTIVE_REPLY_AT_USER_ID_EXTRA, ""),
-                )
         if not bubbled and _should_disable_segmented_reply_for_result(
             self.context,
             result,
@@ -749,8 +691,6 @@ class QQBotFeaturesPlugin(Star):
                 "[QQBotFeatures] plugin override disabled AstrBot segmented reply for LLM result: session=%s",
                 getattr(event, "unified_msg_origin", ""),
             )
-        elif active_reply_decorated:
-            result.set_result_content_type(ResultContentType.GENERAL_RESULT)
         await self._meme_runtime.on_decorating_result(event)
 
     @filter.after_message_sent(desc="发送后补发未混入同一消息链的本地表情图片，并清理临时文件。")
@@ -993,34 +933,6 @@ class QQBotFeaturesPlugin(Star):
             await run_group_file_cleanup(event)
         except Exception as exc:
             yield event.plain_result(f"群文件清理失败：{exc}")
-        event.stop_event()
-
-    @filter.regex(NOTE_EXPORT_PATTERN, desc="主人限定的群聊记录导出命令，只读公开群上下文并写入固定安全目录。")
-    async def group_note_export(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode, command_type="note_export"):
-            return
-        if event.is_private_chat() or not event.get_group_id():
-            yield event.plain_result("群聊记录导出只能在群聊中使用。")
-            event.stop_event()
-            return
-        if str(event.get_sender_id() or "") != OWNER_QQ:
-            yield event.plain_result("这个导出只允许主人使用。")
-            event.stop_event()
-            return
-        try:
-            result = await asyncio.to_thread(
-                export_group_notes_markdown,
-                group_id=str(event.get_group_id()),
-                text=event.get_message_str(),
-            )
-        except GroupNoteExportError as exc:
-            yield _chain_result_with_reply(event, [Plain(str(exc))])
-            event.stop_event()
-            return
-        yield _chain_result_with_reply(
-            event,
-            [Plain(f"已导出最近 {result.count} 条公开群聊记录：\n{result.path}")],
-        )
         event.stop_event()
 
     @filter.regex(FACTORIO_DOWNLOAD_PATTERN, desc="获取 Factorio Space Age Windows 安装包下载链接，需要本机已配置 Factorio 凭据。")
@@ -2122,24 +2034,13 @@ def load_twin_config(config=None) -> TwinInteractionConfig:
     return TwinInteractionConfig(
         enabled_groups=parse_twin_group_ids(get_config_value(config, "enabled_groups", "")),
         direct_handler_enabled=read_twin_bool(get_config_value(config, "direct_handler_enabled", True), default=True),
-        max_context_messages=clamp_twin_int(
-            get_config_value(config, "max_context_messages", DEFAULT_TWIN_MAX_CONTEXT_MESSAGES),
-            default=DEFAULT_TWIN_MAX_CONTEXT_MESSAGES,
-            minimum=0,
-            maximum=20,
-        ),
         max_context_chars=clamp_twin_int(
             get_config_value(config, "max_context_chars", DEFAULT_TWIN_MAX_CONTEXT_CHARS),
             default=DEFAULT_TWIN_MAX_CONTEXT_CHARS,
             minimum=400,
             maximum=4000,
         ),
-        context_root=resolve_public_group_context_root(),
     )
-
-
-def resolve_public_group_context_root() -> Path:
-    return get_qqbot_runtime_root() / "ai" / "group_context"
 
 
 def is_bot_sender(event: AstrMessageEvent, profile: TwinProfile) -> bool:
@@ -2195,22 +2096,6 @@ def _should_disable_segmented_reply_for_result(
     )
 
 
-def _decorate_active_reply_result(event: AstrMessageEvent, result) -> bool:
-    if event.get_platform_name() != "aiocqhttp":
-        return False
-    if result is None or not result.is_model_result():
-        return False
-    decorated = decorate_active_reply_source(
-        result.chain,
-        quote_message_id=event.get_extra(ACTIVE_REPLY_QUOTE_MESSAGE_ID_EXTRA, ""),
-        at_user_id=event.get_extra(ACTIVE_REPLY_AT_USER_ID_EXTRA, ""),
-    )
-    if decorated is None:
-        return False
-    result.chain = decorated
-    return True
-
-
 def _read_segmented_reply_config(context: Context) -> dict:
     get_config = getattr(context, "get_config", None)
     config = None
@@ -2226,14 +2111,6 @@ def _read_segmented_reply_config(context: Context) -> dict:
         return {}
     segmented_reply = platform_settings.get("segmented_reply")
     return segmented_reply if isinstance(segmented_reply, dict) else {}
-
-
-def build_delegated_reply_instruction(event: AstrMessageEvent, delegated_from: str) -> str:
-    return build_delegated_reply_instruction_text(
-        current_id=safe_event_value(event, "get_self_id"),
-        current_name=read_bot_display_name(event),
-        delegated_from=delegated_from,
-    )
 
 
 def _plain_result_text(chain) -> str:

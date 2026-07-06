@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-import os
-from pathlib import Path
 import re
-from typing import Any
 
 try:
     from astrbot.api.message_components import At, Image, Plain, Reply
@@ -16,15 +12,6 @@ except Exception:  # pragma: no cover - imported by lightweight unit tests.
 
 
 BOT_NAME_MARKERS = ("棉花糖", "天使棉花糖", "恶魔棉花糖", "呼叫棉花糖")
-DEFAULT_CONTEXT_ROOT = (
-    Path("data")
-    / "astrbot"
-    / "data"
-    / "plugin_data"
-    / "qqbot_features_runtime"
-    / "ai"
-    / "group_context"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,18 +67,12 @@ def extract_plain_text(event: object) -> str:
 
 def extract_reply_texts(event: object) -> list[str]:
     texts: list[str] = []
-    reply_ids: list[str] = []
     for segment in safe_get_messages(event):
         if not is_reply_segment(segment):
             continue
         text = reply_segment_text(segment)
         if text:
             texts.append(text)
-        reply_id = str(getattr(segment, "id", "") or "").strip()
-        if reply_id:
-            reply_ids.append(reply_id)
-    if reply_ids and len(texts) < len(reply_ids):
-        texts.extend(resolve_reply_texts_from_public_context(event, reply_ids))
     return dedupe_keep_order(texts)
 
 
@@ -109,34 +90,6 @@ def reply_segment_text(segment: object) -> str:
             parts.append(str(getattr(item, "text", "") or ""))
     text = normalize_space("".join(parts))
     return "" if is_media_placeholder_text(text) else text
-
-
-def resolve_reply_texts_from_public_context(event: object, reply_ids: list[str]) -> list[str]:
-    group_id = safe_call(event, "get_group_id")
-    if not group_id:
-        return []
-    path = safe_group_context_file(resolve_public_group_context_root(), str(group_id))
-    if path is None or not path.is_file():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except Exception:
-        return []
-    if not isinstance(payload, list):
-        return []
-    wanted = {str(value).strip() for value in reply_ids if str(value).strip()}
-    texts: list[str] = []
-    for record in payload:
-        if not isinstance(record, dict):
-            continue
-        message_id = str(record.get("message_id") or "").strip()
-        if message_id not in wanted:
-            continue
-        text = normalize_space(record.get("text") or "")
-        if text:
-            sender = normalize_space(record.get("sender_name") or record.get("user_id") or "")
-            texts.append(f"{sender}: {text}" if sender else text)
-    return texts
 
 
 def canonical_event_claim_key(event: object, *, purpose: str, include_private_self_id: bool = False) -> str:
@@ -352,30 +305,3 @@ def dedupe_keep_order(values: list[str]) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
-
-
-def resolve_public_group_context_root() -> Path:
-    astrbot_root = Path(os.environ.get("ASTRBOT_ROOT", "")).resolve()
-    if astrbot_root.name == "astrbot" and astrbot_root.parent.name == "data":
-        workspace_root = astrbot_root.parent.parent
-    else:
-        cwd = Path.cwd().resolve()
-        if cwd.name == "qqbot":
-            workspace_root = cwd
-        elif cwd.name == "astrbot" and cwd.parent.name == "data":
-            workspace_root = cwd.parent.parent
-        else:
-            workspace_root = cwd
-    return workspace_root / DEFAULT_CONTEXT_ROOT
-
-
-def safe_group_context_file(context_root: Path, group_id: str) -> Path | None:
-    if not str(group_id or "").isdigit():
-        return None
-    root = context_root.resolve()
-    path = (root / f"{group_id}.json").resolve()
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return None
-    return path

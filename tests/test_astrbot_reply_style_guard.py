@@ -80,46 +80,10 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_permissi
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_followup_tail
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_markdown_syntax
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_model_regex_segmenting
-from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_reply_instruction_text
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_both_targeted_reply_instruction_text
-from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_delegated_comment_prompt_text
-from astrbot_plugin_qqbot_features.reply_style_guard_runtime import decorate_active_reply_source
 
 
 class AstrBotReplyStyleGuardTest(unittest.TestCase):
-    def test_active_reply_source_decorator_prepends_quote_and_at(self) -> None:
-        chain = decorate_active_reply_source(
-            [Plain("第一条消息"), Plain("第二条消息")],
-            quote_message_id="m-100",
-            at_user_id="3062317151",
-        )
-
-        self.assertIsNotNone(chain)
-        self.assertIsInstance(chain[0], Reply)
-        self.assertEqual(chain[0].id, "m-100")
-        self.assertIsInstance(chain[1], At)
-        self.assertEqual(chain[1].qq, "3062317151")
-        self.assertEqual(chain[2].text, "第一条消息")
-        self.assertEqual(chain[3].text, "第二条消息")
-
-    def test_active_reply_source_decorator_skips_non_plain_chain(self) -> None:
-        self.assertIsNone(
-            decorate_active_reply_source(
-                [Nodes([])],
-                quote_message_id="m-100",
-                at_user_id="3062317151",
-            )
-        )
-
-    def test_active_reply_source_decorator_does_not_duplicate_reply(self) -> None:
-        self.assertIsNone(
-            decorate_active_reply_source(
-                [Reply(id="existing"), Plain("正文")],
-                quote_message_id="m-100",
-                at_user_id="3062317151",
-            )
-        )
-
     def test_stripping_only_followup_question_returns_empty_text(self) -> None:
         self.assertEqual(strip_followup_tail("你把具体名字发我。"), "")
         self.assertEqual(strip_followup_tail("是不是更安全？"), "")
@@ -148,6 +112,22 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertEqual(
             sanitize_reply_plain_text("**结论**：别登录。\n- 原因：不正规。\n你把具体名字发我。"),
             "结论：别登录。\n· 原因：不正规。",
+        )
+
+    def test_sanitize_reply_plain_text_strips_followup_control_marker(self) -> None:
+        self.assertEqual(
+            sanitize_reply_plain_text("处理完了[[QQBOT_FOLLOWUP_END]]"),
+            "处理完了",
+        )
+
+    def test_sanitize_reply_plain_text_strips_twin_refusal_when_answer_exists(self) -> None:
+        self.assertEqual(
+            sanitize_reply_plain_text("我不能替姐姐回答。这个图大概率是 Hello Kitty。"),
+            "这个图大概率是 Hello Kitty。",
+        )
+        self.assertEqual(
+            sanitize_reply_plain_text("还是让妹妹自己来说吧，我在呢。"),
+            "我在呢。",
         )
 
     def test_decorative_tail_is_stripped(self) -> None:
@@ -202,23 +182,6 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             )
         )
 
-    def test_delegated_reply_instruction_mentions_busy_target(self) -> None:
-        instruction = build_delegated_reply_instruction_text(
-            current_id="1443944862",
-            current_name="😇棉花糖😇",
-            delegated_from="2629227874",
-        )
-
-        self.assertIn("原本被叫到的是 👿棉花糖👿", instruction)
-        self.assertIn("现在由 😇棉花糖😇 用自己的身份回答", instruction)
-        self.assertIn("不要固定开场", instruction)
-        self.assertIn("不要说“我先接一下”", instruction)
-        self.assertIn("不要说“我先接一下”“她在忙”", instruction)
-        self.assertIn("不要冒充对方", instruction)
-        self.assertIn("本轮回复里的“我”必须是当前 bot", instruction)
-        self.assertIn("不要编另一个 bot 玩过", instruction)
-        self.assertIn("能发截图", instruction)
-
     def test_both_targeted_instruction_requires_current_bot_to_complete_task(self) -> None:
         instruction = build_both_targeted_reply_instruction_text()
 
@@ -226,6 +189,8 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("直接完成用户这次请求", instruction)
         self.assertIn("如果用户让讲笑话", instruction)
         self.assertIn("不要把任务转给另一个 bot", instruction)
+        self.assertIn("在吗", instruction)
+        self.assertIn("短句应到", instruction)
         self.assertIn("是不是该睡觉了", instruction)
         self.assertIn("不要 @ 另一个 bot", instruction)
         self.assertIn("不要把问题改成评价另一个 bot", instruction)
@@ -248,20 +213,6 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
         self.assertIn("不要说“让她来讲/让对方回应/我不替她讲”", instruction)
         self.assertIn("绝对不要输出括号舞台说明", instruction)
         self.assertIn("用户只点名了另一个 bot 没叫我", instruction)
-
-    def test_delegated_comment_prompt_uses_current_target_viewpoint(self) -> None:
-        prompt = build_delegated_comment_prompt_text(
-            current_id="1443944862",
-            responder_id="2629227874",
-            original_text="@天使 为什么没有开机指令",
-            response_text="姐姐在忙，我替她盯一会儿。",
-        )
-
-        self.assertIn("你是 😇棉花糖😇", prompt)
-        self.assertIn("原本被用户叫到的姐姐", prompt)
-        self.assertIn("👿棉花糖👿 已经用她自己的身份代班回答了", prompt)
-        self.assertIn("不要再说自己在忙", prompt)
-        self.assertIn("不要把自己描述成正在被别人代班的第三人称", prompt)
 
     def test_long_reply_fold_threshold_can_be_disabled(self) -> None:
         self.assertTrue(should_fold_long_reply("a" * 301, threshold=300))

@@ -68,7 +68,7 @@
     "group_message_max_cnt": 300,
     "image_caption": true,
     "active_reply": {
-      "enable": true,
+      "enable": false,
       "method": "possibility_reply",
       "possibility_reply": 0.05,
       "whitelist": []

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import sys
-import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +15,6 @@ from astrbot_plugin_qqbot_features.twin_interaction_logic import (
     is_bare_dual_bot_call,
     is_bot_sender_id,
     is_twin_related_text,
-    load_recent_other_bot_records,
     read_profile,
     read_profile_for_self_id,
     should_handle_direct_twin_request,
@@ -70,9 +67,7 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         config = TwinInteractionConfig(
             enabled_groups=set(),
             direct_handler_enabled=True,
-            max_context_messages=2,
             max_context_chars=2000,
-            context_root=Path("/tmp/missing"),
         )
         injection = build_twin_injection(
             text="[At:1443944862] [At:2629227874]",
@@ -89,9 +84,7 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         config = TwinInteractionConfig(
             enabled_groups=set(),
             direct_handler_enabled=True,
-            max_context_messages=2,
             max_context_chars=2000,
-            context_root=Path("/tmp/missing"),
         )
         injection = build_twin_injection(
             text="[At:1443944862] [At:2629227874] 讲一个笑话",
@@ -143,36 +136,12 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         self.assertIn("是你的姐姐", demon_injection)
         self.assertIn("不能把自己说成 天使棉花糖", demon_injection)
 
-    def test_load_recent_other_bot_records_only_uses_other_bot_public_context(self) -> None:
-        profile = read_profile("angel")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            (root / "123.json").write_text(
-                json.dumps(
-                    [
-                        {"user_id": "111", "text": "human"},
-                        {"user_id": profile.other_bot_id, "text": "恶魔第一句", "message_id": "a"},
-                        {"user_id": profile.bot_id, "text": "天使自己的话"},
-                        {"user_id": profile.other_bot_id, "text": "恶魔第二句", "message_id": "b"},
-                    ],
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-
-            records = load_recent_other_bot_records(root, "123", profile, limit=1)
-
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["text"], "恶魔第二句")
-
     def test_injection_and_direct_prompt_keep_identity_boundary(self) -> None:
         profile = read_profile("angel")
         config = TwinInteractionConfig(
             enabled_groups=set(),
             direct_handler_enabled=True,
-            max_context_messages=2,
             max_context_chars=2000,
-            context_root=Path("/tmp/missing"),
         )
 
         injection = build_twin_injection(
