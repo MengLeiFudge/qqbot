@@ -53,8 +53,22 @@ class UpdateAstrBotContractTest(unittest.TestCase):
         self.assertIn("[switch]$AssumeYes", script)
         self.assertIn("function Get-InstalledNapCatRelease", script)
         self.assertIn("function Get-NormalizedReleaseTag", script)
+        self.assertIn("function Ensure-NapCatBuiltinPlugin", script)
         self.assertIn("NapCat is already at latest release $version; skipping download and package replacement.", script)
+        self.assertIn("Ensure-NapCatBuiltinPlugin -TargetRoot $OneKeyRoot", script)
+        self.assertGreaterEqual(script.count("Ensure-NapCatBuiltinPlugin -TargetRoot $OneKeyRoot"), 2)
         self.assertLess(script.index("NapCat is already at latest release"), script.index("Invoke-WebRequest"))
+
+    def test_update_napcat_ensures_builtin_plugin_after_activation(self) -> None:
+        script = UPDATE_NAPCAT.read_text(encoding="utf-8-sig")
+
+        self.assertIn("ensure-napcat-builtin-plugin.ps1", script)
+        self.assertIn("NapCat builtin plugin ensure failed", script)
+        self.assertIn("Would ensure NapCat builtin plugin after activation.", script)
+        self.assertLess(
+            script.index("Ensure-NapCatBuiltinPlugin -TargetRoot $OneKeyRoot"),
+            script.index("Write-NapCatReleaseMarker -Tag $version -Asset $asset"),
+        )
 
     def test_update_napcat_prompts_with_download_details_before_download(self) -> None:
         script = UPDATE_NAPCAT.read_text(encoding="utf-8-sig")

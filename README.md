@@ -88,7 +88,7 @@ Set-Location D:\project\qqbot
 - `1443944862`：AstrBot 天使平台，默认反连 `ws://127.0.0.1:6200/ws`。
 - `2629227874`：NapCat 反连 AstrBot 恶魔平台，默认 `ws://127.0.0.1:6201/ws`。
 
-NapCat 仍使用 `napcat/` 下的一键包；更新脚本会在替换过程中临时使用 `data\napcat\downloads\` 和 `data\napcat\archives\`，成功迁移账号 OneBot 配置后自动清理下载包、解压目录和旧包备份。
+NapCat 仍使用 `napcat/` 下的一键包；启动和更新脚本会确保官方内置插件 `napcat-plugin-builtin` 存在于 `napcat\onekey\napcat\plugins\`，让 `#napcat` 这类 NapCat 框架固定指令在 NapCat 层优先匹配，不落入 AstrBot/LLM。更新脚本会在替换过程中临时使用 `data\napcat\downloads\` 和 `data\napcat\archives\`，成功迁移账号 OneBot 配置并恢复内置插件后自动清理下载包、解压目录和旧包备份。
 
 ## Linux / 1Panel 部署
 

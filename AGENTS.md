@@ -37,7 +37,7 @@
 - 普通聊天文本不得在 AstrBot 本地插件里按“低信息、在吗、111、真的吗、回复慢、测试、探活”等启发式直接生成本地回复；只要命中明确 @、私聊、命名呼叫或 follow-up，且没有命中明确命令、游戏会话答案、协议事件处理或本地硬安全提醒，就必须交给 LLM 链路处理。插件可以做 prompt 注入、记忆检索、输出清洗和路由门控，但不能凭空补一句固定兜底文本。
 - 双平台所有群聊和私聊 LLM 回复都不做危机处理；自述、倒霉、考试迟到、没吃饭、没睡觉等默认按玩笑、夸张、钓机器人或时间梗分析。分析不出发言原因时不回答，不编原因，不输出危机干预、急救、报警、健康建议或严肃安慰；凭据泄露等本地硬安全提醒仍按既有规则执行。
 - 双平台不保留“严肃模式”人格切换；所有群聊都按轻松水群氛围处理。技术、代码、报错、配置、群管理和安全提醒也必须保持当前天使/恶魔人设语气，但结论要准确、可执行，不能用卖萌或吐槽遮住关键信息。复读、频繁艾特、怪图/表情包和深夜修仙默认是水群行为，直接被叫到时短句接梗、安慰或吐槽；不得因此恢复普通主动接话刷屏。恶魔棉花糖平时不主动使用固定“喵”口癖，不要写“哼...喵”这类模板化短口癖。AstrBot 侧天使/恶魔身份、人设、说话风格和双子关系只来自 AstrBot WebUI 人格配置（运行态 `data\astrbot\data\data_v4.db`）；本地插件不得内嵌或覆盖固定人格、水群风格或固定口癖，只能注入动态事实、接口资料、权限边界和 QQ 纯文本/短气泡这类格式边界。
-- `napcat/`：共用 NapCat 程序包；当前账号 OneBot 配置随一键包放置并由更新脚本迁移。`data\napcat\downloads\` 和 `data\napcat\archives\` 只作为更新事务临时目录，成功更新后必须清理下载包、解压目录和旧包备份；若更新中途失败且旧 `onekey` 已被移走，临时旧包备份可保留为人工恢复点。
+- `napcat/`：共用 NapCat 程序包；当前账号 OneBot 配置随一键包放置并由更新脚本迁移。启动和更新脚本必须确保官方内置插件 `napcat-plugin-builtin` 存在于 `napcat\onekey\napcat\plugins\`，让 `#napcat` 这类 NapCat 框架固定指令在 NapCat 层优先匹配，不得在 AstrBot 插件里模拟该命令。`data\napcat\downloads\` 和 `data\napcat\archives\` 只作为更新事务临时目录，成功更新后必须清理下载包、解压目录和旧包备份；若更新中途失败且旧 `onekey` 已被移走，临时旧包备份可保留为人工恢复点。
 - `data/`：统一运行态根目录，默认忽略，不进 Git；顶层只保留 `data\astrbot\` 和 `data\napcat\`，旧迁移源、旧启动标记、旧下载包、旧归档、临时目录和重复配置不得作为日常运行态保留。
 - `scripts/`：只保留 `start-all.bat` 和 `update-all.bat` 两个根级 Windows 用户入口。
 - `tools/runtime-scripts/`：`scripts/` 两个 all 入口调用的内部 PowerShell 启动、重启和更新实现。
@@ -85,12 +85,12 @@
 - AstrBot 接管已迁移自动事件时，日常启动使用 `scripts\start-all.bat`；修改后验证或需要重新加载插件/配置时使用显式 `tools\runtime-scripts\start-all.ps1 -Target astrbot -SkipInstall -AstrBotProfile both -FeatureMode full -ForceRestart`。如本机端口冲突，可加 `-AstrBotOneBotPort <端口>` 和 `-AstrBotAngelOneBotPort <端口>` 同步 AstrBot 和 NapCat 反连配置。
 - 需要 NapCat 重新反连时也使用普通 AstrBot 启动入口，不要只重启 Python 进程。
 - 普通启动入口默认只保留一个入口终端，按固定前缀输出组件摘要，例如 `[Launcher]`、`[AstrBot]`、`[NapCat] [Angel]`、`[NapCat] [Demon]`；需要恢复旧多子窗口观察方式时显式使用 `-UseChildWindows`。默认启动是 ensure-running：先探测现有 AstrBot WebUI `6185`、OneBot `6200/6201`、artifact API `8080` 和两路 NapCat established 连接，全部 ready 时直接复用，不杀进程；缺失组件或显式 `-ForceRestart` 时才启动/重启。冷启动和强制重启时，启动器必须等 AstrBot WebUI `6185`、OneBot `6200/6201` 和 artifact API `8080` 全部 ready 后，才启动对应 NapCat 账号，避免 NapCat 日志把 AstrBot 启动耗时混成自身等待耗时；`start-astrbot.ps1` 应在 stdout 输出 `AstrBot startup phase: ...` 预启动阶段日志，`start-all.ps1` 等待摘要应识别 Core、插件、provider、KnowledgeBase 和 WebUI 等阶段。启动器临时控制标记写入 `data\astrbot\logs\start_all\<runId>\control\`，不得再写入顶层 `data\launcher\`。双平台 `both/full` 下两个 NapCat 账号不得无条件并行启动，必须通过 `data\napcat\quick-login\<account>.ready` 判断是否可快速登录：任一账号缺少标记或上次失败时按天使优先串行启动，避免两个账号同时写共享 `napcat\onekey\napcat\cache\qrcode.png` 导致控制台二维码不可用时扫错账号；两个账号标记都存在时允许按天使优先并行启动以缩短重启时间；某账号未成功反连时必须清除该账号标记。启动器控制台诊断和 bat 失败停窗文案保持英文/ASCII，避免 Windows 控制台无法显示 NapCat 中文日志或本地化 `pause` 提示时出现乱码；完整原始日志保留在 `data\astrbot\logs\start_all\<runId>\`。
-- NapCat 启动脚本必须同时兼容新版 `napcat\onekey\napcat\launcher-user.bat` 和旧版 `NapCat.*.Shell` / `bootmain` 结构；新版 quick login 使用 `NAPCAT_QUICK_ACCOUNT` 环境变量。
+- NapCat 启动脚本必须同时兼容新版 `napcat\onekey\napcat\launcher-user.bat` 和旧版 `NapCat.*.Shell` / `bootmain` 结构；新版 quick login 使用 `NAPCAT_QUICK_ACCOUNT` 环境变量。启动 NapCat 账号前必须先运行 `tools\runtime-scripts\ensure-napcat-builtin-plugin.ps1` 校验或恢复官方 `napcat-plugin-builtin`，避免 `#napcat` 被透传到 AstrBot/LLM。
 ## 更新
 
 - 总更新入口是 `D:\project\qqbot\scripts\update-all.bat`，按顺序调用 NapCat 和 AstrBot 更新实现。
 - 更新入口默认交互式：NapCat 下载前提示当前版本、目标 release、asset、下载 URL、zip 路径和后续替换动作；AstrBot install/upgrade 前提示当前 tool 状态、计划 uv 命令和会处理的运行进程。用户拒绝某组件时该组件跳过并退出 0；无人值守才显式传 `-AssumeYes` 自动确认。
-- NapCat 更新由 `tools\runtime-scripts\update-napcat.ps1` 实现；会先查询 GitHub 最新 release，本地已是最新 release 时直接跳过下载和替换，并清理旧更新缓存。本地版本优先读 `napcat\onekey\.qqbot-napcat-release.json`，旧包无标记时回看最近成功的 NapCat 更新日志；需要更新时，确认后才下载并解压新包到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，临时移走旧 `napcat\onekey`，替换后迁移账号 OneBot 配置，成功后删除本次下载包、解压目录和旧包临时备份。
+- NapCat 更新由 `tools\runtime-scripts\update-napcat.ps1` 实现；会先查询 GitHub 最新 release，本地已是最新 release 时直接跳过下载和替换，并清理旧更新缓存。本地版本优先读 `napcat\onekey\.qqbot-napcat-release.json`，旧包无标记时回看最近成功的 NapCat 更新日志；需要更新时，确认后才下载并解压新包到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，临时移走旧 `napcat\onekey`，替换后迁移账号 OneBot 配置，并校验或恢复官方 `napcat-plugin-builtin`，成功后删除本次下载包、解压目录和旧包临时备份。
 - OneBot v11 本身是协议；本仓库实际更新对象是 NapCat 协议端和 AstrBot Core。
 - AstrBot 更新由 `tools\runtime-scripts\update-astrbot.ps1` 实现；用户确认后会停止本工作区正在运行的 AstrBot uv tool 进程，再默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
 - Windows PATH 找不到 `uv` 时，更新脚本可以用 `py -3.14 -m pip install --user -U uv` 自举用户级 uv。

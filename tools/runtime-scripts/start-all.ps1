@@ -803,6 +803,36 @@ function Sync-NapCatOneBotClientConfig {
     }
 }
 
+function Ensure-NapCatBuiltinPlugin {
+    param(
+        [string]$LogFile,
+        [string]$ConsolePrefix = ""
+    )
+
+    $script = Join-Path $ScriptRoot "ensure-napcat-builtin-plugin.ps1"
+    if (-not (Test-Path $script)) {
+        throw "NapCat builtin plugin ensure script not found: $script"
+    }
+    $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $script,
+        "-WorkspaceRoot", $WorkspaceRoot,
+        "-NapCatRoot", (Join-Path $WorkspaceRoot "napcat\onekey\napcat")
+    )
+    if ($LogFile) {
+        $arguments += @("-LogFile", $LogFile)
+    }
+    if ($ConsolePrefix) {
+        $arguments += @("-ConsolePrefix", $ConsolePrefix)
+    }
+
+    & powershell.exe @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "NapCat builtin plugin ensure failed with exit code $LASTEXITCODE."
+    }
+}
+
 function Get-ProcessTreeIds {
     param(
         [int]$RootProcessId,
@@ -875,6 +905,58 @@ function Stop-NapCatAccountProcesses {
         if ($_.ScriptStackTrace) {
             Write-LauncherLog -LogFile $LogFile -Message "NapCat account process cleanup stack: $($_.ScriptStackTrace)" -ConsolePrefix $ConsolePrefix
         }
+    }
+}
+
+function Stop-NapCatWorkspaceProcesses {
+    param(
+        [string]$Reason = "restart"
+    )
+
+    try {
+        $allProcesses = @(Get-CimInstance Win32_Process)
+        $napcatRoot = (Join-Path $WorkspaceRoot "napcat\onekey\napcat").TrimEnd("\")
+        $napcatRootPattern = [regex]::Escape($napcatRoot)
+        $roots = @($allProcesses | Where-Object {
+            $_.CommandLine -and
+            $_.CommandLine -match $napcatRootPattern -and
+            (
+                $_.CommandLine -match 'launcher-user\.bat' -or
+                $_.CommandLine -match 'NapCatWinBootMain\.exe'
+            )
+        })
+        if ($roots.Count -eq 0) {
+            Write-LauncherStatus "No existing workspace NapCat process tree found for $Reason."
+            return
+        }
+
+        $targetIds = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($root in $roots) {
+            foreach ($processId in (Get-ProcessTreeIds -RootProcessId ([int]$root.ProcessId) -Processes $allProcesses)) {
+                if ($processId -ne $PID) {
+                    [void]$targetIds.Add([int]$processId)
+                }
+            }
+        }
+        if ($targetIds.Count -eq 0) {
+            Write-LauncherStatus "Workspace NapCat process tree for $Reason only contains current process."
+            return
+        }
+
+        Write-LauncherStatus "Stopping workspace NapCat process tree for ${Reason}: $($targetIds -join ', ')"
+        foreach ($processId in @($targetIds)) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
+        foreach ($processId in @($targetIds)) {
+            try {
+                Wait-Process -Id $processId -Timeout 20 -ErrorAction SilentlyContinue
+            }
+            catch {
+            }
+        }
+    }
+    catch {
+        Write-LauncherStatus "Workspace NapCat process cleanup skipped for ${Reason}: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
     }
 }
 
@@ -1118,6 +1200,7 @@ function Start-NapCatComponent {
 
     Write-LauncherLog -LogFile $launcherLog -Message "Starting NapCat account $Account." -ConsolePrefix $consolePrefix
 
+    Ensure-NapCatBuiltinPlugin -LogFile $launcherLog -ConsolePrefix $consolePrefix
     Sync-NapCatOneBotClientConfig -Account $Account -BotPort $BotPort -ClientName "astrbot-reverse-ws" -PathSuffix "/ws" -LogFile $launcherLog -ConsolePrefix $consolePrefix
 
     Stop-NapCatAccountProcesses -Account $Account -LogFile $launcherLog -ConsolePrefix $consolePrefix
@@ -1597,6 +1680,9 @@ function Invoke-Parent {
         }
         else {
             Write-LauncherStatus "Using existing bot ports before starting NapCat accounts."
+        }
+        if ($ForceRestart) {
+            Stop-NapCatWorkspaceProcesses -Reason "force restart"
         }
         Write-LauncherStatus "Starting NapCat accounts: $($startNapCatComponents -join ', ')"
         if ($AstrBotProfile -eq "both" -and (Test-AllNapCatQuickLoginReady -Components $startNapCatComponents)) {

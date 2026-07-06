@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = ROOT / "scripts"
 START_ALL = ROOT / "tools" / "runtime-scripts" / "start-all.ps1"
 START_ASTRBOT = ROOT / "tools" / "runtime-scripts" / "start-astrbot.ps1"
+ENSURE_NAPCAT_BUILTIN = ROOT / "tools" / "runtime-scripts" / "ensure-napcat-builtin-plugin.ps1"
 START_ALL_BAT = ROOT / "scripts" / "start-all.bat"
 
 
@@ -89,10 +90,45 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("-LogFile $launcherLog", script)
 
     def test_runtime_start_scripts_keep_console_text_ascii(self) -> None:
-        for path in (START_ALL, START_ASTRBOT):
+        for path in (START_ALL, START_ASTRBOT, ENSURE_NAPCAT_BUILTIN):
             script = path.read_text(encoding="utf-8-sig")
 
             self.assertIsNone(re.search(r"[\u4e00-\u9fff]", script), path.name)
+
+    def test_start_all_ensures_napcat_builtin_plugin_before_napcat_start(self) -> None:
+        script = START_ALL.read_text(encoding="utf-8-sig")
+
+        self.assertIn("function Ensure-NapCatBuiltinPlugin", script)
+        self.assertIn("ensure-napcat-builtin-plugin.ps1", script)
+        self.assertIn("NapCat builtin plugin ensure failed", script)
+        self.assertIn("Ensure-NapCatBuiltinPlugin -LogFile $launcherLog -ConsolePrefix $consolePrefix", script)
+        self.assertLess(
+            script.index("Ensure-NapCatBuiltinPlugin -LogFile $launcherLog -ConsolePrefix $consolePrefix"),
+            script.index("Sync-NapCatOneBotClientConfig -Account $Account"),
+        )
+
+        ensure_script = ENSURE_NAPCAT_BUILTIN.read_text(encoding="utf-8-sig")
+        self.assertIn("https://github.com/NapNeko/napcat-plugin-index/releases/download/v1.0.0/napcat-plugin-builtin.zip", ensure_script)
+        self.assertIn("napcat-plugin-builtin", ensure_script)
+        self.assertIn("prefix:\\s*\"#napcat\"", ensure_script)
+        self.assertIn("plugin_onmessage", ensure_script)
+        self.assertIn("config\\plugins.json", ensure_script)
+        self.assertIn("Ensure-NapCatBuiltinPluginEnabled", ensure_script)
+        self.assertIn("NapCat builtin plugin enabled in:", ensure_script)
+        self.assertIn("Write-Utf8NoBomText", ensure_script)
+        self.assertIn("NapCat plugin status config rewritten without UTF-8 BOM", ensure_script)
+
+    def test_force_restart_stops_workspace_napcat_process_tree_before_starting_accounts(self) -> None:
+        script = START_ALL.read_text(encoding="utf-8-sig")
+
+        self.assertIn("function Stop-NapCatWorkspaceProcesses", script)
+        self.assertIn("launcher-user\\.bat", script)
+        self.assertIn("NapCatWinBootMain\\.exe", script)
+        self.assertIn('Stop-NapCatWorkspaceProcesses -Reason "force restart"', script)
+        self.assertLess(
+            script.index('Stop-NapCatWorkspaceProcesses -Reason "force restart"'),
+            script.index("Starting NapCat accounts:"),
+        )
 
     def test_start_all_uses_quick_login_markers_for_dual_napcat_startup(self) -> None:
         script = START_ALL.read_text(encoding="utf-8-sig")

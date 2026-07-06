@@ -562,6 +562,34 @@ function Copy-NapCatAccountConfigs {
     Write-Step "Migrated NapCat account config files: $copied"
 }
 
+function Ensure-NapCatBuiltinPlugin {
+    param(
+        [string]$TargetRoot
+    )
+
+    $script = Join-Path $ScriptRoot "ensure-napcat-builtin-plugin.ps1"
+    if (-not (Test-Path $script)) {
+        throw "NapCat builtin plugin ensure script not found: $script"
+    }
+    $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $script,
+        "-WorkspaceRoot", $WorkspaceRoot,
+        "-NapCatRoot", (Join-Path $TargetRoot "napcat"),
+        "-LogFile", $logFile,
+        "-ConsolePrefix", "[NapCatUpdate]"
+    )
+    if ($DryRun) {
+        $arguments += "-DryRun"
+    }
+
+    & powershell.exe @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "NapCat builtin plugin ensure failed with exit code $LASTEXITCODE."
+    }
+}
+
 Write-Step "NapCat update started."
 Write-Step "Workspace: $WorkspaceRoot"
 Write-Step "Log: $logFile"
@@ -602,6 +630,7 @@ if (
     (Get-NormalizedReleaseTag -Tag $installedRelease.Tag) -eq (Get-NormalizedReleaseTag -Tag $version)
 ) {
     Write-Step "NapCat is already at latest release $version; skipping download and package replacement."
+    Ensure-NapCatBuiltinPlugin -TargetRoot $OneKeyRoot
     Clear-NapCatUpdateCaches -Reason "already latest" -All
     exit 0
 }
@@ -632,6 +661,7 @@ if ($DryRun) {
     }
     Write-Step "Would archive current napcat\onekey to: $archivePath"
     Write-Step "Would activate the prepared package as napcat\onekey."
+    Write-Step "Would ensure NapCat builtin plugin after activation."
     Write-Step "Would write NapCat release marker: $NapCatReleaseMarker"
     Write-Step "NapCat update dry run finished."
     exit 0
@@ -694,6 +724,7 @@ try {
     else {
         Write-Step "No previous NapCat account config directory found; skipping config migration."
     }
+    Ensure-NapCatBuiltinPlugin -TargetRoot $OneKeyRoot
     Write-NapCatReleaseMarker -Tag $version -Asset $asset
     $updateSucceeded = $true
 }
