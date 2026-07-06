@@ -21,8 +21,9 @@
 ├── NapCat angel 1443944862 -> ws://127.0.0.1:6200/ws
 ├── NapCat demon 2629227874 -> ws://127.0.0.1:6201/ws
 └── qqbot 仓库工作副本
+    ├── astrbot/  # 官方源码 submodule，仅作参考
     ├── astrbot-local-plugins/
-    ├── astrbot/config/
+    ├── config/astrbot/
     └── tools/maintenance-scripts/
 ```
 
@@ -33,8 +34,8 @@
 - `astrbot-local-plugins/astrbot_plugin_qqbot_features`
 - `astrbot-local-plugins/astrbot_plugin_topic_concentration`
 - `astrbot-local-plugins/astrbot_plugin_local_artifact_api`
-- `astrbot/config/` 里的脱敏配置示例，用作服务器 WebUI / 数据库配置参考
-- 必要的运行态数据：表情包、游戏存档、RightCodes 积分、公开群上下文、artifact 发布状态
+- `config/astrbot/` 里的脱敏配置示例，用作服务器 WebUI / 数据库配置参考
+- 必要的运行态数据：表情包、游戏存档、RightCodes 积分、Lolicon 元数据和 artifact 发布状态
 
 不要迁移或提交：
 

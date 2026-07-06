@@ -2,8 +2,9 @@
 
 这是本机机器人 monorepo 工作区，按运行组件拆分：
 
-- `astrbot/`：AstrBot 上游源码快照和本机配置示例；实际 AstrBot Core 由 `uv tool` 管理。
+- `astrbot/`：AstrBot 官方上游源码 submodule，用于查阅和固定上游版本；实际 AstrBot Core 由 `uv tool` 管理。
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码，启动 AstrBot 前同步到运行态插件目录。
+- `config/astrbot/`：可提交的 AstrBot 插件、本机配置和人格脱敏示例。
 - `napcat/`：共用 NapCat / QQ 登录端程序包。
 - `data/`：统一运行态数据目录，默认不进 Git；顶层只保留 AstrBot 与 NapCat 运行态。
 - `scripts/`：只保留根级 Windows 用户入口 `start-all.bat` 和 `update-all.bat`。
@@ -25,11 +26,13 @@
 
 可提交配置模板只放在：
 
-- `astrbot/config/`：AstrBot 插件、本机配置和人格示例；可用 `python3 tools/maintenance-scripts/export-astrbot-config-examples.py` 从当前运行态重新导出，脚本会剔除 LLM provider/model 路由并脱敏 key/token/secret。
+- `config/astrbot/`：AstrBot 插件、本机配置和人格示例；可用 `python3 tools/maintenance-scripts/export-astrbot-config-examples.py` 从当前运行态重新导出，脚本会剔除 LLM provider/model 路由并脱敏 key/token/secret。
 
 不要再使用旧 NoneBot2 配置入口；AstrBot 本地迁移插件读取 `data/astrbot/data/plugin_data/qqbot_features_config/`。
 
-AstrBot Core 不再从 `astrbot/` 源码快照启动；`tools/runtime-scripts/start-astrbot.ps1` 会优先直调 `uv tool` 安装出的 `astrbot.exe`，再回退到 PATH 中的 `astrbot`，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。日常启动不会自动使用 `uv tool run --from astrbot` 联网拉包；如果 AstrBot tool 尚未安装，先运行 `scripts\update-all.bat`。
+AstrBot Core 不从 `astrbot/` submodule 启动；`tools/runtime-scripts/start-astrbot.ps1` 会优先直调 `uv tool` 安装出的 `astrbot.exe`，再回退到 PATH 中的 `astrbot`，并通过 `ASTRBOT_ROOT=D:\project\qqbot\data\astrbot` 读取真实数据。日常启动不会自动使用 `uv tool run --from astrbot` 联网拉包；如果 AstrBot tool 尚未安装，先运行 `scripts\update-all.bat`。
+
+首次克隆或换机器后，用 `git submodule update --init --recursive` 拉取 `astrbot/` 官方源码。需要刷新上游源码参考时，更新 submodule 指针并提交外层 gitlink；实际运行包仍通过 `scripts\update-all.bat` 更新 uv tool。
 
 `astrbot-local-plugins/` 下的本地插件会在 `tools/runtime-scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、Sub2API 账号用量查询、复读、入群欢迎、戳一戳文本响应、本地表情包管理、按配置自动同意好友申请和邀请入群、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；旧 AI runtime 使用 AstrBot 原生链路替代。
 
@@ -107,4 +110,4 @@ NapCat 更新会先查询 GitHub 最新 release；如果本地记录已经是最
 
 AstrBot 更新在用户确认后，会停止本工作区正在运行的 AstrBot uv tool 进程，再使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会在确认后用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
 
-更新后使用 `scripts\start-all.bat` 启动 bot2。修改 `astrbot/` 里的源码快照不会影响实际运行的 bot2，除非重新切换回源码模式。
+更新后使用 `scripts\start-all.bat` 启动 bot2。`astrbot/` 是官方源码 submodule，修改或切换它不会影响实际运行的 bot2；实际运行版本以 uv tool 安装包为准。

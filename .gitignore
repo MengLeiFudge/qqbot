@@ -1,6 +1,5 @@
 # Local runtime data
-data/*
-!data/README.md
+data/
 
 # Local and generated files
 .env

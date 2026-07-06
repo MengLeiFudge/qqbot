@@ -12,8 +12,9 @@
 
 ## 目录边界
 
-- `astrbot/`：AstrBot 上游源码快照和本机配置示例；不保留 AstrBot 上游 Git 历史，也不作为 bot2 Core 的日常启动来源。
-- AstrBot 行为调整硬限制：配置优先，插件其次，绝不直接修改 AstrBot Core 源码。能通过 `data/astrbot/data/` 运行态配置、AstrBot 参数或插件实现的行为，不允许改 `astrbot/` 源码快照或 uv tool 安装目录源码；只有先确认配置和插件都无法实现，并获得用户明确批准后，才允许讨论 Core 补丁。新增、改造或迁移 AstrBot 插件能力前，必须先查 AstrBot 原生配置、WebUI 现有开关、Core 已有行为和本仓库现有插件是否已经提供同类能力；若 AstrBot 原生能力可满足或可复用，应优先复用并只做最小插件补足。若原生能力语义不符合本仓库需求，可以在插件中显式架空或覆盖，但必须在插件配置 schema、README/AGENTS、日志或配置说明里写清楚覆盖了哪个原生设置、默认值、恢复原生行为的方法和冲突风险；禁止无说明地另起一套会和原生设置冲突、重复或绕过原生配置的开关、provider、分段、路由、权限或发送机制。
+- `astrbot/`：AstrBot 官方上游源码 submodule，用于查阅 Core 源码和固定上游版本；不作为 bot2 Core 的日常启动来源，不能放本仓库配置示例或运行态数据。
+- `config/astrbot/`：本仓库可提交的 AstrBot 插件、本机配置和人格脱敏示例；由 `tools/maintenance-scripts/export-astrbot-config-examples.py` 从运行态导出。
+- AstrBot 行为调整硬限制：配置优先，插件其次，绝不直接修改 AstrBot Core 源码。能通过 `data/astrbot/data/` 运行态配置、AstrBot 参数或插件实现的行为，不允许改 `astrbot/` submodule 或 uv tool 安装目录源码；只有先确认配置和插件都无法实现，并获得用户明确批准后，才允许讨论 Core 补丁。新增、改造或迁移 AstrBot 插件能力前，必须先查 AstrBot 原生配置、WebUI 现有开关、Core 已有行为和本仓库现有插件是否已经提供同类能力；若 AstrBot 原生能力可满足或可复用，应优先复用并只做最小插件补足。若原生能力语义不符合本仓库需求，可以在插件中显式架空或覆盖，但必须在插件配置 schema、README/AGENTS、日志或配置说明里写清楚覆盖了哪个原生设置、默认值、恢复原生行为的方法和冲突风险；禁止无说明地另起一套会和原生设置冲突、重复或绕过原生配置的开关、provider、分段、路由、权限或发送机制。
 - `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码；`tools/runtime-scripts/start-astrbot.ps1` 启动前同步到 `data/astrbot/data/plugins/`。新增或迁移 bot2 功能时优先放这里，避免直接修改 `astrbot/` Core 源码或把 `data/` 运行态纳入 Git。
 - 原 qqbot / NoneBot2 功能已迁入 AstrBot 本地插件；运行时代码不得依赖 `nonebot2/` 源码、`nonebot` 包、NoneBot2 plugin 入口或 OneBot adapter。
 - 从旧 qqbot 迁入的纯 Python service 只允许作为 AstrBot 插件内 vendored service 使用，运行态数据根统一为 `data\astrbot\data\plugin_data\qqbot_features_runtime`，迁移配置根统一为 `data\astrbot\data\plugin_data\qqbot_features_config`。插件业务状态和小型结构化配置优先写入 `qqbot_features_runtime\db\qqbot_features.sqlite3`；Lolicon 元数据写入 `qqbot_features_runtime\db\lolicon.sqlite3`；本地 artifact 发布去重状态保留在 `qqbot_features_runtime\fe_artifacts\` 和 `qqbot_features_runtime\local_artifacts\`；生成图片、菜单图、shapez 渲染图和临时面板只放 `qqbot_features_runtime\cache\` 或专用 cache 目录；不要再新增 `qqbot_features_runtime\data\...` 下的 JSON/TXT 事实源，也不要恢复旧 AI 记忆、公开群上下文快照、TTS、头像或 shapez 静态旧目录。
@@ -44,7 +45,7 @@
 
 ## 配置示例导出
 
-- AstrBot 可提交配置示例放在 `astrbot/config/`；当前运行态配置导出入口是 `python3 tools/maintenance-scripts/export-astrbot-config-examples.py`。
+- AstrBot 可提交配置示例放在 `config/astrbot/`；当前运行态配置导出入口是 `python3 tools/maintenance-scripts/export-astrbot-config-examples.py`。
 - 导出脚本可读取 `data\astrbot\data\cmd_config.json`、`data\astrbot\data\config\*.json` 和 `data\astrbot\data\data_v4.db` 的 personas 表；输出前必须剔除 LLM provider/model/provider_sources/provider_settings/fallback/image-caption/embedding 路由，并脱敏 key、token、secret、password、cookie、authorization、custom headers/body 等字段。
 - example 可以保留非密钥运行形态，例如端口、bot 账号、群号、插件开关、功能模式和人格文本；不得提交真实 provider key、OneBot token、登录态、数据库密钥、运行日志或会话历史。
 
@@ -71,8 +72,8 @@
   - 根目录是否只有一个 `.git`
   - `data/` 是否未进入 Git
 - 根目录 `tests/` 保留 AstrBot 本地插件、启动脚本和配置导出回归测试；相关改动优先运行 `py -3.14 -m pytest tests` 或本机可用的等价 Python 命令。
-- AstrBot Core 源码快照不作为运行态；Core 相关验证优先使用 ruff、`python -m py_compile` 和实际 uv tool 启动探针。
-- AstrBot Core 运行/更新脚本变更优先做 PowerShell 语法检查；不要把源码快照测试结果当作 uv tool 运行态验证。
+- AstrBot Core submodule 不作为运行态；Core 相关验证优先使用 ruff、`python -m py_compile` 和实际 uv tool 启动探针。
+- AstrBot Core 运行/更新脚本变更优先做 PowerShell 语法检查；不要把 submodule 源码测试结果当作 uv tool 运行态验证。
 - 修改 AstrBot persona、插件注入提示词、回复风格守卫、LLM 路由提示、显式呼叫/follow-up 判定提示、源码知识、图片 caption prompt 或接口资料注入等会影响模型输出的 prompt 后，必须使用实际运行配置对应的 AI/provider 接口做真实模拟调用，样例至少覆盖本次变更目标场景；验证记录必须包含关键输入、实际模型输出、provider/model 和判断结论。允许直接调用对应 AI 接口完成验证，不能只靠想象、静态阅读或未调用模型就声称回答符合预期。
 - 对本仓库启动、重启、更新、进程残留、端口占用、脚本编排和机器人运行态修复，完成脚本或配置改动后必须直接执行真实入口验证；不要因为会停止现有机器人、关闭 NapCat/QQ、替换 `napcat\onekey`、升级 uv tool、重启 AstrBot、清理残留进程或短暂中断服务而停下来要求用户再次确认。用户提出这类问题本身即表示要解决到真实运行可用。
 
@@ -94,4 +95,4 @@
 - AstrBot 更新由 `tools\runtime-scripts\update-astrbot.ps1` 实现；用户确认后会停止本工作区正在运行的 AstrBot uv tool 进程，再默认调用 `uv tool upgrade astrbot --python 3.14`；如果未安装则调用 `uv tool install astrbot --python 3.14`。
 - Windows PATH 找不到 `uv` 时，更新脚本可以用 `py -3.14 -m pip install --user -U uv` 自举用户级 uv。
 - 更新日志写入 `data\astrbot\logs\updates\`，真实数据仍在 `data\astrbot\data\`。
-- 切换到 uv tool 后，修改 `astrbot\` 源码快照不会影响实际运行的 bot2；不要用 `astrbot\` 的源码 diff 判断线上 AstrBot Core 是否已更新。
+- 切换到 uv tool 后，修改或切换 `astrbot\` submodule 不会影响实际运行的 bot2；不要用 `astrbot\` 的源码 diff 判断线上 AstrBot Core 是否已更新。需要更新源码参考时，更新 submodule 指针并提交外层 gitlink；需要更新实际运行 Core 时走 `scripts\update-all.bat`。
