@@ -105,6 +105,30 @@
     "default": "太长不看喵",
     "hint": "触发长输入太长不看阈值时发送的固定短回复。"
   },
+  "temp_dedupe_enabled": {
+    "description": "AstrBot temp 重复文件去重",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后插件后台只删除 data/astrbot/data/temp 中超过安全窗口的重复文件；容量和过期清理由 AstrBot Core 的 temp_dir_max_size 继续负责。"
+  },
+  "temp_dedupe_interval_seconds": {
+    "description": "temp 去重间隔秒数",
+    "type": "int",
+    "default": 21600,
+    "hint": "后台重复文件清理间隔。默认 6 小时；插件启动后会先执行一次。"
+  },
+  "temp_dedupe_min_file_age_seconds": {
+    "description": "temp 去重安全窗口秒数",
+    "type": "int",
+    "default": 600,
+    "hint": "小于该年龄的文件不参与重复删除，避免和正在生成或发送的图片竞争。"
+  },
+  "temp_dedupe_max_files_per_run": {
+    "description": "temp 去重单次扫描上限",
+    "type": "int",
+    "default": 5000,
+    "hint": "限制单次后台去重最多处理的候选文件数，避免 temp 文件过多时长时间占用磁盘 IO。"
+  },
   "meme_manager_webui_port": {
     "description": "表情管理后台端口",
     "type": "int",

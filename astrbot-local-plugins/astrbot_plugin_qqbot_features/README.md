@@ -219,7 +219,7 @@
 ## 数据与安全边界
 
 - 使用 `data\astrbot\data\plugin_data\qqbot_features_runtime` 作为游戏、Arcaea、RightCodes 积分和本地 artifact 发布状态目录；游戏、Arcaea 会话/缓存、复读/thunder/Lolicon 群配置、Shapez 群文件清理状态和 RightCodes 积分优先写入 `db\qqbot_features.sqlite3`。
-- Lolicon 元数据写入 `db\lolicon.sqlite3`，图片不再下载到本地；Arc 猜歌面板和 shapez 渲染图写入 `cache\arc\` / `cache\shapez\`，旧 AI 记忆、TTS、头像和 shapez 静态旧目录不再作为日常运行态保留。
+- Lolicon 元数据写入 `db\lolicon.sqlite3`，图片不再下载到本地；菜单图、Arc 猜歌面板、shapez 渲染图和临时面板写入 AstrBot Core 的 `data\temp\qqbot_features\` 子目录，进入 Core `temp_dir_max_size` 容量清理范围。插件后台只删除超过安全窗口的重复图片副本，不做独立按日期清理；旧 AI 记忆、TTS、头像和 shapez 静态旧目录不再作为日常运行态保留。
 - 使用 `data\astrbot\data\plugin_data\meme_manager` 作为本地表情包运行态目录；这是兼容保留的数据路径，不再对应独立 AstrBot 插件。
 - 旧公开群上下文快照不再作为 prompt 事实源，也不提供群聊记录导出命令。
 - 不提交运行态数据、QQ 登录态、token、数据库或日志。

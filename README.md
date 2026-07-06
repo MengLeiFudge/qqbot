@@ -19,7 +19,8 @@
 - `data/napcat/`：NapCat 更新状态、登录辅助标记和运行日志；历史下载包、旧包备份和旧启动标记不作为日常运行态保留。
 
 - `data/astrbot/data/`：AstrBot 的 `cmd_config.json`、`data_v4.db`、插件和插件数据。
-- `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的轻量运行态。插件业务状态优先存放在 `db/qqbot_features.sqlite3` 和 `db/lolicon.sqlite3`；本地 artifact 发布去重状态保留在 `fe_artifacts/` 和 `local_artifacts/`；生成图片等临时文件只放 `cache/`，不再保留旧 AI 记忆、公开群上下文快照、TTS、头像和 shapez 静态旧目录。
+- `data/astrbot/data/plugin_data/qqbot_features_runtime/`：从旧 qqbot 迁入的轻量运行态。插件业务状态优先存放在 `db/qqbot_features.sqlite3` 和 `db/lolicon.sqlite3`；本地 artifact 发布去重状态保留在 `fe_artifacts/` 和 `local_artifacts/`；不再保留旧 AI 记忆、公开群上下文快照、TTS、头像和 shapez 静态旧目录。
+- `data/astrbot/data/temp/qqbot_features/`：本地插件的菜单图、Arc 猜歌面板、shapez 渲染图和临时面板等可重建生成图。该目录进入 AstrBot Core `temp_dir_max_size` 容量清理范围；插件只额外删除超过安全窗口的重复图片副本，不做独立按日期清理。
 - `data/astrbot/data/plugin_data/qqbot_features_config/`：从旧 qqbot 迁入的 `.env` 和 `qqbot.toml`，供 AstrBot 本地插件读取必要本机配置。
 - `data/astrbot/data/plugin_data/meme_manager/`：`astrbot_plugin_qqbot_features` 内部表情管理模块的运行态事实源，包含 `memes/` 图片目录、`meme_index.json` 单图语义索引和兼容的 `memes_data.json` 类别描述。
 - `data/napcat/quick-login/`：双账号 NapCat 快速登录标记。

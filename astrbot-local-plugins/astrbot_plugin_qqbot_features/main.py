@@ -74,6 +74,10 @@ from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
 from .reread_state import normalize_reread_key
 from .reread_state import reread_probability
+from .runtime_temp import TempDuplicateCleaner
+from .runtime_temp import load_temp_dedupe_config
+from .runtime_temp import resolve_astrbot_temp_root
+from .runtime_temp import resolve_plugin_temp_dir
 from .reply_style_guard_logic import build_both_targeted_reply_instruction_text
 from .reply_style_guard_logic import CHAT_BUBBLE_REPLY_INSTRUCTION
 from .reply_style_guard_logic import STYLE_IMMUTABILITY_INSTRUCTION
@@ -356,7 +360,18 @@ def get_runtime_db_root() -> Path:
 
 
 def get_runtime_cache_root() -> Path:
-    return get_qqbot_runtime_root() / "cache"
+    return get_plugin_temp_root("runtime-cache")
+
+
+def get_astrbot_temp_root() -> Path:
+    return resolve_astrbot_temp_root(fallback_data_root=get_astrbot_data_root())
+
+
+def get_plugin_temp_root(name: str) -> Path:
+    return resolve_plugin_temp_dir(
+        fallback_data_root=get_astrbot_data_root(),
+        name=name,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -409,6 +424,12 @@ class QQBotFeaturesPlugin(Star):
         self._sub2api_usage_cache = Sub2APIUsageCache(ttl_seconds=SUB2API_USAGE_CACHE_TTL_SECONDS)
         self._sub2api_refresh_task: asyncio.Task | None = None
         self._arc_background_task: asyncio.Task | None = None
+        temp_dedupe_config = load_temp_dedupe_config(config)
+        self._temp_duplicate_cleaner = TempDuplicateCleaner(
+            get_astrbot_temp_root(),
+            temp_dedupe_config,
+        )
+        self._temp_duplicate_cleanup_task: asyncio.Task | None = None
         self._sub2api_alerted_thresholds_by_account: dict[str, set[int]] = {}
         self._rightcodes_draw_lock = asyncio.Semaphore(2)
         self._group_inviter_by_group_id: dict[str, str] = {}
@@ -490,13 +511,32 @@ class QQBotFeaturesPlugin(Star):
             "*" if not self._twin_config.enabled_groups else ",".join(sorted(self._twin_config.enabled_groups)),
             self._twin_config.direct_handler_enabled,
         )
+        logger.info(
+            "[QQBotFeatures] temp cleanup loaded: root=%s dedupe_enabled=%s interval=%s min_age=%s max_files=%s",
+            self._temp_duplicate_cleaner.temp_root,
+            temp_dedupe_config.enabled,
+            temp_dedupe_config.interval_seconds,
+            temp_dedupe_config.min_file_age_seconds,
+            temp_dedupe_config.max_files_per_run,
+        )
 
     async def initialize(self) -> None:
         if self._sub2api_config.base_url and self._sub2api_config.admin_api_key:
             self._sub2api_refresh_task = asyncio.create_task(self._sub2api_usage_refresh_loop())
         self._arc_background_task = asyncio.create_task(self._arc_background_loop())
+        self._temp_duplicate_cleanup_task = asyncio.create_task(
+            self._temp_duplicate_cleaner.run(logger=logger)
+        )
 
     async def terminate(self) -> None:
+        if self._temp_duplicate_cleanup_task is not None:
+            await self._temp_duplicate_cleaner.stop()
+            self._temp_duplicate_cleanup_task.cancel()
+            try:
+                await self._temp_duplicate_cleanup_task
+            except asyncio.CancelledError:
+                pass
+        self._temp_duplicate_cleanup_task = None
         if self._sub2api_refresh_task is not None:
             self._sub2api_refresh_task.cancel()
             try:
@@ -2679,7 +2719,7 @@ def get_qqbot_config_root() -> Path:
 
 
 def get_menu_image_cache_root() -> Path:
-    return get_astrbot_data_root() / "plugin_data" / "qqbot_menu"
+    return get_plugin_temp_root("menu")
 
 
 def get_qqbot_config_value(section: str, key: str, default: str = "") -> str:

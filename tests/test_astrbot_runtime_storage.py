@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +21,9 @@ from astrbot_plugin_qqbot_features.legacy_services.sakura.service import SakuraS
 from astrbot_plugin_qqbot_features.legacy_services.settings_store import SettingsStore
 from astrbot_plugin_qqbot_features.rightcodes_draw_logic import RightCodesDrawQuotaStore
 from astrbot_plugin_qqbot_features.runtime_storage import resolve_runtime_db_path
+from astrbot_plugin_qqbot_features.runtime_temp import TempDedupeConfig
+from astrbot_plugin_qqbot_features.runtime_temp import TempDuplicateCleaner
+from astrbot_plugin_qqbot_features.runtime_temp import resolve_plugin_temp_dir
 
 
 class AstrBotRuntimeStorageMigrationTest(unittest.TestCase):
@@ -180,12 +185,56 @@ class AstrBotRuntimeStorageMigrationTest(unittest.TestCase):
         )
 
         self.assertIn('output_root = get_runtime_cache_root()', main_source)
+        self.assertIn('return get_plugin_temp_root("runtime-cache")', main_source)
         self.assertIn('Path(output_root) / "shapez" / "shape"', service_source)
         self.assertIn('Path(output_root) / "shapez" / "chart"', service_source)
         self.assertIn('Path(output_root) / "shapez" / "path"', path_source)
         self.assertNotIn('/ "shapez" / "img" / "shape"', service_source)
         self.assertNotIn('/ "shapez" / "img" / "chart"', service_source)
         self.assertNotIn('/ "shapez" / "img" / "path"', path_source)
+
+    def test_plugin_temp_dir_resolves_under_astrbot_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_root = Path(temp_dir) / "data"
+            with patch("astrbot_plugin_qqbot_features.runtime_temp.get_astrbot_temp_path", None):
+                temp_path = resolve_plugin_temp_dir(fallback_data_root=data_root, name="menu")
+
+        self.assertEqual(temp_path, data_root / "temp" / "qqbot_features" / "menu")
+
+    def test_temp_duplicate_cleaner_removes_old_duplicate_images_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            old_a = temp_root / "io_temp_img_old_a.jpg"
+            old_b = temp_root / "io_temp_img_old_b.jpg"
+            fresh_dup = temp_root / "io_temp_img_fresh.jpg"
+            other = temp_root / "io_temp_img_other.jpg"
+            text_dup = temp_root / "same.txt"
+            for path, payload in (
+                (old_a, b"same-image"),
+                (old_b, b"same-image"),
+                (fresh_dup, b"same-image"),
+                (other, b"other-image"),
+                (text_dup, b"same-image"),
+            ):
+                path.write_bytes(payload)
+            old_mtime = time.time() - 3600
+            os.utime(old_a, (old_mtime, old_mtime))
+            os.utime(old_b, (old_mtime + 1, old_mtime + 1))
+            os.utime(other, (old_mtime, old_mtime))
+            os.utime(text_dup, (old_mtime, old_mtime))
+
+            cleaner = TempDuplicateCleaner(
+                temp_root,
+                TempDedupeConfig(min_file_age_seconds=600),
+            )
+            result = cleaner.cleanup_once()
+
+            self.assertEqual(result.duplicate_files_removed, 1)
+            self.assertTrue(old_a.exists())
+            self.assertFalse(old_b.exists())
+            self.assertTrue(fresh_dup.exists())
+            self.assertTrue(other.exists())
+            self.assertTrue(text_dup.exists())
 
 
 if __name__ == "__main__":

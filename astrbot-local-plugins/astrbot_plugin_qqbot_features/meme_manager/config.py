@@ -7,10 +7,12 @@ try:
     from astrbot.core.utils.astrbot_path import (
         get_astrbot_data_path,
         get_astrbot_plugin_data_path,
+        get_astrbot_temp_path,
     )
 except Exception:
     get_astrbot_data_path = None
     get_astrbot_plugin_data_path = None
+    get_astrbot_temp_path = None
 
 # 获取当前插件目录的绝对路径
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -71,6 +73,21 @@ def _find_workspace_astrbot_data_path() -> Path | None:
     return None
 
 
+def get_astrbot_temp_dir() -> Path:
+    """返回 AstrBot Core temp 子目录，临时表情转换应进入 Core 容量清理范围。"""
+    if get_astrbot_temp_path is not None:
+        try:
+            return (Path(get_astrbot_temp_path()) / "qqbot_features" / "meme_manager").resolve()
+        except Exception:
+            pass
+
+    repo_data_path = _find_workspace_astrbot_data_path()
+    if repo_data_path is not None:
+        return (repo_data_path / "temp" / "qqbot_features" / "meme_manager").resolve()
+
+    return (PLUGIN_DATA_DIR / "temp").resolve()
+
+
 def _plugin_data_dir_has_content(plugin_data_dir: Path) -> bool:
     """判断目标插件数据目录是否已有有效内容。"""
     metadata_file = plugin_data_dir / "memes_data.json"
@@ -124,7 +141,7 @@ migrate_legacy_data_dir_if_needed(PLUGIN_DATA_DIR)
 BASE_DATA_DIR = PLUGIN_DATA_DIR
 MEMES_DIR = PLUGIN_DATA_DIR / "memes"
 MEMES_DATA_PATH = PLUGIN_DATA_DIR / "memes_data.json"  # 类别描述数据文件路径
-TEMP_DIR = PLUGIN_DATA_DIR / "temp"
+TEMP_DIR = get_astrbot_temp_dir()
 DEFAULT_MEMES_INIT_MARKER = PLUGIN_DATA_DIR / ".default_memes_initialized"
 
 # 确保目录存在
