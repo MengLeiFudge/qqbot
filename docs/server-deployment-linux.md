@@ -17,12 +17,12 @@
 │       ├── WebUI: 6185
 │       ├── aiocqhttp angel: 6200/ws
 │       ├── aiocqhttp demon: 6201/ws
-│       └── data/plugins/  # 从本仓库 astrbot-local-plugins 同步
+│       └── data/plugins/  # 从本仓库 plugins 同步
 ├── NapCat angel 1443944862 -> ws://127.0.0.1:6200/ws
 ├── NapCat demon 2629227874 -> ws://127.0.0.1:6201/ws
 └── qqbot 仓库工作副本
     ├── astrbot/  # 官方源码 submodule，仅作参考
-    ├── astrbot-local-plugins/
+    ├── plugins/
     ├── config/astrbot/
     └── tools/maintenance-scripts/
 ```
@@ -31,9 +31,9 @@
 
 ## 必须迁移的仓库内容
 
-- `astrbot-local-plugins/astrbot_plugin_qqbot_features`
-- `astrbot-local-plugins/astrbot_plugin_topic_concentration`
-- `astrbot-local-plugins/astrbot_plugin_local_artifact_api`
+- `plugins/astrbot_plugin_qqbot_features`
+- `plugins/astrbot_plugin_topic_concentration`
+- `plugins/astrbot_plugin_local_artifact_api`
 - `config/astrbot/` 里的脱敏配置示例，用作服务器 WebUI / 数据库配置参考
 - 必要的运行态数据：表情包、游戏存档、RightCodes 积分、Lolicon 元数据和 artifact 发布状态
 

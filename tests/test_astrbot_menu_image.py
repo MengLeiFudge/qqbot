@@ -10,7 +10,7 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
+sys.path.insert(0, str(ROOT / "plugins"))
 
 from astrbot_plugin_qqbot_features.menu_image import render_feature_menu_image
 from astrbot_plugin_qqbot_features.menu_image import render_overview_menu_image

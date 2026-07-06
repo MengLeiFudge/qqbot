@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
+sys.path.insert(0, str(ROOT / "plugins"))
 
 from astrbot_plugin_qqbot_features.legacy_services.kun.service import KunService
 from astrbot_plugin_qqbot_features.legacy_services.lolicon.service import LoliconImageItem
@@ -164,23 +165,23 @@ class AstrBotRuntimeStorageMigrationTest(unittest.TestCase):
             mocked_urlopen.assert_not_called()
             self.assertIsNone(prepared.local_path)
             self.assertFalse((runtime_root / "data" / "lolicon" / "img").exists())
-            with sqlite3.connect(runtime_root / "db" / "lolicon.sqlite3") as conn:
+            with closing(sqlite3.connect(runtime_root / "db" / "lolicon.sqlite3")) as conn:
                 row = conn.execute("select title, url, local_path from images where pid=? and page=?", (123, 0)).fetchone()
             self.assertEqual(row, ("测试图", "https://example.invalid/image.jpg", ""))
 
     def test_shapez_render_output_uses_cache_root(self) -> None:
         service_source = (
-            ROOT / "astrbot-local-plugins" / "astrbot_plugin_qqbot_features" / "legacy_services" / "shapez" / "service.py"
+            ROOT / "plugins" / "astrbot_plugin_qqbot_features" / "legacy_services" / "shapez" / "service.py"
         ).read_text(encoding="utf-8")
         path_source = (
             ROOT
-            / "astrbot-local-plugins"
+            / "plugins"
             / "astrbot_plugin_qqbot_features"
             / "legacy_services"
             / "shapez"
             / "path_renderer.py"
         ).read_text(encoding="utf-8")
-        main_source = (ROOT / "astrbot-local-plugins" / "astrbot_plugin_qqbot_features" / "main.py").read_text(
+        main_source = (ROOT / "plugins" / "astrbot_plugin_qqbot_features" / "main.py").read_text(
             encoding="utf-8"
         )
 

@@ -9,7 +9,7 @@ import types
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
+sys.path.insert(0, str(ROOT / "plugins"))
 
 
 class StubAstrBotLogger:

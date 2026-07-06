@@ -6,7 +6,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
+sys.path.insert(0, str(ROOT / "plugins"))
 
 from astrbot_plugin_qqbot_features.meme_manager.meme_markup import clean_meme_markup_text
 from astrbot_plugin_qqbot_features.meme_manager.meme_markup import extract_wrapped_meme_markups

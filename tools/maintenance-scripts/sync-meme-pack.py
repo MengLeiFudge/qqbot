@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PLUGIN_SOURCE_ROOT = REPO_ROOT / "astrbot-local-plugins"
+PLUGIN_SOURCE_ROOT = REPO_ROOT / "plugins"
 
 
 def main() -> int:

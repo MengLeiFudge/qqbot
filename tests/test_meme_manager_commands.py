@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "astrbot-local-plugins"
+PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "plugins"
 sys.path.insert(0, str(PLUGIN_ROOT))
 
 from astrbot_plugin_qqbot_features.meme_manager.commands import (  # noqa: E402

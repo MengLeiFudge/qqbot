@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import closing
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -75,7 +76,7 @@ class RuntimeJsonStore:
 
     def write(self, namespace: str, payload: object) -> None:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 insert into json_state(namespace, payload, updated_at)
@@ -88,11 +89,11 @@ class RuntimeJsonStore:
             )
 
     def delete(self, namespace: str) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute("delete from json_state where namespace=?", (namespace,))
 
     def _read_raw(self, namespace: str) -> str | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 "select payload from json_state where namespace=?",
                 (namespace,),
@@ -117,4 +118,5 @@ class RuntimeJsonStore:
             )
             """
         )
+        conn.commit()
         return conn

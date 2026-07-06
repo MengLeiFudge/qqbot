@@ -7,7 +7,7 @@ from typing import Any
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "astrbot-local-plugins"))
+sys.path.insert(0, str(ROOT / "plugins"))
 
 from astrbot_plugin_local_artifact_api.legacy_services.artifacts.publish_service import (
     LocalArtifactPublishContext,

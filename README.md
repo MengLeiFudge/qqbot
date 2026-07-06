@@ -2,14 +2,17 @@
 
 这是本机机器人 monorepo 工作区，按运行组件拆分：
 
-- `astrbot/`：AstrBot 官方上游源码 submodule，用于查阅和固定上游版本；实际 AstrBot Core 由 `uv tool` 管理。
-- `astrbot-local-plugins/`：本仓库维护的 AstrBot 本地插件源码，启动 AstrBot 前同步到运行态插件目录。
-- `config/astrbot/`：可提交的 AstrBot 插件、本机配置和人格脱敏示例。
-- `napcat/`：共用 NapCat / QQ 登录端程序包。
-- `data/`：统一运行态数据目录，默认不进 Git；顶层只保留 AstrBot 与 NapCat 运行态。
-- `scripts/`：只保留根级 Windows 用户入口 `start-all.bat` 和 `update-all.bat`。
-- `tools/runtime-scripts/`：启动和更新入口调用的内部 PowerShell 实现。
-- `tools/maintenance-scripts/`：配置导出、表情迁移这类维护脚本。
+```text
+qqbot/
+├── astrbot/       # AstrBot 官方源码 submodule，只作参考；实际 Core 由 uv tool 管理
+├── plugins/       # 本仓库维护的 AstrBot 本地插件源码，启动前同步到运行态
+├── config/        # 可提交的脱敏配置示例
+├── scripts/       # Windows 用户入口，只保留 start-all.bat / update-all.bat
+├── tools/         # 启动、更新和维护脚本实现
+├── tests/         # 本仓库启动脚本、插件和配置导出回归测试
+├── data/          # 统一运行态根目录，默认不进 Git
+└── napcat/        # 共用 NapCat / QQ 登录端程序包，默认不进 Git
+```
 
 ## 数据目录
 
@@ -35,7 +38,7 @@ AstrBot Core 不从 `astrbot/` submodule 启动；`tools/runtime-scripts/start-a
 
 首次克隆或换机器后，用 `git submodule update --init --recursive` 拉取 `astrbot/` 官方源码。需要刷新上游源码参考时，更新 submodule 指针并提交外层 gitlink；实际运行包仍通过 `scripts\update-all.bat` 更新 uv tool。
 
-`astrbot-local-plugins/` 下的本地插件会在 `tools/runtime-scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、Sub2API 账号用量查询、复读、入群欢迎、戳一戳文本响应、本地表情包管理、按配置自动同意好友申请和邀请入群、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；旧 AI runtime 使用 AstrBot 原生链路替代。
+`plugins/` 下的本地插件会在 `tools/runtime-scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、Sub2API 账号用量查询、复读、入群欢迎、戳一戳文本响应、本地表情包管理、按配置自动同意好友申请和邀请入群、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；旧 AI runtime 使用 AstrBot 原生链路替代。
 
 `astrbot_plugin_local_artifact_api` 负责 AstrBot 的本地构建产物发布兼容入口。AstrBot `full` 模式下会在 `127.0.0.1:8080` 提供 `POST /admin/api/artifacts/publish-local`，保持原 NoneBot2 localhost-only 请求体、Git 上下文校验和 OneBot 群文件上传行为，供 `AfterBuildEvent.exe 1` 这类本机白名单构建流程继续发布 zip 产物。服务端会独立读取 zip 内容计算内容 hash，并和自己的发布缓存比对；内容未变化时不删除旧文件、不上传、不发群消息。
 `tools\runtime-scripts\start-all.ps1` 日常默认等价于 `-Target astrbot -FeatureMode full -AstrBotProfile both`。默认模式是 ensure-running：如果现有 AstrBot WebUI `6185`、OneBot `6200/6201`、artifact API `8080` 和两路 NapCat 反连已经 ready，会直接复用当前运行态，避免无意义冷重启；如果端口或连接缺失，才启动缺失组件。需要强制应用插件、配置、脚本或 uv tool 运行包变更时，给 PowerShell 入口加 `-ForceRestart`，此时会清理旧端口和旧进程并重新等待 `6185`、`6200/6201` 和 `8080` 全部就绪；如果 artifact API 绑定失败，启动入口会失败而不是只报告 AstrBot WebUI ready。
@@ -92,7 +95,7 @@ NapCat 仍使用 `napcat/` 下的一键包；启动和更新脚本会确保官�
 
 ## Linux / 1Panel 部署
 
-服务器托管双棉花糖时，1Panel 只负责安装和运行 AstrBot Core；本仓库的完整运行还需要同步 `astrbot-local-plugins/` 三个本地插件、两路 aiocqhttp 平台、两个 NapCat 协议端和必要 `plugin_data` 运行态。完整步骤见 `docs/server-deployment-linux.md`。
+服务器托管双棉花糖时，1Panel 只负责安装和运行 AstrBot Core；本仓库的完整运行还需要同步 `plugins/` 三个本地插件、两路 aiocqhttp 平台、两个 NapCat 协议端和必要 `plugin_data` 运行态。完整步骤见 `docs/server-deployment-linux.md`。
 
 后续修改推荐只走一条主线：本机改动、本机验证、Git 提交、服务器 `git pull`、同步插件、重启 AstrBot / NapCat。服务器上直接用 Codex 改只作为紧急热修；热修完成后必须把 diff 拉回本机复核并提交，避免本机和服务器各自演化。
 

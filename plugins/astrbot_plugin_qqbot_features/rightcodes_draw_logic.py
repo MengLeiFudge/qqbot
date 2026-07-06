@@ -703,7 +703,7 @@ def resolve_workspace_root() -> Path:
     if current.name == "astrbot" and current.parent.name == "data":
         return current.parent.parent
     for parent in current.parents:
-        if (parent / "astrbot-local-plugins").is_dir():
+        if (parent / "plugins").is_dir():
             return parent
     return current
 

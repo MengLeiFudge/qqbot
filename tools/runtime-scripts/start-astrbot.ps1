@@ -21,7 +21,7 @@ catch {
 
 $WorkspaceRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
-$LocalPluginRoot = Join-Path $WorkspaceRoot "astrbot-local-plugins"
+$LocalPluginRoot = Join-Path $WorkspaceRoot "plugins"
 $RuntimePluginRoot = Join-Path $AstrRoot "data\plugins"
 $ManagedLocalPluginPrefixes = @("astrbot_plugin_")
 $ManagedLocalPluginNames = @()

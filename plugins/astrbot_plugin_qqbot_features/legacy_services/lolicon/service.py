@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from enum import Enum
 import json
@@ -135,7 +136,7 @@ class LoliconImageStore:
 
     def upsert_metadata(self, item: LoliconImageItem) -> None:
         self._ensure_schema()
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 """
                 insert into images (
@@ -175,7 +176,7 @@ class LoliconImageStore:
 
     def _ensure_schema(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 """
                 create table if not exists images (
