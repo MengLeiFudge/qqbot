@@ -10,6 +10,17 @@ from typing import Any
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ASTRBOT_DATA = WORKSPACE_ROOT / "data" / "astrbot" / "data"
 DEFAULT_OUTPUT_DIR = WORKSPACE_ROOT / "config" / "astrbot"
+STALE_PLUGIN_EXAMPLE_NAMES = {
+    "astrbot_plugin_qqbot_context_bridge.example.json",
+    "astrbot_plugin_reply_style_guard.example.json",
+    "astrbot_plugin_rightcodes_draw.example.json",
+    "astrbot_plugin_source_knowledge.example.json",
+    "astrbot_plugin_twin_interaction.example.json",
+    "meme_manager.example.json",
+}
+STALE_ROOT_EXAMPLE_NAMES = {
+    "meme-manager.example.json",
+}
 
 DROP_KEYS = {
     "api_base",
@@ -81,11 +92,13 @@ def export_examples(astrbot_data: Path, output_dir: Path) -> None:
     if plugin_config_root.is_dir():
         plugin_output = output_dir / "plugins"
         plugin_output.mkdir(parents=True, exist_ok=True)
+        remove_stale_examples(plugin_output, STALE_PLUGIN_EXAMPLE_NAMES)
         for config_path in sorted(plugin_config_root.glob("*.json")):
             if config_path.name.startswith("abconf_"):
                 continue
             output_path = plugin_output / config_path.name.replace("_config.json", ".example.json")
             write_json(output_path, sanitize_config(read_json(config_path)))
+    remove_stale_examples(output_dir, STALE_ROOT_EXAMPLE_NAMES)
 
     database_path = astrbot_data / "data_v4.db"
     if database_path.is_file():
@@ -98,6 +111,13 @@ def read_json(path: Path) -> Any:
 
 def write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def remove_stale_examples(directory: Path, names: set[str]) -> None:
+    for name in names:
+        path = directory / name
+        if path.is_file():
+            path.unlink()
 
 
 def export_personas(database_path: Path) -> list[dict[str, Any]]:

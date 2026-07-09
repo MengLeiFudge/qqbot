@@ -50,7 +50,9 @@ def test_export_examples_writes_sanitized_configs_and_personas(tmp_path: Path) -
     data_root = tmp_path / "data"
     config_root = data_root / "config"
     output_root = tmp_path / "out"
+    plugin_output_root = output_root / "plugins"
     config_root.mkdir(parents=True)
+    plugin_output_root.mkdir(parents=True)
 
     (data_root / "cmd_config.json").write_text(
         json.dumps(
@@ -67,6 +69,9 @@ def test_export_examples_writes_sanitized_configs_and_personas(tmp_path: Path) -
         encoding="utf-8",
     )
     (config_root / "abconf_should_skip.json").write_text("{}", encoding="utf-8")
+    (plugin_output_root / "meme_manager.example.json").write_text("{}", encoding="utf-8")
+    (plugin_output_root / "astrbot_plugin_reply_style_guard.example.json").write_text("{}", encoding="utf-8")
+    (output_root / "meme-manager.example.json").write_text("{}", encoding="utf-8")
 
     database_path = data_root / "data_v4.db"
     connection = sqlite3.connect(database_path)
@@ -108,5 +113,8 @@ def test_export_examples_writes_sanitized_configs_and_personas(tmp_path: Path) -
     assert cmd_config["platform"][0]["ws_reverse_token"] == ""
     assert plugin_config == {"api_key": "", "feature_mode": "dual"}
     assert not (output_root / "plugins" / "abconf_should_skip.example.json").exists()
+    assert not (plugin_output_root / "meme_manager.example.json").exists()
+    assert not (plugin_output_root / "astrbot_plugin_reply_style_guard.example.json").exists()
+    assert not (output_root / "meme-manager.example.json").exists()
     assert personas[0]["persona_id"] == "恶魔棉花糖"
     assert personas[0]["system_prompt"] == "只来自 WebUI 的人格"

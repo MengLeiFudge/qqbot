@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-import json
 import os
 from pathlib import Path
 import random
@@ -417,7 +416,6 @@ class QQBotFeaturesPlugin(Star):
             ScopedPluginConfig(
                 config,
                 prefix="meme_manager",
-                legacy_plugin_name="meme_manager",
             ),
         )
         self._sub2api_config = load_sub2api_config(config)
@@ -436,7 +434,6 @@ class QQBotFeaturesPlugin(Star):
         reply_style_guard_config = ScopedPluginConfig(
             config,
             prefix="reply_style_guard",
-            legacy_plugin_name="astrbot_plugin_reply_style_guard",
         )
         self._reply_long_reply_fold_threshold_chars = normalize_fold_threshold(
             get_config_value(
@@ -474,7 +471,6 @@ class QQBotFeaturesPlugin(Star):
             ScopedPluginConfig(
                 config,
                 prefix="source_knowledge",
-                legacy_plugin_name="astrbot_plugin_source_knowledge",
             )
         )
         self._source_knowledge_index = SourceIndex(self._source_knowledge_config)
@@ -482,7 +478,6 @@ class QQBotFeaturesPlugin(Star):
             ScopedPluginConfig(
                 config,
                 prefix="twin_interaction",
-                legacy_plugin_name="astrbot_plugin_twin_interaction",
             )
         )
         self._twin_fallback_profile = os.environ.get(PROFILE_ENV, DEFAULT_PROFILE)
@@ -2007,11 +2002,9 @@ def read_bool_config(config, key: str, *, default: bool) -> bool:
 
 
 class ScopedPluginConfig:
-    def __init__(self, base_config, *, prefix: str, legacy_plugin_name: str = "") -> None:
+    def __init__(self, base_config, *, prefix: str) -> None:
         self._base_config = base_config
         self._prefix = prefix
-        self._legacy_plugin_name = legacy_plugin_name
-        self._legacy_config = _load_legacy_plugin_config(legacy_plugin_name)
 
     def get(self, key: str, default=None):
         prefixed_key = f"{self._prefix}_{key}"
@@ -2021,21 +2014,7 @@ class ScopedPluginConfig:
         value = get_config_value(self._base_config, key, None)
         if value is not None:
             return value
-        return get_config_value(self._legacy_config, key, default)
-
-
-def _load_legacy_plugin_config(plugin_name: str) -> dict:
-    if not plugin_name:
-        return {}
-    config_file = resolve_astrbot_data_root() / "config" / f"{plugin_name}_config.json"
-    try:
-        payload = json.loads(config_file.read_text(encoding="utf-8-sig"))
-    except FileNotFoundError:
-        return {}
-    except Exception as exc:
-        logger.warning("[QQBotFeatures] failed to read legacy plugin config %s: %s", config_file, exc)
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        return default
 
 
 def resolve_astrbot_data_root() -> Path:
