@@ -41,6 +41,8 @@ AstrBot Core 不从 `astrbot/` submodule 启动；`tools/runtime-scripts/start-a
 
 `plugins/` 下的本地插件会在 `tools/runtime-scripts/start-astrbot.ps1` 启动前复制到 `data\astrbot\data\plugins\`。当前 `astrbot_plugin_qqbot_features` 负责 AstrBot 的本地功能入口：功能清单、图片菜单、Factorio 下载链接、Sub2API 账号用量查询、复读、入群欢迎、本地表情包管理、按配置自动同意好友申请和邀请入群、群文件清理通知、shapez 短代码渲染、Arc PTT 推荐、活动梯子查询、字母猜歌、曲绘猜歌、作者限定安装包下载、养鲲、落樱之都基础玩法、Lolicon 基础取图和 Lolicon 群配置、RightCodes 生图和生图积分；旧 AI runtime 使用 AstrBot 原生链路替代。拍一拍不在功能合集里生成固定或随机回复，只由对话调度插件视为一次显式呼叫。
 
+功能合集发送菜单、生图、Lolicon、游戏面板、shapez、Arc 和自动表情等图片时，会从本地 32 条混合短句池随机选择一条写入 OneBot 图片 `summary`。这条摘要用于 QQ 会话列表等外层图片预览，不作为额外文本发送，也不额外调用 LLM；AstrBot Core 和第三方插件自行发送的图片不受影响。
+
 `astrbot_plugin_local_artifact_api` 负责 AstrBot 的本地构建产物发布兼容入口。AstrBot `full` 模式下会在 `127.0.0.1:8080` 提供 `POST /admin/api/artifacts/publish-local`，保持原 NoneBot2 localhost-only 请求体、Git 上下文校验和 OneBot 群文件上传行为，供 `AfterBuildEvent.exe 1` 这类本机白名单构建流程继续发布 zip 产物。服务端会独立读取 zip 内容计算内容 hash，并和自己的发布缓存比对；内容未变化时不删除旧文件、不上传、不发群消息。
 `tools\runtime-scripts\start-all.ps1` 日常默认等价于 `-Target astrbot -FeatureMode full -AstrBotProfile both`。默认模式是 ensure-running：如果现有 AstrBot WebUI `6185`、OneBot `6200/6201`、artifact API `8080` 和两路 NapCat 反连已经 ready，会直接复用当前运行态，避免无意义冷重启；如果端口或连接缺失，才启动缺失组件。需要强制应用插件、配置、脚本或 uv tool 运行包变更时，给 PowerShell 入口加 `-ForceRestart`，此时会清理旧端口和旧进程并重新等待 `6185`、`6200/6201` 和 `8080` 全部就绪；如果 artifact API 绑定失败，启动入口会失败而不是只报告 AstrBot WebUI ready。
 

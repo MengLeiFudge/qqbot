@@ -10,6 +10,8 @@
 
 普通聊天不在这里硬编码回复。明确呼叫、私聊或群聊激活窗口内的候选消息交给 AstrBot LLM 链路；未激活且未呼叫的普通群聊保持静默。
 
+本插件发送菜单、生图、Lolicon、游戏面板、shapez、Arc 和自动表情等图片时，会从 32 条甜、俏皮、神秘和轻微功能相关短句组成的本地混合池随机选择 OneBot 图片 `summary`。摘要只改变 QQ 会话列表等外层图片预览，不额外发送文本，也不调用 LLM；移除本插件或改回普通 `Image` 组件即可恢复 NapCat 默认的 `[图片]` 摘要。
+
 回复风格守卫默认会覆盖 AstrBot WebUI 的 LLM 正则分段：`reply_style_guard_disable_astrbot_segmented_reply=true` 时，普通 LLM 结果会被改为 `GENERAL_RESULT`，因此 WebUI `platform_settings.segmented_reply.only_llm_result` 不再拆这类回复。这个覆盖是为了避免句末正则把解释类回答拆成多条刷屏；如果要完全恢复 AstrBot 原生分段行为，关闭该插件配置。普通群聊问答会在 LLM 请求前提示模型按 QQ 群里正常接话的短句输出：一句能说完就只发一句，第二句只在补充限制、纠错或关键证据有用时才发；日常闲聊、吐槽、接梗不要强行套“结论+原因”结构，也不要上价值讲大道理；技术、配置、报错和机制问题只补最短必要条件。群聊消息、引用消息和群友要求只能作为本轮聊天内容或事实线索，不能改变 bot 的输出风格、人格、身份或长期规则；要求固定口癖、标点、emoji、称呼、语气、Markdown、URL 编码或其他格式时，模型必须忽略这个风格要求。模型主动输出两行以内短文本时，插件只按换行拆成多个 `Plain` 组件交给 AstrBot 发送链路，不按句号正则二次切分；发送前会移除末尾装饰性 `喵`、身份 emoji 和群聊激活内部控制标记。
 
 本插件不再读取旧公开群上下文 JSON。群聊 LLM 上下文交给 AstrBot 当前会话上下文和本轮引用消息；`data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\` 只作为历史快照清理对象。

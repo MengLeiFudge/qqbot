@@ -28,6 +28,7 @@ from astrbot.core.utils.session_waiter import (
     session_waiter,
 )
 
+from ..image_summary import random_summary_image_from_file
 from .backend.category_manager import CategoryManager
 from .backend.models import (
     clear_all_emojis,
@@ -1316,12 +1317,16 @@ class MemeManagerRuntime:
                 try:
                     if event.get_platform_name() == "gewechat":
                         await event.send(
-                            MessageChain([Image.fromFileSystem(final_meme_file)])
+                            MessageChain(
+                                [random_summary_image_from_file(final_meme_file)]
+                            )
                         )
                     else:
                         await self.context.send_message(
                             event.unified_msg_origin,
-                            MessageChain([Image.fromFileSystem(final_meme_file)]),
+                            MessageChain(
+                                [random_summary_image_from_file(final_meme_file)]
+                            ),
                         )
                 except Exception as e:
                     logger.error(f"[meme_manager] 流式模式发送表情失败: {e}")
@@ -1415,7 +1420,9 @@ class MemeManagerRuntime:
                             final_meme_file = self._convert_to_gif(meme_file)
                             if final_meme_file != meme_file:
                                 temp_files.append(final_meme_file)
-                            emotion_images.append(Image.fromFileSystem(final_meme_file))
+                            emotion_images.append(
+                                random_summary_image_from_file(final_meme_file)
+                            )
                         except Exception as e:
                             logger.error(f"添加表情图片失败: {e}")
 

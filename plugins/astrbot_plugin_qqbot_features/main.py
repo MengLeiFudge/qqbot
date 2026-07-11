@@ -15,7 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
-from astrbot.api.message_components import At, Image, Plain, Reply
+from astrbot.api.message_components import At, Plain, Reply
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
@@ -25,6 +25,9 @@ from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
 from .command_guard import record_command_handled
 from .command_guard import try_claim_command
+from .image_summary import prepare_onebot_image_summary_chain
+from .image_summary import random_summary_image_from_file
+from .image_summary import random_summary_image_from_url
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
@@ -820,6 +823,7 @@ class QQBotFeaturesPlugin(Star):
                     text,
                 )
                 return
+            message_chain = await prepare_onebot_image_summary_chain(message_chain)
             await original_send_message.__func__(
                 cls,
                 bot,
@@ -831,7 +835,10 @@ class QQBotFeaturesPlugin(Star):
 
         AiocqhttpMessageEvent.send_message = classmethod(guarded_send_message)
         AiocqhttpMessageEvent._runtime_guard_installed = True
-        logger.info("[QQBotFeatures] aiocqhttp internal error guard installed")
+        logger.info(
+            "[QQBotFeatures] aiocqhttp send guard installed: "
+            "internal_errors=true image_summary=true"
+        )
 
     def _fold_long_reply_result(self, event: AstrMessageEvent, result) -> bool:
         if self._reply_long_reply_fold_threshold_chars <= 0:
@@ -888,7 +895,7 @@ class QQBotFeaturesPlugin(Star):
                 feature_mode=self._feature_mode,
                 output_dir=get_menu_image_cache_root(),
             )
-            yield event.chain_result([Image.fromFileSystem(str(image_path))])
+            yield event.chain_result([random_summary_image_from_file(image_path)])
         except Exception as exc:
             logger.exception("[QQBotFeatures] failed to render overview menu image: %s", exc)
             yield event.plain_result(build_menu_text(self._feature_mode))
@@ -910,7 +917,7 @@ class QQBotFeaturesPlugin(Star):
                 feature_mode=self._feature_mode,
                 output_dir=get_menu_image_cache_root(),
             )
-            yield event.chain_result([Image.fromFileSystem(str(image_path))])
+            yield event.chain_result([random_summary_image_from_file(image_path)])
         except Exception as exc:
             logger.exception("[QQBotFeatures] failed to render feature menu image: %s", exc)
             yield event.plain_result(build_feature_menu_text(menu_item))
@@ -1097,7 +1104,7 @@ class QQBotFeaturesPlugin(Star):
             yield event.plain_result(f"shapez 渲染失败：{exc}")
             event.stop_event()
             return
-        chain = [Image.fromFileSystem(str(result.image_path)), Plain(result.text)]
+        chain = [random_summary_image_from_file(result.image_path), Plain(result.text)]
         yield event.chain_result(chain)
         event.stop_event()
 
@@ -1141,9 +1148,9 @@ class QQBotFeaturesPlugin(Star):
         for result in results:
             chain = [Plain(result.prefix)]
             if result.image_path:
-                chain.append(Image.fromFileSystem(str(result.image_path)))
+                chain.append(random_summary_image_from_file(result.image_path))
             elif result.image_url:
-                chain.append(Image.fromURL(result.image_url))
+                chain.append(random_summary_image_from_url(result.image_url))
             elif result.image_text:
                 chain.append(Plain(result.image_text))
             chain.append(Plain(result.suffix))
@@ -1313,7 +1320,10 @@ class QQBotFeaturesPlugin(Star):
 
         message = format_rightcodes_draw_success(result, model=draw_request.model)
         if result.image_url.startswith(("http://", "https://")):
-            yield _chain_result_with_reply(event, [Plain(message), Image.fromURL(result.image_url)])
+            yield _chain_result_with_reply(
+                event,
+                [Plain(message), random_summary_image_from_url(result.image_url)],
+            )
         else:
             yield _chain_result_with_reply(event, [Plain(f"{message}\n{result.image_url}")])
         event.stop_event()
@@ -1397,7 +1407,7 @@ class QQBotFeaturesPlugin(Star):
             return
         if result.image_path is not None:
             yield event.chain_result(
-                [Image.fromFileSystem(str(result.image_path)), Plain(f"\n{result.text}")]
+                [random_summary_image_from_file(result.image_path), Plain(f"\n{result.text}")]
             )
         else:
             yield event.plain_result(result.text)
@@ -2460,7 +2470,9 @@ def build_arc_guess_event_result(event: AstrMessageEvent, result):
     text = getattr(result, "text", str(result))
     if image_path is None:
         return event.plain_result(text)
-    return event.chain_result([Image.fromFileSystem(str(image_path)), Plain(f"\n{text}")])
+    return event.chain_result(
+        [random_summary_image_from_file(image_path), Plain(f"\n{text}")]
+    )
 
 
 def get_arc_assets_root() -> Path:
