@@ -29,6 +29,7 @@ BOT_PROFILES = {
     },
 }
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
+TWIN_BOT_QQ_IDS = frozenset(PROFILE_BY_BOT_ID)
 
 TWIN_TOPIC_MARKERS = (
     "双子",

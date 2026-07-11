@@ -57,18 +57,6 @@ PLUGIN_SPECS: tuple[PluginSpec, ...] = (
         requires_direct_at=False,
     ),
     PluginSpec(
-        id="poke_response",
-        name="戳一戳响应",
-        aliases=("戳一戳", "反戳", "社交事件"),
-        menu_lines=(
-            "作者戳机器人或群成员时按概率响应和反戳",
-        ),
-        commands=("戳一戳",),
-        scopes=("group", "private"),
-        requires_direct_at=False,
-        admin_only=True,
-    ),
-    PluginSpec(
         id="reread",
         name="复读",
         aliases=("随机复读",),

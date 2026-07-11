@@ -18,7 +18,6 @@ from astrbot_plugin_qqbot_features.menu_catalog import MENU_SECTIONS
 from astrbot_plugin_qqbot_features.menu_catalog import find_menu_section
 from astrbot_plugin_qqbot_features.command_guard import is_twin_bot_sender_id
 from astrbot_plugin_qqbot_features.command_guard import should_handle_migrated_command_ids
-from astrbot_plugin_qqbot_features.twin_poke import should_follow_poke_notice
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +39,7 @@ class AstrBotMenuImageTest(unittest.TestCase):
         self.assertEqual(find_menu_section("Arc").name, "Arcaea")
         self.assertEqual(find_menu_section("生图").name, "棉花糖互动")
         self.assertEqual(find_menu_section("群管").name, "群务管理")
+        self.assertNotIn("戳一戳", "\n".join(find_menu_section("互动").lines))
 
     def test_render_overview_menu_image_creates_cached_png(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -72,36 +72,6 @@ class AstrBotMenuImageTest(unittest.TestCase):
                 self.assertEqual(image.format, "PNG")
                 self.assertEqual(image.width, 1120)
                 self.assertGreater(image.height, 300)
-
-    def test_poke_notice_only_responds_when_current_bot_is_target(self) -> None:
-        self.assertFalse(
-            should_follow_poke_notice(
-                self_id="2629227874",
-                user_id="3062317151",
-                target_id="1443944862",
-            )
-        )
-        self.assertFalse(
-            should_follow_poke_notice(
-                self_id="2629227874",
-                user_id="1443944862",
-                target_id="2629227874",
-            )
-        )
-        self.assertFalse(
-            should_follow_poke_notice(
-                self_id="2629227874",
-                user_id="3062317151",
-                target_id="3045271450",
-            )
-        )
-        self.assertTrue(
-            should_follow_poke_notice(
-                self_id="2629227874",
-                user_id="3062317151",
-                target_id="2629227874",
-            )
-        )
 
     def test_migrated_commands_ignore_twin_bot_sender(self) -> None:
         self.assertFalse(

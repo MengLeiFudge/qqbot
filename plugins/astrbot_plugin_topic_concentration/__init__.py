@@ -1,1 +1,1 @@
-"""控制棉花糖显式呼叫、follow-up 和双 bot LLM worker 调度。"""
+"""控制棉花糖群聊激活、显式呼叫和双 bot LLM worker 调度。"""

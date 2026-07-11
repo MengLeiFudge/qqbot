@@ -112,6 +112,7 @@ from .sub2api_usage import Sub2APIUsageCache
 from .sub2api_usage import update_sub2api_usage_alert_state
 from .twin_interaction_logic import TwinInteractionConfig
 from .twin_interaction_logic import TwinProfile
+from .twin_interaction_logic import TWIN_BOT_QQ_IDS
 from .twin_interaction_logic import build_direct_twin_prompt
 from .twin_interaction_logic import build_identity_fact_injection
 from .twin_interaction_logic import build_twin_injection
@@ -123,8 +124,6 @@ from .twin_interaction_logic import read_bool as read_twin_bool
 from .twin_interaction_logic import read_profile
 from .twin_interaction_logic import read_profile_for_self_id
 from .twin_interaction_logic import should_handle_direct_twin_request
-from .twin_poke import TWIN_BOT_QQ_IDS
-from .twin_poke import should_follow_poke_notice
 
 from astrbot.api.provider import LLMResponse
 from astrbot.core.message.components import Plain as CorePlain
@@ -255,11 +254,6 @@ FEATURES: tuple[FeatureSpec, ...] = (
         lines=("新成员入群时天使和恶魔各自按身份发送欢迎；双 bot 互相入群不欢迎",),
     ),
     FeatureSpec(
-        name="戳一戳响应",
-        aliases=("戳一戳", "反戳", "社交事件"),
-        lines=("戳机器人时按概率文本回应；双 bot 之间不互戳",),
-    ),
-    FeatureSpec(
         name="复读",
         aliases=("随机复读",),
         lines=("群里连续出现相同纯文本消息时概率复读，复读后短时间内冷却",),
@@ -320,9 +314,9 @@ FEATURES: tuple[FeatureSpec, ...] = (
     ),
     FeatureSpec(
         name="AI对话",
-        aliases=("AI测试", "显式呼叫", "follow-up"),
+        aliases=("AI测试", "显式呼叫", "群聊激活"),
         status="使用 AstrBot 原生链路",
-        lines=("AI 对话使用 AstrBot provider、persona、记忆和显式呼叫链路",),
+        lines=("AI 对话使用 AstrBot provider、persona、记忆、显式呼叫和群聊激活链路",),
     ),
 )
 
@@ -392,7 +386,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.10.5",
+    "0.12.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -1583,7 +1577,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(text)
 
     @filter.platform_adapter_type("aiocqhttp")
-    @filter.event_message_type(EventMessageType.ALL, desc="OneBot 社交事件监听器，处理好友申请、邀请入群、自身入群私聊通知、新成员欢迎和戳一戳文本回应。")
+    @filter.event_message_type(EventMessageType.ALL, desc="OneBot 社交事件监听器，处理好友申请、邀请入群、自身入群私聊通知和新成员欢迎。")
     async def onebot_social_events(self, event: AstrMessageEvent):
         raw = _raw_event_dict(event)
         if not raw:
@@ -1600,7 +1594,6 @@ class QQBotFeaturesPlugin(Star):
 
     async def _handle_onebot_notice(self, event: AstrMessageEvent, raw: dict):
         notice_type = str(raw.get("notice_type") or "")
-        sub_type = str(raw.get("sub_type") or "")
         if notice_type == "group_increase":
             user_id = str(raw.get("user_id") or "")
             self_id = str(raw.get("self_id") or event.get_self_id())
@@ -1625,29 +1618,6 @@ class QQBotFeaturesPlugin(Star):
                     ]
                 )
             return
-        if notice_type == "notify" and sub_type == "poke":
-            async for result in self._handle_poke_notice(event, raw):
-                yield result
-
-    async def _handle_poke_notice(self, event: AstrMessageEvent, raw: dict):
-        self_id = str(raw.get("self_id") or event.get_self_id())
-        user_id = str(raw.get("user_id") or "")
-        target_id = str(raw.get("target_id") or "")
-        if not should_follow_poke_notice(self_id=self_id, user_id=user_id, target_id=target_id):
-            return
-        roll = random.randint(0, 99)
-        if roll > 25:
-            return
-        if target_id == self_id:
-            yield event.plain_result("谁让你戳我的？")
-            if roll <= 5:
-                await asyncio.sleep(1.0)
-                yield event.plain_result("我记下来了。")
-                if roll <= 1:
-                    await asyncio.sleep(1.0)
-                    yield event.plain_result("还戳？")
-            return
-
     async def _handle_onebot_request(self, event: AstrMessageEvent, raw: dict) -> None:
         request_type = str(raw.get("request_type") or "")
         sub_type = str(raw.get("sub_type") or "")

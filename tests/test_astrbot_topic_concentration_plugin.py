@@ -32,18 +32,28 @@ sys.modules.setdefault("astrbot", types.ModuleType("astrbot"))
 sys.modules.setdefault("astrbot.api", astrbot_api_stub)
 
 from astrbot_plugin_topic_concentration.logic import (
-    FOLLOWUP_END_MARKER,
+    ACTIVATION_WINDOW_SECONDS,
+    DEACTIVATE_MARKER,
+    SKIP_REPLY_MARKER,
+    activate_group_chat,
     build_call_intent_prompt,
-    build_followup_instruction,
+    build_group_activation_instruction,
     chat_with_current_provider,
     classify_cotton_candy_call,
+    clear_group_activations,
+    deactivate_group_chat,
     has_strong_topic_signal,
     is_recent_duplicate_observation,
     looks_like_direct_bot_call,
     looks_like_low_information,
     looks_like_qqbot_fixed_command,
     parse_call_intent_response,
-    strip_followup_end_marker,
+    parse_reply_control,
+    read_group_activation,
+    renew_group_chat_after_reply,
+    retry_explicit_visible_reply,
+    rewrite_last_assistant_history,
+    should_activate_from_poke,
 )
 from astrbot_plugin_topic_concentration.twin_scheduler import (
     calculate_angel_probability,
@@ -73,16 +83,25 @@ class StubResponse:
 
 
 class StubProvider:
-    def __init__(self, provider_id: str, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        provider_id: str,
+        *,
+        fail: bool = False,
+        response_text: str = '{"should_reply": false}',
+    ) -> None:
         self.provider_config = {"id": provider_id}
         self.fail = fail
+        self.response_text = response_text
         self.prompts: list[str] = []
+        self.calls: list[dict] = []
 
-    async def text_chat(self, *, prompt: str, session_id: str, persist: bool):
+    async def text_chat(self, *, prompt: str, **kwargs):
         self.prompts.append(prompt)
+        self.calls.append({"prompt": prompt, **kwargs})
         if self.fail:
             raise RuntimeError(f"{self.provider_config['id']} failed")
-        return StubResponse('{"should_reply": false}')
+        return StubResponse(self.response_text)
 
 
 class StubContext:
@@ -133,6 +152,16 @@ class StubRequestEvent:
         return "1163635014"
 
 
+class StubProviderRequest:
+    def __init__(self) -> None:
+        self.contexts = [{"role": "user", "content": "上一轮上下文"}]
+        self.system_prompt = "保持当前人格"
+        self.model = "current-model"
+
+    async def assemble_context(self) -> dict:
+        return {"role": "user", "content": "@棉花糖 闭嘴"}
+
+
 @dataclass(frozen=True, slots=True)
 class ObservedMessage:
     text: str
@@ -142,6 +171,7 @@ class ObservedMessage:
 
 class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
     def tearDown(self) -> None:
+        clear_group_activations()
         clear_scheduler_state()
 
     def test_decision_uses_only_astrbot_current_provider(self) -> None:
@@ -187,6 +217,34 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertEqual(current.prompts, ["prompt"])
         self.assertEqual(fallback.prompts, [])
 
+    def test_explicit_visible_reply_retry_reuses_current_provider_context(self) -> None:
+        current = StubProvider(
+            "current/provider",
+            response_text=f"好，我先不说了。{DEACTIVATE_MARKER}",
+        )
+        fallback = StubProvider("fallback/provider")
+        context = StubContext(
+            {"current/provider": current, "fallback/provider": fallback},
+            current_provider_id="current/provider",
+        )
+
+        response = asyncio.run(
+            retry_explicit_visible_reply(
+                context=context,
+                event=StubEvent(),
+                request=StubProviderRequest(),
+                logger=StubLogger(),
+            )
+        )
+
+        self.assertEqual(response.completion_text, f"好，我先不说了。{DEACTIVATE_MARKER}")
+        self.assertEqual(fallback.calls, [])
+        self.assertEqual(current.calls[0]["contexts"][-1]["content"], "@棉花糖 闭嘴")
+        self.assertEqual(current.calls[0]["system_prompt"], "保持当前人格")
+        self.assertEqual(current.calls[0]["model"], "current-model")
+        self.assertIsNone(current.calls[0]["func_tool"])
+        self.assertIn("必须重新输出至少一句", current.calls[0]["prompt"])
+
     def test_short_interjection_question_is_low_information_not_strong_topic(self) -> None:
         self.assertTrue(looks_like_low_information("咪？"))
         self.assertFalse(has_strong_topic_signal("咪？"))
@@ -217,14 +275,154 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertTrue(decision.should_reply)
         self.assertEqual(decision.reason, "用户在叫机器人")
 
-    def test_followup_instruction_and_marker_are_internal(self) -> None:
-        instruction = build_followup_instruction()
-        self.assertIn("3 分钟 follow-up", instruction)
-        self.assertIn(FOLLOWUP_END_MARKER, instruction)
+    def test_group_activation_instructions_separate_explicit_and_candidate_routes(self) -> None:
+        explicit = build_group_activation_instruction(explicit=True, ordinary_reply_renewals=0)
+        candidate = build_group_activation_instruction(explicit=False, ordinary_reply_renewals=0)
+        repeated = build_group_activation_instruction(explicit=False, ordinary_reply_renewals=4)
 
-        cleaned, ended = strip_followup_end_marker(f"处理完了{FOLLOWUP_END_MARKER}")
-        self.assertTrue(ended)
-        self.assertEqual(cleaned, "处理完了")
+        self.assertIn("必须给出至少一句可见的简短回复", explicit)
+        self.assertIn(DEACTIVATE_MARKER, explicit)
+        self.assertNotIn(SKIP_REPLY_MARKER, explicit)
+        self.assertIn(SKIP_REPLY_MARKER, candidate)
+        self.assertIn(DEACTIVATE_MARKER, candidate)
+        self.assertIn("连续续期 0 次", candidate)
+        self.assertIn("必须返回", repeated)
+        self.assertIn("不能只返回跳过标记", repeated)
+
+    def test_reply_control_parser_removes_internal_markers(self) -> None:
+        skipped = parse_reply_control(SKIP_REPLY_MARKER)
+        self.assertTrue(skipped.skip_reply)
+        self.assertFalse(skipped.deactivate)
+        self.assertEqual(skipped.cleaned_text, "")
+
+        deactivated = parse_reply_control(f"好，我先不说了。{DEACTIVATE_MARKER}")
+        self.assertFalse(deactivated.skip_reply)
+        self.assertTrue(deactivated.deactivate)
+        self.assertEqual(deactivated.cleaned_text, "好，我先不说了。")
+
+    def test_retry_visible_text_replaces_invalid_assistant_history_without_marker(self) -> None:
+        text_part = types.SimpleNamespace(type="text", text=DEACTIVATE_MARKER)
+        messages = [
+            types.SimpleNamespace(role="user", content="@棉花糖 闭嘴", tool_calls=None),
+            types.SimpleNamespace(role="assistant", content=[text_part], tool_calls=None),
+        ]
+
+        rewrite_last_assistant_history(messages, replacement_text="好，我先不说了。")
+
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[-1].content[0].text, "好，我先不说了。")
+        self.assertNotIn(DEACTIVATE_MARKER, messages[-1].content[0].text)
+
+    def test_marker_only_assistant_history_is_removed_without_retry_text(self) -> None:
+        messages = [
+            types.SimpleNamespace(role="user", content="普通候选", tool_calls=None),
+            types.SimpleNamespace(role="assistant", content=SKIP_REPLY_MARKER, tool_calls=None),
+        ]
+
+        rewrite_last_assistant_history(messages)
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].role, "user")
+
+    def test_group_activation_state_is_scoped_and_renews_only_after_visible_reply(self) -> None:
+        angel = activate_group_chat("10001", "1443944862", now=10.0)
+        demon = activate_group_chat("10001", "2629227874", now=20.0)
+
+        self.assertEqual(angel.expires_at, 10.0 + ACTIVATION_WINDOW_SECONDS)
+        self.assertEqual(demon.expires_at, 20.0 + ACTIVATION_WINDOW_SECONDS)
+        self.assertEqual(angel.generation, 1)
+        self.assertEqual(demon.generation, 1)
+        self.assertIsNone(read_group_activation("10002", "1443944862", now=30.0))
+
+        renewed = renew_group_chat_after_reply("10001", "1443944862", explicit=False, now=40.0)
+        self.assertEqual(renewed.ordinary_reply_renewals, 1)
+        self.assertEqual(renewed.expires_at, 40.0 + ACTIVATION_WINDOW_SECONDS)
+        self.assertEqual(renewed.generation, angel.generation)
+
+        reset = renew_group_chat_after_reply("10001", "1443944862", explicit=True, now=50.0)
+        self.assertEqual(reset.ordinary_reply_renewals, 0)
+        self.assertIsNotNone(read_group_activation("10001", "2629227874", now=50.0))
+
+        self.assertTrue(deactivate_group_chat("10001", "1443944862"))
+        self.assertIsNone(read_group_activation("10001", "1443944862", now=51.0))
+        self.assertIsNotNone(read_group_activation("10001", "2629227874", now=51.0))
+
+    def test_newer_activation_generation_wins_over_late_reply_or_deactivation(self) -> None:
+        first = activate_group_chat("10001", "1443944862", now=10.0)
+        second = activate_group_chat("10001", "1443944862", now=20.0)
+
+        self.assertGreater(second.generation, first.generation)
+        self.assertIsNone(
+            renew_group_chat_after_reply(
+                "10001",
+                "1443944862",
+                explicit=False,
+                expected_generation=first.generation,
+                now=30.0,
+            )
+        )
+        self.assertFalse(
+            deactivate_group_chat(
+                "10001",
+                "1443944862",
+                expected_generation=first.generation,
+            )
+        )
+        self.assertEqual(
+            read_group_activation("10001", "1443944862", now=31.0).generation,
+            second.generation,
+        )
+
+        self.assertTrue(
+            deactivate_group_chat(
+                "10001",
+                "1443944862",
+                expected_generation=second.generation,
+            )
+        )
+        self.assertIsNone(
+            renew_group_chat_after_reply(
+                "10001",
+                "1443944862",
+                explicit=False,
+                expected_generation=second.generation,
+                now=40.0,
+            )
+        )
+
+    def test_group_activation_expires_after_three_minutes(self) -> None:
+        activate_group_chat("10001", "1443944862", now=10.0)
+
+        self.assertIsNotNone(read_group_activation("10001", "1443944862", now=189.9))
+        self.assertIsNone(read_group_activation("10001", "1443944862", now=190.0))
+
+    def test_poke_activates_only_the_human_targeted_current_bot(self) -> None:
+        bot_ids = frozenset({"1443944862", "2629227874"})
+
+        self.assertTrue(
+            should_activate_from_poke(
+                self_id="2629227874",
+                user_id="3062317151",
+                target_id="2629227874",
+                bot_ids=bot_ids,
+            )
+        )
+        self.assertFalse(
+            should_activate_from_poke(
+                self_id="2629227874",
+                user_id="3062317151",
+                target_id="1443944862",
+                bot_ids=bot_ids,
+            )
+        )
+        self.assertFalse(
+            should_activate_from_poke(
+                self_id="2629227874",
+                user_id="1443944862",
+                target_id="2629227874",
+                bot_ids=bot_ids,
+            )
+        )
 
     def test_request_context_treats_image_placeholder_as_unresolved_media(self) -> None:
         context = build_current_request_context(
@@ -356,6 +554,61 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertEqual(delegated.worker_id, "2629227874")
         self.assertEqual(delegated.reason, "target_busy_no_delegation")
 
+    def test_twin_scheduler_forces_explicit_target_even_while_busy(self) -> None:
+        mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
+
+        target = decide_llm_worker(
+            self_id="2629227874",
+            at_ids=("2629227874",),
+            message_key="message:explicit-busy:llm",
+            group_id="1163635014",
+            allow_delegation=False,
+            force_targeted=True,
+            now=20.0,
+        )
+        other = decide_llm_worker(
+            self_id="1443944862",
+            at_ids=("2629227874",),
+            message_key="message:explicit-busy:llm",
+            group_id="1163635014",
+            allow_delegation=False,
+            force_targeted=True,
+            now=21.0,
+        )
+
+        self.assertTrue(target.should_handle)
+        self.assertEqual(target.worker_id, "2629227874")
+        self.assertEqual(target.reason, "target_forced")
+        self.assertFalse(other.should_handle)
+        self.assertEqual(other.reason, "message_claimed_by_other_worker")
+
+    def test_twin_scheduler_forces_untargeted_named_call_when_both_workers_busy(self) -> None:
+        mark_worker_busy("1443944862", now=10.0, lease_seconds=600.0)
+        mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
+
+        selected = decide_llm_worker(
+            self_id="1443944862",
+            message_key="message:named-busy:llm",
+            group_id="1163635014",
+            force_untargeted=True,
+            now=20.0,
+            rng=random.Random(1),
+        )
+        other = decide_llm_worker(
+            self_id="2629227874",
+            message_key="message:named-busy:llm",
+            group_id="1163635014",
+            force_untargeted=True,
+            now=21.0,
+            rng=random.Random(1),
+        )
+
+        self.assertTrue(selected.should_handle)
+        self.assertEqual(selected.worker_id, "1443944862")
+        self.assertEqual(selected.reason, "untargeted_forced")
+        self.assertFalse(other.should_handle)
+        self.assertEqual(other.reason, "message_claimed_by_other_worker")
+
     def test_twin_scheduler_still_delegates_general_targeted_question_when_allowed(self) -> None:
         mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
         self.assertFalse(requires_target_twin_to_handle("配置怎么看", ("2629227874",)))
@@ -419,6 +672,15 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
 
     def test_twin_scheduler_releases_busy_worker(self) -> None:
         mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
+        self.assertTrue(is_worker_busy("2629227874", now=20.0))
+        release_worker("2629227874")
+        self.assertFalse(is_worker_busy("2629227874", now=20.0))
+
+    def test_twin_scheduler_keeps_worker_busy_until_all_concurrent_requests_finish(self) -> None:
+        mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
+        mark_worker_busy("2629227874", now=11.0, lease_seconds=600.0)
+
+        release_worker("2629227874")
         self.assertTrue(is_worker_busy("2629227874", now=20.0))
         release_worker("2629227874")
         self.assertFalse(is_worker_busy("2629227874", now=20.0))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from .twin_poke import TWIN_BOT_QQ_IDS
+from .twin_interaction_logic import TWIN_BOT_QQ_IDS
 try:
     from astrbot_plugin_topic_concentration.twin_scheduler import decide_llm_worker
     from astrbot_plugin_topic_concentration.twin_scheduler import record_worker_handled

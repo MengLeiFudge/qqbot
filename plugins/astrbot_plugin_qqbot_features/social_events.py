@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .twin_poke import TWIN_BOT_QQ_IDS
+from .twin_interaction_logic import TWIN_BOT_QQ_IDS
 
 
 ANGEL_BOT_QQ = "1443944862"

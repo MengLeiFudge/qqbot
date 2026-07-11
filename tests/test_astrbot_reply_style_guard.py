@@ -114,10 +114,11 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             "结论：别登录。\n· 原因：不正规。",
         )
 
-    def test_sanitize_reply_plain_text_strips_followup_control_marker(self) -> None:
+    def test_sanitize_reply_plain_text_strips_internal_control_markers(self) -> None:
+        self.assertEqual(sanitize_reply_plain_text("[[QQBOT_SKIP_REPLY]]"), "")
         self.assertEqual(
-            sanitize_reply_plain_text("处理完了[[QQBOT_FOLLOWUP_END]]"),
-            "处理完了",
+            sanitize_reply_plain_text("好，我先不说了。[[QQBOT_DEACTIVATE]]"),
+            "好，我先不说了。",
         )
 
     def test_sanitize_reply_plain_text_strips_twin_refusal_when_answer_exists(self) -> None:

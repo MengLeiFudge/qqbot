@@ -14,7 +14,7 @@ GROUP_BALANCE_STEP = 1.0
 MIN_ANGEL_PROBABILITY = 0.2
 MAX_ANGEL_PROBABILITY = 0.8
 
-_BUSY_UNTIL: dict[str, float] = {}
+_WORKER_BUSY_STATES: dict[str, "WorkerBusyState"] = {}
 _MESSAGE_CLAIMS: dict[str, "MessageClaim"] = {}
 _GROUP_BALANCE: dict[str, float] = {}
 _PENDING_COMMENTS: dict[tuple[str, str, str], "DelegatedComment"] = {}
@@ -31,6 +31,12 @@ class WorkerScheduleDecision:
     group_key: str = ""
     balance_before: float = 0.0
     angel_probability: float = 0.5
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerBusyState:
+    active_requests: int
+    expires_at: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +70,8 @@ def decide_llm_worker(
     private_chat: bool = False,
     allow_multi_target: bool = False,
     allow_delegation: bool = False,
+    force_targeted: bool = False,
+    force_untargeted: bool = False,
     now: float | None = None,
     worker_ids: tuple[str, ...] = TWIN_WORKER_IDS,
     rng: random.Random | None = None,
@@ -116,14 +124,19 @@ def decide_llm_worker(
                 angel_probability=angel_probability,
             )
 
-    selected = select_worker(
-        target_ids=targeted,
-        now=current,
-        group_key=group_key,
-        worker_ids=worker_ids,
-        allow_delegation=allow_delegation,
-        rng=rng,
-    )
+    if force_targeted and len(targeted) == 1:
+        selected = next(iter(targeted))
+    elif force_untargeted and not targeted:
+        selected = choose_idle_worker(list(worker_ids), group_key=group_key, rng=rng)
+    else:
+        selected = select_worker(
+            target_ids=targeted,
+            now=current,
+            group_key=group_key,
+            worker_ids=worker_ids,
+            allow_delegation=allow_delegation,
+            rng=rng,
+        )
     if selected is None:
         if targeted and not allow_delegation:
             return WorkerScheduleDecision(
@@ -142,10 +155,12 @@ def decide_llm_worker(
     reason = "selected_worker"
     if targeted:
         if selected in targeted:
-            reason = "target_available"
+            reason = "target_forced" if force_targeted else "target_available"
         else:
             reason = "target_busy_delegated"
             delegated_from = ",".join(sorted(targeted))
+    elif force_untargeted:
+        reason = "untargeted_forced"
     if claim_key:
         _MESSAGE_CLAIMS[claim_key] = MessageClaim(
             worker_id=selected,
@@ -222,11 +237,26 @@ def mark_worker_busy(
     if not key:
         return
     current = time.monotonic() if now is None else now
-    _BUSY_UNTIL[key] = current + max(1.0, lease_seconds)
+    previous = _WORKER_BUSY_STATES.get(key)
+    active_requests = 1
+    if previous is not None and previous.expires_at > current:
+        active_requests = previous.active_requests + 1
+    _WORKER_BUSY_STATES[key] = WorkerBusyState(
+        active_requests=active_requests,
+        expires_at=current + max(1.0, lease_seconds),
+    )
 
 
 def release_worker(worker_id: object) -> None:
-    _BUSY_UNTIL.pop(normalize_id(worker_id), None)
+    key = normalize_id(worker_id)
+    state = _WORKER_BUSY_STATES.get(key)
+    if state is None or state.active_requests <= 1:
+        _WORKER_BUSY_STATES.pop(key, None)
+        return
+    _WORKER_BUSY_STATES[key] = WorkerBusyState(
+        active_requests=state.active_requests - 1,
+        expires_at=state.expires_at,
+    )
 
 
 def mark_claim_processing(claim_key: object, worker_id: object, *, now: float | None = None) -> None:
@@ -303,14 +333,15 @@ def pop_pending_delegated_comment(
 
 def is_worker_busy(worker_id: object, *, now: float | None = None) -> bool:
     current = time.monotonic() if now is None else now
-    return _BUSY_UNTIL.get(normalize_id(worker_id), 0.0) > current
+    state = _WORKER_BUSY_STATES.get(normalize_id(worker_id))
+    return bool(state and state.active_requests > 0 and state.expires_at > current)
 
 
 def cleanup_scheduler_state(*, now: float | None = None) -> None:
     current = time.monotonic() if now is None else now
-    for worker_id, expires_at in list(_BUSY_UNTIL.items()):
-        if expires_at <= current:
-            _BUSY_UNTIL.pop(worker_id, None)
+    for worker_id, state in list(_WORKER_BUSY_STATES.items()):
+        if state.expires_at <= current:
+            _WORKER_BUSY_STATES.pop(worker_id, None)
     for claim_key, claim in list(_MESSAGE_CLAIMS.items()):
         if claim.expires_at <= current:
             _MESSAGE_CLAIMS.pop(claim_key, None)
@@ -320,7 +351,7 @@ def cleanup_scheduler_state(*, now: float | None = None) -> None:
 
 
 def clear_scheduler_state() -> None:
-    _BUSY_UNTIL.clear()
+    _WORKER_BUSY_STATES.clear()
     _MESSAGE_CLAIMS.clear()
     _GROUP_BALANCE.clear()
     _PENDING_COMMENTS.clear()
