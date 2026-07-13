@@ -28,6 +28,7 @@ from .logic import renew_group_chat_after_reply
 from .logic import retry_explicit_visible_reply
 from .logic import rewrite_last_assistant_history
 from .logic import should_activate_from_poke
+from .logic import should_normalize_empty_mention
 from .twin_scheduler import complete_claim_response
 from .twin_scheduler import decide_llm_worker
 from .twin_scheduler import mark_claim_processing
@@ -62,6 +63,7 @@ ACTIVATION_GENERATION_EXTRA = "_qqbot_group_activation_generation"
 ACTIVATION_REQUEST_EXTRA = "_qqbot_group_activation_provider_request"
 RETRY_VISIBLE_TEXT_EXTRA = "_qqbot_group_activation_retry_visible_text"
 PENDING_STATE_ACTION_EXTRA = "_qqbot_group_activation_pending_action"
+EMPTY_MENTION_CALL_EXTRA = "_qqbot_empty_mention_call"
 ROUTE_PRIVATE = "private"
 ROUTE_EXPLICIT = "explicit"
 ROUTE_CANDIDATE = "candidate"
@@ -69,13 +71,14 @@ ACTION_RENEW_EXPLICIT = "renew_explicit"
 ACTION_RENEW_CANDIDATE = "renew_candidate"
 ACTION_DEACTIVATE = "deactivate"
 POKE_CALL_TEXT = "用户拍了拍你"
+EMPTY_MENTION_CALL_TEXT = "用户只@了你，没有附带其他内容"
 
 
 @register(
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖群聊激活状态、显式呼叫与双 bot 普通 LLM worker 调度。",
-    "0.5.0",
+    "0.5.1",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -95,16 +98,24 @@ class TopicConcentrationPlugin(Star):
         poke_target_id = _current_poke_target_id(event)
         if not _is_candidate_event(event, poke_target_id=poke_target_id):
             return
+        at_ids = _at_target_ids(event)
+        self_id = str(event.get_self_id() or "").strip()
+        empty_mention = not event.is_private_chat() and should_normalize_empty_mention(
+            self_id=self_id,
+            at_target_ids=at_ids,
+            has_other_content=_has_other_message_content(event),
+        )
         if poke_target_id:
             event.message_str = POKE_CALL_TEXT
+        elif empty_mention:
+            event.message_str = EMPTY_MENTION_CALL_TEXT
+            event.set_extra(EMPTY_MENTION_CALL_EXTRA, "1")
         text = _plain_text(event) or str(event.get_message_str() or "")
         if looks_like_qqbot_fixed_command(text):
             return
 
-        at_ids = _at_target_ids(event)
         reply_target_id = _reply_target_id(event)
         target_ids = collect_target_twin_ids(at_ids, reply_target_id)
-        self_id = str(event.get_self_id() or "").strip()
         route = ""
         reason = ""
         effective_at_ids = at_ids
@@ -116,6 +127,11 @@ class TopicConcentrationPlugin(Star):
         elif poke_target_id:
             route = ROUTE_EXPLICIT
             reason = "poke"
+            effective_at_ids = (self_id,)
+            target_ids = (self_id,)
+        elif empty_mention:
+            route = ROUTE_EXPLICIT
+            reason = "empty_mention"
             effective_at_ids = (self_id,)
             target_ids = (self_id,)
         elif target_ids:
@@ -229,6 +245,7 @@ class TopicConcentrationPlugin(Star):
                     text=build_group_activation_instruction(
                         explicit=route == ROUTE_EXPLICIT,
                         ordinary_reply_renewals=renewals,
+                        empty_mention=bool(event.get_extra(EMPTY_MENTION_CALL_EXTRA, "")),
                     )
                 ).mark_as_temp()
             )
@@ -477,6 +494,16 @@ def _plain_text(event) -> str:
 
 def _at_target_ids(event) -> tuple[str, ...]:
     return tuple(str(segment.qq) for segment in event.get_messages() if isinstance(segment, At))
+
+
+def _has_other_message_content(event) -> bool:
+    for segment in event.get_messages():
+        if isinstance(segment, At):
+            continue
+        if isinstance(segment, Plain) and not str(segment.text or "").strip():
+            continue
+        return True
+    return False
 
 
 def _reply_target_id(event) -> str:

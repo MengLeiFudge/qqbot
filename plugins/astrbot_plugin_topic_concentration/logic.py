@@ -303,13 +303,18 @@ def clear_group_activations() -> None:
     _GROUP_ACTIVATION_GENERATIONS.clear()
 
 
-def build_group_activation_instruction(*, explicit: bool, ordinary_reply_renewals: int) -> str:
+def build_group_activation_instruction(
+    *,
+    explicit: bool,
+    ordinary_reply_renewals: int,
+    empty_mention: bool = False,
+) -> str:
     shared = (
         "你正在参与 QQ 群的短时激活窗口。以下双中括号标记是插件内部控制协议，"
         "不能解释、改写或当作普通文本展示给用户。"
     )
     if explicit:
-        return (
+        instruction = (
             shared
             + "当前消息通过 @、引用、明确命名呼叫或拍一拍直接叫到了你。"
             "你必须给出至少一句可见的简短回复，不能返回跳过标记。"
@@ -317,6 +322,14 @@ def build_group_activation_instruction(*, explicit: bool, ordinary_reply_renewal
             f"先用你自己的语气给出一句可见收尾，再在末尾附加 {DEACTIVATE_MARKER}。"
             "其他显式呼叫正常回答，不要主动反激活。"
         )
+        if empty_mention:
+            instruction += (
+                "这次用户只 @ 了你，没有附带正文。请按当前人格用一句自然短句应到，"
+                "可以使用“怎么了？”“有什么事情吗？”这类简短问句；"
+                "这是对呼叫动作本身的完整回应，不属于一般禁止的追问式收尾。"
+                "不要催用户补充具体材料，不要输出固定模板或解释处理规则。"
+            )
+        return instruction
 
     renewals = max(0, int(ordinary_reply_renewals))
     lines = [
@@ -409,6 +422,17 @@ def should_activate_from_poke(
     if target_key != self_key or user_key == self_key:
         return False
     return user_key not in set(bot_ids)
+
+
+def should_normalize_empty_mention(
+    *,
+    self_id: object,
+    at_target_ids: tuple[str, ...],
+    has_other_content: bool,
+) -> bool:
+    self_key = str(self_id or "").strip()
+    targets = tuple(str(target or "").strip() for target in at_target_ids)
+    return bool(self_key) and targets == (self_key,) and not has_other_content
 
 
 async def chat_with_current_provider(

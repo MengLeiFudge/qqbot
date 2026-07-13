@@ -114,6 +114,17 @@ class AstrBotReplyStyleGuardTest(unittest.TestCase):
             "结论：别登录。\n· 原因：不正规。",
         )
 
+    def test_empty_mention_reply_can_keep_short_question_tail(self) -> None:
+        self.assertEqual(
+            sanitize_reply_plain_text("怎么了？有什么事情吗？", strip_question_tail=False),
+            "怎么了？有什么事情吗？",
+        )
+        self.assertEqual(sanitize_reply_plain_text("怎么了？有什么事情吗？"), "")
+        self.assertEqual(
+            sanitize_reply_plain_text("你把具体名字发我。", strip_question_tail=False),
+            "",
+        )
+
     def test_sanitize_reply_plain_text_strips_internal_control_markers(self) -> None:
         self.assertEqual(sanitize_reply_plain_text("[[QQBOT_SKIP_REPLY]]"), "")
         self.assertEqual(

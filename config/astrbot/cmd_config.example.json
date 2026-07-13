@@ -36,8 +36,8 @@
       "content_cleanup_rule": ""
     },
     "no_permission_reply": true,
-    "empty_mention_waiting": true,
-    "empty_mention_waiting_need_reply": true,
+    "empty_mention_waiting": false,
+    "empty_mention_waiting_need_reply": false,
     "friend_message_needs_wake_prefix": false,
     "ignore_bot_self_message": true,
     "ignore_at_all": false

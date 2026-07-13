@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import random
 import sys
@@ -54,6 +55,7 @@ from astrbot_plugin_topic_concentration.logic import (
     retry_explicit_visible_reply,
     rewrite_last_assistant_history,
     should_activate_from_poke,
+    should_normalize_empty_mention,
 )
 from astrbot_plugin_topic_concentration.twin_scheduler import (
     calculate_angel_probability,
@@ -277,12 +279,20 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
 
     def test_group_activation_instructions_separate_explicit_and_candidate_routes(self) -> None:
         explicit = build_group_activation_instruction(explicit=True, ordinary_reply_renewals=0)
+        empty_mention = build_group_activation_instruction(
+            explicit=True,
+            ordinary_reply_renewals=0,
+            empty_mention=True,
+        )
         candidate = build_group_activation_instruction(explicit=False, ordinary_reply_renewals=0)
         repeated = build_group_activation_instruction(explicit=False, ordinary_reply_renewals=4)
 
         self.assertIn("必须给出至少一句可见的简短回复", explicit)
         self.assertIn(DEACTIVATE_MARKER, explicit)
         self.assertNotIn(SKIP_REPLY_MARKER, explicit)
+        self.assertIn("用户只 @ 了你", empty_mention)
+        self.assertIn("怎么了？", empty_mention)
+        self.assertIn("不要催用户补充具体材料", empty_mention)
         self.assertIn(SKIP_REPLY_MARKER, candidate)
         self.assertIn(DEACTIVATE_MARKER, candidate)
         self.assertIn("连续续期 0 次", candidate)
@@ -423,6 +433,42 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
                 bot_ids=bot_ids,
             )
         )
+
+    def test_only_current_bot_at_without_content_is_normalized_as_empty_mention(self) -> None:
+        self.assertTrue(
+            should_normalize_empty_mention(
+                self_id="1443944862",
+                at_target_ids=("1443944862",),
+                has_other_content=False,
+            )
+        )
+        self.assertFalse(
+            should_normalize_empty_mention(
+                self_id="1443944862",
+                at_target_ids=("2629227874",),
+                has_other_content=False,
+            )
+        )
+        self.assertFalse(
+            should_normalize_empty_mention(
+                self_id="1443944862",
+                at_target_ids=("1443944862", "2629227874"),
+                has_other_content=False,
+            )
+        )
+        self.assertFalse(
+            should_normalize_empty_mention(
+                self_id="1443944862",
+                at_target_ids=("1443944862",),
+                has_other_content=True,
+            )
+        )
+
+    def test_shipped_config_disables_astrbot_empty_mention_waiter(self) -> None:
+        config = json.loads((ROOT / "config" / "astrbot" / "cmd_config.example.json").read_text(encoding="utf-8"))
+
+        self.assertFalse(config["platform_settings"]["empty_mention_waiting"])
+        self.assertFalse(config["platform_settings"]["empty_mention_waiting_need_reply"])
 
     def test_request_context_treats_image_placeholder_as_unresolved_media(self) -> None:
         context = build_current_request_context(

@@ -210,6 +210,7 @@ DEFAULT_LONG_INPUT_TLDR_TEXT = "太长不看喵"
 LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
 LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
 BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
+EMPTY_MENTION_CALL_EXTRA = "_qqbot_empty_mention_call"
 DEFAULT_TWIN_MAX_CONTEXT_CHARS = 1200
 INTERNAL_ERROR_PREFIXES = (
     "Error occurred while processing agent request:",
@@ -398,7 +399,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.12.0",
+    "0.13.1",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -697,7 +698,10 @@ class QQBotFeaturesPlugin(Star):
             if not isinstance(comp, CorePlain):
                 cleaned_chain.append(comp)
                 continue
-            cleaned = sanitize_reply_plain_text(comp.text)
+            cleaned = sanitize_reply_plain_text(
+                comp.text,
+                strip_question_tail=not bool(event.get_extra(EMPTY_MENTION_CALL_EXTRA, "")),
+            )
             if cleaned != comp.text:
                 comp.text = cleaned
                 changed = True

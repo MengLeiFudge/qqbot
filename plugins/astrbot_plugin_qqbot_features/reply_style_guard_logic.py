@@ -149,12 +149,13 @@ _PERMISSION_ESCALATION_ACTIONS = (
 )
 
 
-def sanitize_reply_plain_text(text: str) -> str:
-    return strip_decorative_tail(
-        strip_twin_refusal_text(
-            strip_followup_tail(strip_permission_escalation_advice(strip_markdown_syntax(strip_internal_control_markers(text))))
-        )
-    )
+def sanitize_reply_plain_text(text: str, *, strip_question_tail: bool = True) -> str:
+    cleaned = strip_internal_control_markers(text)
+    cleaned = strip_markdown_syntax(cleaned)
+    cleaned = strip_permission_escalation_advice(cleaned)
+    cleaned = strip_followup_tail(cleaned, strip_questions=strip_question_tail)
+    cleaned = strip_twin_refusal_text(cleaned)
+    return strip_decorative_tail(cleaned)
 
 
 def strip_twin_refusal_text(text: str) -> str:
@@ -457,7 +458,7 @@ def strip_markdown_syntax(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def strip_followup_tail(text: str) -> str:
+def strip_followup_tail(text: str, *, strip_questions: bool = True) -> str:
     current = text.strip()
     if not current:
         return ""
@@ -465,7 +466,7 @@ def strip_followup_tail(text: str) -> str:
     stripped_any = False
     while lines:
         line = lines[-1].strip()
-        stripped = strip_followup_from_line(line)
+        stripped = strip_followup_from_line(line, strip_questions=strip_questions)
         if stripped == line:
             break
         stripped_any = True
@@ -486,22 +487,22 @@ def strip_internal_control_markers(text: str) -> str:
     return cleaned.strip()
 
 
-def strip_followup_from_line(line: str) -> str:
+def strip_followup_from_line(line: str, *, strip_questions: bool = True) -> str:
     parts = [part.strip() for part in _TAIL_BOUNDARY.split(line) if part.strip()]
     if not parts:
         return ""
-    while parts and is_followup_sentence(parts[-1]):
+    while parts and is_followup_sentence(parts[-1], strip_questions=strip_questions):
         parts.pop()
     return "".join(parts).strip()
 
 
-def is_followup_sentence(sentence: str) -> bool:
+def is_followup_sentence(sentence: str, *, strip_questions: bool = True) -> bool:
     compact = re.sub(r"\s+", "", sentence)
     if not compact:
         return False
     if any(marker in compact for marker in _FOLLOWUP_MARKERS):
         return True
-    if compact.endswith(("?", "？")):
+    if strip_questions and compact.endswith(("?", "？")):
         return True
     return False
 
