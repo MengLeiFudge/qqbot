@@ -40,24 +40,33 @@ from .onebot_api import OneBotCallApiAdapter
 from .rightcodes_draw_logic import RightCodesDrawClient
 from .rightcodes_draw_logic import RightCodesDrawQuotaStore
 from .rightcodes_draw_logic import RightCodesDrawRequest
+from .rightcodes_draw_logic import extract_rightcodes_draw_model_switch
+from .rightcodes_draw_logic import extract_removed_rightcodes_draw_temporary_model
 from .rightcodes_draw_logic import format_draw_quota_exceeded_message
 from .rightcodes_draw_logic import format_draw_start_message
 from .rightcodes_draw_logic import format_rightcodes_draw_failure
 from .rightcodes_draw_logic import format_rightcodes_draw_missing_prompt_message
 from .rightcodes_draw_logic import format_rightcodes_draw_model_help
+from .rightcodes_draw_logic import format_rightcodes_draw_model_switch_invalid
+from .rightcodes_draw_logic import format_rightcodes_draw_model_switch_success
 from .rightcodes_draw_logic import format_rightcodes_draw_points_mutation_denied
+from .rightcodes_draw_logic import format_rightcodes_draw_points_ranking
 from .rightcodes_draw_logic import format_rightcodes_draw_points_status
 from .rightcodes_draw_logic import format_rightcodes_draw_suggestion_message
 from .rightcodes_draw_logic import format_rightcodes_draw_success
+from .rightcodes_draw_logic import format_rightcodes_draw_temporary_model_removed
 from .rightcodes_draw_logic import format_rightcodes_draw_timeout
 from .rightcodes_draw_logic import load_rightcodes_config
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_feature_request
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_help_command
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_invocation
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_model_switch
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_mutation_request
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_query
+from .rightcodes_draw_logic import looks_like_rightcodes_draw_points_ranking
 from .rightcodes_draw_logic import looks_like_rightcodes_draw_suggestion
 from .rightcodes_draw_logic import parse_rightcodes_draw_command
+from .rightcodes_draw_logic import parse_rightcodes_draw_model_switch
 from .rightcodes_draw_catalog import format_rightcodes_draw_catalog_injection
 from .rightcodes_draw_catalog import should_inject_rightcodes_draw_catalog
 from .rightcodes_draw_rewrite import RIGHTCODES_DRAW_REWRITE_SYSTEM_PROMPT
@@ -310,9 +319,9 @@ FEATURES: tuple[FeatureSpec, ...] = (
         name="RightCodes生图",
         aliases=("生图", "画图", "RightCodes"),
         lines=(
-            "棉花糖生图 [模型名] 提示词：提交 RightCodes 生图任务",
-            "生图模型 / 生图价格：查看模型、价格和积分消耗",
-            "查看积分 / balance / points：查询当前 QQ 的生图积分",
+            "棉花糖生图 提示词：使用当前模型提交 RightCodes 生图任务",
+            "生图模型 / 生图价格：查看模型；切换生图模型 模型名：持久切换",
+            "查看积分 / balance / points：查询积分、当前模型和消耗；积分排行：查看全群前 10",
         ),
     ),
     FeatureSpec(
@@ -1173,7 +1182,11 @@ class QQBotFeaturesPlugin(Star):
             self._rightcodes_config.data_root,
             multiplier=self._rightcodes_config.point_multiplier,
         )
-        await asyncio.to_thread(store.record_group_message, event.get_sender_id())
+        await asyncio.to_thread(
+            store.record_group_message,
+            event.get_sender_id(),
+            nickname=event.get_sender_name(),
+        )
 
     @filter.on_llm_request(desc="在 LLM 请求前按关键词注入 RightCodes 生图接口知识库。")
     async def inject_rightcodes_draw_catalog(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -1210,7 +1223,7 @@ class QQBotFeaturesPlugin(Star):
             len(request_context.combined_query),
         )
 
-    @filter.event_message_type(EventMessageType.ALL, desc="RightCodes 生图总入口，处理生图、模型价格、积分查询和拒绝手动改分请求。")
+    @filter.event_message_type(EventMessageType.ALL, desc="RightCodes 生图总入口，处理生图、模型切换、积分查询与排行。")
     async def rightcodes_draw_command(self, event: AstrMessageEvent):
         text = extract_plain_text(event).strip()
         if not text:
@@ -1245,11 +1258,34 @@ class QQBotFeaturesPlugin(Star):
             yield event.plain_result(format_rightcodes_draw_points_status(balance))
             event.stop_event()
             return
+        if looks_like_rightcodes_draw_points_ranking(text):
+            ranking = await asyncio.to_thread(store.get_points_ranking, limit=10)
+            yield event.plain_result(format_rightcodes_draw_points_ranking(ranking))
+            event.stop_event()
+            return
         if looks_like_rightcodes_draw_help_command(text):
-            yield event.plain_result(format_rightcodes_draw_model_help())
+            balance = await asyncio.to_thread(store.get_balance, user_id)
+            yield event.plain_result(
+                format_rightcodes_draw_model_help(balance.model, multiplier=balance.multiplier)
+            )
+            event.stop_event()
+            return
+        if looks_like_rightcodes_draw_model_switch(text):
+            model = parse_rightcodes_draw_model_switch(text)
+            if model is None:
+                candidate = extract_rightcodes_draw_model_switch(text) or ""
+                yield event.plain_result(format_rightcodes_draw_model_switch_invalid(candidate))
+            else:
+                balance = await asyncio.to_thread(store.set_model, user_id, model)
+                yield event.plain_result(format_rightcodes_draw_model_switch_success(balance))
             event.stop_event()
             return
 
+        temporary_model = extract_removed_rightcodes_draw_temporary_model(text)
+        if temporary_model is not None:
+            yield event.plain_result(format_rightcodes_draw_temporary_model_removed(temporary_model))
+            event.stop_event()
+            return
         draw_request = parse_rightcodes_draw_command(text)
         if draw_request is None:
             if looks_like_rightcodes_draw_invocation(text):
@@ -1257,6 +1293,12 @@ class QQBotFeaturesPlugin(Star):
                 event.stop_event()
                 return
             return
+        balance = await asyncio.to_thread(store.get_balance, user_id)
+        draw_request = RightCodesDrawRequest(
+            prompt=draw_request.prompt,
+            model=balance.model,
+            image_urls=draw_request.image_urls,
+        )
         request_context = build_current_request_context(event, text)
         reference_image_urls = extract_image_sources(event)
         if should_rewrite_rightcodes_draw_prompt(

@@ -18,7 +18,10 @@ EXPLICIT_VISIBLE_RETRY_INSTRUCTION = (
 DUAL_PLATFORM_DUPLICATE_WINDOW_SECONDS = 3.0
 FIXED_COMMAND_PREFIX_RE = re.compile(
     r"^(?:棉花糖|棉花)\s*生图|^(?:查|查询|查看|看)(?:一下)?(?:我(?:的)?|当前)?(?:生图)?积分"
-    r"|^(?:生图模型|生图价格|draw\s*models|draw\s*help|balance|points?)$"
+    r"|^积分\s*排行(?:榜)?$"
+    r"|^(?:切换\s*)?生图\s*模型(?:\s*\S+)?$"
+    r"|^(?:(?:棉花糖|棉花)\s*)?(?:生图|画图)\s*(?:模型(?:说明)?|价格)$"
+    r"|^(?:draw\s*models|draw\s*help|balance|points?)$"
     r"|^用量$"
     r"|^(?:菜单|帮助|指令)(?:\s*\S+)?$|^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
     r"|^[开关](?:群色图|图片显示)$|^(?:来点)?(?:[美色涩蛇]图|混合).*$"

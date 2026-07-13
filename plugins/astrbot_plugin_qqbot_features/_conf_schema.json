@@ -43,7 +43,7 @@
     "description": "RightCodes 生图总超时秒数",
     "type": "int",
     "default": 240,
-    "hint": "生图通常超过 1 分钟；超过该时间仍未返回时，插件回复失败并退回本次扣除的积分或免费次数。"
+    "hint": "生图通常超过 1 分钟；超过该时间仍未返回时，插件回复失败并退回本次扣除的积分。"
   },
   "sub2api_base_url": {
     "description": "Sub2API 管理端地址",

@@ -106,11 +106,11 @@ class AstrBotRuntimeStorageMigrationTest(unittest.TestCase):
             legacy_before = points_path.read_text(encoding="utf-8")
 
             store = RightCodesDrawQuotaStore(runtime_root)
-            self.assertEqual(store.get_balance("10001", date_key="2026-07-05").points, 39)
+            self.assertEqual(store.get_balance("10001").points, 39)
             store.record_group_message("10001")
 
             self.assertEqual(points_path.read_text(encoding="utf-8"), legacy_before)
-            self.assertEqual(store.get_balance("10001", date_key="2026-07-05").points, 40)
+            self.assertEqual(store.get_balance("10001").points, 40)
 
     def test_rightcodes_quota_store_merges_legacy_points_created_during_restart_window(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -133,11 +133,11 @@ class AstrBotRuntimeStorageMigrationTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            self.assertEqual(store.get_balance("10001", date_key="2026-07-05").points, 5)
-            self.assertEqual(store.get_balance("10002", date_key="2026-07-05").points, 1)
+            self.assertEqual(store.get_balance("10001").points, 5)
+            self.assertEqual(store.get_balance("10002").points, 1)
 
             store.record_group_message("10002", amount=9)
-            self.assertEqual(store.get_balance("10002", date_key="2026-07-05").points, 10)
+            self.assertEqual(store.get_balance("10002").points, 10)
 
     def test_lolicon_prepare_item_records_metadata_without_downloading_image(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

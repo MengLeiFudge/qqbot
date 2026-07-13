@@ -4,7 +4,7 @@ import re
 
 
 RIGHTCODES_DRAW_CATALOG_TEXT = """RightCodes 生图接口知识库：
-资料来源：Right Code 官方文档 https://docs.right.codes/docs/rc_extension/draw/ ，最近更新 2026-05-30。
+资料来源：Right Code 官方文档 https://docs.right.codes/docs/rc_draw/ ，最近核对 2026-07-13。
 
 基础信息：
 - 统一基础地址：https://www.right.codes/draw
@@ -35,11 +35,12 @@ RIGHTCODES_DRAW_CATALOG_TEXT = """RightCodes 生图接口知识库：
 - chat/completions 文档没有把 size 列为独立图片生成字段；如果用户坚持走 chat/completions 控制尺寸，建议把 1024x1024、方图、1K 写进 content 文本里。
 
 模型说明：
-- gpt-image-2-vip：OpenAI 最新画图模型，官方直连，支持 1K、2K、4K。
-- gpt-image-2：OpenAI 最新画图模型，特价版，支持 1K。
-- nano-banana：由 gemini-2.5-flash-image 模型封装。
-- nano-banana-2：nano banana 第二代绘图模型，综合效果远超上一代，支持 1K、2K、4K。
-- nano-banana-pro：nano banana 第二代绘图模型，综合效果远超上一代，支持 1K、2K、4K。
+- gpt-image-2：$0.04/次，OpenAI 画图模型，支持 1K。
+- gpt-image-2-vip：$0.13/次，OpenAI 官方直连，当前支持 1K；官方已停止 2K、4K。
+- nano-banana：$0.14/次，即 gemini-2.5-flash-image，支持 1K。
+- nano-banana-2：$0.12/次，即 gemini-3.1-flash-image-preview，支持 1K、2K、4K。
+- nano-banana-2-lite：$0.05/次，即 gemini-3.1-flash-lite-image，支持 1K。
+- nano-banana-pro：$0.18/次，即 gemini-3-pro-image-preview，支持 1K、2K、4K。
 
 回答风格要求：
 - 回答 RightCodes 生图接口问题时，区分 images/generations 和 chat/completions，不要说“没有明确图像参数位”。

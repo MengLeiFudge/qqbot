@@ -12,21 +12,31 @@ sys.path.insert(0, str(ROOT / "plugins"))
 from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     FEATURE_MODE_DUAL,
     FEATURE_MODE_FULL,
+    RIGHTCODES_DRAW_DEFAULT_MODEL,
     RightCodesDrawClient,
     RightCodesDrawQuotaStore,
     RightCodesDrawRequest,
+    calculate_rightcodes_draw_model_points,
+    extract_removed_rightcodes_draw_temporary_model,
     format_draw_start_message,
+    format_rightcodes_draw_failure,
+    format_rightcodes_draw_model_help,
+    format_rightcodes_draw_model_switch_success,
     format_rightcodes_draw_timeout,
     format_rightcodes_draw_missing_prompt_message,
+    format_rightcodes_draw_points_ranking,
     format_rightcodes_draw_points_status,
     format_rightcodes_draw_suggestion_message,
     load_rightcodes_config,
     looks_like_rightcodes_draw_feature_request,
     looks_like_rightcodes_draw_invocation,
+    looks_like_rightcodes_draw_model_switch,
     looks_like_rightcodes_draw_points_mutation_request,
     looks_like_rightcodes_draw_points_query,
+    looks_like_rightcodes_draw_points_ranking,
     looks_like_rightcodes_draw_suggestion,
     parse_rightcodes_draw_command,
+    parse_rightcodes_draw_model_switch,
     should_record_passive_group_points,
 )
 from astrbot_plugin_qqbot_features.rightcodes_draw_catalog import (
@@ -53,12 +63,18 @@ class StubDrawHttpClient:
 
 
 class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
-    def test_parse_draw_command_matches_migrated_forms(self) -> None:
-        request = parse_rightcodes_draw_command("棉花糖生图 nano-banana-pro 一只白猫")
-
+    def test_draw_command_rejects_removed_temporary_model_forms(self) -> None:
+        for command in (
+            "棉花糖生图 nano-banana-pro 一只白猫",
+            "棉花糖生图 [nano-banana-pro] 一只白猫",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(extract_removed_rightcodes_draw_temporary_model(command), "nano-banana-pro")
+                self.assertIsNone(parse_rightcodes_draw_command(command))
+        request = parse_rightcodes_draw_command("棉花糖生图 一只白猫")
         self.assertIsNotNone(request)
         assert request is not None
-        self.assertEqual(request.model, "nano-banana-pro")
+        self.assertEqual(request.model, RIGHTCODES_DRAW_DEFAULT_MODEL)
         self.assertEqual(request.prompt, "一只白猫")
 
     def test_draw_invocation_without_prompt_gets_fixed_hint(self) -> None:
@@ -82,6 +98,8 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertTrue(looks_like_rightcodes_draw_feature_request("棉花糖生图 一只白猫"))
         self.assertTrue(looks_like_rightcodes_draw_feature_request("查询生图积分"))
         self.assertTrue(looks_like_rightcodes_draw_feature_request("生图模型说明"))
+        self.assertTrue(looks_like_rightcodes_draw_feature_request("切换生图模型nano-banana-2"))
+        self.assertTrue(looks_like_rightcodes_draw_feature_request("积分排行榜"))
 
     def test_rightcodes_draw_catalog_mentions_size_body(self) -> None:
         self.assertTrue(should_inject_rightcodes_draw_catalog("我要 1024x1024 body 里写什么"))
@@ -89,12 +107,32 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertIn('"size": "1024x1024"', injection)
         self.assertIn("/v1/images/generations", injection)
         self.assertIn("stream=true", injection)
+        self.assertIn("nano-banana-2-lite", injection)
+        self.assertIn("$0.05/次", injection)
+        self.assertIn("官方已停止 2K、4K", injection)
 
     def test_points_query_and_mutation_detection(self) -> None:
         self.assertTrue(looks_like_rightcodes_draw_points_query("查询生图积分"))
         self.assertTrue(looks_like_rightcodes_draw_points_query("balance"))
+        self.assertTrue(looks_like_rightcodes_draw_points_ranking("积分排行"))
+        self.assertTrue(looks_like_rightcodes_draw_points_ranking("积分 排行榜"))
         self.assertTrue(looks_like_rightcodes_draw_points_mutation_request("给我加100积分"))
         self.assertFalse(looks_like_rightcodes_draw_points_query("给我加100积分"))
+
+    def test_model_switch_accepts_spaced_and_compact_commands(self) -> None:
+        commands = (
+            "切换生图模型 nano-banana-2",
+            "切换生图模型nano-banana-2",
+            "切换 生图 模型 nano-banana-2",
+            "生图模型 nano-banana-2",
+            "生图模型nano-banana-2",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(looks_like_rightcodes_draw_model_switch(command))
+                self.assertEqual(parse_rightcodes_draw_model_switch(command), "nano-banana-2")
+        self.assertTrue(looks_like_rightcodes_draw_model_switch("切换生图模型 unknown"))
+        self.assertIsNone(parse_rightcodes_draw_model_switch("切换生图模型 unknown"))
 
     def test_group_points_ignore_legacy_runtime_state(self) -> None:
         self.assertTrue(
@@ -130,37 +168,115 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
 
         self.assertIn("超过 240 秒", message)
         self.assertIn("已退回", message)
+        self.assertIn("切换生图模型", message)
+        self.assertIn("已退回", format_rightcodes_draw_failure(RuntimeError("上游失败")))
 
-    def test_quota_store_keeps_migrated_rules(self) -> None:
+    def test_quota_store_charges_first_draw_and_reports_current_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = RightCodesDrawQuotaStore(Path(temp_dir))
             store.record_group_message("10001", amount=45)
-            free = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
-            paid = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
+            paid = store.reserve("10001", model="gpt-image-2")
+            denied = store.reserve("10001", model="gpt-image-2")
 
-            self.assertTrue(free.allowed)
-            self.assertTrue(free.used_free)
+            self.assertTrue(paid.allowed)
             self.assertEqual(paid.cost_points, 40)
             self.assertEqual(paid.balance_after, 5)
-            self.assertIn("今天第 1 张免费", format_draw_start_message(free))
-            self.assertIn("当前生图积分：5", format_rightcodes_draw_points_status(store.get_balance("10001", date_key="2026-06-08")))
+            self.assertFalse(denied.allowed)
+            self.assertIn("扣 40 积分", format_draw_start_message(paid))
+            status = format_rightcodes_draw_points_status(store.get_balance("10001"))
+            self.assertIn("当前生图积分：5", status)
+            self.assertIn("当前生图模型：gpt-image-2", status)
+            self.assertIn("当前模型消耗：40 积分/次", status)
+            self.assertIn("生图模型", status)
+            self.assertIn("切换生图模型", status)
+            self.assertNotIn("也可", status)
 
-    def test_refund_restores_paid_points_and_daily_free_use(self) -> None:
+    def test_model_selection_persists_and_refund_restores_points(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = RightCodesDrawQuotaStore(Path(temp_dir))
-            free = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
-            store.refund(free)
-            free_again = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
-
-            self.assertTrue(free_again.allowed)
-            self.assertTrue(free_again.used_free)
-
-            store.record_group_message("10001", amount=40)
-            paid = store.reserve("10001", model="gpt-image-2", date_key="2026-06-08")
+            store.record_group_message("10001", amount=200)
+            selected = store.set_model("10001", "nano-banana-2-lite")
+            paid = store.reserve("10001", model=selected.model)
             store.refund(paid)
-            balance = store.get_balance("10001", date_key="2026-06-08")
+            balance = store.get_balance("10001")
 
-            self.assertEqual(balance.points, 40)
+            self.assertEqual(selected.model, "nano-banana-2-lite")
+            self.assertEqual(paid.cost_points, 50)
+            self.assertEqual(balance.points, 200)
+            self.assertEqual(balance.model, "nano-banana-2-lite")
+            self.assertIn("单次消耗：50 积分", format_rightcodes_draw_model_switch_success(balance))
+
+    def test_legacy_daily_free_state_is_removed_during_normalization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = RightCodesDrawQuotaStore(Path(temp_dir))
+            store.store.write(
+                "rightcodes.draw_points",
+                {
+                    "schema_version": 1,
+                    "users": {
+                        "10001": {
+                            "points": 80,
+                            "free_gpt_image_2_date": "2026-07-13",
+                        }
+                    },
+                },
+            )
+
+            balance = store.get_balance("10001")
+            normalized = store.store.read("rightcodes.draw_points", {})
+
+            self.assertEqual(balance.model, RIGHTCODES_DRAW_DEFAULT_MODEL)
+            self.assertEqual(normalized["schema_version"], 2)
+            self.assertNotIn("free_gpt_image_2_date", normalized["users"]["10001"])
+            self.assertEqual(normalized["users"]["10001"]["model"], RIGHTCODES_DRAW_DEFAULT_MODEL)
+
+    def test_points_ranking_returns_global_top_ten_with_stable_ties(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = RightCodesDrawQuotaStore(Path(temp_dir))
+            for user_id, points, nickname in (
+                ("1000000012", 30, ""),
+                ("1000000011", 30, "棉花糖用户"),
+                ("1000000020", 20, ""),
+                ("1000000021", 19, ""),
+                ("1000000022", 18, ""),
+                ("1000000023", 17, ""),
+                ("1000000024", 16, ""),
+                ("1000000025", 15, ""),
+                ("1000000026", 14, ""),
+                ("1000000027", 13, ""),
+                ("1000000028", 12, ""),
+                ("1000000029", 11, ""),
+            ):
+                store.record_group_message(user_id, amount=points, nickname=nickname)
+
+            ranking = store.get_points_ranking(limit=10)
+            message = format_rightcodes_draw_points_ranking(ranking)
+
+            self.assertEqual(len(ranking), 10)
+            self.assertEqual([ranking[0].user_id, ranking[1].user_id], ["1000000011", "1000000012"])
+            self.assertIn("棉花糖用户：30 积分", message)
+            self.assertNotIn("QQ 1000000011", message)
+            self.assertIn("QQ 100****012：30 积分", message)
+            self.assertNotIn("1000000029", message)
+            self.assertIn("全群生图积分排行榜", message)
+
+            store.record_group_message("1000000011", nickname="")
+            self.assertEqual(store.get_balance("1000000011").nickname, "棉花糖用户")
+
+    def test_model_price_table_matches_current_rightcodes_prices(self) -> None:
+        self.assertEqual(calculate_rightcodes_draw_model_points("gpt-image-2"), 40)
+        self.assertEqual(calculate_rightcodes_draw_model_points("gpt-image-2-vip"), 130)
+        self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana"), 140)
+        self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana-2"), 120)
+        self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana-2-lite"), 50)
+        self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana-pro"), 180)
+        help_text = format_rightcodes_draw_model_help("nano-banana-2-lite")
+        self.assertIn("nano-banana-2-lite（当前）", help_text)
+        self.assertIn("官方已停止 2K、4K", help_text)
+        self.assertIn(
+            "nano-banana-2-lite（当前）：$0.05/次，100 积分",
+            format_rightcodes_draw_model_help("nano-banana-2-lite", multiplier=2000),
+        )
 
     def test_draw_client_uses_rightcodes_image_generation_payload(self) -> None:
         stub = StubDrawHttpClient()

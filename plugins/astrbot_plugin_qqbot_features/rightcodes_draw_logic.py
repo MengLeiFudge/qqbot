@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING
 import hashlib
 import json
@@ -14,7 +13,6 @@ import time
 from typing import Any, Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .runtime_storage import RuntimeJsonStore
 from .runtime_storage import read_json_file
@@ -23,12 +21,12 @@ from .runtime_storage import read_json_file
 RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
 RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
 RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 1000
-RIGHTCODES_DRAW_FREE_DAILY_LIMIT = 1
 RIGHTCODES_DRAW_MODEL_ORDER = (
     "gpt-image-2",
     "gpt-image-2-vip",
     "nano-banana",
     "nano-banana-2",
+    "nano-banana-2-lite",
     "nano-banana-pro",
 )
 RIGHTCODES_DRAW_MODELS = set(RIGHTCODES_DRAW_MODEL_ORDER)
@@ -37,14 +35,16 @@ RIGHTCODES_DRAW_MODEL_PRICES = {
     "gpt-image-2-vip": Decimal("0.13"),
     "nano-banana": Decimal("0.14"),
     "nano-banana-2": Decimal("0.12"),
+    "nano-banana-2-lite": Decimal("0.05"),
     "nano-banana-pro": Decimal("0.18"),
 }
 RIGHTCODES_DRAW_MODEL_DESCRIPTIONS = {
-    "gpt-image-2": "OpenAI 最新的画图模型，特价版，支持分辨率：1K",
-    "gpt-image-2-vip": "OpenAI 最新的画图模型，官方直连，支持分辨率：1K、2K、4K",
-    "nano-banana": "由 gemini-2.5-flash-image 模型封装而来",
-    "nano-banana-2": "nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K",
-    "nano-banana-pro": "nano banana 第二代绘图模型，综合效果远超上一代，支持分辨率：1K、2K、4K",
+    "gpt-image-2": "OpenAI 画图模型，上游支持 1K",
+    "gpt-image-2-vip": "OpenAI 官方直连，上游当前支持 1K，官方已停止 2K、4K",
+    "nano-banana": "即 gemini-2.5-flash-image，上游支持 1K",
+    "nano-banana-2": "即 gemini-3.1-flash-image-preview，上游支持 1K、2K、4K",
+    "nano-banana-2-lite": "即 gemini-3.1-flash-lite-image，上游支持 1K",
+    "nano-banana-pro": "即 gemini-3-pro-image-preview，上游支持 1K、2K、4K",
 }
 FEATURE_MODE_ENV = "QQBOT_ASTRBOT_FEATURE_MODE"
 FEATURE_MODE_DUAL = "dual"
@@ -59,6 +59,8 @@ _DRAW_POINTS_MUTATION_RE = re.compile(
     r"(?:加|增加|扣|扣除|减|减少|改|修改|设置|设定|送|赠|赠送|充值|充).{0,16}积分"
     r"|积分.{0,16}(?:加|增加|扣|扣除|减|减少|改|修改|设置|设定|送|赠|赠送|充值|充)"
 )
+_DRAW_MODEL_SWITCH_PRIMARY_RE = re.compile(r"^切换\s*生图\s*模型\s*(.*)$", re.IGNORECASE)
+_DRAW_MODEL_SWITCH_ALIAS_RE = re.compile(r"^生图\s*模型\s*(.+)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,9 +80,9 @@ class RightCodesDrawResult:
 class RightCodesDrawPointBalance:
     user_id: str
     points: int
-    free_available: bool
-    date_key: str
+    model: str
     multiplier: int
+    nickname: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,9 +95,6 @@ class RightCodesDrawQuotaResult:
     balance_after: int
     multiplier: int
     price: str
-    date_key: str
-    used_free: bool = False
-    free_limit: int = RIGHTCODES_DRAW_FREE_DAILY_LIMIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +190,13 @@ class RightCodesDrawQuotaStore:
         self.path = self.data_root / "ai" / "draw_points.json"
         self.store = RuntimeJsonStore(self.data_root)
 
-    def record_group_message(self, user_id: int | str, *, amount: int = 1) -> int:
+    def record_group_message(
+        self,
+        user_id: int | str,
+        *,
+        amount: int = 1,
+        nickname: str = "",
+    ) -> int:
         user_key = str(user_id).strip()
         if not user_key or amount <= 0:
             return 0
@@ -201,64 +206,90 @@ class RightCodesDrawQuotaStore:
             user_payload = get_user_payload(users, user_key)
             points = int(user_payload.get("points", 0) or 0) + int(amount)
             user_payload["points"] = points
+            cached_nickname = normalize_rightcodes_draw_nickname(nickname, user_id=user_key)
+            if cached_nickname:
+                user_payload["nickname"] = cached_nickname
             users[user_key] = user_payload
             payload["users"] = users
             self._write(payload)
             return points
 
-    def get_balance(
-        self,
-        user_id: int | str,
-        *,
-        date_key: str | None = None,
-    ) -> RightCodesDrawPointBalance:
-        date_key = date_key or current_draw_quota_date_key()
+    def get_balance(self, user_id: int | str) -> RightCodesDrawPointBalance:
         user_key = str(user_id).strip()
         if not user_key:
-            return RightCodesDrawPointBalance("", 0, False, date_key, self.multiplier)
+            return RightCodesDrawPointBalance("", 0, RIGHTCODES_DRAW_DEFAULT_MODEL, self.multiplier)
         with _DRAW_POINTS_LOCK:
             payload = self._read()
             users = get_users_payload(payload)
             user_payload = get_user_payload(users, user_key)
-        free_date = str(user_payload.get("free_gpt_image_2_date", "") or "")
         return RightCodesDrawPointBalance(
             user_id=user_key,
             points=int(user_payload.get("points", 0) or 0),
-            free_available=free_date != date_key,
-            date_key=date_key,
+            model=normalize_rightcodes_draw_model(user_payload.get("model")),
             multiplier=self.multiplier,
+            nickname=normalize_rightcodes_draw_nickname(user_payload.get("nickname"), user_id=user_key),
         )
+
+    def set_model(self, user_id: int | str, model: str) -> RightCodesDrawPointBalance:
+        user_key = str(user_id).strip()
+        model_key = str(model or "").strip().lower()
+        if not user_key:
+            raise ValueError("缺少 QQ 用户 ID")
+        if model_key not in RIGHTCODES_DRAW_MODELS:
+            raise ValueError(f"不支持的生图模型: {model}")
+        with _DRAW_POINTS_LOCK:
+            payload = self._read()
+            users = get_users_payload(payload)
+            user_payload = get_user_payload(users, user_key)
+            user_payload["model"] = model_key
+            users[user_key] = user_payload
+            payload["users"] = users
+            self._write(payload)
+            return RightCodesDrawPointBalance(
+                user_id=user_key,
+                points=int(user_payload.get("points", 0) or 0),
+                model=model_key,
+                multiplier=self.multiplier,
+                nickname=normalize_rightcodes_draw_nickname(user_payload.get("nickname"), user_id=user_key),
+            )
+
+    def get_points_ranking(self, *, limit: int = 10) -> tuple[RightCodesDrawPointBalance, ...]:
+        with _DRAW_POINTS_LOCK:
+            payload = self._read()
+            users = get_users_payload(payload)
+        balances = [
+            RightCodesDrawPointBalance(
+                user_id=user_id,
+                points=int(user_payload.get("points", 0) or 0),
+                model=normalize_rightcodes_draw_model(user_payload.get("model")),
+                multiplier=self.multiplier,
+                nickname=normalize_rightcodes_draw_nickname(user_payload.get("nickname"), user_id=user_id),
+            )
+            for user_id, user_payload in users.items()
+        ]
+        balances.sort(key=lambda item: (-item.points, sortable_user_id(item.user_id)))
+        return tuple(balances[: max(0, int(limit))])
 
     def reserve(
         self,
         user_id: int | str,
         *,
         model: str = RIGHTCODES_DRAW_DEFAULT_MODEL,
-        date_key: str | None = None,
     ) -> RightCodesDrawQuotaResult:
-        date_key = date_key or current_draw_quota_date_key()
         user_key = str(user_id).strip()
+        model = normalize_rightcodes_draw_model(model)
         cost_points = calculate_rightcodes_draw_model_points(model, multiplier=self.multiplier)
         price = format_rightcodes_draw_model_price(model)
         if not user_key:
-            return RightCodesDrawQuotaResult(False, "", model, cost_points, 0, 0, self.multiplier, price, date_key)
+            return RightCodesDrawQuotaResult(False, "", model, cost_points, 0, 0, self.multiplier, price)
         with _DRAW_POINTS_LOCK:
             payload = self._read()
             users = get_users_payload(payload)
             user_payload = get_user_payload(users, user_key)
             balance = int(user_payload.get("points", 0) or 0)
-            free_date = str(user_payload.get("free_gpt_image_2_date", "") or "")
-            if model == RIGHTCODES_DRAW_DEFAULT_MODEL and free_date != date_key:
-                user_payload["free_gpt_image_2_date"] = date_key
-                users[user_key] = user_payload
-                payload["users"] = users
-                self._write(payload)
-                return RightCodesDrawQuotaResult(
-                    True, user_key, model, 0, balance, balance, self.multiplier, price, date_key, True
-                )
             if balance < cost_points:
                 return RightCodesDrawQuotaResult(
-                    False, user_key, model, cost_points, balance, balance, self.multiplier, price, date_key
+                    False, user_key, model, cost_points, balance, balance, self.multiplier, price
                 )
             user_payload["points"] = balance - cost_points
             users[user_key] = user_payload
@@ -273,7 +304,6 @@ class RightCodesDrawQuotaStore:
                 balance - cost_points,
                 self.multiplier,
                 price,
-                date_key,
             )
 
     def refund(self, reservation: RightCodesDrawQuotaResult) -> None:
@@ -283,10 +313,7 @@ class RightCodesDrawQuotaStore:
             payload = self._read()
             users = get_users_payload(payload)
             user_payload = get_user_payload(users, reservation.user_id)
-            if reservation.used_free:
-                if user_payload.get("free_gpt_image_2_date") == reservation.date_key:
-                    user_payload.pop("free_gpt_image_2_date", None)
-            elif reservation.cost_points > 0:
+            if reservation.cost_points > 0:
                 points = int(user_payload.get("points", 0) or 0)
                 user_payload["points"] = points + reservation.cost_points
             users[reservation.user_id] = user_payload
@@ -294,10 +321,13 @@ class RightCodesDrawQuotaStore:
             self._write(payload)
 
     def _read(self) -> dict[str, object]:
-        raw = self.store.read("rightcodes.draw_points", {"schema_version": 1, "users": {}})
+        raw = self.store.read("rightcodes.draw_points", {"schema_version": 2, "users": {}})
         if not isinstance(raw, dict):
-            raw = {"schema_version": 1, "users": {}}
-        raw = normalize_draw_points_payload(raw)
+            raw = {"schema_version": 2, "users": {}}
+        normalized = normalize_draw_points_payload(raw)
+        if normalized != raw:
+            self.store.write("rightcodes.draw_points", normalized)
+        raw = normalized
         if not self.path.exists():
             return raw
         fingerprint = fingerprint_file(self.path)
@@ -361,24 +391,9 @@ def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
     rest = extract_rightcodes_draw_prompt(normalized)
     if rest is None or not rest:
         return None
-    model = RIGHTCODES_DRAW_DEFAULT_MODEL
-    prompt = rest
-    bracket_match = re.match(r"^\[([^\]]+)\]\s*(.+)$", rest)
-    if bracket_match is not None:
-        candidate = bracket_match.group(1).strip()
-        if candidate in RIGHTCODES_DRAW_MODELS:
-            model = candidate
-            prompt = bracket_match.group(2).strip()
-        else:
-            return RightCodesDrawRequest(prompt=rest, model=model)
-    else:
-        parts = rest.split(maxsplit=1)
-        if len(parts) == 2 and parts[0] in RIGHTCODES_DRAW_MODELS:
-            model = parts[0]
-            prompt = parts[1].strip()
-    if not prompt:
+    if extract_removed_rightcodes_draw_temporary_model(normalized) is not None:
         return None
-    return RightCodesDrawRequest(prompt=prompt, model=model)
+    return RightCodesDrawRequest(prompt=rest)
 
 
 def looks_like_rightcodes_draw_invocation(text: str) -> bool:
@@ -399,7 +414,9 @@ def looks_like_rightcodes_draw_feature_request(text: str, *, is_direct_or_privat
         looks_like_rightcodes_draw_invocation(normalized)
         or looks_like_rightcodes_draw_points_mutation_request(normalized)
         or looks_like_rightcodes_draw_points_query(normalized)
+        or looks_like_rightcodes_draw_points_ranking(normalized)
         or looks_like_rightcodes_draw_help_command(normalized)
+        or looks_like_rightcodes_draw_model_switch(normalized)
     )
 
 
@@ -408,6 +425,18 @@ def extract_rightcodes_draw_prompt(text: str) -> str | None:
     if command_match is not None:
         return command_match.group(1).strip()
     return None
+
+
+def extract_removed_rightcodes_draw_temporary_model(text: str) -> str | None:
+    rest = extract_rightcodes_draw_prompt(text.strip())
+    if not rest:
+        return None
+    bracket_match = re.match(r"^\[([^\]]+)\](?:\s+|$)", rest)
+    if bracket_match is not None:
+        candidate = bracket_match.group(1).strip().lower()
+        return candidate if candidate in RIGHTCODES_DRAW_MODELS else None
+    candidate = rest.split(maxsplit=1)[0].strip().lower()
+    return candidate if candidate in RIGHTCODES_DRAW_MODELS else None
 
 
 def extract_natural_draw_prompt(text: str) -> str | None:
@@ -426,7 +455,14 @@ def looks_like_rightcodes_draw_command(text: str) -> bool:
 
 
 def format_rightcodes_draw_missing_prompt_message() -> str:
-    return "生图需要文字提示词。用法：棉花糖生图 提示词；也可以写：棉花糖生图 模型名 提示词。"
+    return "生图需要文字提示词。用法：棉花糖生图 提示词。需要换模型时，先发送：切换生图模型 模型名。"
+
+
+def format_rightcodes_draw_temporary_model_removed(model: str) -> str:
+    return (
+        f"生图命令不再支持临时指定模型 {model}，本次没有扣积分。"
+        f"请先发送“切换生图模型 {model}”，再发送“棉花糖生图 提示词”。"
+    )
 
 
 def looks_like_rightcodes_draw_help_command(text: str) -> bool:
@@ -457,6 +493,11 @@ def looks_like_rightcodes_draw_points_query(text: str) -> bool:
     return _DRAW_POINTS_QUERY_RE.fullmatch(compact) is not None
 
 
+def looks_like_rightcodes_draw_points_ranking(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.strip())
+    return compact in {"积分排行", "积分排行榜"}
+
+
 def looks_like_rightcodes_draw_points_mutation_request(text: str) -> bool:
     compact = re.sub(r"\s+", "", text.strip())
     if not compact or "积分" not in compact:
@@ -464,46 +505,100 @@ def looks_like_rightcodes_draw_points_mutation_request(text: str) -> bool:
     return _DRAW_POINTS_MUTATION_RE.search(compact) is not None
 
 
-def format_rightcodes_draw_model_help() -> str:
-    lines = ["棉花糖现在支持这些生图模型喵："]
+def extract_rightcodes_draw_model_switch(text: str) -> str | None:
+    normalized = text.strip()
+    match = _DRAW_MODEL_SWITCH_PRIMARY_RE.fullmatch(normalized)
+    if match is not None:
+        return match.group(1).strip()
+    match = _DRAW_MODEL_SWITCH_ALIAS_RE.fullmatch(normalized)
+    if match is not None:
+        return match.group(1).strip()
+    return None
+
+
+def looks_like_rightcodes_draw_model_switch(text: str) -> bool:
+    return extract_rightcodes_draw_model_switch(text) is not None
+
+
+def parse_rightcodes_draw_model_switch(text: str) -> str | None:
+    candidate = extract_rightcodes_draw_model_switch(text)
+    if candidate is None:
+        return None
+    model = candidate.lower()
+    return model if model in RIGHTCODES_DRAW_MODELS else None
+
+
+def format_rightcodes_draw_model_help(
+    current_model: str = RIGHTCODES_DRAW_DEFAULT_MODEL,
+    *,
+    multiplier: int = RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER,
+) -> str:
+    current_model = normalize_rightcodes_draw_model(current_model)
+    lines = [f"当前生图模型：{current_model}", "可用模型："]
     for model in RIGHTCODES_DRAW_MODEL_ORDER:
         description = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[model]
         price = format_rightcodes_draw_model_price(model)
-        default_mark = "（默认）" if model == RIGHTCODES_DRAW_DEFAULT_MODEL else ""
-        free_mark = "；每天首张免费" if model == RIGHTCODES_DRAW_DEFAULT_MODEL else ""
+        current_mark = "（当前）" if model == current_model else ""
         lines.append(
-            f"- {model}{default_mark}：${price}/张"
-            f"（{calculate_rightcodes_draw_model_points(model)} 积分）{free_mark}。{description}"
+            f"· {model}{current_mark}：${price}/次，"
+            f"{calculate_rightcodes_draw_model_points(model, multiplier=multiplier)} 积分。{description}"
         )
     lines.extend(
         [
             "",
-            "用法：",
-            "棉花糖生图 [模型名] 提示词",
-            "棉花糖生图 模型名 提示词",
-            "不写模型时默认使用 gpt-image-2。",
+            "切换模型：切换生图模型 模型名",
+            "隐藏别名：生图模型 模型名",
+            "切换后生图：棉花糖生图 提示词",
         ]
     )
     return "\n".join(lines)
 
 
 def format_rightcodes_draw_points_status(balance: RightCodesDrawPointBalance) -> str:
-    free_status = (
-        f"{RIGHTCODES_DRAW_DEFAULT_MODEL} 今日免费次数：可用"
-        if balance.free_available
-        else f"{RIGHTCODES_DRAW_DEFAULT_MODEL} 今日免费次数：已使用"
-    )
-    model_lines = [
-        f"- {model}: {calculate_rightcodes_draw_model_points(model, multiplier=balance.multiplier)} 积分"
-        for model in RIGHTCODES_DRAW_MODEL_ORDER
-    ]
+    cost_points = calculate_rightcodes_draw_model_points(balance.model, multiplier=balance.multiplier)
     return "\n".join(
         [
             f"当前生图积分：{balance.points}",
-            free_status,
-            f"扣费倍率：价格 x {balance.multiplier}",
-            "模型扣费：",
-            *model_lines,
+            f"当前生图模型：{balance.model}",
+            f"当前模型消耗：{cost_points} 积分/次",
+            "",
+            "查看模型：生图模型",
+            "切换模型：切换生图模型 模型名",
+        ]
+    )
+
+
+def format_rightcodes_draw_points_ranking(ranking: tuple[RightCodesDrawPointBalance, ...]) -> str:
+    if not ranking:
+        return "全群还没有生图积分记录。"
+    lines = ["全群生图积分排行榜："]
+    for index, balance in enumerate(ranking, start=1):
+        identity = balance.nickname or f"QQ {mask_qq_user_id(balance.user_id)}"
+        lines.append(f"{index}. {identity}：{balance.points} 积分")
+    return "\n".join(lines)
+
+
+def format_rightcodes_draw_model_switch_success(balance: RightCodesDrawPointBalance) -> str:
+    cost_points = calculate_rightcodes_draw_model_points(balance.model, multiplier=balance.multiplier)
+    description = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[balance.model]
+    return "\n".join(
+        [
+            f"已切换生图模型：{balance.model}",
+            f"单次消耗：{cost_points} 积分",
+            description,
+            "之后发送“棉花糖生图 提示词”就会使用这个模型。",
+        ]
+    )
+
+
+def format_rightcodes_draw_model_switch_invalid(candidate: str) -> str:
+    candidate = str(candidate or "").strip()
+    first_line = f"不支持这个生图模型：{candidate}" if candidate else "请指定要切换的生图模型。"
+    return "\n".join(
+        [
+            first_line,
+            "查看模型：生图模型",
+            "切换用法：切换生图模型 模型名",
         ]
     )
 
@@ -513,11 +608,6 @@ def format_rightcodes_draw_points_mutation_denied() -> str:
 
 
 def format_draw_start_message(quota: RightCodesDrawQuotaResult) -> str:
-    if quota.used_free:
-        return (
-            "收到，棉花糖开始生图任务啦！"
-            f"{quota.model} 今天第 1 张免费，当前积分 {quota.balance_after}。"
-        )
     return (
         "收到，棉花糖开始生图任务啦！"
         f"本次使用 {quota.model}，扣 {quota.cost_points} 积分，"
@@ -530,7 +620,7 @@ def format_draw_quota_exceeded_message(quota: RightCodesDrawQuotaResult) -> str:
         f"积分不够啦：{quota.model} 需要 {quota.cost_points} 积分"
         f"（价格 ${quota.price} x 倍率 {quota.multiplier}），"
         f"你现在有 {quota.balance_before} 积分。"
-        "gpt-image-2 每天第 1 张免费。"
+        "可发送“生图模型”查看价格，或用“切换生图模型 模型名”切换后重试。"
     )
 
 
@@ -549,13 +639,18 @@ def format_rightcodes_draw_success(
 
 
 def format_rightcodes_draw_failure(exc: Exception) -> str:
-    return f"❌ 生成失败: {extract_rightcodes_draw_error_message(exc)}"
+    return (
+        f"❌ 生成失败: {extract_rightcodes_draw_error_message(exc)}。"
+        "本次扣除的积分已退回。可发送“生图模型”查看模型，"
+        "或用“切换生图模型 模型名”切换后重试。"
+    )
 
 
 def format_rightcodes_draw_timeout(timeout_seconds: float) -> str:
     return (
         f"❌ 生成失败: RightCodes 生图超过 {timeout_seconds:.0f} 秒还没返回，"
-        "本次扣除的积分或免费次数已退回。"
+        "本次扣除的积分已退回。可发送“生图模型”查看模型，"
+        "或用“切换生图模型 模型名”切换后重试。"
     )
 
 
@@ -581,7 +676,7 @@ def calculate_rightcodes_draw_model_points(
 
 
 def get_rightcodes_draw_model_price(model: str) -> Decimal:
-    return RIGHTCODES_DRAW_MODEL_PRICES.get(model, RIGHTCODES_DRAW_MODEL_PRICES[RIGHTCODES_DRAW_DEFAULT_MODEL])
+    return RIGHTCODES_DRAW_MODEL_PRICES[normalize_rightcodes_draw_model(model)]
 
 
 def format_rightcodes_draw_model_price(model: str) -> str:
@@ -666,21 +761,6 @@ def extract_image_url(text: str) -> str:
     return ""
 
 
-def current_draw_quota_date_key() -> str:
-    return datetime.now(resolve_zone("Asia/Shanghai")).strftime("%Y-%m-%d")
-
-
-def resolve_zone(timezone_name: str):
-    try:
-        return ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError:
-        if timezone_name == "Asia/Shanghai":
-            return timezone(timedelta(hours=8), name=timezone_name)
-        if timezone_name == "UTC":
-            return timezone.utc
-        return datetime.now().astimezone().tzinfo or timezone.utc
-
-
 def resolve_default_data_root() -> Path:
     return resolve_astrbot_data_root() / "plugin_data" / "qqbot_features_runtime"
 
@@ -722,17 +802,20 @@ def get_users_payload(payload: dict[str, object]) -> dict[str, dict[str, object]
 def get_user_payload(users: dict[str, dict[str, object]], user_key: str) -> dict[str, object]:
     raw = users.get(user_key)
     if not isinstance(raw, dict):
-        return {"points": 0}
-    payload: dict[str, object] = {"points": safe_int(raw.get("points"), 0)}
-    free_date = str(raw.get("free_gpt_image_2_date", "") or "").strip()
-    if free_date:
-        payload["free_gpt_image_2_date"] = free_date
+        return {"points": 0, "model": RIGHTCODES_DRAW_DEFAULT_MODEL}
+    payload: dict[str, object] = {
+        "points": safe_int(raw.get("points"), 0),
+        "model": normalize_rightcodes_draw_model(raw.get("model")),
+    }
+    nickname = normalize_rightcodes_draw_nickname(raw.get("nickname"), user_id=user_key)
+    if nickname:
+        payload["nickname"] = nickname
     return payload
 
 
 def normalize_draw_points_payload(payload: dict[str, object]) -> dict[str, object]:
     normalized: dict[str, object] = {
-        "schema_version": max(1, safe_int(payload.get("schema_version"), 1)),
+        "schema_version": max(2, safe_int(payload.get("schema_version"), 2)),
         "users": {},
     }
     users: dict[str, dict[str, object]] = {}
@@ -746,16 +829,17 @@ def merge_draw_points_payload(current: dict[str, object], legacy: dict[str, obje
     merged = normalize_draw_points_payload(current)
     users = get_users_payload(merged)
     for user_id, legacy_user in get_users_payload(normalize_draw_points_payload(legacy)).items():
+        current_exists = user_id in users
         current_user = get_user_payload(users, user_id)
         legacy_payload = get_user_payload({user_id: legacy_user}, user_id)
         current_points = safe_int(current_user.get("points"), 0)
         legacy_points = safe_int(legacy_payload.get("points"), 0)
         if legacy_points > current_points:
             current_user["points"] = legacy_points
-        current_free_date = str(current_user.get("free_gpt_image_2_date", "") or "")
-        legacy_free_date = str(legacy_payload.get("free_gpt_image_2_date", "") or "")
-        if legacy_free_date > current_free_date:
-            current_user["free_gpt_image_2_date"] = legacy_free_date
+        if not current_exists:
+            current_user["model"] = normalize_rightcodes_draw_model(legacy_payload.get("model"))
+        if not current_user.get("nickname") and legacy_payload.get("nickname"):
+            current_user["nickname"] = legacy_payload["nickname"]
         users[user_id] = current_user
     merged["users"] = users
     return merged
@@ -781,3 +865,29 @@ def safe_int(value: object, default: int) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return default
+
+
+def normalize_rightcodes_draw_model(model: object) -> str:
+    candidate = str(model or "").strip().lower()
+    return candidate if candidate in RIGHTCODES_DRAW_MODELS else RIGHTCODES_DRAW_DEFAULT_MODEL
+
+
+def normalize_rightcodes_draw_nickname(nickname: object, *, user_id: str = "") -> str:
+    value = re.sub(r"\s+", " ", str(nickname or "")).strip()[:64]
+    if not value or value == str(user_id or "").strip():
+        return ""
+    return value
+
+
+def mask_qq_user_id(user_id: object) -> str:
+    value = str(user_id or "").strip()
+    if len(value) <= 6:
+        return "*" * max(1, len(value))
+    return f"{value[:3]}{'*' * (len(value) - 6)}{value[-3:]}"
+
+
+def sortable_user_id(user_id: str) -> tuple[int, int | str]:
+    user_key = str(user_id or "").strip()
+    if user_key.isdigit():
+        return (0, int(user_key))
+    return (1, user_key)
