@@ -115,7 +115,7 @@ class AstrBotImageSummaryTest(unittest.TestCase):
         with patch.object(image_summary.random, "choice", return_value="嘘，偷偷看"):
             component = image_summary.random_summary_image_from_file("preview.png")
 
-        self.assertIsInstance(component, Image)
+        self.assertIs(type(component), Image)
         self.assertEqual(component.summary, "嘘，偷偷看")
         self.assertTrue(component.file.startswith("file://"))
 
@@ -131,10 +131,10 @@ class AstrBotImageSummaryTest(unittest.TestCase):
             image_summary.random_summary_image_from_url("file:///preview.png")
 
     def test_onebot_chain_serializes_summary_in_image_data(self) -> None:
-        component = image_summary.RandomSummaryImage(
-            file="https://example.invalid/image.png",
-            summary="给你一颗糖",
-        )
+        with patch.object(image_summary.random, "choice", return_value="给你一颗糖"):
+            component = image_summary.random_summary_image_from_url(
+                "https://example.invalid/image.png"
+            )
         original = StubMessageChain([object(), component])
 
         converted = asyncio.run(

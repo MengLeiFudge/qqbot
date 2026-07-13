@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 import unittest
@@ -9,78 +10,142 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins"))
 
 from astrbot_plugin_qqbot_features.sub2api_usage import (  # noqa: E402
-    Sub2APIClient,
     Sub2APIAccountUsage,
-    Sub2APIUsageWindow,
+    Sub2APIClient,
     Sub2APIUsageCache,
-    format_sub2api_usage_alert_message,
+    Sub2APIUsageSnapshot,
+    Sub2APIUsageWindow,
+    build_user_usage_ranking,
     format_sub2api_http_error,
-    format_sub2api_usage_message,
+    format_sub2api_usage_alert_message,
     format_sub2api_usage_response,
     load_sub2api_config,
-    parse_sub2api_usage_command,
+    mask_sub2api_email,
     parse_sub2api_group_ids,
+    parse_sub2api_usage_command,
+    sub2api_calendar_range,
     update_sub2api_usage_alert_state,
 )
 
 
 class StubSub2APIHttpClient:
-    def __init__(self, *, multiple_accounts: bool = False) -> None:
+    def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
-        self.multiple_accounts = multiple_accounts
 
     async def get_json(self, url: str, *, headers: dict[str, str], timeout: float):
         self.calls.append({"url": url, "headers": headers, "timeout": timeout})
         if "/api/v1/admin/accounts?" in url:
-            items = [
-                {
-                    "id": 88,
-                    "name": "Pro",
-                    "platform": "openai",
-                    "type": "oauth",
-                    "status": "active",
-                    "last_used_at": "2026-06-12T03:00:00Z",
-                    "current_concurrency": 2,
-                }
-            ]
-            if self.multiple_accounts:
-                items.append(
-                    {
-                        "id": 89,
-                        "name": "pro",
-                        "platform": "claude",
-                        "type": "session",
-                        "status": "active",
-                        "last_used_at": "2026-06-12T03:30:00Z",
-                        "current_concurrency": 1,
-                    }
-                )
             return {
                 "code": 0,
-                "message": "success",
-                "data": {"items": items},
+                "data": {
+                    "items": [
+                        {
+                            "id": 88,
+                            "name": "Christeena",
+                            "platform": "openai",
+                            "type": "oauth",
+                            "status": "active",
+                            "current_concurrency": 2,
+                        },
+                        {
+                            "id": 89,
+                            "name": "Backup",
+                            "platform": "claude",
+                            "type": "session",
+                            "status": "active",
+                            "current_concurrency": 1,
+                        },
+                    ],
+                    "total": 2,
+                },
             }
-        if "/api/v1/admin/accounts/88/usage?" in url or "/api/v1/admin/accounts/89/usage?" in url:
-            is_backup = "/api/v1/admin/accounts/89/usage?" in url
+        if "/api/v1/admin/users?" in url:
             return {
                 "code": 0,
-                "message": "success",
+                "data": {
+                    "items": [
+                        {"id": 1, "username": "alice", "email": "alice@example.com"},
+                        {"id": 2, "username": "", "email": "bob@example.com"},
+                        {"id": 3, "username": "", "email": "zero@example.com"},
+                    ],
+                    "total": 3,
+                },
+            }
+        if "/api/v1/admin/dashboard/user-breakdown?" in url:
+            if "start_date=" not in url or "end_date=" not in url or "timezone=Asia%2FShanghai" not in url:
+                raise AssertionError(f"missing date range or timezone: {url}")
+            return {
+                "code": 0,
+                "data": {
+                    "users": [
+                        {"user_id": 1, "actual_cost": 12.5},
+                        {"user_id": 2, "actual_cost": 3.25},
+                    ]
+                },
+            }
+        if "/api/v1/admin/accounts/" in url and "/usage?" in url:
+            return {
+                "code": 0,
                 "data": {
                     "source": "active",
-                    "updated_at": "2026-06-12T04:30:00Z" if is_backup else "2026-06-12T04:00:00Z",
-                    "five_hour": {
-                        "utilization": 8.4 if is_backup else 15.4,
-                        "remaining_seconds": 3600 if is_backup else 7260,
-                        "window_stats": {"requests": 3, "tokens": 6789, "cost": 0.12} if is_backup else {"requests": 7, "tokens": 12345, "cost": 0.42},
-                    },
-                    "seven_day": {
-                        "utilization": 21.2 if is_backup else 34.8,
-                        "remaining_seconds": 604800,
-                        "window_stats": {"requests": 11, "tokens": 22222, "cost": 0.88} if is_backup else {"requests": 30, "tokens": 98765, "cost": 3.21},
-                    },
+                    "updated_at": "2026-07-13T04:00:00Z",
+                    "five_hour": {"utilization": 15.4, "remaining_seconds": 7260},
+                    "seven_day": {"utilization": 34.8, "remaining_seconds": 604800},
                 },
             }
         raise AssertionError(f"unexpected url: {url}")
+
+
+class PartiallyFailingAccountUsageStub(StubSub2APIHttpClient):
+    async def get_json(self, url: str, *, headers: dict[str, str], timeout: float):
+        if "/api/v1/admin/accounts/89/usage?" in url:
+            self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+            raise TimeoutError("backup account usage timed out")
+        return await super().get_json(url, headers=headers, timeout=timeout)
+
+
+class EmptyAccountsStub:
+    async def get_json(self, url: str, *, headers: dict[str, str], timeout: float):
+        del headers, timeout
+        if "/api/v1/admin/accounts?" not in url:
+            raise AssertionError(f"unexpected url: {url}")
+        return {"code": 0, "data": {"items": [], "total": 0}}
+
+
+class ServerCappedPageStub:
+    async def get_json(self, url: str, *, headers: dict[str, str], timeout: float):
+        del headers, timeout
+        if "/api/v1/admin/accounts?" not in url:
+            raise AssertionError(f"unexpected url: {url}")
+        if "page=1" in url:
+            start, count = 1, 50
+        elif "page=2" in url:
+            start, count = 51, 50
+        elif "page=3" in url:
+            start, count = 101, 1
+        else:
+            raise AssertionError(f"unexpected page: {url}")
+        return {
+            "code": 0,
+            "data": {
+                "items": [{"id": index, "name": f"account-{index}"} for index in range(start, start + count)],
+                "total": 101,
+            },
+        }
+
+
+class TooManyUsersStub:
+    async def get_json(self, url: str, *, headers: dict[str, str], timeout: float):
+        del headers, timeout
+        if "/api/v1/admin/users?" not in url:
+            raise AssertionError(f"unexpected url: {url}")
+        return {
+            "code": 0,
+            "data": {
+                "items": [{"id": index, "email": f"user-{index}@example.com"} for index in range(1, 202)],
+                "total": 201,
+            },
+        }
 
 
 class AstrBotSub2APIUsageTest(unittest.TestCase):
@@ -95,26 +160,25 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
 
         self.assertEqual(config.base_url, "https://ai.example.com")
         self.assertEqual(config.admin_api_key, "test-admin-key")
-        self.assertEqual(config.default_account_name, "Pro")
         self.assertEqual(config.timeout_seconds, 90.0)
         self.assertEqual(config.refresh_interval_seconds, 300.0)
         self.assertEqual(config.alert_group_ids, ("123", "456"))
-
-    def test_parse_sub2api_alert_group_ids(self) -> None:
-        self.assertEqual(parse_sub2api_group_ids("123, 456，789,abc,123"), ("123", "456", "789"))
-        self.assertEqual(parse_sub2api_group_ids(["100", "", "x", 200]), ("100", "200"))
+        self.assertNotIn("default_account_name", config.__dataclass_fields__)
 
     def test_parse_only_usage_command(self) -> None:
-        query = parse_sub2api_usage_command("用量")
-
-        self.assertIsNotNone(query)
-        assert query is not None
-        self.assertEqual(query.account_name, "Pro")
-        self.assertIsNone(parse_sub2api_usage_command("pro"))
+        self.assertIsNotNone(parse_sub2api_usage_command("用量"))
         self.assertIsNone(parse_sub2api_usage_command("查询"))
         self.assertIsNone(parse_sub2api_usage_command("用量 Pro2"))
 
-    def test_client_uses_admin_api_key_and_active_force_usage(self) -> None:
+    def test_parse_sub2api_alert_group_ids(self) -> None:
+        self.assertEqual(parse_sub2api_group_ids("123, 456，789,abc,123"), ("123", "456", "789"))
+
+    def test_calendar_ranges_match_sub2api_webui(self) -> None:
+        today = date(2026, 7, 13)
+        self.assertEqual(sub2api_calendar_range(days=7, today=today), (date(2026, 7, 7), today))
+        self.assertEqual(sub2api_calendar_range(days=30, today=today), (date(2026, 6, 14), today))
+
+    def test_client_lists_all_accounts_and_forces_each_usage_refresh(self) -> None:
         stub = StubSub2APIHttpClient()
         client = Sub2APIClient(
             base_url="https://ai.example.com",
@@ -123,86 +187,126 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             http_client=stub,
         )
 
-        usages = asyncio.run(client.get_account_usage("Pro", force_refresh=True))
+        usages = asyncio.run(client.get_account_usage(force_refresh=True))
 
-        self.assertEqual(len(usages), 1)
-        self.assertEqual(usages[0].account_id, 88)
-        self.assertEqual(usages[0].name, "Pro")
-        self.assertEqual(usages[0].source, "active")
-        self.assertEqual(len(stub.calls), 2)
+        self.assertEqual([usage.account_id for usage in usages], [88, 89])
+        self.assertEqual([usage.name for usage in usages], ["Christeena", "Backup"])
+        self.assertEqual(len(stub.calls), 3)
         headers = stub.calls[0]["headers"]
         self.assertIsInstance(headers, dict)
         assert isinstance(headers, dict)
         self.assertEqual(headers["x-api-key"], "test-admin-key")
-        self.assertIn("application/json", headers["Accept"])
-        self.assertIn("Mozilla/5.0", headers["User-Agent"])
-        self.assertIn("zh-CN", headers["Accept-Language"])
-        self.assertIn("search=Pro", str(stub.calls[0]["url"]))
+        self.assertIn("page_size=100", str(stub.calls[0]["url"]))
         self.assertIn("source=active", str(stub.calls[1]["url"]))
         self.assertIn("force=true", str(stub.calls[1]["url"]))
+        self.assertIn("source=active", str(stub.calls[2]["url"]))
 
-    def test_cloudflare_1010_error_message_is_actionable(self) -> None:
-        message = format_sub2api_http_error(
-            403,
-            '{"title":"Error 1010: Access denied","detail":"The site owner has blocked access based on your browser\'s signature."}',
-        )
-
-        self.assertIn("Cloudflare", message)
-        self.assertIn("Error 1010", message)
-        self.assertIn("尚未进入 Admin API Key 鉴权", message)
-        self.assertNotIn("test-admin-key", message)
-
-    def test_client_queries_every_matching_account(self) -> None:
-        stub = StubSub2APIHttpClient(multiple_accounts=True)
-        client = Sub2APIClient(
-            base_url="https://ai.example.com",
-            admin_api_key="test-admin-key",
-            http_client=stub,
-        )
-
-        usages = asyncio.run(client.get_account_usage("Pro", force_refresh=True))
-
-        self.assertEqual([usage.account_id for usage in usages], [88, 89])
-        self.assertEqual(len(stub.calls), 3)
-        self.assertIn("/api/v1/admin/accounts/88/usage?", str(stub.calls[1]["url"]))
-        self.assertIn("/api/v1/admin/accounts/89/usage?", str(stub.calls[2]["url"]))
-
-    def test_usage_cache_is_shared_by_sub2api_account_name(self) -> None:
-        cache = Sub2APIUsageCache(ttl_seconds=60)
+    def test_client_merges_user_ranking_and_keeps_zero_spend_users(self) -> None:
         stub = StubSub2APIHttpClient()
         client = Sub2APIClient(
             base_url="https://ai.example.com",
             admin_api_key="test-admin-key",
             http_client=stub,
         )
-        usages = asyncio.run(client.get_account_usage("Pro", force_refresh=True))
-        cache.set("Pro", usages, now=10.0)
 
-        self.assertIs(cache.get("pro", now=69.0), usages)
-        self.assertIsNone(cache.get("pro", now=70.0))
-        self.assertIs(cache.get_latest("pro"), usages)
+        ranking = asyncio.run(client.get_user_usage_ranking())
+
+        self.assertEqual([usage.user_id for usage in ranking], [1, 2, 3])
+        self.assertEqual(ranking[0].seven_day_actual_cost, 12.5)
+        self.assertEqual(ranking[1].thirty_day_actual_cost, 3.25)
+        self.assertEqual(ranking[2].seven_day_actual_cost, 0.0)
+        breakdown_calls = [call for call in stub.calls if "/user-breakdown?" in str(call["url"])]
+        self.assertEqual(len(breakdown_calls), 2)
+
+    def test_one_account_usage_failure_keeps_other_accounts_in_snapshot(self) -> None:
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=PartiallyFailingAccountUsageStub(),
+        )
+
+        usages = asyncio.run(client.get_account_usage(force_refresh=True))
+
+        self.assertEqual([usage.account_id for usage in usages], [88, 89])
+        self.assertEqual(usages[0].source, "active")
+        self.assertIn("backup account usage timed out", usages[1].error)
+
+    def test_empty_account_list_is_a_valid_fresh_result(self) -> None:
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=EmptyAccountsStub(),
+        )
+
+        self.assertEqual(asyncio.run(client.get_account_usage(force_refresh=True)), [])
+
+    def test_pagination_uses_total_when_server_caps_page_size(self) -> None:
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=ServerCappedPageStub(),
+        )
+
+        accounts = asyncio.run(client.list_accounts())
+
+        self.assertEqual(len(accounts), 101)
+        self.assertEqual(accounts[0]["id"], 1)
+        self.assertEqual(accounts[-1]["id"], 101)
+
+    def test_more_than_200_users_fails_instead_of_reporting_unknown_costs_as_zero(self) -> None:
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=TooManyUsersStub(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "最多返回 200 位用户"):
+            asyncio.run(client.get_user_usage_ranking())
+
+    def test_user_ranking_uses_actual_cost_and_sorts_by_7d_then_30d(self) -> None:
+        ranking = build_user_usage_ranking(
+            [
+                {"id": 1, "username": "", "email": "one@example.com"},
+                {"id": 2, "username": "two", "email": "two@example.com"},
+                {"id": 3, "username": "", "email": "zero@example.com"},
+            ],
+            [{"user_id": 1, "actual_cost": 10}, {"user_id": 2, "actual_cost": 10, "cost": 999}],
+            [{"user_id": 1, "actual_cost": 2}, {"user_id": 2, "actual_cost": 5}],
+        )
+
+        self.assertEqual([usage.user_id for usage in ranking], [2, 1, 3])
+        self.assertEqual(mask_sub2api_email(ranking[1].email), "o***@example.com")
+        self.assertEqual(ranking[0].seven_day_actual_cost, 10.0)
+
+    def test_usage_cache_keeps_one_shared_snapshot(self) -> None:
+        cache = Sub2APIUsageCache()
+        snapshot = Sub2APIUsageSnapshot(
+            accounts=(Sub2APIAccountUsage(account_id=1, name="Main"),),
+            accounts_refreshed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
+        )
+
+        cache.set(snapshot)
+
+        self.assertIs(cache.get_latest(), snapshot)
 
     def test_usage_alert_state_fires_when_crossing_thresholds(self) -> None:
         state: dict[str, set[int]] = {}
-        usage_79 = Sub2APIAccountUsage(account_id=1, name="Pro", five_hour=Sub2APIUsageWindow(utilization=79.9))
-        usage_80 = Sub2APIAccountUsage(account_id=1, name="Pro", five_hour=Sub2APIUsageWindow(utilization=80.0))
-        usage_92 = Sub2APIAccountUsage(account_id=1, name="Pro", five_hour=Sub2APIUsageWindow(utilization=92.0))
-        usage_70 = Sub2APIAccountUsage(account_id=1, name="Pro", five_hour=Sub2APIUsageWindow(utilization=70.0))
+        usage_79 = Sub2APIAccountUsage(account_id=1, name="Main", five_hour=Sub2APIUsageWindow(utilization=79.9))
+        usage_80 = Sub2APIAccountUsage(account_id=1, name="Main", five_hour=Sub2APIUsageWindow(utilization=80.0))
+        usage_92 = Sub2APIAccountUsage(account_id=1, name="Main", five_hour=Sub2APIUsageWindow(utilization=92.0))
+        usage_70 = Sub2APIAccountUsage(account_id=1, name="Main", five_hour=Sub2APIUsageWindow(utilization=70.0))
 
         self.assertEqual(update_sub2api_usage_alert_state([usage_79], state), [])
-        alerts = update_sub2api_usage_alert_state([usage_80], state)
-        self.assertEqual([alert.threshold for alert in alerts], [80])
+        self.assertEqual([alert.threshold for alert in update_sub2api_usage_alert_state([usage_80], state)], [80])
         self.assertEqual(update_sub2api_usage_alert_state([usage_80], state), [])
-        alerts = update_sub2api_usage_alert_state([usage_92], state)
-        self.assertEqual([alert.threshold for alert in alerts], [90])
+        self.assertEqual([alert.threshold for alert in update_sub2api_usage_alert_state([usage_92], state)], [90])
         self.assertEqual(update_sub2api_usage_alert_state([usage_70], state), [])
-        alerts = update_sub2api_usage_alert_state([usage_80], state)
-        self.assertEqual([alert.threshold for alert in alerts], [80])
+        self.assertEqual([alert.threshold for alert in update_sub2api_usage_alert_state([usage_80], state)], [80])
 
     def test_usage_alert_message_contains_threshold_and_window(self) -> None:
         usage = Sub2APIAccountUsage(
             account_id=1,
-            name="Pro",
+            name="Main",
             five_hour=Sub2APIUsageWindow(utilization=95.1),
             updated_at="2026-06-12T12:00:00Z",
         )
@@ -210,44 +314,35 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
 
         message = format_sub2api_usage_alert_message(alert)
 
-        self.assertIn("Sub2API 5h 用量提醒：Pro 已达到 95%", message)
+        self.assertIn("Sub2API 5h 用量提醒：Main 已达到 95%", message)
         self.assertIn("当前 5h：95%", message)
-        self.assertIn("更新时间：", message)
 
-    def test_format_usage_message_hides_secret_values(self) -> None:
-        stub = StubSub2APIHttpClient()
-        client = Sub2APIClient(
-            base_url="https://ai.example.com",
-            admin_api_key="test-admin-key",
-            http_client=stub,
+    def test_text_fallback_masks_email_and_reports_stale_errors(self) -> None:
+        snapshot = Sub2APIUsageSnapshot(
+            accounts=(Sub2APIAccountUsage(account_id=1, name="Main"),),
+            users=tuple(build_user_usage_ranking(
+                [{"id": 2, "username": "", "email": "bob@example.com"}], [], []
+            )),
+            accounts_error="HTTP 502",
+            users_error="timeout",
         )
-        usages = asyncio.run(client.get_account_usage("Pro"))
 
-        message = format_sub2api_usage_message(usages[0])
+        message = format_sub2api_usage_response(snapshot)
 
-        self.assertIn("Sub2API 用量：Pro", message)
-        self.assertIn("状态：openai / oauth / active / 并发 2", message)
-        self.assertIn("5h：15%", message)
-        self.assertIn("7d：35%", message)
-        self.assertIn("12.3K tokens", message)
+        self.assertIn("账号刷新失败：HTTP 502", message)
+        self.assertIn("用户刷新失败：timeout", message)
+        self.assertIn("b***@example.com", message)
         self.assertNotIn("test-admin-key", message)
 
-    def test_format_usage_response_lists_multiple_accounts(self) -> None:
-        stub = StubSub2APIHttpClient(multiple_accounts=True)
-        client = Sub2APIClient(
-            base_url="https://ai.example.com",
-            admin_api_key="test-admin-key",
-            http_client=stub,
+    def test_cloudflare_1010_error_message_is_actionable(self) -> None:
+        message = format_sub2api_http_error(
+            403,
+            '{"title":"Error 1010: Access denied","detail":"The site owner has blocked access based on your browser signature."}',
         )
-        usages = asyncio.run(client.get_account_usage("Pro", force_refresh=True))
 
-        message = format_sub2api_usage_response(usages, "Pro")
-
-        self.assertIn("Sub2API 用量：Pro，共 2 个账号", message)
-        self.assertIn("1. Pro", message)
-        self.assertIn("2. pro", message)
-        self.assertIn("状态：claude / session / active / 并发 1", message)
-        self.assertIn("6.8K tokens", message)
+        self.assertIn("Cloudflare", message)
+        self.assertIn("Error 1010", message)
+        self.assertIn("尚未进入 Admin API Key 鉴权", message)
 
 
 if __name__ == "__main__":

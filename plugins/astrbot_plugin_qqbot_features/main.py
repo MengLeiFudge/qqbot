@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import random
@@ -112,9 +113,8 @@ from .source_knowledge import format_source_injection
 from .source_knowledge import load_source_knowledge_config
 from .source_knowledge import resolve_domains
 from .sub2api_usage import Sub2APIClient
-from .sub2api_usage import SUB2API_USAGE_CACHE_TTL_SECONDS
-from .sub2api_usage import Sub2APIAccountUsage
 from .sub2api_usage import Sub2APIUsageAlert
+from .sub2api_usage import Sub2APIUsageSnapshot
 from .sub2api_usage import format_sub2api_usage_alert_message
 from .sub2api_usage import format_sub2api_usage_response
 from .sub2api_usage import load_sub2api_config
@@ -122,6 +122,7 @@ from .sub2api_usage import looks_like_sub2api_usage_command
 from .sub2api_usage import parse_sub2api_usage_command
 from .sub2api_usage import Sub2APIUsageCache
 from .sub2api_usage import update_sub2api_usage_alert_state
+from .sub2api_usage_image import render_sub2api_usage_image
 from .twin_interaction_logic import TwinInteractionConfig
 from .twin_interaction_logic import TwinProfile
 from .twin_interaction_logic import TWIN_BOT_QQ_IDS
@@ -426,7 +427,7 @@ class QQBotFeaturesPlugin(Star):
             ),
         )
         self._sub2api_config = load_sub2api_config(config)
-        self._sub2api_usage_cache = Sub2APIUsageCache(ttl_seconds=SUB2API_USAGE_CACHE_TTL_SECONDS)
+        self._sub2api_usage_cache = Sub2APIUsageCache()
         self._sub2api_refresh_task: asyncio.Task | None = None
         self._arc_background_task: asyncio.Task | None = None
         temp_dedupe_config = load_temp_dedupe_config(config)
@@ -999,58 +1000,127 @@ class QQBotFeaturesPlugin(Star):
         )
         event.stop_event()
 
-    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询 Sub2API 默认账号的 5h/7d 用量窗口；直接返回后台刷新缓存。")
+    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询全部 Sub2API 账号额度和用户 7d/30d 实际消费；直接返回后台刷新缓存图片。")
     async def sub2api_usage(self, event: AstrMessageEvent):
         text = extract_plain_text(event).strip()
-        command = parse_sub2api_usage_command(
-            text,
-            default_account_name=self._sub2api_config.default_account_name,
-        )
+        command = parse_sub2api_usage_command(text)
         if command is None:
             return
         if not _should_handle_migrated_command(event, self._feature_mode, command_type="sub2api_usage"):
             return
-        usage = self._get_cached_sub2api_usage(command.account_name)
-        if usage is None:
+        snapshot = self._get_cached_sub2api_usage()
+        if snapshot is None:
             yield event.plain_result("Sub2API 用量后台刷新中，暂无可用缓存；稍后再发“用量”即可直接返回当前值。")
             event.stop_event()
             return
-        yield event.plain_result(format_sub2api_usage_response(usage, command.account_name))
+        try:
+            image_path = render_sub2api_usage_image(
+                snapshot=snapshot,
+                output_dir=get_sub2api_usage_image_cache_root(),
+            )
+            yield event.chain_result([random_summary_image_from_file(image_path)])
+        except Exception as exc:
+            logger.exception("[QQBotFeatures] failed to render Sub2API usage image: %s", exc)
+            yield event.plain_result(format_sub2api_usage_response(snapshot))
         event.stop_event()
 
-    def _get_cached_sub2api_usage(self, account_name: str) -> list[Sub2APIAccountUsage] | None:
-        return self._sub2api_usage_cache.get_latest(account_name)
+    def _get_cached_sub2api_usage(self) -> Sub2APIUsageSnapshot | None:
+        return self._sub2api_usage_cache.get_latest()
 
-    async def _refresh_sub2api_usage_once(self) -> list[Sub2APIAccountUsage]:
-        account_name = self._sub2api_config.default_account_name
-        usage = await Sub2APIClient(
+    def _new_sub2api_client(self) -> Sub2APIClient:
+        return Sub2APIClient(
             base_url=self._sub2api_config.base_url,
             admin_api_key=self._sub2api_config.admin_api_key,
             timeout_seconds=self._sub2api_config.timeout_seconds,
-        ).get_account_usage(account_name, force_refresh=True)
-        self._sub2api_usage_cache.set(account_name, usage, now=time.monotonic())
-        return usage
+        )
+
+    async def _refresh_sub2api_users_once(self) -> Sub2APIUsageSnapshot:
+        previous = self._sub2api_usage_cache.get_latest()
+        accounts = previous.accounts if previous is not None else ()
+        users = previous.users if previous is not None else ()
+        accounts_refreshed_at = previous.accounts_refreshed_at if previous is not None else None
+        users_refreshed_at = previous.users_refreshed_at if previous is not None else None
+        accounts_error = previous.accounts_error if previous is not None else ""
+        users_error = ""
+        try:
+            users = tuple(await self._new_sub2api_client().get_user_usage_ranking())
+            users_refreshed_at = datetime.now(timezone.utc)
+        except Exception:
+            try:
+                # 用户榜由三个独立的只读接口拼合；上游短暂失败时立即重试一次。
+                users = tuple(await self._new_sub2api_client().get_user_usage_ranking())
+                users_refreshed_at = datetime.now(timezone.utc)
+            except Exception as exc:
+                users_error = str(exc)
+        snapshot = Sub2APIUsageSnapshot(
+            accounts=accounts,
+            users=users,
+            accounts_refreshed_at=accounts_refreshed_at,
+            users_refreshed_at=users_refreshed_at,
+            accounts_error=accounts_error,
+            users_error=users_error,
+        )
+        self._sub2api_usage_cache.set(snapshot)
+        return snapshot
+
+    async def _refresh_sub2api_accounts_once(self) -> Sub2APIUsageSnapshot:
+        previous = self._sub2api_usage_cache.get_latest()
+        accounts = previous.accounts if previous is not None else ()
+        users = previous.users if previous is not None else ()
+        accounts_refreshed_at = previous.accounts_refreshed_at if previous is not None else None
+        users_refreshed_at = previous.users_refreshed_at if previous is not None else None
+        accounts_error = ""
+        users_error = previous.users_error if previous is not None else ""
+        try:
+            accounts = tuple(await self._new_sub2api_client().get_account_usage(force_refresh=True))
+            accounts_refreshed_at = datetime.now(timezone.utc)
+        except Exception as exc:
+            accounts_error = str(exc)
+        snapshot = Sub2APIUsageSnapshot(
+            accounts=accounts,
+            users=users,
+            accounts_refreshed_at=accounts_refreshed_at,
+            users_refreshed_at=users_refreshed_at,
+            accounts_error=accounts_error,
+            users_error=users_error,
+        )
+        self._sub2api_usage_cache.set(snapshot)
+        return snapshot
 
     async def _sub2api_usage_refresh_loop(self) -> None:
-        account_name = self._sub2api_config.default_account_name
         interval = self._sub2api_config.refresh_interval_seconds
+        phase_interval = max(30.0, interval / 2)
         while True:
             try:
-                usage = await self._refresh_sub2api_usage_once()
-                await self._send_sub2api_usage_alerts(
-                    update_sub2api_usage_alert_state(usage, self._sub2api_alerted_thresholds_by_account)
-                )
+                snapshot = await self._refresh_sub2api_users_once()
                 logger.info(
-                    "[QQBotFeatures] refreshed Sub2API usage cache, account=%s count=%s interval=%ss",
-                    account_name,
-                    len(usage),
+                    "[QQBotFeatures] refreshed Sub2API user usage cache, users=%s interval=%ss users_error=%s",
+                    len(snapshot.users),
                     interval,
+                    bool(snapshot.users_error),
+                )
+                await asyncio.sleep(phase_interval)
+                snapshot = await self._refresh_sub2api_accounts_once()
+                if not snapshot.accounts_error:
+                    await self._send_sub2api_usage_alerts(
+                        update_sub2api_usage_alert_state(
+                            list(snapshot.accounts),
+                            self._sub2api_alerted_thresholds_by_account,
+                        )
+                    )
+                logger.info(
+                    "[QQBotFeatures] refreshed Sub2API account usage cache, accounts=%s users=%s interval=%ss account_error=%s users_error=%s",
+                    len(snapshot.accounts),
+                    len(snapshot.users),
+                    interval,
+                    bool(snapshot.accounts_error),
+                    bool(snapshot.users_error),
                 )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.warning("[QQBotFeatures] failed to refresh Sub2API usage cache: %s", exc)
-            await asyncio.sleep(interval)
+            await asyncio.sleep(phase_interval)
 
     async def _send_sub2api_usage_alerts(self, alerts: list[Sub2APIUsageAlert]) -> None:
         if not alerts or not self._sub2api_config.alert_group_ids:
@@ -2727,6 +2797,10 @@ def get_qqbot_config_root() -> Path:
 
 def get_menu_image_cache_root() -> Path:
     return get_plugin_temp_root("menu")
+
+
+def get_sub2api_usage_image_cache_root() -> Path:
+    return get_plugin_temp_root("sub2api-usage")
 
 
 def get_qqbot_config_value(section: str, key: str, default: str = "") -> str:

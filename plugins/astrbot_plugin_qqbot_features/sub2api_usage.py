@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import re
 from typing import Any, Protocol
@@ -11,12 +11,13 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-SUB2API_DEFAULT_ACCOUNT_NAME = "Pro"
 SUB2API_DEFAULT_TIMEOUT_SECONDS = 90.0
 SUB2API_DEFAULT_REFRESH_INTERVAL_SECONDS = 300.0
-SUB2API_USAGE_CACHE_TTL_SECONDS = 60.0
 SUB2API_QUERY_RE = re.compile(r"^用量$", re.IGNORECASE)
 SUB2API_USAGE_ALERT_THRESHOLDS = (80, 90, 95)
+SUB2API_LIST_PAGE_SIZE = 100
+SUB2API_USER_BREAKDOWN_LIMIT = 200
+SUB2API_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 SUB2API_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -27,7 +28,6 @@ SUB2API_USER_AGENT = (
 class Sub2APIConfig:
     base_url: str
     admin_api_key: str
-    default_account_name: str
     timeout_seconds: float
     refresh_interval_seconds: float
     alert_group_ids: tuple[str, ...]
@@ -35,7 +35,7 @@ class Sub2APIConfig:
 
 @dataclass(frozen=True, slots=True)
 class Sub2APICommand:
-    account_name: str
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +71,25 @@ class Sub2APIAccountUsage:
 
 
 @dataclass(frozen=True, slots=True)
+class Sub2APIUserUsage:
+    user_id: int
+    username: str = ""
+    email: str = ""
+    seven_day_actual_cost: float = 0.0
+    thirty_day_actual_cost: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class Sub2APIUsageSnapshot:
+    accounts: tuple[Sub2APIAccountUsage, ...] = ()
+    users: tuple[Sub2APIUserUsage, ...] = ()
+    accounts_refreshed_at: datetime | None = None
+    users_refreshed_at: datetime | None = None
+    accounts_error: str = ""
+    users_error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Sub2APIUsageAlert:
     usage: Sub2APIAccountUsage
     threshold: int
@@ -78,38 +97,14 @@ class Sub2APIUsageAlert:
 
 
 class Sub2APIUsageCache:
-    def __init__(self, *, ttl_seconds: float = SUB2API_USAGE_CACHE_TTL_SECONDS) -> None:
-        self.ttl_seconds = max(0.0, float(ttl_seconds))
-        self._items: dict[str, tuple[float, list[Sub2APIAccountUsage]]] = {}
+    def __init__(self) -> None:
+        self._snapshot: Sub2APIUsageSnapshot | None = None
 
-    def get(self, account_name: str, *, now: float) -> list[Sub2APIAccountUsage] | None:
-        return self.get_fresh(account_name, now=now)
+    def get_latest(self) -> Sub2APIUsageSnapshot | None:
+        return self._snapshot
 
-    def get_fresh(self, account_name: str, *, now: float) -> list[Sub2APIAccountUsage] | None:
-        cache_key = normalize_cache_key(account_name)
-        if not cache_key:
-            return None
-        cached = self._items.get(cache_key)
-        if cached is None:
-            return None
-        cached_at, usage = cached
-        if now - cached_at >= self.ttl_seconds:
-            return None
-        return usage
-
-    def get_latest(self, account_name: str) -> list[Sub2APIAccountUsage] | None:
-        cache_key = normalize_cache_key(account_name)
-        if not cache_key:
-            return None
-        cached = self._items.get(cache_key)
-        if cached is None:
-            return None
-        return cached[1]
-
-    def set(self, account_name: str, usage: list[Sub2APIAccountUsage], *, now: float) -> None:
-        cache_key = normalize_cache_key(account_name)
-        if cache_key:
-            self._items[cache_key] = (now, usage)
+    def set(self, snapshot: Sub2APIUsageSnapshot) -> None:
+        self._snapshot = snapshot
 
 
 class AsyncSub2APIHttpClient(Protocol):
@@ -127,11 +122,6 @@ def load_sub2api_config(config: object) -> Sub2APIConfig:
     return Sub2APIConfig(
         base_url=str(get_config_value(config, "sub2api_base_url", "") or "").strip().rstrip("/"),
         admin_api_key=str(get_config_value(config, "sub2api_admin_api_key", "") or "").strip(),
-        default_account_name=str(
-            get_config_value(config, "sub2api_default_account_name", SUB2API_DEFAULT_ACCOUNT_NAME)
-            or SUB2API_DEFAULT_ACCOUNT_NAME
-        ).strip()
-        or SUB2API_DEFAULT_ACCOUNT_NAME,
         timeout_seconds=float(get_config_value(config, "sub2api_timeout_seconds", SUB2API_DEFAULT_TIMEOUT_SECONDS) or SUB2API_DEFAULT_TIMEOUT_SECONDS),
         refresh_interval_seconds=max(
             60.0,
@@ -163,12 +153,12 @@ def get_config_value(config: object, key: str, default: object = None) -> object
     return getattr(config, key, default)
 
 
-def parse_sub2api_usage_command(text: str, *, default_account_name: str = SUB2API_DEFAULT_ACCOUNT_NAME) -> Sub2APICommand | None:
+def parse_sub2api_usage_command(text: str) -> Sub2APICommand | None:
     normalized = normalize_command_text(text)
     if not normalized:
         return None
     if SUB2API_QUERY_RE.match(normalized):
-        return Sub2APICommand(account_name=default_account_name)
+        return Sub2APICommand()
     return None
 
 
@@ -180,8 +170,8 @@ def normalize_cache_key(account_name: str) -> str:
     return str(account_name or "").strip().casefold()
 
 
-def looks_like_sub2api_usage_command(text: str, *, default_account_name: str = SUB2API_DEFAULT_ACCOUNT_NAME) -> bool:
-    return parse_sub2api_usage_command(text, default_account_name=default_account_name) is not None
+def looks_like_sub2api_usage_command(text: str) -> bool:
+    return parse_sub2api_usage_command(text) is not None
 
 
 def parse_sub2api_group_ids(raw: object) -> tuple[str, ...]:
@@ -254,44 +244,92 @@ class Sub2APIClient:
         self.timeout_seconds = float(timeout_seconds or SUB2API_DEFAULT_TIMEOUT_SECONDS)
         self.http_client = http_client
 
-    async def get_account_usage(self, account_name: str, *, force_refresh: bool = False) -> list[Sub2APIAccountUsage]:
+    async def get_account_usage(self, *, force_refresh: bool = False) -> list[Sub2APIAccountUsage]:
         if not self.base_url:
             raise ValueError("Sub2API 地址还没配置")
         if not self.admin_api_key:
             raise ValueError("Sub2API Admin API Key 还没配置")
-        accounts = await self.find_accounts(account_name)
-        if not accounts:
-            raise LookupError(f"Sub2API 没找到账号：{account_name}")
+        accounts = await self.list_accounts()
         results: list[Sub2APIAccountUsage] = []
         for account in accounts:
             account_id = int(account.get("id") or 0)
             if account_id <= 0:
                 continue
-            usage = await self.fetch_usage(account_id, force_refresh=force_refresh)
+            try:
+                usage = await self.fetch_usage(account_id, force_refresh=force_refresh)
+            except Exception as exc:
+                results.append(build_account_usage(account, {"error": str(exc)}))
+                continue
             results.append(build_account_usage(account, usage))
-        if not results:
-            raise LookupError(f"Sub2API 账号缺少有效 id：{account_name}")
         return results
 
-    async def find_accounts(self, account_name: str) -> list[dict[str, Any]]:
+    async def list_accounts(self) -> list[dict[str, Any]]:
+        return await self._list_paginated("accounts", sort_by="name")
+
+    async def list_users(self) -> list[dict[str, Any]]:
+        return await self._list_paginated("users", sort_by="id")
+
+    async def get_user_usage_ranking(self) -> list[Sub2APIUserUsage]:
+        if not self.base_url:
+            raise ValueError("Sub2API 地址还没配置")
+        if not self.admin_api_key:
+            raise ValueError("Sub2API Admin API Key 还没配置")
+        users = await self.list_users()
+        if len(users) > SUB2API_USER_BREAKDOWN_LIMIT:
+            raise RuntimeError(
+                "Sub2API 用户消费接口单次最多返回 200 位用户，"
+                f"当前共有 {len(users)} 位用户，无法安全输出完整消费榜。"
+            )
+        seven_day_start, seven_day_end = sub2api_calendar_range(days=7)
+        thirty_day_start, thirty_day_end = sub2api_calendar_range(days=30)
+        seven_day_rows, thirty_day_rows = await asyncio.gather(
+            self.fetch_user_breakdown(start_date=seven_day_start, end_date=seven_day_end),
+            self.fetch_user_breakdown(start_date=thirty_day_start, end_date=thirty_day_end),
+        )
+        return build_user_usage_ranking(users, seven_day_rows, thirty_day_rows)
+
+    async def fetch_user_breakdown(self, *, start_date: date, end_date: date) -> list[dict[str, Any]]:
         query = urlencode(
             {
-                "page": "1",
-                "page_size": "10",
-                "search": account_name,
-                "sort_by": "name",
-                "sort_order": "asc",
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "timezone": "Asia/Shanghai",
+                "limit": str(SUB2API_USER_BREAKDOWN_LIMIT),
+                "sort_by": "actual_cost",
             }
         )
-        payload = await self._get_json(f"{self.base_url}/api/v1/admin/accounts?{query}")
-        items = ensure_dict(payload).get("data", {}).get("items", [])
-        if not isinstance(items, list):
-            return []
-        return pick_matching_accounts(items, account_name)
+        payload = await self._get_json(f"{self.base_url}/api/v1/admin/dashboard/user-breakdown?{query}")
+        data = ensure_dict(payload).get("data", {})
+        users = data.get("users", []) if isinstance(data, dict) else []
+        return [user for user in users if isinstance(user, dict)] if isinstance(users, list) else []
 
-    async def find_account(self, account_name: str) -> dict[str, Any] | None:
-        accounts = await self.find_accounts(account_name)
-        return accounts[0] if accounts else None
+    async def _list_paginated(self, resource: str, *, sort_by: str) -> list[dict[str, Any]]:
+        page = 1
+        items: list[dict[str, Any]] = []
+        while True:
+            query = urlencode(
+                {
+                    "page": str(page),
+                    "page_size": str(SUB2API_LIST_PAGE_SIZE),
+                    "sort_by": sort_by,
+                    "sort_order": "asc",
+                }
+            )
+            payload = await self._get_json(f"{self.base_url}/api/v1/admin/{resource}?{query}")
+            data = ensure_dict(payload).get("data", {})
+            page_items = data.get("items", []) if isinstance(data, dict) else []
+            if not isinstance(page_items, list):
+                break
+            items.extend(item for item in page_items if isinstance(item, dict))
+            total = optional_int(data.get("total")) if isinstance(data, dict) else None
+            if (
+                not page_items
+                or (total is not None and len(items) >= total)
+                or (total is None and len(page_items) < SUB2API_LIST_PAGE_SIZE)
+            ):
+                break
+            page += 1
+        return items
 
     async def fetch_usage(self, account_id: int, *, force_refresh: bool = False) -> dict[str, Any]:
         params = {"source": "active" if force_refresh else "passive"}
@@ -318,13 +356,6 @@ def build_sub2api_headers(admin_api_key: str) -> dict[str, str]:
         "Pragma": "no-cache",
         "User-Agent": SUB2API_USER_AGENT,
     }
-
-
-def pick_matching_accounts(items: list[object], account_name: str) -> list[dict[str, Any]]:
-    normalized = account_name.strip().casefold()
-    dict_items = [item for item in items if isinstance(item, dict)]
-    matched = [item for item in dict_items if str(item.get("name", "")).strip().casefold() == normalized]
-    return matched or dict_items
 
 
 async def get_json(url: str, *, headers: dict[str, str], timeout: float) -> Any:
@@ -392,13 +423,86 @@ def parse_window_stats(value: object) -> Sub2APIWindowStats | None:
     )
 
 
-def format_sub2api_usage_response(usages: list[Sub2APIAccountUsage], account_name: str) -> str:
-    if len(usages) == 1:
-        return format_sub2api_usage_message(usages[0])
-    lines = [f"Sub2API 用量：{account_name}，共 {len(usages)} 个账号"]
-    for index, usage in enumerate(usages, start=1):
+def sub2api_calendar_range(*, days: int, today: date | None = None) -> tuple[date, date]:
+    if days <= 0:
+        raise ValueError("天数必须大于 0")
+    end_date = today or datetime.now(SUB2API_TIMEZONE).date()
+    return end_date - timedelta(days=days - 1), end_date
+
+
+def build_user_usage_ranking(
+    users: list[dict[str, Any]],
+    seven_day_rows: list[dict[str, Any]],
+    thirty_day_rows: list[dict[str, Any]],
+) -> list[Sub2APIUserUsage]:
+    seven_day_costs = build_user_actual_costs(seven_day_rows)
+    thirty_day_costs = build_user_actual_costs(thirty_day_rows)
+    results: list[Sub2APIUserUsage] = []
+    seen_user_ids: set[int] = set()
+    for user in users:
+        user_id = optional_int(user.get("id"))
+        if user_id is None or user_id <= 0 or user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(user_id)
+        results.append(
+            Sub2APIUserUsage(
+                user_id=user_id,
+                username=str(user.get("username") or "").strip(),
+                email=str(user.get("email") or "").strip(),
+                seven_day_actual_cost=seven_day_costs.get(user_id, 0.0),
+                thirty_day_actual_cost=thirty_day_costs.get(user_id, 0.0),
+            )
+        )
+    return sorted(
+        results,
+        key=lambda usage: (-usage.seven_day_actual_cost, -usage.thirty_day_actual_cost, usage.user_id),
+    )
+
+
+def build_user_actual_costs(rows: list[dict[str, Any]]) -> dict[int, float]:
+    costs: dict[int, float] = {}
+    for row in rows:
+        user_id = optional_int(row.get("user_id"))
+        if user_id is None or user_id <= 0:
+            continue
+        costs[user_id] = optional_float(row.get("actual_cost")) or 0.0
+    return costs
+
+
+def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
+    lines = [f"Sub2API 用量：账号 {len(snapshot.accounts)} 个，用户 {len(snapshot.users)} 个"]
+    if snapshot.accounts_refreshed_at:
+        lines.append(f"账号刷新：{format_datetime(snapshot.accounts_refreshed_at)}")
+    if snapshot.accounts_error:
+        lines.append(f"账号刷新失败：{snapshot.accounts_error}")
+    for index, usage in enumerate(snapshot.accounts, start=1):
         lines.extend(format_sub2api_usage_message(usage, title=f"{index}. {usage.name or usage.account_id}").splitlines())
+    lines.append("用户实际消费（7d / 30d）：")
+    if snapshot.users_refreshed_at:
+        lines.append(f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}")
+    if snapshot.users_error:
+        lines.append(f"用户刷新失败：{snapshot.users_error}")
+    for index, usage in enumerate(snapshot.users, start=1):
+        lines.append(
+            f"{index}. {format_sub2api_user_name(usage)}："
+            f"7d ${usage.seven_day_actual_cost:.2f}，30d ${usage.thirty_day_actual_cost:.2f}"
+        )
     return "\n".join(lines)
+
+
+def format_sub2api_user_name(usage: Sub2APIUserUsage) -> str:
+    username = usage.username.strip()
+    return username or mask_sub2api_email(usage.email) or f"用户 {usage.user_id}"
+
+
+def mask_sub2api_email(email: str) -> str:
+    text = str(email or "").strip()
+    if not text:
+        return ""
+    local, separator, domain = text.partition("@")
+    if not separator or not local:
+        return f"{text[:1]}***"
+    return f"{local[:1]}***@{domain}"
 
 
 def format_sub2api_usage_alert_message(alert: Sub2APIUsageAlert) -> str:
@@ -482,6 +586,12 @@ def format_time_text(value: str) -> str:
         return text
     local = parsed.astimezone()
     return local.strftime("%Y-%m-%d %H:%M")
+
+
+def format_datetime(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(SUB2API_TIMEZONE).strftime("%Y-%m-%d %H:%M")
 
 
 def parse_datetime(value: str) -> datetime | None:

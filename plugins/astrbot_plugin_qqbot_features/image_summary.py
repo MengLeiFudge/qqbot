@@ -47,28 +47,6 @@ def choose_image_summary() -> str:
     return random.choice(IMAGE_SUMMARY_POOL)
 
 
-class RandomSummaryImage(Image):
-    """保持标准 Image 行为，同时携带仅供 OneBot 发送端使用的摘要。"""
-
-    summary: str
-    sub_type: int | None = None
-
-    def __init__(
-        self,
-        file: str,
-        *,
-        summary: str,
-        path: str = "",
-        sub_type: int | None = None,
-    ) -> None:
-        super().__init__(
-            file=file,
-            path=path,
-            summary=summary,
-            sub_type=sub_type,
-        )
-
-
 class _OneBotImageSummarySegment(BaseMessageComponent):
     """最终发送前使用的原始 OneBot 图片段，避免 Core 丢弃 summary。"""
 
@@ -96,19 +74,22 @@ class _OneBotImageSummarySegment(BaseMessageComponent):
         return {"type": "image", "data": data}
 
 
-def random_summary_image_from_file(path: str | Path) -> RandomSummaryImage:
+def random_summary_image_from_file(path: str | Path) -> Image:
     file_path = Path(path).resolve(strict=False)
-    return RandomSummaryImage(
-        file=file_path.as_uri(),
-        path=str(file_path),
-        summary=choose_image_summary(),
-    )
+    return _image_with_summary(file=file_path.as_uri(), path=str(file_path))
 
 
-def random_summary_image_from_url(url: str) -> RandomSummaryImage:
+def random_summary_image_from_url(url: str) -> Image:
     if not url.startswith(("http://", "https://")):
         raise ValueError("image URL must use http:// or https://")
-    return RandomSummaryImage(file=url, summary=choose_image_summary())
+    return _image_with_summary(file=url)
+
+
+def _image_with_summary(*, file: str, path: str = "") -> Image:
+    """Keep the exact AstrBot Image type so RespondStage does not drop it as empty."""
+    image = Image(file=file, path=path)
+    image.__dict__["summary"] = choose_image_summary()
+    return image
 
 
 async def prepare_onebot_image_summary_chain(message_chain):
