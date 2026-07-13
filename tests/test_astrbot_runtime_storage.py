@@ -139,6 +139,27 @@ class AstrBotRuntimeStorageMigrationTest(unittest.TestCase):
             store.record_group_message("10002", amount=9)
             self.assertEqual(store.get_balance("10002").points, 10)
 
+    def test_kun_ranking_uses_the_resolved_display_name_without_appending_qq(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir) / "qqbot_features_runtime"
+            service = KunService(runtime_root / "db" / "kun" / "users.json")
+            first = service.ensure_user(10001)
+            second = service.ensure_user(10002)
+            first.level = 200
+            second.level = 100
+
+            result = service.build_level_rank_lines(
+                group_id=30001,
+                resolve_display_name=lambda group_id, user_id: {
+                    (30001, 10001): "群名片小明",
+                    (30001, 10002): "10002",
+                }[(group_id, user_id)],
+            )[0]
+
+            self.assertIn("群名片小明", result)
+            self.assertNotIn("群名片小明(10001)", result)
+            self.assertIn("10002", result)
+
     def test_lolicon_prepare_item_records_metadata_without_downloading_image(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir) / "qqbot_features_runtime"

@@ -29,6 +29,7 @@ from .command_guard import try_claim_command
 from .image_summary import prepare_onebot_image_summary_chain
 from .image_summary import random_summary_image_from_file
 from .image_summary import random_summary_image_from_url
+from .group_nickname_store import GroupNicknameStore
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
 from .menu_image import render_feature_menu_image
@@ -212,6 +213,7 @@ LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
 LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
 BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
 EMPTY_MENTION_CALL_EXTRA = "_qqbot_empty_mention_call"
+GROUP_NICKNAME_CACHED_EXTRA = "_qqbot_group_nickname_cached"
 DEFAULT_TWIN_MAX_CONTEXT_CHARS = 1200
 INTERNAL_ERROR_PREFIXES = (
     "Error occurred while processing agent request:",
@@ -1240,6 +1242,43 @@ class QQBotFeaturesPlugin(Star):
             yield event.chain_result(chain)
         event.stop_event()
 
+    async def _cache_group_nickname(self, event: AstrMessageEvent) -> None:
+        if str(event.get_extra(GROUP_NICKNAME_CACHED_EXTRA, "") or ""):
+            return
+        group_id = str(event.get_group_id() or "").strip()
+        user_id = str(event.get_sender_id() or "").strip()
+        if not group_id or not user_id:
+            return
+        card, nickname = extract_event_sender_nickname_fields(event)
+        event.set_extra(GROUP_NICKNAME_CACHED_EXTRA, "1")
+        if not card and not nickname:
+            return
+        store = GroupNicknameStore(get_qqbot_runtime_root())
+        try:
+            await asyncio.to_thread(
+                store.record_group_sender,
+                group_id,
+                user_id,
+                card=card,
+                nickname=nickname,
+                updated_at=read_event_time_seconds(event),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[QQBotFeatures] group nickname cache write failed: group_id=%s user_id=%s error=%s",
+                group_id,
+                user_id,
+                exc,
+            )
+
+    @filter.event_message_type(
+        EventMessageType.GROUP_MESSAGE,
+        priority=3000,
+        desc="缓存每条群消息的群名片和 QQ 昵称，供统一用户显示名解析使用。",
+    )
+    async def cache_group_nickname(self, event: AstrMessageEvent):
+        await self._cache_group_nickname(event)
+
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE, desc="记录 RightCodes 生图积分的普通群消息事件；双 bot 场景只由固定命令 owner 账号累计。")
     async def record_rightcodes_group_message_points(self, event: AstrMessageEvent):
         if str(event.get_self_id() or "") != read_command_owner_qq():
@@ -1256,11 +1295,7 @@ class QQBotFeaturesPlugin(Star):
             self._rightcodes_config.data_root,
             multiplier=self._rightcodes_config.point_multiplier,
         )
-        await asyncio.to_thread(
-            store.record_group_message,
-            event.get_sender_id(),
-            nickname=event.get_sender_name(),
-        )
+        await asyncio.to_thread(store.record_group_message, event.get_sender_id())
 
     @filter.on_llm_request(desc="在 LLM 请求前按关键词注入 RightCodes 生图接口知识库。")
     async def inject_rightcodes_draw_catalog(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -1317,6 +1352,7 @@ class QQBotFeaturesPlugin(Star):
             return
         if not _should_handle_migrated_command(event, self._feature_mode, command_type="rightcodes_draw"):
             return
+        await self._cache_group_nickname(event)
         store = RightCodesDrawQuotaStore(
             self._rightcodes_config.data_root,
             multiplier=self._rightcodes_config.point_multiplier,
@@ -1334,7 +1370,13 @@ class QQBotFeaturesPlugin(Star):
             return
         if looks_like_rightcodes_draw_points_ranking(text):
             ranking = await asyncio.to_thread(store.get_points_ranking, limit=10)
-            yield event.plain_result(format_rightcodes_draw_points_ranking(ranking))
+            group_id = event.get_group_id()
+            yield event.plain_result(
+                format_rightcodes_draw_points_ranking(
+                    ranking,
+                    resolve_display_name=lambda candidate: resolve_display_name(group_id, candidate),
+                )
+            )
             event.stop_event()
             return
         if looks_like_rightcodes_draw_help_command(text):
@@ -1649,6 +1691,7 @@ class QQBotFeaturesPlugin(Star):
         text = event.get_message_str().strip()
         if not text or not event.get_group_id():
             return
+        await self._cache_group_nickname(event)
         try:
             result = await asyncio.to_thread(
                 handle_arc_guess_session_text,
@@ -1668,6 +1711,7 @@ class QQBotFeaturesPlugin(Star):
     async def kun_command(self, event: AstrMessageEvent):
         if not _should_handle_migrated_command(event, self._feature_mode, command_type="kun_game"):
             return
+        await self._cache_group_nickname(event)
         response = await asyncio.to_thread(handle_kun_command, event)
         if response is None:
             return
@@ -2021,6 +2065,16 @@ def _raw_event_dict(event: AstrMessageEvent) -> dict:
         return dict(raw)
     except Exception:
         return {}
+
+
+def extract_event_sender_nickname_fields(event: AstrMessageEvent) -> tuple[str, str]:
+    raw_sender = _raw_event_dict(event).get("sender")
+    if isinstance(raw_sender, dict):
+        card = str(raw_sender.get("card") or "").strip()
+        nickname = str(raw_sender.get("nickname") or "").strip()
+        if card or nickname:
+            return card, nickname
+    return "", str(event.get_sender_name() or "").strip()
 
 
 def _at(user_id: str):
@@ -2829,15 +2883,12 @@ def read_event_time_seconds(event: AstrMessageEvent) -> int:
     return int(time.time())
 
 
-def resolve_display_name(user_id: int, group_id: int = 0) -> str:
-    return str(user_id)
+def resolve_display_name(group_id: int | str, user_id: int | str) -> str:
+    return GroupNicknameStore(get_qqbot_runtime_root()).resolve_display_name(group_id, user_id)
 
 
 def get_player_name(event: AstrMessageEvent) -> str:
-    name = str(event.get_sender_name() or "").strip()
-    if name:
-        return name
-    return str(event.get_sender_id() or "")
+    return resolve_display_name(event.get_group_id(), event.get_sender_id())
 
 
 def fetch_factorio_space_age_windows_link() -> FactorioDownloadLink:

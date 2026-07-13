@@ -389,8 +389,7 @@ class KunService:
                 if resolve_display_name is not None
                 else str(item.qq)
             )
-            identity = display_name if display_name == str(item.qq) else f"{display_name}({item.qq})"
-            lines.append(f"{index} Lv.{item.level} {item.name}\n{identity}")
+            lines.append(f"{index} Lv.{item.level} {item.name}\n{display_name}")
         return ["\n".join(lines)]
 
     def build_money_rank_lines(
@@ -408,8 +407,7 @@ class KunService:
                 if resolve_display_name is not None
                 else str(item.qq)
             )
-            identity = display_name if display_name == str(item.qq) else f"{display_name}({item.qq})"
-            lines.append(f"{index} {item.money} 枚萌泪币\n{identity}")
+            lines.append(f"{index} {item.money} 枚萌泪币\n{display_name}")
         return ["\n".join(lines)]
 
     def give_money(self, giver: KunUser, receiver: KunUser, amount: int, is_admin: bool) -> str:

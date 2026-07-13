@@ -233,24 +233,29 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
     def test_points_ranking_returns_global_top_ten_with_stable_ties(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = RightCodesDrawQuotaStore(Path(temp_dir))
-            for user_id, points, nickname in (
-                ("1000000012", 30, ""),
-                ("1000000011", 30, "棉花糖用户"),
-                ("1000000020", 20, ""),
-                ("1000000021", 19, ""),
-                ("1000000022", 18, ""),
-                ("1000000023", 17, ""),
-                ("1000000024", 16, ""),
-                ("1000000025", 15, ""),
-                ("1000000026", 14, ""),
-                ("1000000027", 13, ""),
-                ("1000000028", 12, ""),
-                ("1000000029", 11, ""),
+            for user_id, points in (
+                ("1000000012", 30),
+                ("1000000011", 30),
+                ("1000000020", 20),
+                ("1000000021", 19),
+                ("1000000022", 18),
+                ("1000000023", 17),
+                ("1000000024", 16),
+                ("1000000025", 15),
+                ("1000000026", 14),
+                ("1000000027", 13),
+                ("1000000028", 12),
+                ("1000000029", 11),
             ):
-                store.record_group_message(user_id, amount=points, nickname=nickname)
+                store.record_group_message(user_id, amount=points)
 
             ranking = store.get_points_ranking(limit=10)
-            message = format_rightcodes_draw_points_ranking(ranking)
+            message = format_rightcodes_draw_points_ranking(
+                ranking,
+                resolve_display_name=lambda user_id: {
+                    "1000000011": "棉花糖用户",
+                }.get(user_id, user_id),
+            )
 
             self.assertEqual(len(ranking), 10)
             self.assertEqual([ranking[0].user_id, ranking[1].user_id], ["1000000011", "1000000012"])
@@ -260,8 +265,27 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
             self.assertNotIn("1000000029", message)
             self.assertIn("全群生图积分排行榜", message)
 
-            store.record_group_message("1000000011", nickname="")
-            self.assertEqual(store.get_balance("1000000011").nickname, "棉花糖用户")
+    def test_legacy_global_nickname_is_removed_from_draw_points(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = RightCodesDrawQuotaStore(Path(temp_dir))
+            store.store.write(
+                "rightcodes.draw_points",
+                {
+                    "schema_version": 2,
+                    "users": {
+                        "10001": {
+                            "points": 80,
+                            "model": RIGHTCODES_DRAW_DEFAULT_MODEL,
+                            "nickname": "旧全局昵称",
+                        }
+                    },
+                },
+            )
+
+            store.get_balance("10001")
+            normalized = store.store.read("rightcodes.draw_points", {})
+
+            self.assertNotIn("nickname", normalized["users"]["10001"])
 
     def test_model_price_table_matches_current_rightcodes_prices(self) -> None:
         self.assertEqual(calculate_rightcodes_draw_model_points("gpt-image-2"), 40)

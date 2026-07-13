@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING
 import hashlib
@@ -82,7 +83,6 @@ class RightCodesDrawPointBalance:
     points: int
     model: str
     multiplier: int
-    nickname: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,13 +190,7 @@ class RightCodesDrawQuotaStore:
         self.path = self.data_root / "ai" / "draw_points.json"
         self.store = RuntimeJsonStore(self.data_root)
 
-    def record_group_message(
-        self,
-        user_id: int | str,
-        *,
-        amount: int = 1,
-        nickname: str = "",
-    ) -> int:
+    def record_group_message(self, user_id: int | str, *, amount: int = 1) -> int:
         user_key = str(user_id).strip()
         if not user_key or amount <= 0:
             return 0
@@ -206,9 +200,6 @@ class RightCodesDrawQuotaStore:
             user_payload = get_user_payload(users, user_key)
             points = int(user_payload.get("points", 0) or 0) + int(amount)
             user_payload["points"] = points
-            cached_nickname = normalize_rightcodes_draw_nickname(nickname, user_id=user_key)
-            if cached_nickname:
-                user_payload["nickname"] = cached_nickname
             users[user_key] = user_payload
             payload["users"] = users
             self._write(payload)
@@ -227,7 +218,6 @@ class RightCodesDrawQuotaStore:
             points=int(user_payload.get("points", 0) or 0),
             model=normalize_rightcodes_draw_model(user_payload.get("model")),
             multiplier=self.multiplier,
-            nickname=normalize_rightcodes_draw_nickname(user_payload.get("nickname"), user_id=user_key),
         )
 
     def set_model(self, user_id: int | str, model: str) -> RightCodesDrawPointBalance:
@@ -250,7 +240,6 @@ class RightCodesDrawQuotaStore:
                 points=int(user_payload.get("points", 0) or 0),
                 model=model_key,
                 multiplier=self.multiplier,
-                nickname=normalize_rightcodes_draw_nickname(user_payload.get("nickname"), user_id=user_key),
             )
 
     def get_points_ranking(self, *, limit: int = 10) -> tuple[RightCodesDrawPointBalance, ...]:
@@ -263,7 +252,6 @@ class RightCodesDrawQuotaStore:
                 points=int(user_payload.get("points", 0) or 0),
                 model=normalize_rightcodes_draw_model(user_payload.get("model")),
                 multiplier=self.multiplier,
-                nickname=normalize_rightcodes_draw_nickname(user_payload.get("nickname"), user_id=user_id),
             )
             for user_id, user_payload in users.items()
         ]
@@ -568,12 +556,17 @@ def format_rightcodes_draw_points_status(balance: RightCodesDrawPointBalance) ->
     )
 
 
-def format_rightcodes_draw_points_ranking(ranking: tuple[RightCodesDrawPointBalance, ...]) -> str:
+def format_rightcodes_draw_points_ranking(
+    ranking: tuple[RightCodesDrawPointBalance, ...],
+    *,
+    resolve_display_name: Callable[[str], str] | None = None,
+) -> str:
     if not ranking:
         return "全群还没有生图积分记录。"
     lines = ["全群生图积分排行榜："]
     for index, balance in enumerate(ranking, start=1):
-        identity = balance.nickname or f"QQ {mask_qq_user_id(balance.user_id)}"
+        display_name = resolve_display_name(balance.user_id) if resolve_display_name is not None else balance.user_id
+        identity = display_name if display_name != balance.user_id else f"QQ {mask_qq_user_id(balance.user_id)}"
         lines.append(f"{index}. {identity}：{balance.points} 积分")
     return "\n".join(lines)
 
@@ -807,9 +800,6 @@ def get_user_payload(users: dict[str, dict[str, object]], user_key: str) -> dict
         "points": safe_int(raw.get("points"), 0),
         "model": normalize_rightcodes_draw_model(raw.get("model")),
     }
-    nickname = normalize_rightcodes_draw_nickname(raw.get("nickname"), user_id=user_key)
-    if nickname:
-        payload["nickname"] = nickname
     return payload
 
 
@@ -838,8 +828,6 @@ def merge_draw_points_payload(current: dict[str, object], legacy: dict[str, obje
             current_user["points"] = legacy_points
         if not current_exists:
             current_user["model"] = normalize_rightcodes_draw_model(legacy_payload.get("model"))
-        if not current_user.get("nickname") and legacy_payload.get("nickname"):
-            current_user["nickname"] = legacy_payload["nickname"]
         users[user_id] = current_user
     merged["users"] = users
     return merged
@@ -870,13 +858,6 @@ def safe_int(value: object, default: int) -> int:
 def normalize_rightcodes_draw_model(model: object) -> str:
     candidate = str(model or "").strip().lower()
     return candidate if candidate in RIGHTCODES_DRAW_MODELS else RIGHTCODES_DRAW_DEFAULT_MODEL
-
-
-def normalize_rightcodes_draw_nickname(nickname: object, *, user_id: str = "") -> str:
-    value = re.sub(r"\s+", " ", str(nickname or "")).strip()[:64]
-    if not value or value == str(user_id or "").strip():
-        return ""
-    return value
 
 
 def mask_qq_user_id(user_id: object) -> str:
