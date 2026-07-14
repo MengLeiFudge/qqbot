@@ -175,7 +175,7 @@
 - `auto_approve_group_invites`
   - 是否自动同意邀请入群，默认开启。
 - `sub2api_base_url`
-  - Sub2API 根地址，例如 `https://ai.example.com`。
+  - Sub2API 根地址，例如 `https://ai.example.com`。插件会显式直连该地址，不继承 Windows WinINET 或 urllib 系统代理。
 - `sub2api_admin_api_key`
   - Sub2API 设置页生成的 `admin-` 开头 Admin API Key，只填写在运行态插件配置，不写入源码或示例配置。
 - `sub2api_timeout_seconds`

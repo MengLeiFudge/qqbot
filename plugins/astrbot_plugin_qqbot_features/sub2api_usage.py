@@ -8,7 +8,7 @@ import re
 from typing import Any, Protocol
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 
 SUB2API_DEFAULT_TIMEOUT_SECONDS = 90.0
@@ -361,8 +361,11 @@ def build_sub2api_headers(admin_api_key: str) -> dict[str, str]:
 async def get_json(url: str, *, headers: dict[str, str], timeout: float) -> Any:
     def request_json() -> Any:
         request = Request(url, headers=headers, method="GET")
+        # Sub2API 源站可直连；禁用 urllib 自动继承的 Windows WinINET 代理，
+        # 避免本机代理隧道偶发提前关闭 TLS 连接。
+        opener = build_opener(ProxyHandler({}))
         try:
-            with urlopen(request, timeout=timeout) as response:
+            with opener.open(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:300]

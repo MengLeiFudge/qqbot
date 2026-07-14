@@ -1076,8 +1076,13 @@ class QQBotFeaturesPlugin(Star):
         try:
             accounts = tuple(await self._new_sub2api_client().get_account_usage(force_refresh=True))
             accounts_refreshed_at = datetime.now(timezone.utc)
-        except Exception as exc:
-            accounts_error = str(exc)
+        except Exception:
+            try:
+                # 账号列表等整轮请求遇到一次瞬时网络错误时，完整重试一轮。
+                accounts = tuple(await self._new_sub2api_client().get_account_usage(force_refresh=True))
+                accounts_refreshed_at = datetime.now(timezone.utc)
+            except Exception as exc:
+                accounts_error = str(exc)
         snapshot = Sub2APIUsageSnapshot(
             accounts=accounts,
             users=users,
