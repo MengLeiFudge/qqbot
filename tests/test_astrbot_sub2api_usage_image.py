@@ -33,6 +33,8 @@ class AstrBotSub2APIUsageImageTest(unittest.TestCase):
                     current_concurrency=0,
                     five_hour=Sub2APIUsageWindow(utilization=0.0, remaining_seconds=0),
                     seven_day=Sub2APIUsageWindow(utilization=5.0, remaining_seconds=3600),
+                    last_used_at="2026-07-15T02:34:16.710391+08:00",
+                    updated_at="2026-07-15T02:35:00.831240125+08:00",
                 ),
             ),
             users=tuple(
@@ -40,7 +42,9 @@ class AstrBotSub2APIUsageImageTest(unittest.TestCase):
                     user_id=index,
                     username="" if index % 2 else f"user-{index}",
                     email=f"user-{index}@example.com",
+                    last_24_hours_actual_cost=float(10 - index),
                     seven_day_actual_cost=float(8 - index),
+                    fourteen_day_actual_cost=float(12 - index),
                     thirty_day_actual_cost=float(index),
                 )
                 for index in range(1, 9)

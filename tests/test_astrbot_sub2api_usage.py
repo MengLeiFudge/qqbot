@@ -17,13 +17,16 @@ from astrbot_plugin_qqbot_features.sub2api_usage import (  # noqa: E402
     Sub2APIUsageWindow,
     build_user_usage_ranking,
     format_sub2api_http_error,
+    format_sub2api_user_name,
     format_sub2api_usage_alert_message,
     format_sub2api_usage_response,
+    format_time_text,
     load_sub2api_config,
     mask_sub2api_email,
     parse_sub2api_group_ids,
     parse_sub2api_usage_command,
     sub2api_calendar_range,
+    sub2api_last_24_hours_range,
     update_sub2api_usage_alert_state,
 )
 
@@ -175,7 +178,9 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
 
     def test_calendar_ranges_match_sub2api_webui(self) -> None:
         today = date(2026, 7, 13)
+        self.assertEqual(sub2api_last_24_hours_range(today=today), (date(2026, 7, 12), today))
         self.assertEqual(sub2api_calendar_range(days=7, today=today), (date(2026, 7, 7), today))
+        self.assertEqual(sub2api_calendar_range(days=14, today=today), (date(2026, 6, 30), today))
         self.assertEqual(sub2api_calendar_range(days=30, today=today), (date(2026, 6, 14), today))
 
     def test_client_lists_all_accounts_and_forces_each_usage_refresh(self) -> None:
@@ -201,7 +206,7 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         self.assertIn("force=true", str(stub.calls[1]["url"]))
         self.assertIn("source=active", str(stub.calls[2]["url"]))
 
-    def test_client_merges_user_ranking_and_keeps_zero_spend_users(self) -> None:
+    def test_client_merges_four_usage_ranges_and_hides_zero_spend_users(self) -> None:
         stub = StubSub2APIHttpClient()
         client = Sub2APIClient(
             base_url="https://ai.example.com",
@@ -211,12 +216,13 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
 
         ranking = asyncio.run(client.get_user_usage_ranking())
 
-        self.assertEqual([usage.user_id for usage in ranking], [1, 2, 3])
+        self.assertEqual([usage.user_id for usage in ranking], [1, 2])
+        self.assertEqual(ranking[0].last_24_hours_actual_cost, 12.5)
         self.assertEqual(ranking[0].seven_day_actual_cost, 12.5)
+        self.assertEqual(ranking[1].fourteen_day_actual_cost, 3.25)
         self.assertEqual(ranking[1].thirty_day_actual_cost, 3.25)
-        self.assertEqual(ranking[2].seven_day_actual_cost, 0.0)
         breakdown_calls = [call for call in stub.calls if "/user-breakdown?" in str(call["url"])]
-        self.assertEqual(len(breakdown_calls), 2)
+        self.assertEqual(len(breakdown_calls), 4)
 
     def test_one_account_usage_failure_keeps_other_accounts_in_snapshot(self) -> None:
         client = Sub2APIClient(
@@ -263,19 +269,25 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "最多返回 200 位用户"):
             asyncio.run(client.get_user_usage_ranking())
 
-    def test_user_ranking_uses_actual_cost_and_sorts_by_7d_then_30d(self) -> None:
+    def test_user_ranking_uses_four_actual_cost_ranges_and_username_or_masked_email(self) -> None:
         ranking = build_user_usage_ranking(
             [
                 {"id": 1, "username": "", "email": "one@example.com"},
                 {"id": 2, "username": "two", "email": "two@example.com"},
                 {"id": 3, "username": "", "email": "zero@example.com"},
             ],
+            [{"user_id": 1, "actual_cost": 5}, {"user_id": 2, "actual_cost": 10}],
             [{"user_id": 1, "actual_cost": 10}, {"user_id": 2, "actual_cost": 10, "cost": 999}],
+            [{"user_id": 1, "actual_cost": 20}, {"user_id": 2, "actual_cost": 5}],
             [{"user_id": 1, "actual_cost": 2}, {"user_id": 2, "actual_cost": 5}],
         )
 
-        self.assertEqual([usage.user_id for usage in ranking], [2, 1, 3])
-        self.assertEqual(mask_sub2api_email(ranking[1].email), "o***@example.com")
+        self.assertEqual([usage.user_id for usage in ranking], [2, 1])
+        self.assertEqual(format_sub2api_user_name(ranking[0]), "two")
+        self.assertEqual(format_sub2api_user_name(ranking[1]), "o*e@example.com")
+        self.assertEqual(mask_sub2api_email("605738729@qq.com"), "605***729@qq.com")
+        self.assertEqual(mask_sub2api_email("tursom@foxmail.com"), "tu**om@foxmail.com")
+        self.assertEqual(ranking[0].last_24_hours_actual_cost, 10.0)
         self.assertEqual(ranking[0].seven_day_actual_cost, 10.0)
 
     def test_usage_cache_keeps_one_shared_snapshot(self) -> None:
@@ -319,9 +331,20 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
 
     def test_text_fallback_masks_email_and_reports_stale_errors(self) -> None:
         snapshot = Sub2APIUsageSnapshot(
-            accounts=(Sub2APIAccountUsage(account_id=1, name="Main"),),
+            accounts=(
+                Sub2APIAccountUsage(
+                    account_id=1,
+                    name="Main",
+                    last_used_at="2026-07-15T02:34:16.710391+08:00",
+                    updated_at="2026-07-15T02:35:00.831240125+08:00",
+                ),
+            ),
             users=tuple(build_user_usage_ranking(
-                [{"id": 2, "username": "", "email": "bob@example.com"}], [], []
+                [{"id": 2, "username": "", "email": "bob@example.com"}],
+                [{"user_id": 2, "actual_cost": 1}],
+                [],
+                [],
+                [],
             )),
             accounts_error="HTTP 502",
             users_error="timeout",
@@ -331,8 +354,16 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
 
         self.assertIn("账号刷新失败：HTTP 502", message)
         self.assertIn("用户刷新失败：timeout", message)
-        self.assertIn("b***@example.com", message)
+        self.assertIn("用户消费（24h / 7d / 14d / 30d）：", message)
+        self.assertNotIn("用户实际消费", message)
+        self.assertIn("最近使用：2026-07-15 02:34", message)
+        self.assertIn("更新时间：2026-07-15 02:35", message)
+        self.assertIn("b*b@example.com", message)
         self.assertNotIn("test-admin-key", message)
+
+    def test_format_time_text_uses_sub2api_timezone_and_accepts_nanoseconds(self) -> None:
+        self.assertEqual(format_time_text("2026-07-15T02:35:00.831240125+08:00"), "2026-07-15 02:35")
+        self.assertEqual(format_time_text("2026-07-14T18:35:00Z"), "2026-07-15 02:35")
 
     def test_cloudflare_1010_error_message_is_actionable(self) -> None:
         message = format_sub2api_http_error(

@@ -1002,7 +1002,7 @@ class QQBotFeaturesPlugin(Star):
         )
         event.stop_event()
 
-    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询全部 Sub2API 账号额度和用户 7d/30d 实际消费；直接返回后台刷新缓存图片。")
+    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询全部 Sub2API 账号额度和有消费用户 24h/7d/14d/30d 实际消费；直接返回后台刷新缓存图片。")
     async def sub2api_usage(self, event: AstrMessageEvent):
         text = extract_plain_text(event).strip()
         command = parse_sub2api_usage_command(text)

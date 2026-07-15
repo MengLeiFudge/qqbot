@@ -75,7 +75,9 @@ class Sub2APIUserUsage:
     user_id: int
     username: str = ""
     email: str = ""
+    last_24_hours_actual_cost: float = 0.0
     seven_day_actual_cost: float = 0.0
+    fourteen_day_actual_cost: float = 0.0
     thirty_day_actual_cost: float = 0.0
 
 
@@ -280,13 +282,23 @@ class Sub2APIClient:
                 "Sub2API 用户消费接口单次最多返回 200 位用户，"
                 f"当前共有 {len(users)} 位用户，无法安全输出完整消费榜。"
             )
+        last_24_hours_start, last_24_hours_end = sub2api_last_24_hours_range()
         seven_day_start, seven_day_end = sub2api_calendar_range(days=7)
+        fourteen_day_start, fourteen_day_end = sub2api_calendar_range(days=14)
         thirty_day_start, thirty_day_end = sub2api_calendar_range(days=30)
-        seven_day_rows, thirty_day_rows = await asyncio.gather(
+        last_24_hours_rows, seven_day_rows, fourteen_day_rows, thirty_day_rows = await asyncio.gather(
+            self.fetch_user_breakdown(start_date=last_24_hours_start, end_date=last_24_hours_end),
             self.fetch_user_breakdown(start_date=seven_day_start, end_date=seven_day_end),
+            self.fetch_user_breakdown(start_date=fourteen_day_start, end_date=fourteen_day_end),
             self.fetch_user_breakdown(start_date=thirty_day_start, end_date=thirty_day_end),
         )
-        return build_user_usage_ranking(users, seven_day_rows, thirty_day_rows)
+        return build_user_usage_ranking(
+            users,
+            last_24_hours_rows,
+            seven_day_rows,
+            fourteen_day_rows,
+            thirty_day_rows,
+        )
 
     async def fetch_user_breakdown(self, *, start_date: date, end_date: date) -> list[dict[str, Any]]:
         query = urlencode(
@@ -426,6 +438,12 @@ def parse_window_stats(value: object) -> Sub2APIWindowStats | None:
     )
 
 
+def sub2api_last_24_hours_range(*, today: date | None = None) -> tuple[date, date]:
+    # Sub2API WebUI 先减 24 小时再截为本地日期，后端再按完整自然日解析。
+    end_date = today or datetime.now(SUB2API_TIMEZONE).date()
+    return end_date - timedelta(days=1), end_date
+
+
 def sub2api_calendar_range(*, days: int, today: date | None = None) -> tuple[date, date]:
     if days <= 0:
         raise ValueError("天数必须大于 0")
@@ -435,10 +453,14 @@ def sub2api_calendar_range(*, days: int, today: date | None = None) -> tuple[dat
 
 def build_user_usage_ranking(
     users: list[dict[str, Any]],
+    last_24_hours_rows: list[dict[str, Any]],
     seven_day_rows: list[dict[str, Any]],
+    fourteen_day_rows: list[dict[str, Any]],
     thirty_day_rows: list[dict[str, Any]],
 ) -> list[Sub2APIUserUsage]:
+    last_24_hours_costs = build_user_actual_costs(last_24_hours_rows)
     seven_day_costs = build_user_actual_costs(seven_day_rows)
+    fourteen_day_costs = build_user_actual_costs(fourteen_day_rows)
     thirty_day_costs = build_user_actual_costs(thirty_day_rows)
     results: list[Sub2APIUserUsage] = []
     seen_user_ids: set[int] = set()
@@ -447,18 +469,39 @@ def build_user_usage_ranking(
         if user_id is None or user_id <= 0 or user_id in seen_user_ids:
             continue
         seen_user_ids.add(user_id)
+        last_24_hours_actual_cost = last_24_hours_costs.get(user_id, 0.0)
+        seven_day_actual_cost = seven_day_costs.get(user_id, 0.0)
+        fourteen_day_actual_cost = fourteen_day_costs.get(user_id, 0.0)
+        thirty_day_actual_cost = thirty_day_costs.get(user_id, 0.0)
+        if not any(
+            (
+                last_24_hours_actual_cost,
+                seven_day_actual_cost,
+                fourteen_day_actual_cost,
+                thirty_day_actual_cost,
+            )
+        ):
+            continue
         results.append(
             Sub2APIUserUsage(
                 user_id=user_id,
                 username=str(user.get("username") or "").strip(),
                 email=str(user.get("email") or "").strip(),
-                seven_day_actual_cost=seven_day_costs.get(user_id, 0.0),
-                thirty_day_actual_cost=thirty_day_costs.get(user_id, 0.0),
+                last_24_hours_actual_cost=last_24_hours_actual_cost,
+                seven_day_actual_cost=seven_day_actual_cost,
+                fourteen_day_actual_cost=fourteen_day_actual_cost,
+                thirty_day_actual_cost=thirty_day_actual_cost,
             )
         )
     return sorted(
         results,
-        key=lambda usage: (-usage.seven_day_actual_cost, -usage.thirty_day_actual_cost, usage.user_id),
+        key=lambda usage: (
+            -usage.last_24_hours_actual_cost,
+            -usage.seven_day_actual_cost,
+            -usage.fourteen_day_actual_cost,
+            -usage.thirty_day_actual_cost,
+            usage.user_id,
+        ),
     )
 
 
@@ -480,15 +523,20 @@ def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
         lines.append(f"账号刷新失败：{snapshot.accounts_error}")
     for index, usage in enumerate(snapshot.accounts, start=1):
         lines.extend(format_sub2api_usage_message(usage, title=f"{index}. {usage.name or usage.account_id}").splitlines())
-    lines.append("用户实际消费（7d / 30d）：")
+    lines.append("用户消费（24h / 7d / 14d / 30d）：")
     if snapshot.users_refreshed_at:
         lines.append(f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}")
     if snapshot.users_error:
         lines.append(f"用户刷新失败：{snapshot.users_error}")
+    if not snapshot.users:
+        lines.append("四档周期内暂无消费用户。")
     for index, usage in enumerate(snapshot.users, start=1):
         lines.append(
             f"{index}. {format_sub2api_user_name(usage)}："
-            f"7d ${usage.seven_day_actual_cost:.2f}，30d ${usage.thirty_day_actual_cost:.2f}"
+            f"24h ${usage.last_24_hours_actual_cost:.2f}，"
+            f"7d ${usage.seven_day_actual_cost:.2f}，"
+            f"14d ${usage.fourteen_day_actual_cost:.2f}，"
+            f"30d ${usage.thirty_day_actual_cost:.2f}"
         )
     return "\n".join(lines)
 
@@ -504,8 +552,17 @@ def mask_sub2api_email(email: str) -> str:
         return ""
     local, separator, domain = text.partition("@")
     if not separator or not local:
-        return f"{text[:1]}***"
-    return f"{local[:1]}***@{domain}"
+        return "*" * len(text)
+    if len(local) <= 2:
+        masked_local = "*" * len(local)
+    else:
+        mask_count = (len(local) + 2) // 3
+        visible_count = len(local) - mask_count
+        prefix_count = (visible_count + 1) // 2
+        suffix_count = visible_count - prefix_count
+        suffix = local[-suffix_count:] if suffix_count else ""
+        masked_local = f"{local[:prefix_count]}{'*' * mask_count}{suffix}"
+    return f"{masked_local}@{domain}"
 
 
 def format_sub2api_usage_alert_message(alert: Sub2APIUsageAlert) -> str:
@@ -587,7 +644,7 @@ def format_time_text(value: str) -> str:
     parsed = parse_datetime(text)
     if parsed is None:
         return text
-    local = parsed.astimezone()
+    local = parsed.astimezone(SUB2API_TIMEZONE)
     return local.strftime("%Y-%m-%d %H:%M")
 
 

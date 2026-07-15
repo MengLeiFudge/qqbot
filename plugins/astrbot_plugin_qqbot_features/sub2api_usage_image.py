@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 from .sub2api_usage import Sub2APIAccountUsage
 from .sub2api_usage import Sub2APIUsageSnapshot
 from .sub2api_usage import Sub2APIUserUsage
-from .sub2api_usage import format_datetime
+from .sub2api_usage import format_datetime, format_time_text
 from .sub2api_usage import format_sub2api_user_name
 from .sub2api_usage import format_usage_window
 
@@ -69,7 +69,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
             y += height + 16
 
     y += 18
-    draw.text((MARGIN, y), f"用户实际消费榜  共 {len(snapshot.users)} 人", font=fonts.section, fill=INK)
+    draw.text((MARGIN, y), f"用户消费榜  共 {len(snapshot.users)} 人", font=fonts.section, fill=INK)
     y += 44
     _draw_user_table(draw, fonts, snapshot.users, y)
 
@@ -153,9 +153,9 @@ def _draw_account_panel(
         (f"7d：{format_usage_window(usage.seven_day)}", INK),
     ]
     if usage.last_used_at:
-        rows.append((f"最近使用：{usage.last_used_at}", MUTED))
+        rows.append((f"最近使用：{format_time_text(usage.last_used_at)}", MUTED))
     if usage.updated_at:
-        rows.append((f"上游更新时间：{usage.updated_at}", MUTED))
+        rows.append((f"上游更新时间：{format_time_text(usage.updated_at)}", MUTED))
     if usage.error:
         rows.append((f"错误：{usage.error}", ERROR))
     for text, color in rows:
@@ -192,22 +192,28 @@ def _draw_user_table(
     header_bottom = y + 68
     draw.rounded_rectangle((MARGIN + 1, y + 1, CANVAS_WIDTH - MARGIN - 1, header_bottom), radius=11, fill=(232, 240, 250))
     name_x = MARGIN + 28
-    seven_x = 850
-    thirty_x = 1020
+    last_24_hours_x = 600
+    seven_x = 750
+    fourteen_x = 900
+    thirty_x = 1050
     draw.text((name_x, y + 20), "用户", font=fonts.body_bold, fill=INK)
-    draw.text((seven_x, y + 20), "7d 实际消费", font=fonts.body_bold, fill=INK)
-    draw.text((thirty_x, y + 20), "30d 实际消费", font=fonts.body_bold, fill=INK)
+    draw.text((last_24_hours_x, y + 22), "近24小时", font=fonts.small, fill=INK)
+    draw.text((seven_x, y + 22), "近7天", font=fonts.small, fill=INK)
+    draw.text((fourteen_x, y + 22), "近14天", font=fonts.small, fill=INK)
+    draw.text((thirty_x, y + 22), "近30天", font=fonts.small, fill=INK)
     if not users:
-        draw.text((name_x, header_bottom + 16), "暂无用户缓存。", font=fonts.body, fill=MUTED)
+        draw.text((name_x, header_bottom + 16), "四档周期内暂无消费用户。", font=fonts.body, fill=MUTED)
         return
     row_y = header_bottom
     for index, usage in enumerate(users, start=1):
         if index % 2 == 0:
             draw.rectangle((MARGIN + 1, row_y, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=(248, 250, 253))
-        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 680)
+        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 490)
         draw.text((name_x, row_y + 13), label, font=fonts.body, fill=INK)
-        draw.text((seven_x, row_y + 13), f"${usage.seven_day_actual_cost:.2f}", font=fonts.body, fill=GOOD)
-        draw.text((thirty_x, row_y + 13), f"${usage.thirty_day_actual_cost:.2f}", font=fonts.body, fill=GOOD)
+        _draw_right_aligned(draw, fonts.body, f"${usage.last_24_hours_actual_cost:.2f}", 725, row_y + 13, GOOD)
+        _draw_right_aligned(draw, fonts.body, f"${usage.seven_day_actual_cost:.2f}", 875, row_y + 13, GOOD)
+        _draw_right_aligned(draw, fonts.body, f"${usage.fourteen_day_actual_cost:.2f}", 1025, row_y + 13, GOOD)
+        _draw_right_aligned(draw, fonts.body, f"${usage.thirty_day_actual_cost:.2f}", 1175, row_y + 13, GOOD)
         draw.line((MARGIN + 1, row_y + ROW_HEIGHT, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=BORDER, width=1)
         row_y += ROW_HEIGHT
 
@@ -236,6 +242,17 @@ def _ellipsize(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, text: str, 
     while value and draw.textlength(value + ellipsis, font=font) > max_width:
         value = value[:-1]
     return value + ellipsis
+
+
+def _draw_right_aligned(
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.ImageFont,
+    text: str,
+    right_x: int,
+    y: int,
+    fill: tuple[int, int, int],
+) -> None:
+    draw.text((right_x - draw.textlength(text, font=font), y), text, font=font, fill=fill)
 
 
 def _rounded_rect(
