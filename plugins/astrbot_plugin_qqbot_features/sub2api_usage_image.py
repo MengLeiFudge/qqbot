@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 from .sub2api_usage import Sub2APIAccountUsage
 from .sub2api_usage import Sub2APIUsageSnapshot
 from .sub2api_usage import Sub2APIUserUsage
+from .sub2api_usage import format_actual_cost
 from .sub2api_usage import format_datetime, format_time_text
 from .sub2api_usage import format_sub2api_user_name
 from .sub2api_usage import format_usage_window
@@ -34,7 +35,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     payload = {
         "kind": "sub2api-usage",
         "snapshot": asdict(snapshot),
-        "version": 1,
+        "version": 2,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
@@ -51,7 +52,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     draw.text((MARGIN, 36), "Sub2API 用量报告", font=fonts.title, fill=INK)
     draw.text(
         (MARGIN + 2, 98),
-        "账号额度为后台主动刷新缓存；用户消费为实际扣费，按 Asia/Shanghai 自然日统计。",
+        "账号额度和账号7d为后台刷新缓存；其余用户消费按 Asia/Shanghai 自然日统计。",
         font=fonts.subtitle,
         fill=MUTED,
     )
@@ -97,6 +98,12 @@ def _status_lines(snapshot: Sub2APIUsageSnapshot) -> list[tuple[str, tuple[int, 
         lines.append(("账号刷新：暂无成功数据", WARNING))
     if snapshot.accounts_error:
         lines.append((f"账号刷新失败，已保留上次成功缓存：{snapshot.accounts_error}", ERROR))
+    if snapshot.account_seven_day_refreshed_at:
+        lines.append((f"账号7d刷新：{format_datetime(snapshot.account_seven_day_refreshed_at)}", GOOD))
+    else:
+        lines.append(("账号7d刷新：暂无成功数据", WARNING))
+    if snapshot.account_seven_day_error:
+        lines.append((f"账号7d刷新失败，已保留上次成功缓存：{snapshot.account_seven_day_error}", ERROR))
     if snapshot.users_refreshed_at:
         lines.append((f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}", GOOD))
     else:
@@ -192,27 +199,30 @@ def _draw_user_table(
     header_bottom = y + 68
     draw.rounded_rectangle((MARGIN + 1, y + 1, CANVAS_WIDTH - MARGIN - 1, header_bottom), radius=11, fill=(232, 240, 250))
     name_x = MARGIN + 28
-    last_24_hours_x = 600
+    account_seven_day_x = 470
+    last_24_hours_x = 610
     seven_x = 750
-    fourteen_x = 900
-    thirty_x = 1050
+    fourteen_x = 890
+    thirty_x = 1030
     draw.text((name_x, y + 20), "用户", font=fonts.body_bold, fill=INK)
+    draw.text((account_seven_day_x, y + 22), "账号7d", font=fonts.small, fill=INK)
     draw.text((last_24_hours_x, y + 22), "近24小时", font=fonts.small, fill=INK)
     draw.text((seven_x, y + 22), "近7天", font=fonts.small, fill=INK)
     draw.text((fourteen_x, y + 22), "近14天", font=fonts.small, fill=INK)
     draw.text((thirty_x, y + 22), "近30天", font=fonts.small, fill=INK)
     if not users:
-        draw.text((name_x, header_bottom + 16), "四档周期内暂无消费用户。", font=fonts.body, fill=MUTED)
+        draw.text((name_x, header_bottom + 16), "当前统计周期内暂无消费用户。", font=fonts.body, fill=MUTED)
         return
     row_y = header_bottom
     for index, usage in enumerate(users, start=1):
         if index % 2 == 0:
             draw.rectangle((MARGIN + 1, row_y, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=(248, 250, 253))
-        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 490)
+        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 370)
         draw.text((name_x, row_y + 13), label, font=fonts.body, fill=INK)
-        _draw_right_aligned(draw, fonts.body, f"${usage.last_24_hours_actual_cost:.2f}", 725, row_y + 13, GOOD)
+        _draw_right_aligned(draw, fonts.body, format_actual_cost(usage.account_seven_day_actual_cost), 595, row_y + 13, GOOD)
+        _draw_right_aligned(draw, fonts.body, f"${usage.last_24_hours_actual_cost:.2f}", 735, row_y + 13, GOOD)
         _draw_right_aligned(draw, fonts.body, f"${usage.seven_day_actual_cost:.2f}", 875, row_y + 13, GOOD)
-        _draw_right_aligned(draw, fonts.body, f"${usage.fourteen_day_actual_cost:.2f}", 1025, row_y + 13, GOOD)
+        _draw_right_aligned(draw, fonts.body, f"${usage.fourteen_day_actual_cost:.2f}", 1015, row_y + 13, GOOD)
         _draw_right_aligned(draw, fonts.body, f"${usage.thirty_day_actual_cost:.2f}", 1175, row_y + 13, GOOD)
         draw.line((MARGIN + 1, row_y + ROW_HEIGHT, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=BORDER, width=1)
         row_y += ROW_HEIGHT

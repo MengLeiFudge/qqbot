@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import json
 import re
@@ -75,6 +75,7 @@ class Sub2APIUserUsage:
     user_id: int
     username: str = ""
     email: str = ""
+    account_seven_day_actual_cost: float | None = None
     last_24_hours_actual_cost: float = 0.0
     seven_day_actual_cost: float = 0.0
     fourteen_day_actual_cost: float = 0.0
@@ -87,8 +88,10 @@ class Sub2APIUsageSnapshot:
     users: tuple[Sub2APIUserUsage, ...] = ()
     accounts_refreshed_at: datetime | None = None
     users_refreshed_at: datetime | None = None
+    account_seven_day_refreshed_at: datetime | None = None
     accounts_error: str = ""
     users_error: str = ""
+    account_seven_day_error: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,20 +303,119 @@ class Sub2APIClient:
             thirty_day_rows,
         )
 
-    async def fetch_user_breakdown(self, *, start_date: date, end_date: date) -> list[dict[str, Any]]:
-        query = urlencode(
-            {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "timezone": "Asia/Shanghai",
-                "limit": str(SUB2API_USER_BREAKDOWN_LIMIT),
-                "sort_by": "actual_cost",
-            }
-        )
+    async def get_account_seven_day_user_costs(
+        self,
+        accounts: tuple[Sub2APIAccountUsage, ...],
+        users: tuple[Sub2APIUserUsage, ...],
+        *,
+        now: datetime | None = None,
+    ) -> dict[int, float]:
+        if not self.base_url:
+            raise ValueError("Sub2API 地址还没配置")
+        if not self.admin_api_key:
+            raise ValueError("Sub2API Admin API Key 还没配置")
+        if not users:
+            return {}
+        end_time = now or datetime.now(timezone.utc)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        end_time = end_time.astimezone(SUB2API_TIMEZONE)
+        costs = {usage.user_id: 0.0 for usage in users}
+        for account in accounts:
+            window = account.seven_day
+            resets_at = parse_datetime(window.resets_at) if window is not None else None
+            if resets_at is None:
+                raise RuntimeError(f"Sub2API 账号 {account.name or account.account_id} 缺少 7d 重置时间")
+            resets_at = resets_at.astimezone(SUB2API_TIMEZONE)
+            if end_time >= resets_at:
+                raise RuntimeError(f"Sub2API 账号 {account.name or account.account_id} 的 7d 重置时间已过期")
+            window_started_at = resets_at - timedelta(days=7)
+            first_full_hour = window_started_at.replace(minute=0, second=0, microsecond=0)
+            if first_full_hour < window_started_at:
+                first_full_hour += timedelta(hours=1)
+            if first_full_hour.date() == window_started_at.date() and first_full_hour <= end_time:
+                hourly_costs = await self.fetch_account_hourly_user_costs(
+                    account_id=account.account_id,
+                    date_value=window_started_at.date(),
+                    start_hour=first_full_hour,
+                    end_time=end_time,
+                )
+                for usage in users:
+                    costs[usage.user_id] += hourly_costs.get(usage.user_id, 0.0)
+            full_days_start = window_started_at.date() + timedelta(days=1)
+            if full_days_start <= end_time.date():
+                rows = await self.fetch_user_breakdown(
+                    start_date=full_days_start,
+                    end_date=end_time.date(),
+                    account_id=account.account_id,
+                )
+                full_day_costs = build_user_actual_costs(rows)
+                for usage in users:
+                    costs[usage.user_id] += full_day_costs.get(usage.user_id, 0.0)
+        return costs
+
+    async def fetch_user_breakdown(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        account_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "timezone": "Asia/Shanghai",
+            "limit": str(SUB2API_USER_BREAKDOWN_LIMIT),
+            "sort_by": "actual_cost",
+        }
+        if account_id is not None:
+            params["account_id"] = str(account_id)
+        query = urlencode(params)
         payload = await self._get_json(f"{self.base_url}/api/v1/admin/dashboard/user-breakdown?{query}")
         data = ensure_dict(payload).get("data", {})
         users = data.get("users", []) if isinstance(data, dict) else []
         return [user for user in users if isinstance(user, dict)] if isinstance(users, list) else []
+
+    async def fetch_account_hourly_user_costs(
+        self,
+        *,
+        account_id: int,
+        date_value: date,
+        start_hour: datetime,
+        end_time: datetime,
+    ) -> dict[int, float]:
+        query = urlencode(
+            {
+                "start_date": date_value.isoformat(),
+                "end_date": date_value.isoformat(),
+                "granularity": "hour",
+                "account_id": str(account_id),
+                "include_stats": "false",
+                "include_trend": "false",
+                "include_model_stats": "false",
+                "include_group_stats": "false",
+                "include_users_trend": "true",
+            }
+        )
+        payload = await self._get_json(f"{self.base_url}/api/v1/admin/dashboard/snapshot-v2?{query}")
+        data = ensure_dict(payload).get("data", {})
+        if not isinstance(data, dict):
+            return {}
+        trend = data.get("users_trend", [])
+        if not isinstance(trend, list):
+            return {}
+        costs: dict[int, float] = {}
+        for row in trend:
+            if not isinstance(row, dict):
+                continue
+            bucket = parse_sub2api_hour_bucket(row.get("date"))
+            if bucket is None or bucket < start_hour or bucket > end_time:
+                continue
+            user_id = optional_int(row.get("user_id"))
+            if user_id is None or user_id <= 0:
+                continue
+            costs[user_id] = costs.get(user_id, 0.0) + (optional_float(row.get("actual_cost")) or 0.0)
+        return costs
 
     async def _list_paginated(self, resource: str, *, sort_by: str) -> list[dict[str, Any]]:
         page = 1
@@ -505,6 +607,22 @@ def build_user_usage_ranking(
     )
 
 
+def apply_account_seven_day_user_costs(
+    users: tuple[Sub2APIUserUsage, ...],
+    costs: dict[int, float | None],
+) -> tuple[Sub2APIUserUsage, ...]:
+    return tuple(
+        replace(
+            usage,
+            account_seven_day_actual_cost=costs.get(
+                usage.user_id,
+                usage.account_seven_day_actual_cost,
+            ),
+        )
+        for usage in users
+    )
+
+
 def build_user_actual_costs(rows: list[dict[str, Any]]) -> dict[int, float]:
     costs: dict[int, float] = {}
     for row in rows:
@@ -521,24 +639,33 @@ def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
         lines.append(f"账号刷新：{format_datetime(snapshot.accounts_refreshed_at)}")
     if snapshot.accounts_error:
         lines.append(f"账号刷新失败：{snapshot.accounts_error}")
+    if snapshot.account_seven_day_refreshed_at:
+        lines.append(f"账号7d刷新：{format_datetime(snapshot.account_seven_day_refreshed_at)}")
+    if snapshot.account_seven_day_error:
+        lines.append(f"账号7d刷新失败：{snapshot.account_seven_day_error}")
     for index, usage in enumerate(snapshot.accounts, start=1):
         lines.extend(format_sub2api_usage_message(usage, title=f"{index}. {usage.name or usage.account_id}").splitlines())
-    lines.append("用户消费（24h / 7d / 14d / 30d）：")
+    lines.append("用户消费（账号7d / 24h / 7d / 14d / 30d）：")
     if snapshot.users_refreshed_at:
         lines.append(f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}")
     if snapshot.users_error:
         lines.append(f"用户刷新失败：{snapshot.users_error}")
     if not snapshot.users:
-        lines.append("四档周期内暂无消费用户。")
+        lines.append("当前统计周期内暂无消费用户。")
     for index, usage in enumerate(snapshot.users, start=1):
         lines.append(
             f"{index}. {format_sub2api_user_name(usage)}："
+            f"账号7d {format_actual_cost(usage.account_seven_day_actual_cost)}，"
             f"24h ${usage.last_24_hours_actual_cost:.2f}，"
             f"7d ${usage.seven_day_actual_cost:.2f}，"
             f"14d ${usage.fourteen_day_actual_cost:.2f}，"
             f"30d ${usage.thirty_day_actual_cost:.2f}"
         )
     return "\n".join(lines)
+
+
+def format_actual_cost(value: float | None) -> str:
+    return "--" if value is None else f"${value:.2f}"
 
 
 def format_sub2api_user_name(usage: Sub2APIUserUsage) -> str:
@@ -667,6 +794,19 @@ def parse_datetime(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def parse_sub2api_hour_bucket(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=SUB2API_TIMEZONE)
+    return parsed.astimezone(SUB2API_TIMEZONE)
 
 
 def format_compact_number(value: int) -> str:

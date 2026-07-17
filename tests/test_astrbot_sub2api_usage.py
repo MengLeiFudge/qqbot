@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins"))
@@ -14,7 +15,9 @@ from astrbot_plugin_qqbot_features.sub2api_usage import (  # noqa: E402
     Sub2APIClient,
     Sub2APIUsageCache,
     Sub2APIUsageSnapshot,
+    Sub2APIUserUsage,
     Sub2APIUsageWindow,
+    apply_account_seven_day_user_costs,
     build_user_usage_ranking,
     format_sub2api_http_error,
     format_sub2api_user_name,
@@ -77,6 +80,22 @@ class StubSub2APIHttpClient:
         if "/api/v1/admin/dashboard/user-breakdown?" in url:
             if "start_date=" not in url or "end_date=" not in url or "timezone=Asia%2FShanghai" not in url:
                 raise AssertionError(f"missing date range or timezone: {url}")
+            query = parse_qs(urlparse(url).query)
+            account_id = int(query["account_id"][0]) if "account_id" in query else None
+            if account_id is not None:
+                actual_costs = {
+                    88: {1: 20.0, 2: 5.0},
+                    89: {1: 2.0, 2: 3.0},
+                }.get(account_id, {})
+                return {
+                    "code": 0,
+                    "data": {
+                        "users": [
+                            {"user_id": user_id, "actual_cost": actual_cost}
+                            for user_id, actual_cost in actual_costs.items()
+                        ]
+                    },
+                }
             return {
                 "code": 0,
                 "data": {
@@ -93,7 +112,30 @@ class StubSub2APIHttpClient:
                     "source": "active",
                     "updated_at": "2026-07-13T04:00:00Z",
                     "five_hour": {"utilization": 15.4, "remaining_seconds": 7260},
-                    "seven_day": {"utilization": 34.8, "remaining_seconds": 604800},
+                    "seven_day": {
+                        "utilization": 34.8,
+                        "resets_at": "2026-07-20T12:17:00+08:00",
+                        "remaining_seconds": 604800,
+                    },
+                },
+            }
+        if "/api/v1/admin/dashboard/snapshot-v2?" in url:
+            query = parse_qs(urlparse(url).query)
+            account_id = int(query["account_id"][0])
+            hourly_costs = {
+                (88, 1): 1.0,
+                (88, 2): 0.5,
+                (89, 1): 0.5,
+                (89, 2): 1.0,
+            }
+            return {
+                "code": 0,
+                "data": {
+                    "users_trend": [
+                        {"date": "2026-07-13 12:00", "user_id": 1, "actual_cost": 999.0},
+                        {"date": "2026-07-13 13:00", "user_id": 1, "actual_cost": hourly_costs.get((account_id, 1), 0.0)},
+                        {"date": "2026-07-13 13:00", "user_id": 2, "actual_cost": hourly_costs.get((account_id, 2), 0.0)},
+                    ]
                 },
             }
         raise AssertionError(f"unexpected url: {url}")
@@ -224,6 +266,81 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         breakdown_calls = [call for call in stub.calls if "/user-breakdown?" in str(call["url"])]
         self.assertEqual(len(breakdown_calls), 4)
 
+    def test_client_sums_reset_day_hours_and_later_full_days_for_each_user(self) -> None:
+        stub = StubSub2APIHttpClient()
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=stub,
+        )
+        accounts = tuple(asyncio.run(client.get_account_usage(force_refresh=True)))
+        users = tuple(asyncio.run(client.get_user_usage_ranking()))
+
+        costs = asyncio.run(
+            client.get_account_seven_day_user_costs(
+                accounts,
+                users,
+                now=datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+
+        self.assertEqual(costs, {1: 23.5, 2: 9.5})
+        hourly_calls = [call for call in stub.calls if "/api/v1/admin/dashboard/snapshot-v2?" in str(call["url"])]
+        self.assertEqual(len(hourly_calls), 2)
+        for call in hourly_calls:
+            query = parse_qs(urlparse(str(call["url"])).query)
+            self.assertEqual(query["start_date"], ["2026-07-13"])
+            self.assertEqual(query["end_date"], ["2026-07-13"])
+            self.assertEqual(query["granularity"], ["hour"])
+            self.assertEqual(query["include_users_trend"], ["true"])
+            self.assertNotIn("user_id", query)
+        full_day_calls = [
+            call
+            for call in stub.calls
+            if "/api/v1/admin/dashboard/user-breakdown?" in str(call["url"])
+            and "account_id=" in str(call["url"])
+        ]
+        self.assertEqual(len(full_day_calls), 2)
+        for call in full_day_calls:
+            query = parse_qs(urlparse(str(call["url"])).query)
+            self.assertEqual(query["start_date"], ["2026-07-14"])
+            self.assertEqual(query["end_date"], ["2026-07-17"])
+
+    def test_user_refresh_can_preserve_cached_account_seven_day_cost(self) -> None:
+        users = (
+            Sub2APIUserUsage(user_id=1, username="alice"),
+            Sub2APIUserUsage(user_id=2, username="bob", account_seven_day_actual_cost=3.0),
+        )
+
+        updated = apply_account_seven_day_user_costs(users, {1: 12.5})
+
+        self.assertEqual(updated[0].account_seven_day_actual_cost, 12.5)
+        self.assertEqual(updated[1].account_seven_day_actual_cost, 3.0)
+
+    def test_expired_account_reset_time_fails_instead_of_overcounting_old_window(self) -> None:
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=StubSub2APIHttpClient(),
+        )
+        accounts = (
+            Sub2APIAccountUsage(
+                account_id=88,
+                name="Main",
+                seven_day=Sub2APIUsageWindow(resets_at="2026-07-17T11:59:00+00:00"),
+            ),
+        )
+        users = (Sub2APIUserUsage(user_id=1),)
+
+        with self.assertRaisesRegex(RuntimeError, "7d 重置时间已过期"):
+            asyncio.run(
+                client.get_account_seven_day_user_costs(
+                    accounts,
+                    users,
+                    now=datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc),
+                )
+            )
+
     def test_one_account_usage_failure_keeps_other_accounts_in_snapshot(self) -> None:
         client = Sub2APIClient(
             base_url="https://ai.example.com",
@@ -339,22 +456,28 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
                     updated_at="2026-07-15T02:35:00.831240125+08:00",
                 ),
             ),
-            users=tuple(build_user_usage_ranking(
-                [{"id": 2, "username": "", "email": "bob@example.com"}],
-                [{"user_id": 2, "actual_cost": 1}],
-                [],
-                [],
-                [],
-            )),
+            users=apply_account_seven_day_user_costs(
+                tuple(build_user_usage_ranking(
+                    [{"id": 2, "username": "", "email": "bob@example.com"}],
+                    [{"user_id": 2, "actual_cost": 1}],
+                    [],
+                    [],
+                    [],
+                )),
+                {2: 0.75},
+            ),
+            account_seven_day_refreshed_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
             accounts_error="HTTP 502",
             users_error="timeout",
+            account_seven_day_error="stats timeout",
         )
-
         message = format_sub2api_usage_response(snapshot)
 
         self.assertIn("账号刷新失败：HTTP 502", message)
+        self.assertIn("账号7d刷新失败：stats timeout", message)
         self.assertIn("用户刷新失败：timeout", message)
-        self.assertIn("用户消费（24h / 7d / 14d / 30d）：", message)
+        self.assertIn("用户消费（账号7d / 24h / 7d / 14d / 30d）：", message)
+        self.assertIn("账号7d $0.75，24h $1.00", message)
         self.assertNotIn("用户实际消费", message)
         self.assertIn("最近使用：2026-07-15 02:34", message)
         self.assertIn("更新时间：2026-07-15 02:35", message)

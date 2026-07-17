@@ -42,6 +42,7 @@ class AstrBotSub2APIUsageImageTest(unittest.TestCase):
                     user_id=index,
                     username="" if index % 2 else f"user-{index}",
                     email=f"user-{index}@example.com",
+                    account_seven_day_actual_cost=float(index) / 3,
                     last_24_hours_actual_cost=float(10 - index),
                     seven_day_actual_cost=float(8 - index),
                     fourteen_day_actual_cost=float(12 - index),
@@ -51,6 +52,7 @@ class AstrBotSub2APIUsageImageTest(unittest.TestCase):
             ),
             accounts_refreshed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
             users_refreshed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
+            account_seven_day_refreshed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
             users_error="上游暂时超时，保留上次成功用户榜。",
         )
         with tempfile.TemporaryDirectory() as directory:
