@@ -247,6 +247,26 @@ def mark_worker_busy(
     )
 
 
+def try_mark_worker_busy(
+    worker_id: object,
+    *,
+    now: float | None = None,
+    lease_seconds: float = WORKER_BUSY_LEASE_SECONDS,
+) -> bool:
+    key = normalize_id(worker_id)
+    if not key:
+        return False
+    current = time.monotonic() if now is None else now
+    cleanup_scheduler_state(now=current)
+    if is_worker_busy(key, now=current):
+        return False
+    _WORKER_BUSY_STATES[key] = WorkerBusyState(
+        active_requests=1,
+        expires_at=current + max(1.0, lease_seconds),
+    )
+    return True
+
+
 def release_worker(worker_id: object) -> None:
     key = normalize_id(worker_id)
     state = _WORKER_BUSY_STATES.get(key)

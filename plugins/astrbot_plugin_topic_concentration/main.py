@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from astrbot.api import logger
 from astrbot.api.event import filter
@@ -10,6 +11,7 @@ from astrbot.core.agent.message import TextPart
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
 from .logic import ACTIVATION_WINDOW_SECONDS
+from .logic import CANDIDATE_MAX_WAIT_SECONDS
 from .logic import DEACTIVATE_MARKER
 from .logic import SKIP_REPLY_MARKER
 from .logic import activate_group_chat
@@ -20,6 +22,7 @@ from .logic import classify_cotton_candy_call
 from .logic import clear_group_activations
 from .logic import contains_cotton_candy_marker
 from .logic import deactivate_group_chat
+from .logic import is_candidate_request_current
 from .logic import looks_like_qqbot_fixed_command
 from .logic import parse_call_intent_response
 from .logic import parse_reply_control
@@ -36,6 +39,7 @@ from .twin_scheduler import mark_worker_busy
 from .twin_scheduler import record_worker_handled
 from .twin_scheduler import release_worker
 from .twin_scheduler import targeted_twin_ids
+from .twin_scheduler import try_mark_worker_busy
 
 try:
     from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
@@ -63,6 +67,8 @@ ACTIVATION_GENERATION_EXTRA = "_qqbot_group_activation_generation"
 ACTIVATION_REQUEST_EXTRA = "_qqbot_group_activation_provider_request"
 RETRY_VISIBLE_TEXT_EXTRA = "_qqbot_group_activation_retry_visible_text"
 PENDING_STATE_ACTION_EXTRA = "_qqbot_group_activation_pending_action"
+CANDIDATE_QUEUED_AT_EXTRA = "_qqbot_group_activation_candidate_queued_at"
+CANDIDATE_RESERVED_EXTRA = "_qqbot_group_activation_candidate_reserved"
 EMPTY_MENTION_CALL_EXTRA = "_qqbot_empty_mention_call"
 ROUTE_PRIVATE = "private"
 ROUTE_EXPLICIT = "explicit"
@@ -78,7 +84,7 @@ EMPTY_MENTION_CALL_TEXT = "用户只@了你，没有附带其他内容"
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖群聊激活状态、显式呼叫与双 bot 普通 LLM worker 调度。",
-    "0.5.1",
+    "0.5.2",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -192,6 +198,20 @@ class TopicConcentrationPlugin(Star):
             )
             return
 
+        if route == ROUTE_CANDIDATE:
+            if not try_mark_worker_busy(decision.worker_id):
+                event.should_call_llm(True)
+                event.stop_event()
+                logger.info(
+                    "[TopicConcentration] skip candidate before queue: worker=%s group=%s reason=worker_busy claim=%s",
+                    decision.worker_id,
+                    event.get_group_id(),
+                    decision.claim_key,
+                )
+                return
+            event.set_extra(CANDIDATE_RESERVED_EXTRA, "1")
+            event.set_extra(CANDIDATE_QUEUED_AT_EXTRA, time.monotonic())
+
         if route == ROUTE_EXPLICIT:
             activation_state = activate_group_chat(event.get_group_id(), decision.worker_id)
 
@@ -225,6 +245,14 @@ class TopicConcentrationPlugin(Star):
             decision.angel_probability,
         )
 
+    @filter.on_waiting_llm_request(priority=1000, desc="候选进入 AstrBot 会话锁前检查激活代际与排队时效。")
+    async def validate_candidate_before_queue(self, event):
+        if str(event.get_extra(LLM_ROUTE_EXTRA, "") or "") != ROUTE_CANDIDATE:
+            return
+        if _candidate_request_is_current(event):
+            return
+        _stop_stale_candidate(event, stage="waiting")
+
     @filter.on_llm_request(desc="标记当前 worker 正在等待普通 LLM 返回，并注入群聊激活控制协议。")
     async def mark_direct_llm_worker_busy(self, event, req):
         selected = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "")
@@ -234,10 +262,14 @@ class TopicConcentrationPlugin(Star):
             event.should_call_llm(True)
             event.stop_event()
             return
+        route = str(event.get_extra(LLM_ROUTE_EXTRA, "") or "")
+        if route == ROUTE_CANDIDATE and not _candidate_request_is_current(event):
+            _stop_stale_candidate(event, stage="provider")
+            return
         claim_key = str(event.get_extra(LLM_WORKER_CLAIM_KEY_EXTRA, "") or "")
         mark_claim_processing(claim_key, selected)
-        mark_worker_busy(selected)
-        route = str(event.get_extra(LLM_ROUTE_EXTRA, "") or "")
+        if route != ROUTE_CANDIDATE:
+            mark_worker_busy(selected)
         if route in {ROUTE_EXPLICIT, ROUTE_CANDIDATE}:
             renewals = int(event.get_extra(ACTIVATION_RENEWALS_EXTRA, 0) or 0)
             req.extra_user_content_parts.append(
@@ -271,8 +303,21 @@ class TopicConcentrationPlugin(Star):
         selected = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "")
         if not selected:
             return
-        release_worker(selected)
         route = str(event.get_extra(LLM_ROUTE_EXTRA, "") or "")
+        candidate_current = route != ROUTE_CANDIDATE or _candidate_request_is_current(event)
+        release_worker(selected)
+        if route == ROUTE_CANDIDATE:
+            event.set_extra(CANDIDATE_RESERVED_EXTRA, "")
+        if not candidate_current:
+            _apply_reply_control(response, "", suppress=True)
+            logger.info(
+                "[TopicConcentration] suppress stale candidate response: worker=%s group=%s generation=%s claim=%s",
+                selected,
+                event.get_group_id(),
+                int(event.get_extra(ACTIVATION_GENERATION_EXTRA, 0) or 0),
+                str(event.get_extra(LLM_WORKER_CLAIM_KEY_EXTRA, "") or ""),
+            )
+            return
         raw_text = _response_text(response)
         control = parse_reply_control(raw_text) if route in {ROUTE_EXPLICIT, ROUTE_CANDIDATE} else None
         if route == ROUTE_EXPLICIT and control is not None and not control.cleaned_text:
@@ -412,6 +457,39 @@ class TopicConcentrationPlugin(Star):
             applied,
             state.ordinary_reply_renewals if state is not None else 0,
         )
+
+
+def _candidate_request_is_current(event) -> bool:
+    selected = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "")
+    generation = int(event.get_extra(ACTIVATION_GENERATION_EXTRA, 0) or 0)
+    queued_at = float(event.get_extra(CANDIDATE_QUEUED_AT_EXTRA, 0.0) or 0.0)
+    return bool(event.get_extra(CANDIDATE_RESERVED_EXTRA, "")) and is_candidate_request_current(
+        event.get_group_id(),
+        selected,
+        expected_generation=generation,
+        queued_at=queued_at,
+    )
+
+
+def _stop_stale_candidate(event, *, stage: str) -> None:
+    selected = str(event.get_extra(LLM_WORKER_SELECTED_EXTRA, "") or "")
+    if event.get_extra(CANDIDATE_RESERVED_EXTRA, ""):
+        release_worker(selected)
+        event.set_extra(CANDIDATE_RESERVED_EXTRA, "")
+    event.should_call_llm(True)
+    event.stop_event()
+    queued_at = float(event.get_extra(CANDIDATE_QUEUED_AT_EXTRA, 0.0) or 0.0)
+    age = max(0.0, time.monotonic() - queued_at) if queued_at > 0 else -1.0
+    logger.info(
+        "[TopicConcentration] skip stale candidate: worker=%s group=%s stage=%s age=%.2fs max_wait=%.0fs generation=%s claim=%s",
+        selected,
+        event.get_group_id(),
+        stage,
+        age,
+        CANDIDATE_MAX_WAIT_SECONDS,
+        int(event.get_extra(ACTIVATION_GENERATION_EXTRA, 0) or 0),
+        str(event.get_extra(LLM_WORKER_CLAIM_KEY_EXTRA, "") or ""),
+    )
 
 
 async def _decide_named_call(context: Context, event, text: str) -> str | None:

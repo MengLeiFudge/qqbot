@@ -7,6 +7,7 @@ import time
 
 
 ACTIVATION_WINDOW_SECONDS = 180.0
+CANDIDATE_MAX_WAIT_SECONDS = 30.0
 SKIP_REPLY_MARKER = "[[QQBOT_SKIP_REPLY]]"
 DEACTIVATE_MARKER = "[[QQBOT_DEACTIVATE]]"
 EXPLICIT_VISIBLE_RETRY_INSTRUCTION = (
@@ -236,6 +237,24 @@ def read_group_activation(
         _GROUP_ACTIVATIONS.pop(key, None)
         return None
     return state
+
+
+def is_candidate_request_current(
+    group_id: object,
+    worker_id: object,
+    *,
+    expected_generation: int,
+    queued_at: float,
+    now: float | None = None,
+    max_wait_seconds: float = CANDIDATE_MAX_WAIT_SECONDS,
+) -> bool:
+    current = time.monotonic() if now is None else now
+    if expected_generation <= 0 or queued_at <= 0:
+        return False
+    if current - queued_at > max(0.0, max_wait_seconds):
+        return False
+    state = read_group_activation(group_id, worker_id, now=current)
+    return state is not None and state.generation == expected_generation
 
 
 def renew_group_chat_after_reply(

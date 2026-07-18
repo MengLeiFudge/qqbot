@@ -34,6 +34,7 @@ sys.modules.setdefault("astrbot.api", astrbot_api_stub)
 
 from astrbot_plugin_topic_concentration.logic import (
     ACTIVATION_WINDOW_SECONDS,
+    CANDIDATE_MAX_WAIT_SECONDS,
     DEACTIVATE_MARKER,
     SKIP_REPLY_MARKER,
     activate_group_chat,
@@ -44,6 +45,7 @@ from astrbot_plugin_topic_concentration.logic import (
     clear_group_activations,
     deactivate_group_chat,
     has_strong_topic_signal,
+    is_candidate_request_current,
     is_recent_duplicate_observation,
     looks_like_direct_bot_call,
     looks_like_low_information,
@@ -71,6 +73,7 @@ from astrbot_plugin_topic_concentration.twin_scheduler import (
     release_worker,
     set_group_balance,
     targeted_twin_ids,
+    try_mark_worker_busy,
 )
 from astrbot_plugin_qqbot_features.request_context import build_current_request_context
 from astrbot_plugin_qqbot_features.source_knowledge import load_source_knowledge_config
@@ -721,6 +724,47 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertTrue(is_worker_busy("2629227874", now=20.0))
         release_worker("2629227874")
         self.assertFalse(is_worker_busy("2629227874", now=20.0))
+
+    def test_twin_scheduler_candidate_reservation_requires_idle_worker(self) -> None:
+        self.assertTrue(try_mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0))
+        self.assertFalse(try_mark_worker_busy("2629227874", now=11.0, lease_seconds=600.0))
+        release_worker("2629227874")
+        self.assertTrue(try_mark_worker_busy("2629227874", now=12.0, lease_seconds=600.0))
+
+    def test_candidate_request_requires_current_generation_and_short_wait(self) -> None:
+        first = activate_group_chat("1163635014", "2629227874", now=10.0)
+        assert first is not None
+
+        self.assertTrue(
+            is_candidate_request_current(
+                "1163635014",
+                "2629227874",
+                expected_generation=first.generation,
+                queued_at=12.0,
+                now=12.0 + CANDIDATE_MAX_WAIT_SECONDS,
+            )
+        )
+        self.assertFalse(
+            is_candidate_request_current(
+                "1163635014",
+                "2629227874",
+                expected_generation=first.generation,
+                queued_at=12.0,
+                now=12.001 + CANDIDATE_MAX_WAIT_SECONDS,
+            )
+        )
+
+        second = activate_group_chat("1163635014", "2629227874", now=20.0)
+        assert second is not None
+        self.assertFalse(
+            is_candidate_request_current(
+                "1163635014",
+                "2629227874",
+                expected_generation=first.generation,
+                queued_at=20.0,
+                now=21.0,
+            )
+        )
 
     def test_twin_scheduler_keeps_worker_busy_until_all_concurrent_requests_finish(self) -> None:
         mark_worker_busy("2629227874", now=10.0, lease_seconds=600.0)
