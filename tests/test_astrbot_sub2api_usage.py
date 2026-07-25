@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import unittest
@@ -11,25 +11,29 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins"))
 
 from astrbot_plugin_qqbot_features.sub2api_usage import (  # noqa: E402
+    SUB2API_TIMEZONE,
+    Sub2APIAccountSevenDayRanking,
     Sub2APIAccountUsage,
+    Sub2APIAccountUserUsage,
     Sub2APIClient,
     Sub2APIUsageCache,
     Sub2APIUsageSnapshot,
     Sub2APIUserUsage,
     Sub2APIUsageWindow,
-    apply_account_seven_day_user_costs,
+    build_account_user_ranking,
+    build_rolling_user_costs,
     build_user_usage_ranking,
     format_sub2api_http_error,
     format_sub2api_user_name,
     format_sub2api_usage_alert_message,
     format_sub2api_usage_response,
     format_time_text,
+    find_account_seven_day_ranking,
     load_sub2api_config,
     mask_sub2api_email,
     parse_sub2api_group_ids,
     parse_sub2api_usage_command,
-    sub2api_calendar_range,
-    sub2api_last_24_hours_range,
+    retain_failed_account_ranking,
     update_sub2api_usage_alert_state,
 )
 
@@ -96,15 +100,7 @@ class StubSub2APIHttpClient:
                         ]
                     },
                 }
-            return {
-                "code": 0,
-                "data": {
-                    "users": [
-                        {"user_id": 1, "actual_cost": 12.5},
-                        {"user_id": 2, "actual_cost": 3.25},
-                    ]
-                },
-            }
+            raise AssertionError(f"ordinary rolling windows must not call user-breakdown: {url}")
         if "/api/v1/admin/accounts/" in url and "/usage?" in url:
             return {
                 "code": 0,
@@ -121,23 +117,47 @@ class StubSub2APIHttpClient:
             }
         if "/api/v1/admin/dashboard/snapshot-v2?" in url:
             query = parse_qs(urlparse(url).query)
-            account_id = int(query["account_id"][0])
-            hourly_costs = {
-                (88, 1): 1.0,
-                (88, 2): 0.5,
-                (89, 1): 0.5,
-                (89, 2): 1.0,
-            }
-            return {
-                "code": 0,
-                "data": {
-                    "users_trend": [
-                        {"date": "2026-07-13 12:00", "user_id": 1, "actual_cost": 999.0},
-                        {"date": "2026-07-13 13:00", "user_id": 1, "actual_cost": hourly_costs.get((account_id, 1), 0.0)},
-                        {"date": "2026-07-13 13:00", "user_id": 2, "actual_cost": hourly_costs.get((account_id, 2), 0.0)},
+            account_id = int(query["account_id"][0]) if "account_id" in query else None
+            if account_id is not None:
+                hourly_costs = {
+                    (88, 1): 1.0,
+                    (88, 2): 0.5,
+                    (89, 1): 0.5,
+                    (89, 2): 1.0,
+                }
+                trend = [
+                    {"date": "2026-07-13 12:00", "user_id": 1, "actual_cost": 999.0},
+                    {"date": "2026-07-13 13:00", "user_id": 1, "actual_cost": hourly_costs.get((account_id, 1), 0.0)},
+                    {"date": "2026-07-13 13:00", "user_id": 2, "actual_cost": hourly_costs.get((account_id, 2), 0.0)},
+                ]
+            else:
+                start_date = query["start_date"][0]
+                if query["granularity"] == ["day"]:
+                    trend = [
+                        {"date": "2026-06-18", "user_id": 1, "actual_cost": 160.0},
+                        {"date": "2026-06-18", "user_id": 2, "actual_cost": 16.0},
+                        {"date": "2026-07-04", "user_id": 1, "actual_cost": 70.0},
+                        {"date": "2026-07-04", "user_id": 2, "actual_cost": 7.0},
+                        {"date": "2026-07-11", "user_id": 1, "actual_cost": 60.0},
+                        {"date": "2026-07-11", "user_id": 2, "actual_cost": 6.0},
+                        {"date": "2026-07-17", "user_id": 1, "actual_cost": 10.0},
+                        {"date": "2026-07-17", "user_id": 2, "actual_cost": 1.0},
                     ]
-                },
-            }
+                else:
+                    hourly_costs = {
+                        "2026-07-16": {1: 1.0, 2: 0.1},
+                        "2026-07-10": {1: 2.0, 2: 0.2},
+                        "2026-07-03": {1: 3.0, 2: 0.3},
+                        "2026-06-17": {1: 4.0, 2: 0.4},
+                    }.get(start_date, {})
+                    trend = [
+                        {"date": f"{start_date} 12:00", "user_id": 1, "actual_cost": 999.0},
+                        *(
+                            {"date": f"{start_date} 13:00", "user_id": user_id, "actual_cost": actual_cost}
+                            for user_id, actual_cost in hourly_costs.items()
+                        ),
+                    ]
+            return {"code": 0, "data": {"users_trend": trend}}
         raise AssertionError(f"unexpected url: {url}")
 
 
@@ -194,6 +214,8 @@ class TooManyUsersStub:
 
 
 class AstrBotSub2APIUsageTest(unittest.TestCase):
+    """Verify Sub2API cache, aggregation, formatting, and alert contracts."""
+
     def test_config_defaults_and_secret_fields(self) -> None:
         config = load_sub2api_config(
             {
@@ -218,13 +240,6 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
     def test_parse_sub2api_alert_group_ids(self) -> None:
         self.assertEqual(parse_sub2api_group_ids("123, 456，789,abc,123"), ("123", "456", "789"))
 
-    def test_calendar_ranges_match_sub2api_webui(self) -> None:
-        today = date(2026, 7, 13)
-        self.assertEqual(sub2api_last_24_hours_range(today=today), (date(2026, 7, 12), today))
-        self.assertEqual(sub2api_calendar_range(days=7, today=today), (date(2026, 7, 7), today))
-        self.assertEqual(sub2api_calendar_range(days=14, today=today), (date(2026, 6, 30), today))
-        self.assertEqual(sub2api_calendar_range(days=30, today=today), (date(2026, 6, 14), today))
-
     def test_client_lists_all_accounts_and_forces_each_usage_refresh(self) -> None:
         stub = StubSub2APIHttpClient()
         client = Sub2APIClient(
@@ -248,7 +263,7 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         self.assertIn("force=true", str(stub.calls[1]["url"]))
         self.assertIn("source=active", str(stub.calls[2]["url"]))
 
-    def test_client_merges_four_usage_ranges_and_hides_zero_spend_users(self) -> None:
+    def test_client_merges_four_rolling_windows_and_hides_zero_spend_users(self) -> None:
         stub = StubSub2APIHttpClient()
         client = Sub2APIClient(
             base_url="https://ai.example.com",
@@ -256,17 +271,93 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             http_client=stub,
         )
 
-        ranking = asyncio.run(client.get_user_usage_ranking())
+        ranking = asyncio.run(
+            client.get_user_usage_ranking(
+                now=datetime(2026, 7, 17, 4, 37, tzinfo=timezone.utc),
+            )
+        )
 
         self.assertEqual([usage.user_id for usage in ranking], [1, 2])
-        self.assertEqual(ranking[0].last_24_hours_actual_cost, 12.5)
-        self.assertEqual(ranking[0].seven_day_actual_cost, 12.5)
-        self.assertEqual(ranking[1].fourteen_day_actual_cost, 3.25)
-        self.assertEqual(ranking[1].thirty_day_actual_cost, 3.25)
-        breakdown_calls = [call for call in stub.calls if "/user-breakdown?" in str(call["url"])]
-        self.assertEqual(len(breakdown_calls), 4)
+        self.assertEqual(ranking[0].last_24_hours_actual_cost, 11.0)
+        self.assertEqual(ranking[0].seven_day_actual_cost, 72.0)
+        self.assertEqual(ranking[0].fourteen_day_actual_cost, 143.0)
+        self.assertEqual(ranking[0].thirty_day_actual_cost, 304.0)
+        self.assertAlmostEqual(ranking[1].last_24_hours_actual_cost, 1.1)
+        self.assertAlmostEqual(ranking[1].seven_day_actual_cost, 7.2)
+        self.assertAlmostEqual(ranking[1].fourteen_day_actual_cost, 14.3)
+        self.assertAlmostEqual(ranking[1].thirty_day_actual_cost, 30.4)
 
-    def test_client_sums_reset_day_hours_and_later_full_days_for_each_user(self) -> None:
+        hourly_calls = [
+            call for call in stub.calls
+            if "/dashboard/snapshot-v2?" in str(call["url"])
+            and "granularity=hour" in str(call["url"])
+            and "account_id=" not in str(call["url"])
+        ]
+        self.assertEqual(len(hourly_calls), 4)
+        self.assertEqual(
+            {
+                parse_qs(urlparse(str(call["url"])).query)["start_date"][0]
+                for call in hourly_calls
+            },
+            {"2026-07-16", "2026-07-10", "2026-07-03", "2026-06-17"},
+        )
+        for call in hourly_calls:
+            query = parse_qs(urlparse(str(call["url"])).query)
+            self.assertEqual(query["start_date"], query["end_date"])
+            self.assertEqual(query["granularity"], ["hour"])
+            self.assertEqual(query["include_users_trend"], ["true"])
+
+        daily_calls = [
+            call for call in stub.calls
+            if "/dashboard/snapshot-v2?" in str(call["url"])
+            and "granularity=day" in str(call["url"])
+            and "account_id=" not in str(call["url"])
+        ]
+        self.assertEqual(len(daily_calls), 1)
+        daily_query = parse_qs(urlparse(str(daily_calls[0]["url"])).query)
+        self.assertEqual(daily_query["start_date"], ["2026-06-18"])
+        self.assertEqual(daily_query["end_date"], ["2026-07-17"])
+        self.assertEqual(daily_query["include_users_trend"], ["true"])
+        self.assertLess(
+            max(stub.calls.index(call) for call in hourly_calls),
+            stub.calls.index(daily_calls[0]),
+        )
+        self.assertFalse(any(
+            "/user-breakdown?" in str(call["url"])
+            and "account_id=" not in str(call["url"])
+            for call in stub.calls
+        ))
+
+    def test_rolling_window_includes_an_exact_start_hour(self) -> None:
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=StubSub2APIHttpClient(),
+        )
+
+        window_started_at = datetime(2026, 7, 16, 12, 0, tzinfo=SUB2API_TIMEZONE)
+        end_time = datetime(2026, 7, 17, 12, 0, tzinfo=SUB2API_TIMEZONE)
+        hourly_costs = asyncio.run(
+            client.fetch_hourly_user_costs(
+                date_value=window_started_at.date(),
+                start_hour=window_started_at,
+                end_time=end_time,
+            )
+        )
+        costs = build_rolling_user_costs(
+            window_started_at=window_started_at,
+            end_time=end_time,
+            hourly_costs=hourly_costs,
+            daily_costs_by_date={
+                end_time.date(): {1: 10.0, 2: 1.0},
+            },
+        )
+
+        self.assertEqual(costs[1], 1010.0)
+        self.assertAlmostEqual(costs[2], 1.1)
+
+    def test_client_builds_separate_rankings_for_each_account(self) -> None:
+        """Each account ID produces its own ordered actual-cost rows and requests."""
         stub = StubSub2APIHttpClient()
         client = Sub2APIClient(
             base_url="https://ai.example.com",
@@ -274,19 +365,40 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             http_client=stub,
         )
         accounts = tuple(asyncio.run(client.get_account_usage(force_refresh=True)))
-        users = tuple(asyncio.run(client.get_user_usage_ranking()))
-
-        costs = asyncio.run(
-            client.get_account_seven_day_user_costs(
-                accounts,
-                users,
-                now=datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc),
-            )
+        users = (
+            Sub2APIUserUsage(user_id=1, username="alice"),
+            Sub2APIUserUsage(user_id=2, username="bob"),
         )
+        now = datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
 
-        self.assertEqual(costs, {1: 23.5, 2: 9.5})
-        hourly_calls = [call for call in stub.calls if "/api/v1/admin/dashboard/snapshot-v2?" in str(call["url"])]
+        rankings = {
+            account.account_id: asyncio.run(
+                client.get_account_seven_day_ranking(account, users, now=now)
+            )
+            for account in accounts
+        }
+
+        self.assertEqual(
+            [(usage.user_id, usage.actual_cost) for usage in rankings[88]],
+            [(1, 21.0), (2, 5.5)],
+        )
+        self.assertEqual(
+            [(usage.user_id, usage.actual_cost) for usage in rankings[89]],
+            [(2, 4.0), (1, 2.5)],
+        )
+        hourly_calls = [
+            call for call in stub.calls
+            if "/api/v1/admin/dashboard/snapshot-v2?" in str(call["url"])
+            and "account_id=" in str(call["url"])
+        ]
         self.assertEqual(len(hourly_calls), 2)
+        self.assertEqual(
+            {
+                parse_qs(urlparse(str(call["url"])).query)["account_id"][0]
+                for call in hourly_calls
+            },
+            {"88", "89"},
+        )
         for call in hourly_calls:
             query = parse_qs(urlparse(str(call["url"])).query)
             self.assertEqual(query["start_date"], ["2026-07-13"])
@@ -306,18 +418,72 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             self.assertEqual(query["start_date"], ["2026-07-14"])
             self.assertEqual(query["end_date"], ["2026-07-17"])
 
-    def test_user_refresh_can_preserve_cached_account_seven_day_cost(self) -> None:
+    def test_account_cycle_includes_an_exact_start_hour(self) -> None:
+        """An exact reset-derived start hour is included rather than rounded away."""
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=StubSub2APIHttpClient(),
+        )
+        account = Sub2APIAccountUsage(
+            account_id=88,
+            name="Main",
+            seven_day=Sub2APIUsageWindow(resets_at="2026-07-20T12:00:00+08:00"),
+        )
         users = (
-            Sub2APIUserUsage(user_id=1, username="alice"),
-            Sub2APIUserUsage(user_id=2, username="bob", account_seven_day_actual_cost=3.0),
+            Sub2APIUserUsage(user_id=1),
+            Sub2APIUserUsage(user_id=2),
         )
 
-        updated = apply_account_seven_day_user_costs(users, {1: 12.5})
+        ranking = asyncio.run(
+            client.get_account_seven_day_ranking(
+                account,
+                users,
+                now=datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc),
+            )
+        )
 
-        self.assertEqual(updated[0].account_seven_day_actual_cost, 12.5)
-        self.assertEqual(updated[1].account_seven_day_actual_cost, 3.0)
+        self.assertEqual(ranking[0].user_id, 1)
+        self.assertEqual(ranking[0].actual_cost, 1020.0)
+        self.assertEqual(ranking[1].actual_cost, 5.5)
+
+    def test_account_ranking_filters_zero_costs_and_uses_stable_ties(self) -> None:
+        """Account rankings contain every positive user with deterministic ties."""
+        users = (
+            Sub2APIUserUsage(user_id=3, username="three"),
+            Sub2APIUserUsage(user_id=2, username="zero"),
+            Sub2APIUserUsage(user_id=1, username="one"),
+        )
+
+        ranking = build_account_user_ranking(users, {1: 5.0, 2: 0.0, 3: 5.0})
+
+        self.assertEqual([usage.user_id for usage in ranking], [1, 3])
+
+    def test_failed_account_keeps_only_its_own_cached_ranking(self) -> None:
+        """A failed refresh cannot borrow rows from another stable account ID."""
+        refreshed_at = datetime(2026, 7, 15, tzinfo=timezone.utc)
+        previous = Sub2APIAccountSevenDayRanking(
+            account_id=88,
+            users=(Sub2APIAccountUserUsage(user_id=1, actual_cost=12.5),),
+            refreshed_at=refreshed_at,
+        )
+
+        failed = retain_failed_account_ranking(88, previous, "stats timeout")
+        new_account_failed = retain_failed_account_ranking(89, None, "missing reset")
+        mismatched_cache = retain_failed_account_ranking(89, previous, "renamed account")
+
+        self.assertEqual(failed.users, previous.users)
+        self.assertEqual(failed.refreshed_at, refreshed_at)
+        self.assertEqual(failed.error, "stats timeout")
+        self.assertEqual(new_account_failed.users, ())
+        self.assertIsNone(new_account_failed.refreshed_at)
+        self.assertEqual(mismatched_cache.users, ())
+        self.assertIsNone(mismatched_cache.refreshed_at)
+        self.assertIs(find_account_seven_day_ranking((failed,), 88), failed)
+        self.assertIsNone(find_account_seven_day_ranking((failed,), 89))
 
     def test_expired_account_reset_time_fails_instead_of_overcounting_old_window(self) -> None:
+        """An expired cycle boundary fails instead of reporting the previous cycle."""
         client = Sub2APIClient(
             base_url="https://ai.example.com",
             admin_api_key="test-admin-key",
@@ -334,8 +500,8 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "7d 重置时间已过期"):
             asyncio.run(
-                client.get_account_seven_day_user_costs(
-                    accounts,
+                client.get_account_seven_day_ranking(
+                    accounts[0],
                     users,
                     now=datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc),
                 )
@@ -386,17 +552,17 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "最多返回 200 位用户"):
             asyncio.run(client.get_user_usage_ranking())
 
-    def test_user_ranking_uses_four_actual_cost_ranges_and_username_or_masked_email(self) -> None:
+    def test_user_ranking_uses_four_actual_cost_windows_and_username_or_masked_email(self) -> None:
         ranking = build_user_usage_ranking(
             [
                 {"id": 1, "username": "", "email": "one@example.com"},
                 {"id": 2, "username": "two", "email": "two@example.com"},
                 {"id": 3, "username": "", "email": "zero@example.com"},
             ],
-            [{"user_id": 1, "actual_cost": 5}, {"user_id": 2, "actual_cost": 10}],
-            [{"user_id": 1, "actual_cost": 10}, {"user_id": 2, "actual_cost": 10, "cost": 999}],
-            [{"user_id": 1, "actual_cost": 20}, {"user_id": 2, "actual_cost": 5}],
-            [{"user_id": 1, "actual_cost": 2}, {"user_id": 2, "actual_cost": 5}],
+            {1: 5.0, 2: 10.0},
+            {1: 10.0, 2: 10.0},
+            {1: 20.0, 2: 5.0},
+            {1: 2.0, 2: 5.0},
         )
 
         self.assertEqual([usage.user_id for usage in ranking], [2, 1])
@@ -446,7 +612,8 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         self.assertIn("Sub2API 5h 用量提醒：Main 已达到 95%", message)
         self.assertIn("当前 5h：95%", message)
 
-    def test_text_fallback_masks_email_and_reports_stale_errors(self) -> None:
+    def test_text_fallback_masks_email_and_reports_per_account_stale_errors(self) -> None:
+        """Text fallback mirrors per-account stale state and the global four-window table."""
         snapshot = Sub2APIUsageSnapshot(
             accounts=(
                 Sub2APIAccountUsage(
@@ -456,33 +623,61 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
                     updated_at="2026-07-15T02:35:00.831240125+08:00",
                 ),
             ),
-            users=apply_account_seven_day_user_costs(
-                tuple(build_user_usage_ranking(
-                    [{"id": 2, "username": "", "email": "bob@example.com"}],
-                    [{"user_id": 2, "actual_cost": 1}],
-                    [],
-                    [],
-                    [],
-                )),
-                {2: 0.75},
+            account_seven_day_rankings=(
+                Sub2APIAccountSevenDayRanking(
+                    account_id=1,
+                    users=(
+                        Sub2APIAccountUserUsage(
+                            user_id=2,
+                            email="bob@example.com",
+                            actual_cost=0.75,
+                        ),
+                    ),
+                    refreshed_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+                    error="stats timeout",
+                ),
             ),
-            account_seven_day_refreshed_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+            users=tuple(build_user_usage_ranking(
+                [{"id": 2, "username": "", "email": "bob@example.com"}],
+                {2: 1.0},
+                {},
+                {},
+                {},
+            )),
             accounts_error="HTTP 502",
             users_error="timeout",
-            account_seven_day_error="stats timeout",
         )
         message = format_sub2api_usage_response(snapshot)
 
         self.assertIn("账号刷新失败：HTTP 502", message)
-        self.assertIn("账号7d刷新失败：stats timeout", message)
+        self.assertIn("Main 当前账号7d周期消费榜：", message)
+        self.assertIn("刷新失败，已保留上次成功缓存：stats timeout", message)
+        self.assertIn("b*b@example.com：$0.75", message)
         self.assertIn("用户刷新失败：timeout", message)
-        self.assertIn("用户消费（账号7d / 24h / 7d / 14d / 30d）：", message)
-        self.assertIn("账号7d $0.75，24h $1.00", message)
-        self.assertNotIn("用户实际消费", message)
+        self.assertIn("全账号滚动消费榜（24h / 7d / 14d / 30d）：", message)
+        self.assertIn("b*b@example.com：24h $1.00", message)
+        self.assertNotIn("用户消费（账号7d", message)
         self.assertIn("最近使用：2026-07-15 02:34", message)
         self.assertIn("更新时间：2026-07-15 02:35", message)
-        self.assertIn("b*b@example.com", message)
         self.assertNotIn("test-admin-key", message)
+
+    def test_text_fallback_does_not_claim_stale_cache_for_first_failure(self) -> None:
+        """A first failed account refresh reports no data instead of claiming a retained cache."""
+        snapshot = Sub2APIUsageSnapshot(
+            accounts=(Sub2APIAccountUsage(account_id=1, name="New"),),
+            account_seven_day_rankings=(
+                Sub2APIAccountSevenDayRanking(
+                    account_id=1,
+                    error="missing reset",
+                ),
+            ),
+        )
+
+        message = format_sub2api_usage_response(snapshot)
+
+        self.assertIn("刷新：暂无成功数据", message)
+        self.assertIn("刷新失败：missing reset", message)
+        self.assertNotIn("已保留上次成功缓存", message)
 
     def test_format_time_text_uses_sub2api_timezone_and_accepts_nanoseconds(self) -> None:
         self.assertEqual(format_time_text("2026-07-15T02:35:00.831240125+08:00"), "2026-07-15 02:35")

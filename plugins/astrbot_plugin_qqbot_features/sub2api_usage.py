@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import json
 import re
@@ -72,10 +72,11 @@ class Sub2APIAccountUsage:
 
 @dataclass(frozen=True, slots=True)
 class Sub2APIUserUsage:
+    """One user's global rolling actual-cost totals."""
+
     user_id: int
     username: str = ""
     email: str = ""
-    account_seven_day_actual_cost: float | None = None
     last_24_hours_actual_cost: float = 0.0
     seven_day_actual_cost: float = 0.0
     fourteen_day_actual_cost: float = 0.0
@@ -83,15 +84,36 @@ class Sub2APIUserUsage:
 
 
 @dataclass(frozen=True, slots=True)
+class Sub2APIAccountUserUsage:
+    """One user's actual cost inside a single account's active seven-day cycle."""
+
+    user_id: int
+    username: str = ""
+    email: str = ""
+    actual_cost: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class Sub2APIAccountSevenDayRanking:
+    """Cached per-user ranking and refresh state for one stable account ID."""
+
+    account_id: int
+    users: tuple[Sub2APIAccountUserUsage, ...] = ()
+    refreshed_at: datetime | None = None
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Sub2APIUsageSnapshot:
+    """One immutable cache view of account quotas and user consumption rankings."""
+
     accounts: tuple[Sub2APIAccountUsage, ...] = ()
+    account_seven_day_rankings: tuple[Sub2APIAccountSevenDayRanking, ...] = ()
     users: tuple[Sub2APIUserUsage, ...] = ()
     accounts_refreshed_at: datetime | None = None
     users_refreshed_at: datetime | None = None
-    account_seven_day_refreshed_at: datetime | None = None
     accounts_error: str = ""
     users_error: str = ""
-    account_seven_day_error: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,7 +296,12 @@ class Sub2APIClient:
     async def list_users(self) -> list[dict[str, Any]]:
         return await self._list_paginated("users", sort_by="id")
 
-    async def get_user_usage_ranking(self) -> list[Sub2APIUserUsage]:
+    async def get_user_usage_ranking(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> list[Sub2APIUserUsage]:
+        """Fetch four start days before one shared daily trend, then rank visible users."""
         if not self.base_url:
             raise ValueError("Sub2API 地址还没配置")
         if not self.admin_api_key:
@@ -285,74 +312,100 @@ class Sub2APIClient:
                 "Sub2API 用户消费接口单次最多返回 200 位用户，"
                 f"当前共有 {len(users)} 位用户，无法安全输出完整消费榜。"
             )
-        last_24_hours_start, last_24_hours_end = sub2api_last_24_hours_range()
-        seven_day_start, seven_day_end = sub2api_calendar_range(days=7)
-        fourteen_day_start, fourteen_day_end = sub2api_calendar_range(days=14)
-        thirty_day_start, thirty_day_end = sub2api_calendar_range(days=30)
-        last_24_hours_rows, seven_day_rows, fourteen_day_rows, thirty_day_rows = await asyncio.gather(
-            self.fetch_user_breakdown(start_date=last_24_hours_start, end_date=last_24_hours_end),
-            self.fetch_user_breakdown(start_date=seven_day_start, end_date=seven_day_end),
-            self.fetch_user_breakdown(start_date=fourteen_day_start, end_date=fourteen_day_end),
-            self.fetch_user_breakdown(start_date=thirty_day_start, end_date=thirty_day_end),
+        end_time = normalize_sub2api_datetime(now or datetime.now(timezone.utc))
+        window_starts = {
+            days: end_time - timedelta(days=days)
+            for days in (1, 7, 14, 30)
+        }
+        hourly_costs_by_days: dict[int, dict[int, float]] = {}
+        for days, window_started_at in window_starts.items():
+            hourly_costs_by_days[days] = await self.fetch_hourly_user_costs(
+                date_value=window_started_at.date(),
+                start_hour=ceil_to_hour(window_started_at),
+                end_time=end_time,
+            )
+        earliest_full_day = window_starts[30].date() + timedelta(days=1)
+        daily_costs_by_date = await self.fetch_daily_user_costs(
+            start_date=earliest_full_day,
+            end_date=end_time.date(),
+        )
+        last_24_hours_costs = build_rolling_user_costs(
+            window_started_at=window_starts[1],
+            end_time=end_time,
+            hourly_costs=hourly_costs_by_days[1],
+            daily_costs_by_date=daily_costs_by_date,
+        )
+        seven_day_costs = build_rolling_user_costs(
+            window_started_at=window_starts[7],
+            end_time=end_time,
+            hourly_costs=hourly_costs_by_days[7],
+            daily_costs_by_date=daily_costs_by_date,
+        )
+        fourteen_day_costs = build_rolling_user_costs(
+            window_started_at=window_starts[14],
+            end_time=end_time,
+            hourly_costs=hourly_costs_by_days[14],
+            daily_costs_by_date=daily_costs_by_date,
+        )
+        thirty_day_costs = build_rolling_user_costs(
+            window_started_at=window_starts[30],
+            end_time=end_time,
+            hourly_costs=hourly_costs_by_days[30],
+            daily_costs_by_date=daily_costs_by_date,
         )
         return build_user_usage_ranking(
             users,
-            last_24_hours_rows,
-            seven_day_rows,
-            fourteen_day_rows,
-            thirty_day_rows,
+            last_24_hours_costs,
+            seven_day_costs,
+            fourteen_day_costs,
+            thirty_day_costs,
         )
 
-    async def get_account_seven_day_user_costs(
+    async def get_account_seven_day_ranking(
         self,
-        accounts: tuple[Sub2APIAccountUsage, ...],
+        account: Sub2APIAccountUsage,
         users: tuple[Sub2APIUserUsage, ...],
         *,
         now: datetime | None = None,
-    ) -> dict[int, float]:
+    ) -> tuple[Sub2APIAccountUserUsage, ...]:
+        """Rank users within one account's active seven-day quota cycle."""
         if not self.base_url:
             raise ValueError("Sub2API 地址还没配置")
         if not self.admin_api_key:
             raise ValueError("Sub2API Admin API Key 还没配置")
         if not users:
-            return {}
-        end_time = now or datetime.now(timezone.utc)
-        if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
-        end_time = end_time.astimezone(SUB2API_TIMEZONE)
+            return ()
+        end_time = normalize_sub2api_datetime(now or datetime.now(timezone.utc))
+        window = account.seven_day
+        resets_at = parse_datetime(window.resets_at) if window is not None else None
+        if resets_at is None:
+            raise RuntimeError(f"Sub2API 账号 {account.name or account.account_id} 缺少 7d 重置时间")
+        resets_at = resets_at.astimezone(SUB2API_TIMEZONE)
+        if end_time >= resets_at:
+            raise RuntimeError(f"Sub2API 账号 {account.name or account.account_id} 的 7d 重置时间已过期")
+        window_started_at = resets_at - timedelta(days=7)
         costs = {usage.user_id: 0.0 for usage in users}
-        for account in accounts:
-            window = account.seven_day
-            resets_at = parse_datetime(window.resets_at) if window is not None else None
-            if resets_at is None:
-                raise RuntimeError(f"Sub2API 账号 {account.name or account.account_id} 缺少 7d 重置时间")
-            resets_at = resets_at.astimezone(SUB2API_TIMEZONE)
-            if end_time >= resets_at:
-                raise RuntimeError(f"Sub2API 账号 {account.name or account.account_id} 的 7d 重置时间已过期")
-            window_started_at = resets_at - timedelta(days=7)
-            first_full_hour = window_started_at.replace(minute=0, second=0, microsecond=0)
-            if first_full_hour < window_started_at:
-                first_full_hour += timedelta(hours=1)
-            if first_full_hour.date() == window_started_at.date() and first_full_hour <= end_time:
-                hourly_costs = await self.fetch_account_hourly_user_costs(
-                    account_id=account.account_id,
-                    date_value=window_started_at.date(),
-                    start_hour=first_full_hour,
-                    end_time=end_time,
-                )
-                for usage in users:
-                    costs[usage.user_id] += hourly_costs.get(usage.user_id, 0.0)
-            full_days_start = window_started_at.date() + timedelta(days=1)
-            if full_days_start <= end_time.date():
-                rows = await self.fetch_user_breakdown(
-                    start_date=full_days_start,
-                    end_date=end_time.date(),
-                    account_id=account.account_id,
-                )
-                full_day_costs = build_user_actual_costs(rows)
-                for usage in users:
-                    costs[usage.user_id] += full_day_costs.get(usage.user_id, 0.0)
-        return costs
+        first_full_hour = ceil_to_hour(window_started_at)
+        if first_full_hour.date() == window_started_at.date() and first_full_hour <= end_time:
+            hourly_costs = await self.fetch_hourly_user_costs(
+                date_value=window_started_at.date(),
+                start_hour=first_full_hour,
+                end_time=end_time,
+                account_id=account.account_id,
+            )
+            for user_id in costs:
+                costs[user_id] += hourly_costs.get(user_id, 0.0)
+        full_days_start = window_started_at.date() + timedelta(days=1)
+        if full_days_start <= end_time.date():
+            rows = await self.fetch_user_breakdown(
+                start_date=full_days_start,
+                end_date=end_time.date(),
+                account_id=account.account_id,
+            )
+            full_day_costs = build_user_actual_costs(rows)
+            for user_id in costs:
+                costs[user_id] += full_day_costs.get(user_id, 0.0)
+        return build_account_user_ranking(users, costs)
 
     async def fetch_user_breakdown(
         self,
@@ -361,6 +414,7 @@ class Sub2APIClient:
         end_date: date,
         account_id: int | None = None,
     ) -> list[dict[str, Any]]:
+        """Fetch inclusive Shanghai-date user totals, optionally for one account."""
         params = {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
@@ -376,38 +430,23 @@ class Sub2APIClient:
         users = data.get("users", []) if isinstance(data, dict) else []
         return [user for user in users if isinstance(user, dict)] if isinstance(users, list) else []
 
-    async def fetch_account_hourly_user_costs(
+    async def fetch_hourly_user_costs(
         self,
         *,
-        account_id: int,
         date_value: date,
         start_hour: datetime,
         end_time: datetime,
+        account_id: int | None = None,
     ) -> dict[int, float]:
-        query = urlencode(
-            {
-                "start_date": date_value.isoformat(),
-                "end_date": date_value.isoformat(),
-                "granularity": "hour",
-                "account_id": str(account_id),
-                "include_stats": "false",
-                "include_trend": "false",
-                "include_model_stats": "false",
-                "include_group_stats": "false",
-                "include_users_trend": "true",
-            }
+        """Sum selected hourly user buckets for all accounts or one account."""
+        trend = await self._fetch_user_cost_trend(
+            start_date=date_value,
+            end_date=date_value,
+            granularity="hour",
+            account_id=account_id,
         )
-        payload = await self._get_json(f"{self.base_url}/api/v1/admin/dashboard/snapshot-v2?{query}")
-        data = ensure_dict(payload).get("data", {})
-        if not isinstance(data, dict):
-            return {}
-        trend = data.get("users_trend", [])
-        if not isinstance(trend, list):
-            return {}
         costs: dict[int, float] = {}
         for row in trend:
-            if not isinstance(row, dict):
-                continue
             bucket = parse_sub2api_hour_bucket(row.get("date"))
             if bucket is None or bucket < start_hour or bucket > end_time:
                 continue
@@ -416,6 +455,57 @@ class Sub2APIClient:
                 continue
             costs[user_id] = costs.get(user_id, 0.0) + (optional_float(row.get("actual_cost")) or 0.0)
         return costs
+
+    async def fetch_daily_user_costs(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> dict[date, dict[int, float]]:
+        """Index per-user daily costs so several rolling windows can share one response."""
+        trend = await self._fetch_user_cost_trend(
+            start_date=start_date,
+            end_date=end_date,
+            granularity="day",
+        )
+        costs_by_date: dict[date, dict[int, float]] = {}
+        for row in trend:
+            bucket = parse_sub2api_hour_bucket(row.get("date"))
+            if bucket is None or bucket.date() < start_date or bucket.date() > end_date:
+                continue
+            user_id = optional_int(row.get("user_id"))
+            if user_id is None or user_id <= 0:
+                continue
+            daily_costs = costs_by_date.setdefault(bucket.date(), {})
+            daily_costs[user_id] = daily_costs.get(user_id, 0.0) + (optional_float(row.get("actual_cost")) or 0.0)
+        return costs_by_date
+
+    async def _fetch_user_cost_trend(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        granularity: str,
+        account_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch raw user cost buckets with only the requested trend payload enabled."""
+        params = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "granularity": granularity,
+            "include_stats": "false",
+            "include_trend": "false",
+            "include_model_stats": "false",
+            "include_group_stats": "false",
+            "include_users_trend": "true",
+        }
+        if account_id is not None:
+            params["account_id"] = str(account_id)
+        query = urlencode(params)
+        payload = await self._get_json(f"{self.base_url}/api/v1/admin/dashboard/snapshot-v2?{query}")
+        data = ensure_dict(payload).get("data", {})
+        trend = data.get("users_trend", []) if isinstance(data, dict) else []
+        return [row for row in trend if isinstance(row, dict)] if isinstance(trend, list) else []
 
     async def _list_paginated(self, resource: str, *, sort_by: str) -> list[dict[str, Any]]:
         page = 1
@@ -540,30 +630,45 @@ def parse_window_stats(value: object) -> Sub2APIWindowStats | None:
     )
 
 
-def sub2api_last_24_hours_range(*, today: date | None = None) -> tuple[date, date]:
-    # Sub2API WebUI 先减 24 小时再截为本地日期，后端再按完整自然日解析。
-    end_date = today or datetime.now(SUB2API_TIMEZONE).date()
-    return end_date - timedelta(days=1), end_date
+def normalize_sub2api_datetime(value: datetime) -> datetime:
+    """Interpret naive datetimes as UTC and convert all boundaries to Shanghai time."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(SUB2API_TIMEZONE)
 
 
-def sub2api_calendar_range(*, days: int, today: date | None = None) -> tuple[date, date]:
-    if days <= 0:
-        raise ValueError("天数必须大于 0")
-    end_date = today or datetime.now(SUB2API_TIMEZONE).date()
-    return end_date - timedelta(days=days - 1), end_date
+def ceil_to_hour(value: datetime) -> datetime:
+    """Return the first whole-hour boundary at or after a window start."""
+    hour = value.replace(minute=0, second=0, microsecond=0)
+    return hour if hour == value else hour + timedelta(hours=1)
+
+
+def build_rolling_user_costs(
+    *,
+    window_started_at: datetime,
+    end_time: datetime,
+    hourly_costs: dict[int, float],
+    daily_costs_by_date: dict[date, dict[int, float]],
+) -> dict[int, float]:
+    """Combine a partial start day with shared complete-date user totals."""
+    full_days_start = window_started_at.date() + timedelta(days=1)
+    costs = dict(hourly_costs)
+    for bucket_date, daily_costs in daily_costs_by_date.items():
+        if bucket_date < full_days_start or bucket_date > end_time.date():
+            continue
+        for user_id, cost in daily_costs.items():
+            costs[user_id] = costs.get(user_id, 0.0) + cost
+    return costs
 
 
 def build_user_usage_ranking(
     users: list[dict[str, Any]],
-    last_24_hours_rows: list[dict[str, Any]],
-    seven_day_rows: list[dict[str, Any]],
-    fourteen_day_rows: list[dict[str, Any]],
-    thirty_day_rows: list[dict[str, Any]],
+    last_24_hours_costs: dict[int, float],
+    seven_day_costs: dict[int, float],
+    fourteen_day_costs: dict[int, float],
+    thirty_day_costs: dict[int, float],
 ) -> list[Sub2APIUserUsage]:
-    last_24_hours_costs = build_user_actual_costs(last_24_hours_rows)
-    seven_day_costs = build_user_actual_costs(seven_day_rows)
-    fourteen_day_costs = build_user_actual_costs(fourteen_day_rows)
-    thirty_day_costs = build_user_actual_costs(thirty_day_rows)
+    """Build the visible ranking from pre-aggregated rolling-window costs."""
     results: list[Sub2APIUserUsage] = []
     seen_user_ids: set[int] = set()
     for user in users:
@@ -607,19 +712,44 @@ def build_user_usage_ranking(
     )
 
 
-def apply_account_seven_day_user_costs(
+def build_account_user_ranking(
     users: tuple[Sub2APIUserUsage, ...],
-    costs: dict[int, float | None],
-) -> tuple[Sub2APIUserUsage, ...]:
-    return tuple(
-        replace(
-            usage,
-            account_seven_day_actual_cost=costs.get(
-                usage.user_id,
-                usage.account_seven_day_actual_cost,
-            ),
+    costs: dict[int, float],
+) -> tuple[Sub2APIAccountUserUsage, ...]:
+    """Build one account's complete nonzero ranking from known users and costs."""
+    ranking = (
+        Sub2APIAccountUserUsage(
+            user_id=usage.user_id,
+            username=usage.username,
+            email=usage.email,
+            actual_cost=costs.get(usage.user_id, 0.0),
         )
         for usage in users
+        if costs.get(usage.user_id, 0.0) > 0.0
+    )
+    return tuple(sorted(ranking, key=lambda usage: (-usage.actual_cost, usage.user_id)))
+
+
+def find_account_seven_day_ranking(
+    rankings: tuple[Sub2APIAccountSevenDayRanking, ...],
+    account_id: int,
+) -> Sub2APIAccountSevenDayRanking | None:
+    """Find cached cycle data by stable account identity rather than display name."""
+    return next((ranking for ranking in rankings if ranking.account_id == account_id), None)
+
+
+def retain_failed_account_ranking(
+    account_id: int,
+    previous: Sub2APIAccountSevenDayRanking | None,
+    error: str,
+) -> Sub2APIAccountSevenDayRanking:
+    """Attach an error while retaining only the same account's complete ranking."""
+    cached = previous if previous is not None and previous.account_id == account_id else None
+    return Sub2APIAccountSevenDayRanking(
+        account_id=account_id,
+        users=cached.users if cached is not None else (),
+        refreshed_at=cached.refreshed_at if cached is not None else None,
+        error=error,
     )
 
 
@@ -634,18 +764,35 @@ def build_user_actual_costs(rows: list[dict[str, Any]]) -> dict[int, float]:
 
 
 def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
+    """Format the cached per-account and global rankings when image rendering fails."""
     lines = [f"Sub2API 用量：账号 {len(snapshot.accounts)} 个，用户 {len(snapshot.users)} 个"]
     if snapshot.accounts_refreshed_at:
         lines.append(f"账号刷新：{format_datetime(snapshot.accounts_refreshed_at)}")
     if snapshot.accounts_error:
         lines.append(f"账号刷新失败：{snapshot.accounts_error}")
-    if snapshot.account_seven_day_refreshed_at:
-        lines.append(f"账号7d刷新：{format_datetime(snapshot.account_seven_day_refreshed_at)}")
-    if snapshot.account_seven_day_error:
-        lines.append(f"账号7d刷新失败：{snapshot.account_seven_day_error}")
-    for index, usage in enumerate(snapshot.accounts, start=1):
-        lines.extend(format_sub2api_usage_message(usage, title=f"{index}. {usage.name or usage.account_id}").splitlines())
-    lines.append("用户消费（账号7d / 24h / 7d / 14d / 30d）：")
+    for index, account in enumerate(snapshot.accounts, start=1):
+        account_name = account.name or str(account.account_id)
+        lines.extend(format_sub2api_usage_message(account, title=f"{index}. {account_name}").splitlines())
+        ranking = find_account_seven_day_ranking(snapshot.account_seven_day_rankings, account.account_id)
+        lines.append(f"{account_name} 当前账号7d周期消费榜：")
+        if ranking is None or ranking.refreshed_at is None:
+            lines.append("刷新：暂无成功数据")
+        else:
+            lines.append(f"刷新：{format_datetime(ranking.refreshed_at)}")
+        if ranking is not None and ranking.error:
+            if ranking.refreshed_at is None:
+                lines.append(f"刷新失败：{ranking.error}")
+            else:
+                lines.append(f"刷新失败，已保留上次成功缓存：{ranking.error}")
+        ranking_users = ranking.users if ranking is not None else ()
+        if not ranking_users:
+            lines.append("当前账号7d周期内暂无消费用户。")
+        for user_index, usage in enumerate(ranking_users, start=1):
+            lines.append(
+                f"{user_index}. {format_sub2api_user_name(usage)}："
+                f"${usage.actual_cost:.2f}"
+            )
+    lines.append("全账号滚动消费榜（24h / 7d / 14d / 30d）：")
     if snapshot.users_refreshed_at:
         lines.append(f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}")
     if snapshot.users_error:
@@ -655,7 +802,6 @@ def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
     for index, usage in enumerate(snapshot.users, start=1):
         lines.append(
             f"{index}. {format_sub2api_user_name(usage)}："
-            f"账号7d {format_actual_cost(usage.account_seven_day_actual_cost)}，"
             f"24h ${usage.last_24_hours_actual_cost:.2f}，"
             f"7d ${usage.seven_day_actual_cost:.2f}，"
             f"14d ${usage.fourteen_day_actual_cost:.2f}，"
@@ -664,11 +810,8 @@ def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
     return "\n".join(lines)
 
 
-def format_actual_cost(value: float | None) -> str:
-    return "--" if value is None else f"${value:.2f}"
-
-
-def format_sub2api_user_name(usage: Sub2APIUserUsage) -> str:
+def format_sub2api_user_name(usage: Sub2APIUserUsage | Sub2APIAccountUserUsage) -> str:
+    """Resolve a safe display label shared by global and per-account ranking rows."""
     username = usage.username.strip()
     return username or mask_sub2api_email(usage.email) or f"用户 {usage.user_id}"
 

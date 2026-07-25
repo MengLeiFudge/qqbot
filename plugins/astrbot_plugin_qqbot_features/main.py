@@ -113,15 +113,18 @@ from .source_knowledge import format_enabled_groups as format_source_enabled_gro
 from .source_knowledge import format_source_injection
 from .source_knowledge import load_source_knowledge_config
 from .source_knowledge import resolve_domains
+from .sub2api_usage import Sub2APIAccountSevenDayRanking
+from .sub2api_usage import Sub2APIAccountUsage
 from .sub2api_usage import Sub2APIClient
 from .sub2api_usage import Sub2APIUsageAlert
 from .sub2api_usage import Sub2APIUsageSnapshot
-from .sub2api_usage import apply_account_seven_day_user_costs
+from .sub2api_usage import Sub2APIUserUsage
 from .sub2api_usage import format_sub2api_usage_alert_message
 from .sub2api_usage import format_sub2api_usage_response
 from .sub2api_usage import load_sub2api_config
 from .sub2api_usage import looks_like_sub2api_usage_command
 from .sub2api_usage import parse_sub2api_usage_command
+from .sub2api_usage import retain_failed_account_ranking
 from .sub2api_usage import Sub2APIUsageCache
 from .sub2api_usage import update_sub2api_usage_alert_state
 from .sub2api_usage_image import render_sub2api_usage_image
@@ -1003,7 +1006,7 @@ class QQBotFeaturesPlugin(Star):
         )
         event.stop_event()
 
-    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询全部 Sub2API 账号额度和有消费用户账号7d / 24h / 7d / 14d / 30d 实际消费；直接返回后台刷新缓存图片。")
+    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询全部 Sub2API 账号额度、各账号当前7d周期用户消费榜和全账号24h / 7d / 14d / 30d滚动消费；直接返回后台刷新缓存图片。")
     async def sub2api_usage(self, event: AstrMessageEvent):
         text = extract_plain_text(event).strip()
         command = parse_sub2api_usage_command(text)
@@ -1037,60 +1040,78 @@ class QQBotFeaturesPlugin(Star):
             timeout_seconds=self._sub2api_config.timeout_seconds,
         )
 
+    async def _refresh_sub2api_account_ranking(
+        self,
+        account: Sub2APIAccountUsage,
+        users: tuple[Sub2APIUserUsage, ...],
+        previous: Sub2APIAccountSevenDayRanking | None,
+        *,
+        now: datetime,
+    ) -> Sub2APIAccountSevenDayRanking:
+        """Refresh one account atomically, retaining only that account's stale cache."""
+        last_error = ""
+        for _ in range(2):
+            try:
+                ranking_users = await self._new_sub2api_client().get_account_seven_day_ranking(
+                    account,
+                    users,
+                    now=now,
+                )
+                return Sub2APIAccountSevenDayRanking(
+                    account_id=account.account_id,
+                    users=ranking_users,
+                    refreshed_at=datetime.now(timezone.utc),
+                )
+            except Exception as exc:
+                last_error = str(exc)
+        return retain_failed_account_ranking(
+            account.account_id,
+            previous,
+            last_error,
+        )
+
     async def _refresh_sub2api_users_once(self) -> Sub2APIUsageSnapshot:
+        """Refresh global rolling user costs without changing per-account rankings."""
         previous = self._sub2api_usage_cache.get_latest()
         accounts = previous.accounts if previous is not None else ()
+        account_rankings = previous.account_seven_day_rankings if previous is not None else ()
         users = previous.users if previous is not None else ()
         accounts_refreshed_at = previous.accounts_refreshed_at if previous is not None else None
         users_refreshed_at = previous.users_refreshed_at if previous is not None else None
-        account_seven_day_refreshed_at = previous.account_seven_day_refreshed_at if previous is not None else None
         accounts_error = previous.accounts_error if previous is not None else ""
         users_error = ""
-        account_seven_day_error = previous.account_seven_day_error if previous is not None else ""
-        previous_account_costs = {
-            usage.user_id: usage.account_seven_day_actual_cost
-            for usage in users
-            if usage.account_seven_day_actual_cost is not None
-        }
         try:
-            users = apply_account_seven_day_user_costs(
-                tuple(await self._new_sub2api_client().get_user_usage_ranking()),
-                previous_account_costs,
-            )
+            users = tuple(await self._new_sub2api_client().get_user_usage_ranking())
             users_refreshed_at = datetime.now(timezone.utc)
         except Exception:
             try:
-                # 用户榜由四个独立的只读接口拼合；上游短暂失败时立即重试一次。
-                users = apply_account_seven_day_user_costs(
-                    tuple(await self._new_sub2api_client().get_user_usage_ranking()),
-                    previous_account_costs,
-                )
+                # 用户榜由多个只读趋势请求拼合；上游短暂失败时立即完整重试一次。
+                users = tuple(await self._new_sub2api_client().get_user_usage_ranking())
                 users_refreshed_at = datetime.now(timezone.utc)
             except Exception as exc:
                 users_error = str(exc)
         snapshot = Sub2APIUsageSnapshot(
             accounts=accounts,
+            account_seven_day_rankings=account_rankings,
             users=users,
             accounts_refreshed_at=accounts_refreshed_at,
             users_refreshed_at=users_refreshed_at,
-            account_seven_day_refreshed_at=account_seven_day_refreshed_at,
             accounts_error=accounts_error,
             users_error=users_error,
-            account_seven_day_error=account_seven_day_error,
         )
         self._sub2api_usage_cache.set(snapshot)
         return snapshot
 
     async def _refresh_sub2api_accounts_once(self) -> Sub2APIUsageSnapshot:
+        """Refresh account quotas and each account's cycle ranking independently."""
         previous = self._sub2api_usage_cache.get_latest()
         accounts = previous.accounts if previous is not None else ()
+        account_rankings = previous.account_seven_day_rankings if previous is not None else ()
         users = previous.users if previous is not None else ()
         accounts_refreshed_at = previous.accounts_refreshed_at if previous is not None else None
         users_refreshed_at = previous.users_refreshed_at if previous is not None else None
-        account_seven_day_refreshed_at = previous.account_seven_day_refreshed_at if previous is not None else None
         accounts_error = ""
         users_error = previous.users_error if previous is not None else ""
-        account_seven_day_error = ""
         try:
             accounts = tuple(await self._new_sub2api_client().get_account_usage(force_refresh=True))
             accounts_refreshed_at = datetime.now(timezone.utc)
@@ -1101,30 +1122,31 @@ class QQBotFeaturesPlugin(Star):
                 accounts_refreshed_at = datetime.now(timezone.utc)
             except Exception as exc:
                 accounts_error = str(exc)
-        if accounts_error:
-            account_seven_day_error = f"账号刷新失败，账号7d未更新：{accounts_error}"
-        else:
-            try:
-                costs = await self._new_sub2api_client().get_account_seven_day_user_costs(accounts, users)
-                users = apply_account_seven_day_user_costs(users, costs)
-                account_seven_day_refreshed_at = datetime.now(timezone.utc)
-            except Exception:
-                try:
-                    # 账号7d按重置日小时趋势和后续自然日统计；瞬时网络失败时整轮重试一次。
-                    costs = await self._new_sub2api_client().get_account_seven_day_user_costs(accounts, users)
-                    users = apply_account_seven_day_user_costs(users, costs)
-                    account_seven_day_refreshed_at = datetime.now(timezone.utc)
-                except Exception as exc:
-                    account_seven_day_error = str(exc)
+        if not accounts_error:
+            previous_by_account = {
+                ranking.account_id: ranking
+                for ranking in account_rankings
+            }
+            ranking_now = datetime.now(timezone.utc)
+            refreshed_rankings: list[Sub2APIAccountSevenDayRanking] = []
+            for account in accounts:
+                refreshed_rankings.append(
+                    await self._refresh_sub2api_account_ranking(
+                        account,
+                        users,
+                        previous_by_account.get(account.account_id),
+                        now=ranking_now,
+                    )
+                )
+            account_rankings = tuple(refreshed_rankings)
         snapshot = Sub2APIUsageSnapshot(
             accounts=accounts,
+            account_seven_day_rankings=account_rankings,
             users=users,
             accounts_refreshed_at=accounts_refreshed_at,
             users_refreshed_at=users_refreshed_at,
-            account_seven_day_refreshed_at=account_seven_day_refreshed_at,
             accounts_error=accounts_error,
             users_error=users_error,
-            account_seven_day_error=account_seven_day_error,
         )
         self._sub2api_usage_cache.set(snapshot)
         return snapshot
@@ -1150,14 +1172,17 @@ class QQBotFeaturesPlugin(Star):
                             self._sub2api_alerted_thresholds_by_account,
                         )
                     )
+                account_ranking_errors = sum(
+                    1 for ranking in snapshot.account_seven_day_rankings if ranking.error
+                )
                 logger.info(
-                    "[QQBotFeatures] refreshed Sub2API account usage cache, accounts=%s users=%s interval=%ss account_error=%s users_error=%s account_7d_error=%s",
+                    "[QQBotFeatures] refreshed Sub2API account usage cache, accounts=%s users=%s interval=%ss account_error=%s users_error=%s account_7d_errors=%s",
                     len(snapshot.accounts),
                     len(snapshot.users),
                     interval,
                     bool(snapshot.accounts_error),
                     bool(snapshot.users_error),
-                    bool(snapshot.account_seven_day_error),
+                    account_ranking_errors,
                 )
             except asyncio.CancelledError:
                 raise

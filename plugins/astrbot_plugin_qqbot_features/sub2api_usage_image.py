@@ -9,10 +9,10 @@ import textwrap
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .sub2api_usage import Sub2APIAccountSevenDayRanking
 from .sub2api_usage import Sub2APIAccountUsage
 from .sub2api_usage import Sub2APIUsageSnapshot
 from .sub2api_usage import Sub2APIUserUsage
-from .sub2api_usage import format_actual_cost
 from .sub2api_usage import format_datetime, format_time_text
 from .sub2api_usage import format_sub2api_user_name
 from .sub2api_usage import format_usage_window
@@ -32,27 +32,59 @@ ROW_HEIGHT = 50
 
 
 def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Path) -> Path:
+    """Render a versioned cached report from one immutable usage snapshot."""
     payload = {
         "kind": "sub2api-usage",
         "snapshot": asdict(snapshot),
-        "version": 2,
+        "version": 4,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
         return image_path
 
     fonts = _Fonts(_find_font_path())
-    account_heights = [_account_height(usage) for usage in snapshot.accounts]
+    rankings_by_account = {
+        ranking.account_id: ranking
+        for ranking in snapshot.account_seven_day_rankings
+    }
+    account_sections = [
+        (
+            account,
+            _account_height(account),
+            rankings_by_account.get(
+                account.account_id,
+                Sub2APIAccountSevenDayRanking(account_id=account.account_id),
+            ),
+        )
+        for account in snapshot.accounts
+    ]
     status_height = _status_height(snapshot)
     user_height = _user_table_height(snapshot.users)
-    canvas_height = 172 + status_height + 76 + sum(account_heights) + 76 + user_height + 48
+    if account_sections:
+        account_content_height = sum(
+            account_height + _account_ranking_table_height(ranking) + 80
+            for _, account_height, ranking in account_sections
+        )
+    else:
+        account_content_height = 72
+    canvas_height = (
+        156
+        + status_height
+        + 34
+        + 44
+        + account_content_height
+        + 18
+        + 44
+        + user_height
+        + 48
+    )
     image = Image.new("RGB", (CANVAS_WIDTH, canvas_height), BACKGROUND)
     draw = ImageDraw.Draw(image)
 
     draw.text((MARGIN, 36), "Sub2API 用量报告", font=fonts.title, fill=INK)
     draw.text(
         (MARGIN + 2, 98),
-        "账号额度和账号7d为后台刷新缓存；其余用户消费按 Asia/Shanghai 自然日统计。",
+        "各账号当前7d周期榜与额度来自后台缓存；底部消费按 Asia/Shanghai 滚动小时近似统计。",
         font=fonts.subtitle,
         fill=MUTED,
     )
@@ -62,15 +94,25 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     y += 34
     draw.text((MARGIN, y), f"账号用量  共 {len(snapshot.accounts)} 个", font=fonts.section, fill=INK)
     y += 44
-    if not snapshot.accounts:
+    if not account_sections:
         y = _draw_empty_panel(draw, fonts, y, "暂无账号缓存。")
     else:
-        for usage, height in zip(snapshot.accounts, account_heights):
-            _draw_account_panel(draw, fonts, usage, y, height)
-            y += height + 16
+        for account, account_height, ranking in account_sections:
+            _draw_account_panel(draw, fonts, account, y, account_height)
+            y += account_height + 14
+            draw.text(
+                (MARGIN, y),
+                f"当前账号7d周期消费榜  共 {len(ranking.users)} 人",
+                font=fonts.body_bold,
+                fill=INK,
+            )
+            y += 40
+            ranking_height = _account_ranking_table_height(ranking)
+            _draw_account_ranking_table(draw, fonts, ranking, y, ranking_height)
+            y += ranking_height + 26
 
     y += 18
-    draw.text((MARGIN, y), f"用户消费榜  共 {len(snapshot.users)} 人", font=fonts.section, fill=INK)
+    draw.text((MARGIN, y), f"全账号滚动消费榜  共 {len(snapshot.users)} 人", font=fonts.section, fill=INK)
     y += 44
     _draw_user_table(draw, fonts, snapshot.users, y)
 
@@ -91,6 +133,7 @@ def _status_height(snapshot: Sub2APIUsageSnapshot) -> int:
 
 
 def _status_lines(snapshot: Sub2APIUsageSnapshot) -> list[tuple[str, tuple[int, int, int]]]:
+    """Describe only global account-list and rolling-user refresh state."""
     lines: list[tuple[str, tuple[int, int, int]]] = []
     if snapshot.accounts_refreshed_at:
         lines.append((f"账号刷新：{format_datetime(snapshot.accounts_refreshed_at)}", GOOD))
@@ -98,12 +141,6 @@ def _status_lines(snapshot: Sub2APIUsageSnapshot) -> list[tuple[str, tuple[int, 
         lines.append(("账号刷新：暂无成功数据", WARNING))
     if snapshot.accounts_error:
         lines.append((f"账号刷新失败，已保留上次成功缓存：{snapshot.accounts_error}", ERROR))
-    if snapshot.account_seven_day_refreshed_at:
-        lines.append((f"账号7d刷新：{format_datetime(snapshot.account_seven_day_refreshed_at)}", GOOD))
-    else:
-        lines.append(("账号7d刷新：暂无成功数据", WARNING))
-    if snapshot.account_seven_day_error:
-        lines.append((f"账号7d刷新失败，已保留上次成功缓存：{snapshot.account_seven_day_error}", ERROR))
     if snapshot.users_refreshed_at:
         lines.append((f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}", GOOD))
     else:
@@ -150,8 +187,14 @@ def _draw_account_panel(
     y: int,
     height: int,
 ) -> None:
+    """Draw one quota card while constraining long account names to the panel."""
     _rounded_rect(draw, (MARGIN, y, CANVAS_WIDTH - MARGIN, y + height), radius=12, fill=PANEL, outline=BORDER)
-    title = usage.name or f"账号 {usage.account_id}"
+    title = _ellipsize(
+        draw,
+        fonts.body_bold,
+        usage.name or f"账号 {usage.account_id}",
+        CANVAS_WIDTH - 2 * MARGIN - 44,
+    )
     draw.text((MARGIN + 22, y + 16), title, font=fonts.body_bold, fill=INK)
     text_y = y + 54
     rows = [
@@ -184,7 +227,76 @@ def _account_meta(usage: Sub2APIAccountUsage) -> str:
     return "状态：" + (" / ".join(parts) if parts else "未提供")
 
 
+def _account_ranking_status_lines(
+    ranking: Sub2APIAccountSevenDayRanking,
+) -> list[tuple[str, tuple[int, int, int]]]:
+    """Describe one account's independent ranking refresh and stale-cache state."""
+    lines = [
+        (
+            f"刷新：{format_datetime(ranking.refreshed_at)}"
+            if ranking.refreshed_at is not None
+            else "刷新：暂无成功数据",
+            GOOD if ranking.refreshed_at is not None else WARNING,
+        )
+    ]
+    if ranking.error:
+        lines.append((f"刷新失败，已保留上次成功缓存：{ranking.error}", ERROR))
+    return lines
+
+
+def _account_ranking_table_height(ranking: Sub2APIAccountSevenDayRanking) -> int:
+    """Measure one account ranking including wrapped status text and one empty row."""
+    status_height = 26 + sum(
+        max(1, len(_wrap_text(text, 66))) * 30
+        for text, _ in _account_ranking_status_lines(ranking)
+    )
+    return 68 + status_height + max(1, len(ranking.users)) * ROW_HEIGHT
+
+
+def _draw_account_ranking_table(
+    draw: ImageDraw.ImageDraw,
+    fonts: _Fonts,
+    ranking: Sub2APIAccountSevenDayRanking,
+    y: int,
+    height: int,
+) -> None:
+    """Draw one account's independent current-cycle ranking and refresh state."""
+    _rounded_rect(draw, (MARGIN, y, CANVAS_WIDTH - MARGIN, y + height), radius=12, fill=PANEL, outline=BORDER)
+    header_bottom = y + 68
+    draw.rounded_rectangle(
+        (MARGIN + 1, y + 1, CANVAS_WIDTH - MARGIN - 1, header_bottom),
+        radius=11,
+        fill=(232, 240, 250),
+    )
+    name_x = MARGIN + 28
+    draw.text((name_x, y + 20), "用户", font=fonts.body_bold, fill=INK)
+    draw.text((1010, y + 22), "本周期消费", font=fonts.small, fill=INK)
+
+    status_y = header_bottom + 12
+    for text, color in _account_ranking_status_lines(ranking):
+        for line in _wrap_text(text, 66):
+            draw.text((name_x, status_y), line, font=fonts.small, fill=color)
+            status_y += 30
+    row_y = y + 68 + 26 + sum(
+        max(1, len(_wrap_text(text, 66))) * 30
+        for text, _ in _account_ranking_status_lines(ranking)
+    )
+    draw.line((MARGIN + 1, row_y, CANVAS_WIDTH - MARGIN - 1, row_y), fill=BORDER, width=1)
+    if not ranking.users:
+        draw.text((name_x, row_y + 13), "当前账号7d周期内暂无消费用户。", font=fonts.body, fill=MUTED)
+        return
+    for index, usage in enumerate(ranking.users, start=1):
+        if index % 2 == 0:
+            draw.rectangle((MARGIN + 1, row_y, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=(248, 250, 253))
+        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 850)
+        draw.text((name_x, row_y + 13), label, font=fonts.body, fill=INK)
+        _draw_right_aligned(draw, fonts.body, f"${usage.actual_cost:.2f}", 1175, row_y + 13, GOOD)
+        draw.line((MARGIN + 1, row_y + ROW_HEIGHT, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=BORDER, width=1)
+        row_y += ROW_HEIGHT
+
+
 def _user_table_height(users: tuple[Sub2APIUserUsage, ...]) -> int:
+    """Measure the global rolling ranking with one explicit empty-state row."""
     return 68 + max(1, len(users)) * ROW_HEIGHT
 
 
@@ -194,18 +306,17 @@ def _draw_user_table(
     users: tuple[Sub2APIUserUsage, ...],
     y: int,
 ) -> None:
+    """Draw the global four-window ranking without any account-cycle aggregate."""
     height = _user_table_height(users)
     _rounded_rect(draw, (MARGIN, y, CANVAS_WIDTH - MARGIN, y + height), radius=12, fill=PANEL, outline=BORDER)
     header_bottom = y + 68
     draw.rounded_rectangle((MARGIN + 1, y + 1, CANVAS_WIDTH - MARGIN - 1, header_bottom), radius=11, fill=(232, 240, 250))
     name_x = MARGIN + 28
-    account_seven_day_x = 470
     last_24_hours_x = 610
-    seven_x = 750
-    fourteen_x = 890
-    thirty_x = 1030
+    seven_x = 760
+    fourteen_x = 900
+    thirty_x = 1040
     draw.text((name_x, y + 20), "用户", font=fonts.body_bold, fill=INK)
-    draw.text((account_seven_day_x, y + 22), "账号7d", font=fonts.small, fill=INK)
     draw.text((last_24_hours_x, y + 22), "近24小时", font=fonts.small, fill=INK)
     draw.text((seven_x, y + 22), "近7天", font=fonts.small, fill=INK)
     draw.text((fourteen_x, y + 22), "近14天", font=fonts.small, fill=INK)
@@ -217,9 +328,8 @@ def _draw_user_table(
     for index, usage in enumerate(users, start=1):
         if index % 2 == 0:
             draw.rectangle((MARGIN + 1, row_y, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=(248, 250, 253))
-        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 370)
+        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 470)
         draw.text((name_x, row_y + 13), label, font=fonts.body, fill=INK)
-        _draw_right_aligned(draw, fonts.body, format_actual_cost(usage.account_seven_day_actual_cost), 595, row_y + 13, GOOD)
         _draw_right_aligned(draw, fonts.body, f"${usage.last_24_hours_actual_cost:.2f}", 735, row_y + 13, GOOD)
         _draw_right_aligned(draw, fonts.body, f"${usage.seven_day_actual_cost:.2f}", 875, row_y + 13, GOOD)
         _draw_right_aligned(draw, fonts.body, f"${usage.fourteen_day_actual_cost:.2f}", 1015, row_y + 13, GOOD)
