@@ -127,6 +127,27 @@ function Write-LauncherStatus {
     }
 }
 
+# Runtime grandchildren can inherit redirected handles. Exit the completed launcher without waiting for their EOF.
+function Exit-LauncherProcess {
+    <#
+    .SYNOPSIS
+    Flushes launcher output and terminates the current PowerShell process immediately.
+    #>
+    param([int]$ExitCode)
+
+    try {
+        [Console]::Out.Flush()
+    }
+    catch {
+    }
+    try {
+        [Console]::Error.Flush()
+    }
+    catch {
+    }
+    [System.Environment]::Exit($ExitCode)
+}
+
 function Test-AsciiText {
     param([string]$Text)
 
@@ -1051,6 +1072,86 @@ function Get-AstrBotNapCatTitle {
     return "NapCat-2629227874"
 }
 
+function Quote-PowerShellLiteral {
+    <#
+    .SYNOPSIS
+    Quotes text as a single-quoted PowerShell literal.
+    #>
+    param([AllowEmptyString()][string]$Text)
+
+    return "'" + $Text.Replace("'", "''") + "'"
+}
+
+function Start-IsolatedProcess {
+    <#
+    .SYNOPSIS
+    Starts a hidden PowerShell process without inheriting the caller's redirected handles.
+    #>
+    param(
+        [string]$ScriptText,
+        [string]$WorkingDirectory,
+        [string]$StdoutLog,
+        [string]$StderrLog,
+        [string]$StdinPath,
+        [string]$LaunchName
+    )
+
+    $launchRoot = Split-Path -Parent $StdoutLog
+    $launchScript = Join-Path $launchRoot "$LaunchName.ps1"
+    $launchCommand = Join-Path $launchRoot "$LaunchName.cmd"
+    $pidPath = Join-Path $launchRoot "$LaunchName.pid"
+    $pidLiteral = Quote-PowerShellLiteral -Text $pidPath
+    $launchContent = @"
+`$ErrorActionPreference = "Stop"
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Set-Content -Path $pidLiteral -Value `$PID -Encoding ASCII
+$ScriptText
+"@
+    Set-Content -Path $launchScript -Value $launchContent -Encoding UTF8
+
+    $commandContent = @"
+@echo off
+cd /d "$WorkingDirectory"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$launchScript" < "$StdinPath" 1>> "$StdoutLog" 2>> "$StderrLog"
+exit /b %ERRORLEVEL%
+"@
+    Set-Content -Path $launchCommand -Value $commandContent -Encoding Default
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $launchCommand
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $true
+    $startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $shellProcess = [System.Diagnostics.Process]::Start($startInfo)
+    if (-not $shellProcess) {
+        throw "Failed to start isolated PowerShell process for $LaunchName."
+    }
+
+    $pidDeadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $pidDeadline) {
+        if (Test-Path $pidPath) {
+            $launchedPid = [int](Get-Content -Path $pidPath -Encoding ASCII | Select-Object -First 1)
+            $process = Get-Process -Id $launchedPid -ErrorAction SilentlyContinue
+            if ($process) {
+                return $process
+            }
+        }
+        if ($shellProcess.HasExited) {
+            throw "Isolated PowerShell process for $LaunchName exited before publishing a live pid. exit_code=$($shellProcess.ExitCode)"
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    try {
+        if (-not $shellProcess.HasExited) {
+            Stop-Process -Id $shellProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    catch {
+    }
+    throw "Timed out waiting for isolated PowerShell pid for $LaunchName."
+}
+
 function Start-BackgroundPowerShell {
     param(
         [string]$CommandText,
@@ -1064,25 +1165,16 @@ function Start-BackgroundPowerShell {
     $wrappedCommand = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
         "`$env:PYTHONUTF8 = '1'; `$env:PYTHONIOENCODING = 'utf-8'; " +
         "& { $CommandText }"
-    $arguments = @(
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        $wrappedCommand
-    )
     $stdinPath = Join-Path (Split-Path -Parent $StdoutLog) "stdin.empty"
     New-Item -ItemType File -Path $stdinPath -Force | Out-Null
-    $process = Start-Process `
-        -FilePath "powershell.exe" `
-        -ArgumentList $arguments `
+    $process = Start-IsolatedProcess `
+        -ScriptText $wrappedCommand `
         -WorkingDirectory $WorkingDirectory `
-        -WindowStyle Hidden `
-        -RedirectStandardInput $stdinPath `
-        -RedirectStandardOutput $StdoutLog `
-        -RedirectStandardError $StderrLog `
-        -PassThru
-    Write-LauncherLog -LogFile $LauncherLog -Message "Started background PowerShell pid=$($process.Id)." -ConsolePrefix $ConsolePrefix
+        -StdoutLog $StdoutLog `
+        -StderrLog $StderrLog `
+        -StdinPath $stdinPath `
+        -LaunchName "background_launcher"
+    Write-LauncherLog -LogFile $LauncherLog -Message "Started isolated background PowerShell pid=$($process.Id)." -ConsolePrefix $ConsolePrefix
     return $process
 }
 
@@ -1366,7 +1458,7 @@ function Invoke-Child {
         }
         Complete-Child -RunId $RunId -Component $Component
         Write-ComponentStatus -ComponentName $Component -Message "ready. Closing this window."
-        exit 0
+        Exit-LauncherProcess -ExitCode 0
     }
     catch {
         $message = $_.Exception.Message
@@ -1391,7 +1483,7 @@ function Invoke-Child {
         if (-not $NoPauseOnFailure) {
             Read-Host "Press Enter to close this window"
         }
-        exit 1
+        Exit-LauncherProcess -ExitCode 1
     }
 }
 
@@ -1436,32 +1528,25 @@ function Start-ChildProcess {
         [string]$Component
     )
 
-    $arguments = @(
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        $PSCommandPath,
-        "-Child",
-        "-NoPauseOnFailure",
-        "-RunId",
-        $RunId,
-        "-Component",
-        $Component,
-        "-WindowTitle",
-        $Component
+    # Arrays bind positionally when splatted into a PowerShell script; generate named parameters instead.
+    $parameterLines = @(
+        "    Child = `$true",
+        "    NoPauseOnFailure = `$true",
+        "    RunId = $(Quote-PowerShellLiteral -Text $RunId)",
+        "    Component = $(Quote-PowerShellLiteral -Text $Component)",
+        "    WindowTitle = $(Quote-PowerShellLiteral -Text $Component)",
+        "    AstrBotOneBotPort = $AstrBotOneBotPort",
+        "    AstrBotAngelOneBotPort = $AstrBotAngelOneBotPort"
     )
     if ($SkipInstall) {
-        $arguments += "-SkipInstall"
+        $parameterLines += "    SkipInstall = `$true"
     }
     if ($FeatureMode) {
-        $arguments += @("-FeatureMode", $FeatureMode)
+        $parameterLines += "    FeatureMode = $(Quote-PowerShellLiteral -Text $FeatureMode)"
     }
     if ($AstrBotProfile) {
-        $arguments += @("-AstrBotProfile", $AstrBotProfile)
+        $parameterLines += "    AstrBotProfile = $(Quote-PowerShellLiteral -Text $AstrBotProfile)"
     }
-    $arguments += @("-AstrBotOneBotPort", $AstrBotOneBotPort)
-    $arguments += @("-AstrBotAngelOneBotPort", $AstrBotAngelOneBotPort)
 
     $logRoot = Get-ComponentLogRoot -Component $Component -RunId $RunId
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
@@ -1472,16 +1557,21 @@ function Start-ChildProcess {
     New-Item -ItemType File -Path $supervisorStderr -Force | Out-Null
     New-Item -ItemType File -Path $supervisorStdin -Force | Out-Null
 
-    $process = Start-Process `
-        -FilePath "powershell.exe" `
-        -ArgumentList $arguments `
+    $scriptLiteral = Quote-PowerShellLiteral -Text $PSCommandPath
+    $supervisorScript = @"
+`$childParameters = @{
+$($parameterLines -join "`r`n")
+}
+& $scriptLiteral @childParameters
+"@
+    $process = Start-IsolatedProcess `
+        -ScriptText $supervisorScript `
         -WorkingDirectory $WorkspaceRoot `
-        -WindowStyle Hidden `
-        -RedirectStandardInput $supervisorStdin `
-        -RedirectStandardOutput $supervisorStdout `
-        -RedirectStandardError $supervisorStderr `
-        -PassThru
-    Write-ComponentStatus -ComponentName $Component -Message "started supervisor pid=$($process.Id)."
+        -StdoutLog $supervisorStdout `
+        -StderrLog $supervisorStderr `
+        -StdinPath $supervisorStdin `
+        -LaunchName "supervisor_launcher"
+    Write-ComponentStatus -ComponentName $Component -Message "started isolated supervisor pid=$($process.Id)."
     return $process
 }
 
@@ -1729,15 +1819,15 @@ function Invoke-Parent {
 
 if ($Child) {
     Invoke-Child
-    exit $LASTEXITCODE
+    Exit-LauncherProcess -ExitCode ([int]$LASTEXITCODE)
 }
 
 try {
     Invoke-Parent
-    exit 0
+    Exit-LauncherProcess -ExitCode 0
 }
 catch {
     $message = $_.Exception.Message
     Write-Host "[Launcher] Startup failed: $message" -ForegroundColor Red
-    exit 1
+    Exit-LauncherProcess -ExitCode 1
 }

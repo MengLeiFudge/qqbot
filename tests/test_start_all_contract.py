@@ -189,8 +189,20 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn('"napcat-astrbot-demon" { return "[NapCat] [Demon]" }', script)
         self.assertIn("[Launcher]", script)
         self.assertIn("Start-ChildProcess", script)
-        self.assertIn("-NoPauseOnFailure", script)
-        self.assertIn("-RedirectStandardInput $supervisorStdin", script)
+        self.assertIn("NoPauseOnFailure = `$true", script)
+        self.assertIn("function Start-IsolatedProcess", script)
+        self.assertIn("$startInfo.UseShellExecute = $true", script)
+        self.assertIn('$launchCommand = Join-Path $launchRoot "$LaunchName.cmd"', script)
+        self.assertIn('Set-Content -Path $pidLiteral -Value `$PID -Encoding ASCII', script)
+        self.assertIn('1>> "$StdoutLog" 2>> "$StderrLog"', script)
+        self.assertNotIn("1>> $stdoutLiteral", script)
+        self.assertIn('`$childParameters = @{', script)
+        self.assertIn("@childParameters", script)
+        self.assertNotIn("@childArguments", script)
+        self.assertIn('-LaunchName "supervisor_launcher"', script)
+        self.assertIn('-LaunchName "background_launcher"', script)
+        self.assertNotIn("-RedirectStandardOutput", script)
+        self.assertNotIn("-RedirectStandardError", script)
         self.assertIn("supervisor_stdout.log", script)
         self.assertIn("supervisor_stderr.log", script)
         self.assertIn("Flush-ComponentsLauncherLogs", script)
@@ -198,6 +210,17 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("Stopping $Name wrapper pid=$($Process.Id) after readiness was confirmed.", script)
         self.assertIn('Stop-BackgroundWrapperProcess -Process $process -Name "AstrBot background launcher"', script)
         self.assertIn("Stop-BackgroundWrapperProcess -Process $process -Name \"NapCat account $Account background launcher\"", script)
+
+    def test_start_all_exits_without_waiting_for_runtime_log_handles(self) -> None:
+        """Completed launchers must not wait on pipes inherited by runtime grandchildren."""
+        script = START_ALL.read_text(encoding="utf-8-sig")
+
+        self.assertIn("function Exit-LauncherProcess", script)
+        self.assertIn("Runtime grandchildren can inherit redirected handles", script)
+        self.assertIn("[System.Environment]::Exit($ExitCode)", script)
+        self.assertGreaterEqual(script.count("Exit-LauncherProcess -ExitCode 0"), 2)
+        self.assertGreaterEqual(script.count("Exit-LauncherProcess -ExitCode 1"), 2)
+        self.assertNotRegex(script, r"(?m)^\s*exit\s+[01]\s*$")
 
     def test_start_all_reuses_existing_ready_runtime_by_default(self) -> None:
         script = START_ALL.read_text(encoding="utf-8-sig")
