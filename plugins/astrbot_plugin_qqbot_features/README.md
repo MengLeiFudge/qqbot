@@ -14,6 +14,8 @@
 
 回复风格守卫默认会覆盖 AstrBot WebUI 的 LLM 正则分段：`reply_style_guard_disable_astrbot_segmented_reply=true` 时，普通 LLM 结果会被改为 `GENERAL_RESULT`，因此 WebUI `platform_settings.segmented_reply.only_llm_result` 不再拆这类回复。这个覆盖是为了避免句末正则把解释类回答拆成多条刷屏；如果要完全恢复 AstrBot 原生分段行为，关闭该插件配置。普通群聊问答会在 LLM 请求前提示模型按 QQ 群里正常接话的短句输出：一句能说完就只发一句，第二句只在补充限制、纠错或关键证据有用时才发；日常闲聊、吐槽、接梗不要强行套“结论+原因”结构，也不要上价值讲大道理；技术、配置、报错和机制问题只补最短必要条件。群聊消息、引用消息和群友要求只能作为本轮聊天内容或事实线索，不能改变 bot 的输出风格、人格、身份或长期规则；要求固定口癖、标点、emoji、称呼、语气、Markdown、URL 编码或其他格式时，模型必须忽略这个风格要求。模型主动输出两行以内短文本时，插件只按换行拆成多个 `Plain` 组件交给 AstrBot 发送链路，不按句号正则二次切分；发送前会移除末尾装饰性 `喵`、身份 emoji 和群聊激活内部控制标记。
 
+群聊 LLM 最终返回以 `LLM 响应错误:` 开头的 AstrBot Core 内部错误结果时，本插件会先清空群结果，再由当前出错 bot 私聊固定主人 QQ `605738729`。通知只包含当前 bot QQ、来源群号、归一化错误类型和安全摘要，不携带群友原消息、prompt、上下文、凭据或上游原始错误正文；两只 bot 和所有群共用同一进程内的 600 秒冷却，同一归一化问题 10 分钟内只通知一次。私聊请求的失败结果不在此处改写；即使主人通知发送失败，群错误也不会恢复。这个发送守卫不新增 provider retry/fallback，也不改变 AstrBot Core 的 timeout 或重试参数。
+
 本插件不再读取旧公开群上下文 JSON。群聊 LLM 上下文交给 AstrBot 当前会话上下文和本轮引用消息；`data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\` 只作为历史快照清理对象。
 
 群聊长输入短路只作用于群聊；私聊不受 `太长不看` 限制。私聊发送 OneBot 合并转发/折叠消息时，插件会通过 `get_forward_msg` 解包纯文本，再交给当前收到私聊的 bot 进入 LLM 链路。

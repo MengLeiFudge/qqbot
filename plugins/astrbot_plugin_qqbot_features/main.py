@@ -29,6 +29,10 @@ from .command_guard import try_claim_command
 from .image_summary import prepare_onebot_image_summary_chain
 from .image_summary import random_summary_image_from_file
 from .image_summary import random_summary_image_from_url
+from .llm_error_guard import LLM_ERROR_NOTICE_COOLDOWN_SECONDS
+from .llm_error_guard import LLM_ERROR_PREFIX
+from .llm_error_guard import LlmErrorNoticeCooldown
+from .llm_error_guard import build_llm_error_notice
 from .group_nickname_store import GroupNicknameStore
 from .menu_catalog import MENU_SECTIONS
 from .menu_catalog import find_menu_section
@@ -406,10 +410,11 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.13.1",
+    "0.13.2",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
+        """Initialize shared feature runtimes and process-local coordination state."""
         super().__init__(context)
         self._feature_mode = read_feature_mode(config)
         self._auto_approve_friend_requests = read_bool_config(
@@ -423,6 +428,7 @@ class QQBotFeaturesPlugin(Star):
             default=True,
         )
         self._reread_state = RereadRepeatState()
+        self._llm_error_notice_cooldown = LlmErrorNoticeCooldown()
         self._arc_apk_update_manager = None
         self._rightcodes_config = load_rightcodes_config(config)
         self._meme_runtime = MemeManagerRuntime(
@@ -682,10 +688,13 @@ class QQBotFeaturesPlugin(Star):
         )
         await self._meme_runtime.resp(event, response)
 
-    @filter.on_decorating_result(desc="在消息发送前清理 Markdown、追问式、反问式或空洞邀请式收尾。")
+    @filter.on_decorating_result(desc="发送前拦截群聊 LLM 内部错误，并清理普通回复风格。")
     async def strip_reply_style_tail(self, event: AstrMessageEvent):
+        """Suppress group LLM failures before applying ordinary reply decorations."""
         result = event.get_result()
         if result is None or not result.chain:
+            return
+        if await self._handle_group_llm_error(event, result):
             return
         started = event.get_extra(LLM_STARTED_AT_EXTRA)
         if isinstance(started, (int, float)):
@@ -744,6 +753,65 @@ class QQBotFeaturesPlugin(Star):
                 getattr(event, "unified_msg_origin", ""),
             )
         await self._meme_runtime.on_decorating_result(event)
+
+    async def _handle_group_llm_error(self, event: AstrMessageEvent, result) -> bool:
+        """Clear a Core LLM group error and privately notify the owner when eligible."""
+        if event.is_private_chat():
+            return False
+        if getattr(result, "result_content_type", None) not in (
+            ResultContentType.GENERAL_RESULT,
+            ResultContentType.AGENT_RUNNER_ERROR,
+        ):
+            return False
+        group_id = str(event.get_group_id() or "").strip()
+        if not group_id:
+            return False
+        self_id = str(event.get_self_id() or "").strip()
+        notice = build_llm_error_notice(
+            _plain_result_text(result.chain),
+            self_id=self_id,
+            group_id=group_id,
+        )
+        if notice is None:
+            return False
+
+        event.clear_result()
+        if not self._llm_error_notice_cooldown.claim(notice.key):
+            logger.info(
+                "[QQBotFeatures] suppressed duplicate group LLM error: self_id=%s group_id=%s category=%s",
+                self_id,
+                group_id,
+                notice.category,
+            )
+            return True
+
+        try:
+            await AstrBotOneBotApi(event).call_api(
+                "send_private_msg",
+                user_id=int(OWNER_QQ),
+                message=notice.message,
+            )
+        except Exception as exc:
+            logger.error(
+                "[QQBotFeatures] failed to notify owner about group LLM error: "
+                "self_id=%s group_id=%s category=%s notify_error_type=%s",
+                self_id,
+                group_id,
+                notice.category,
+                type(exc).__name__,
+            )
+            return True
+
+        logger.info(
+            "[QQBotFeatures] notified owner about group LLM error: "
+            "self_id=%s group_id=%s owner=%s category=%s cooldown_seconds=%.0f",
+            self_id,
+            group_id,
+            OWNER_QQ,
+            notice.category,
+            LLM_ERROR_NOTICE_COOLDOWN_SECONDS,
+        )
+        return True
 
     @filter.after_message_sent(desc="发送后补发未混入同一消息链的本地表情图片，并清理临时文件。")
     async def meme_manager_after_message_sent(self, event: AstrMessageEvent):
@@ -819,6 +887,7 @@ class QQBotFeaturesPlugin(Star):
         return read_profile_for_self_id(str(event.get_self_id() or ""), self._twin_fallback_profile)
 
     def _install_aiocqhttp_error_guard(self) -> None:
+        """Install final OneBot suppression for internal errors and image summaries."""
         if getattr(AiocqhttpMessageEvent, "_runtime_guard_installed", False):
             logger.info("[QQBotFeatures] aiocqhttp error guard already installed")
             return
@@ -833,14 +902,20 @@ class QQBotFeaturesPlugin(Star):
             is_group: bool = False,
             session_id: str | None = None,
         ) -> None:
+            """Suppress leaked internal text before delegating ordinary OneBot sends."""
             text = _plain_message_chain_text(message_chain)
-            if any(text.startswith(prefix) for prefix in INTERNAL_ERROR_PREFIXES):
+            internal_agent_error = any(
+                text.startswith(prefix) for prefix in INTERNAL_ERROR_PREFIXES
+            )
+            group_llm_error = is_group and text.startswith(LLM_ERROR_PREFIX)
+            if internal_agent_error or group_llm_error:
                 logger.error(
-                    "[QQBotFeatures] suppressed internal agent error from user output: "
-                    "session_id=%s is_group=%s message=%s",
+                    "[QQBotFeatures] suppressed internal error from user output: "
+                    "kind=%s session_id=%s is_group=%s message_chars=%s",
+                    "group_llm" if group_llm_error else "internal_agent",
                     session_id,
                     is_group,
-                    text,
+                    len(text),
                 )
                 return
             message_chain = await prepare_onebot_image_summary_chain(message_chain)
@@ -857,7 +932,7 @@ class QQBotFeaturesPlugin(Star):
         AiocqhttpMessageEvent._runtime_guard_installed = True
         logger.info(
             "[QQBotFeatures] aiocqhttp send guard installed: "
-            "internal_errors=true image_summary=true"
+            "internal_errors=true group_llm_errors=true image_summary=true"
         )
 
     def _fold_long_reply_result(self, event: AstrMessageEvent, result) -> bool:
