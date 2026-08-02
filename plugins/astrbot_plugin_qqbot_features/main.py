@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import random
@@ -89,8 +90,6 @@ from .request_context import extract_at_ids
 from .request_context import extract_image_sources
 from .request_context import extract_plain_text as extract_event_plain_text
 from .reread_state import RereadRepeatState
-from .reread_state import normalize_reread_key
-from .reread_state import reread_probability
 from .runtime_temp import TempDuplicateCleaner
 from .runtime_temp import load_temp_dedupe_config
 from .runtime_temp import resolve_astrbot_temp_root
