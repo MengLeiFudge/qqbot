@@ -32,6 +32,7 @@ class UpdateAstrBotContractTest(unittest.TestCase):
         self.assertIn('"--requirements",', script)
         self.assertIn("jmcomic==2.7.2", requirements)
         self.assertIn("img2pdf==0.6.3", requirements)
+        self.assertIn("pikepdf==10.11.0", requirements)
 
     def test_start_process_wrappers_do_not_pass_empty_argument_list(self) -> None:
         script = UPDATE_ASTRBOT.read_text(encoding="utf-8-sig")

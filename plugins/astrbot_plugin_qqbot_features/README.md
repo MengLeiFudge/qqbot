@@ -144,12 +144,14 @@
 
 ## JM 漫画 PDF
 
-- `JM下载 <作品ID>`
-  - 仅主人 `605738729` 私聊可用；群聊只提示转私聊，其他用户不能启动下载。
-  - 使用锁定版本的 `jmcomic` 下载整本，按上游章节顺序和自然页序生成 PDF，不保存 cookie。
+- `JM1218951` / `jm1218951` / `JM 1218951`
+  - 任何用户都可在群聊或私聊发送完整命令；普通正文中的 JM 数字不会触发。执行 bot 必须已经是请求者好友，双平台会在 command claim 前优先选择具备好友关系的一只。
+  - 原会话引用命令回复好友检查、缓存命中、共享任务、开始处理或 FIFO 队列位置。最终文件和密码只通过私聊发送：先发送加密 PDF，再引用该文件消息发送密码。
+  - PDF 密码是作品 ID 的完整数字部分，例如 `JM1000` 的密码是 `1000`。持久缓存保存未加密标准 PDF；每次交付在 Core temp 生成 AES 加密副本，发送后只删除临时副本。
+  - 使用锁定版本的 `jmcomic` 下载整本，按上游章节顺序和自然页序生成 PDF，不保存 cookie。相同 JMID 只下载一次，不同 JMID 默认最多并发 2 个，其余最多 50 个 FIFO 排队；同一 QQ 可以连续提交多个作品。
+  - 缓存目录为 `qqbot_features_runtime\comic_pdf_cache\JM<作品ID>-【作者】标题\`。目录内 `metadata.json` 记录完整状态、作者、标题、页数、大小、版本和逐 PDF SHA-256；多卷使用 `(1)`、`(2)` 后缀。默认缓存上限 10 GiB，超限按最后访问时间淘汰。
   - 默认单个 PDF 最多 500 页、100 MiB；整本超限时按章节分卷，单章仍超限时继续按页拆分。
-  - 同时只执行一个任务，默认总超时 1800 秒。上传完成、失败或超时后都会清理下载图片和 PDF，不持久缓存漫画内容。
-  - `image2pdf` 上游仓库仅作为排序和转换行为参考；运行时使用本插件自有 `PdfRenderer` 和锁定的 `img2pdf` 编码依赖，不导入该仓库的硬编码脚本。
+  - `image2pdf` 上游仓库仅作为排序和转换行为参考；运行时使用本插件自有 `PdfRenderer`、锁定的 `img2pdf` 编码依赖和 `pikepdf` AES 加密依赖。
 
 ## Factorio
 
@@ -209,15 +211,19 @@
 - `reply_style_guard_long_input_tldr_text`
   - 默认 `太长不看喵`。
 - `jmcomic_enabled`
-  - 默认开启。关闭后 `JM下载 <作品ID>` 不执行下载。
+  - 默认开启。关闭后 `JM作品ID` 命令不执行下载。
 - `jmcomic_proxy`
   - 可选 HTTP/HTTPS 代理地址；留空时显式禁用 JMComic 的系统代理继承，不保存 cookie。
 - `jmcomic_timeout_seconds`
-  - 单任务总超时，默认 1800 秒，范围 60-7200。
+  - 单作品下载超时，默认 1800 秒，范围 60-7200。
 - `jmcomic_max_pages_per_pdf` / `jmcomic_max_pdf_size_mb`
   - 单个 PDF 默认最多 500 页、100 MiB；超限时按章节和页数继续拆分。
 - `jmcomic_max_concurrent_jobs`
-  - 默认 1，最大 2；用于限制网络、CPU 和临时磁盘占用。
+  - 默认 2，范围 1-2；限制不同 JMID 的并发下载，相同 JMID 自动共享一个任务。
+- `jmcomic_max_queued_jobs`
+  - 默认 50，范围 1-100；并发槽占满后的 FIFO 队列上限，同一 QQ 可连续提交多个作品。
+- `jmcomic_cache_max_gb`
+  - 默认 10 GiB，范围 1-100 GiB；超限按 `metadata.json` 的最后访问时间淘汰。
 - `source_knowledge_max_results` / `source_knowledge_max_chars`
   - 默认 `4` / `2600`。源码知识按低成本运行，需要追查大文件或更完整源码证据时再临时调高。
 - `meme_manager_webui_port`
@@ -248,7 +254,7 @@
 ## 数据与安全边界
 
 - 使用 `data\astrbot\data\plugin_data\qqbot_features_runtime` 作为游戏、Arcaea、RightCodes 积分和本地 artifact 发布状态目录；游戏、Arcaea 会话/缓存、复读/thunder/Lolicon 群配置、Shapez 群文件清理状态和 RightCodes 积分优先写入 `db\qqbot_features.sqlite3`。
-- JM 漫画图片和 PDF 只写入 AstrBot Core temp 下的 `qqbot_features\jmcomic\<job>` 独立任务目录，上传完成、失败或超时后由任务立即清理，不写入 SQLite 或其他持久缓存。
+- JM 下载图片、构建中间产物和每次发送的加密 PDF 副本只写入 AstrBot Core temp 下的 `qqbot_features\jmcomic\`，完成、失败或超时后清理。未加密标准 PDF 持久保存在 `qqbot_features_runtime\comic_pdf_cache\JM<作品ID>-【作者】标题\`；每目录只有 `metadata.json` 和一个或多个校验过的 PDF，默认受 10 GiB LRU 上限约束。
 - Lolicon 元数据写入 `db\lolicon.sqlite3`，图片不再下载到本地；菜单图、Arc 猜歌面板、shapez 渲染图和临时面板写入 AstrBot Core 的 `data\temp\qqbot_features\` 子目录，进入 Core `temp_dir_max_size` 容量清理范围。插件后台只删除超过安全窗口的重复图片副本，不做独立按日期清理；旧 AI 记忆、TTS、头像和 shapez 静态旧目录不再作为日常运行态保留。
 - 使用 `data\astrbot\data\plugin_data\meme_manager` 作为本地表情包运行态目录；这是兼容保留的数据路径，不再对应独立 AstrBot 插件。
 - 旧公开群上下文快照不再作为 prompt 事实源，也不提供群聊记录导出命令。

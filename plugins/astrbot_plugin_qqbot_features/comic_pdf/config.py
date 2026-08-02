@@ -7,7 +7,6 @@ def load_comic_pdf_config(config=None) -> ComicPdfConfig:
     """Load bounded JMComic settings from the shared plugin configuration."""
     return ComicPdfConfig(
         enabled=_read_bool(_get(config, "jmcomic_enabled", True), True),
-        owner_qq="605738729",
         proxy=str(_get(config, "jmcomic_proxy", "") or "").strip(),
         timeout_seconds=_clamp_int(
             _get(config, "jmcomic_timeout_seconds", 1800),
@@ -30,11 +29,26 @@ def load_comic_pdf_config(config=None) -> ComicPdfConfig:
         * 1024
         * 1024,
         max_concurrent_jobs=_clamp_int(
-            _get(config, "jmcomic_max_concurrent_jobs", 1),
-            default=1,
+            _get(config, "jmcomic_max_concurrent_jobs", 2),
+            default=2,
             minimum=1,
             maximum=2,
         ),
+        max_queued_jobs=_clamp_int(
+            _get(config, "jmcomic_max_queued_jobs", 50),
+            default=50,
+            minimum=1,
+            maximum=100,
+        ),
+        cache_max_bytes=_clamp_int(
+            _get(config, "jmcomic_cache_max_gb", 10),
+            default=10,
+            minimum=1,
+            maximum=100,
+        )
+        * 1024
+        * 1024
+        * 1024,
     )
 
 

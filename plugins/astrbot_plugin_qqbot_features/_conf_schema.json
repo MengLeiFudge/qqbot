@@ -49,7 +49,7 @@
     "description": "启用 JM 下载转 PDF",
     "type": "bool",
     "default": true,
-    "hint": "仅主人 605738729 私聊可执行 JM下载 <作品ID>；群聊和其他用户不会启动下载。"
+    "hint": "任何好友可在群聊或私聊发送 JM作品ID；文件和密码只通过私聊发送。"
   },
   "jmcomic_proxy": {
     "description": "JM 下载代理",
@@ -78,8 +78,20 @@
   "jmcomic_max_concurrent_jobs": {
     "description": "JM 下载最大并发任务数",
     "type": "int",
-    "default": 1,
-    "hint": "限制下载、转换和磁盘占用；推荐保持 1，最大 2。"
+    "default": 2,
+    "hint": "不同作品并发下载数量，范围 1-2；相同作品自动合并为一个任务。"
+  },
+  "jmcomic_max_queued_jobs": {
+    "description": "JM 下载最大排队任务数",
+    "type": "int",
+    "default": 50,
+    "hint": "并发槽占满后的 FIFO 队列上限，范围 1-100；同一 QQ 可以连续提交多个不同作品。"
+  },
+  "jmcomic_cache_max_gb": {
+    "description": "JM PDF 缓存上限 GiB",
+    "type": "int",
+    "default": 10,
+    "hint": "持久保存未加密标准 PDF，超限按最后访问时间清理，范围 1-100 GiB。"
   },
   "sub2api_base_url": {
     "description": "Sub2API 管理端地址",

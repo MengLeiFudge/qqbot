@@ -27,10 +27,12 @@ from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
 from .command_guard import record_command_handled
 from .command_guard import try_claim_command
+from .comic_pdf import ComicFriendRouteCoordinator
 from .comic_pdf import ComicPdfError
 from .comic_pdf import ComicPdfService
+from .comic_pdf import is_onebot_friend
 from .comic_pdf import load_comic_pdf_config
-from .comic_pdf import upload_private_pdfs
+from .comic_pdf import send_private_pdfs_with_password
 from .image_summary import prepare_onebot_image_summary_chain
 from .image_summary import random_summary_image_from_file
 from .image_summary import random_summary_image_from_url
@@ -160,7 +162,7 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
 FACTORIO_DOWNLOAD_PATTERN = (
     r"(?i)^.*(?:factorio|异星|太空时代|space\s*age|spaceage).*(?:下载|安装包).*(?:链接|地址)?$"
 )
-JMCOMIC_DOWNLOAD_PATTERN = r"(?i)^jm\s*下载\s*([0-9]+)$"
+JMCOMIC_DOWNLOAD_PATTERN = r"(?i)^jm\s*([0-9]+)$"
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单\s*(?!\d+$)\S+$"
 GROUP_FILE_CLEANUP_PATTERN = r"^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
@@ -415,7 +417,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.14.0",
+    "0.15.1",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -440,7 +442,11 @@ class QQBotFeaturesPlugin(Star):
         self._comic_pdf_service = ComicPdfService(
             get_plugin_temp_root("jmcomic"),
             self._comic_pdf_config,
+            cache_root=get_qqbot_runtime_root() / "comic_pdf_cache",
         )
+        self._comic_friend_router = ComicFriendRouteCoordinator()
+        self._comic_active_request_count = 0
+        self._comic_active_requests_lock = asyncio.Lock()
         self._meme_runtime = MemeManagerRuntime(
             self.context,
             ScopedPluginConfig(
@@ -554,6 +560,7 @@ class QQBotFeaturesPlugin(Star):
         )
 
     async def terminate(self) -> None:
+        await self._comic_pdf_service.shutdown()
         if self._temp_duplicate_cleanup_task is not None:
             await self._temp_duplicate_cleaner.stop()
             self._temp_duplicate_cleanup_task.cancel()
@@ -1077,50 +1084,130 @@ class QQBotFeaturesPlugin(Star):
         event.stop_event()
 
     @filter.platform_adapter_type("aiocqhttp")
-    @filter.regex(JMCOMIC_DOWNLOAD_PATTERN, desc="主人私聊下载 JM 作品并转换为受限大小的 PDF 文件。")
+    @filter.regex(JMCOMIC_DOWNLOAD_PATTERN, desc="下载 JM 作品、缓存明文 PDF，并私聊发送密码加密副本。")
     async def jmcomic_download(self, event: AstrMessageEvent):
-        if not _should_handle_migrated_command(event, self._feature_mode, command_type="jmcomic_pdf"):
-            return
-        if str(event.get_sender_id() or "").strip() != self._comic_pdf_config.owner_qq:
-            yield event.plain_result("这个命令仅主人私聊可用。")
-            event.stop_event()
-            return
-        if not event.is_private_chat():
-            yield event.plain_result("请私聊发送 JM下载 <作品ID>。")
-            event.stop_event()
-            return
-        if not self._comic_pdf_config.enabled:
-            yield event.plain_result("JM 下载功能当前未启用。")
-            event.stop_event()
-            return
-        match = re.fullmatch(JMCOMIC_DOWNLOAD_PATTERN, extract_plain_text(event).strip())
+        text = extract_plain_text(event).strip()
+        match = re.fullmatch(JMCOMIC_DOWNLOAD_PATTERN, text)
         if match is None:
             return
         album_id = match.group(1)
-        job = None
-        response_text = ""
-        yield event.plain_result(f"开始下载 JM{album_id}，完成后会直接发送 PDF。")
+        sender_id = str(event.get_sender_id() or "").strip()
+        if not sender_id.isdigit() or is_twin_bot_sender_id(sender_id):
+            return
+        claim_key = _command_claim_key(event, command_type="jmcomic_pdf")
+        api = AstrBotOneBotApi(event)
         try:
-            job = await self._comic_pdf_service.create_pdf(album_id)
-            count = await upload_private_pdfs(
-                AstrBotOneBotApi(event),
-                int(self._comic_pdf_config.owner_qq),
-                job.artifacts,
-            )
-            response_text = f"JM{album_id} 已发送，共 {count} 个 PDF，临时文件已清理。"
-        except ComicPdfError as exc:
-            response_text = str(exc)
+            current_is_friend = await is_onebot_friend(api, int(sender_id))
         except Exception as exc:
-            logger.error(
-                "[QQBotFeatures] JM PDF task failed: album_id=%s error_type=%s",
-                album_id,
+            logger.warning(
+                "[QQBotFeatures] JM friend lookup failed: self=%s user=%s error_type=%s",
+                event.get_self_id(),
+                sender_id,
                 type(exc).__name__,
             )
-            response_text = "JM 下载或文件发送失败，临时文件已清理。"
+            current_is_friend = False
+
+        if event.is_private_chat():
+            selected_worker = str(event.get_self_id() or "").strip()
+            has_friend = current_is_friend
+        else:
+            preferred = decide_migrated_command_route(
+                sender_id=event.get_sender_id(),
+                self_id=event.get_self_id(),
+                at_ids=_at_target_ids(event),
+                group_id=event.get_group_id(),
+                message_key=claim_key,
+                text=text,
+                is_private=False,
+                is_direct_or_private=_is_direct_or_private(event),
+                feature_mode=self._feature_mode,
+                full_mode=FEATURE_MODE_FULL,
+                command_owner_qq=read_command_owner_qq(),
+            ).selected_worker
+            friend_route = await self._comic_friend_router.choose(
+                claim_key,
+                self_id=str(event.get_self_id() or ""),
+                is_friend=current_is_friend,
+                preferred_worker=preferred,
+            )
+            selected_worker = friend_route.selected_worker
+            has_friend = friend_route.has_friend
+        if selected_worker != str(event.get_self_id() or "").strip():
+            return
+        if not try_claim_command(claim_key):
+            return
+        record_command_handled(event.get_group_id(), event.get_self_id())
+        if not has_friend:
+            yield _chain_result_with_reply(
+                event,
+                [Plain("需要先添加天使或恶魔任意一只为好友，再重新发送。")],
+            )
+            event.stop_event()
+            return
+        if not self._comic_pdf_config.enabled:
+            yield _chain_result_with_reply(event, [Plain("JM 下载功能当前未启用。")])
+            event.stop_event()
+            return
+
+        async with self._comic_active_requests_lock:
+            request_capacity = (
+                self._comic_pdf_config.max_concurrent_jobs
+                + self._comic_pdf_config.max_queued_jobs
+            )
+            if self._comic_active_request_count >= request_capacity:
+                request_accepted = False
+            else:
+                self._comic_active_request_count += 1
+                request_accepted = True
+        if not request_accepted:
+            yield _chain_result_with_reply(
+                event,
+                [Plain("JM 下载队列已满，请稍后再试。")],
+            )
+            event.stop_event()
+            return
+
+        delivery = None
+        try:
+            submission = await self._comic_pdf_service.submit(album_id)
+            status_text = {
+                "cache_hit": f"JM{album_id} 缓存命中，正在准备私聊文件。",
+                "started": f"JM{album_id} 已开始下载，完成后私聊发送。",
+                "shared": f"JM{album_id} 正在由其他请求处理，已加入等待。",
+                "queued": f"JM{album_id} 已进入队列，排队第 {submission.queue_position} 个。",
+            }.get(submission.status, f"JM{album_id} 已接受处理。")
+            yield _chain_result_with_reply(event, [Plain(status_text)])
+            cache_entry = await submission.wait()
+            if not await is_onebot_friend(api, int(sender_id)):
+                raise ComicPdfError("发送前检测到好友关系已失效，请重新添加好友后再试。")
+            delivery = await self._comic_pdf_service.create_delivery(cache_entry)
+            await send_private_pdfs_with_password(
+                api,
+                int(sender_id),
+                album_id,
+                delivery.artifacts,
+            )
+        except ComicPdfError as exc:
+            yield _chain_result_with_reply(event, [Plain(str(exc))])
+        except Exception as exc:
+            logger.error(
+                "[QQBotFeatures] JM PDF task failed: album_id=%s user=%s error_type=%s",
+                album_id,
+                sender_id,
+                type(exc).__name__,
+            )
+            yield _chain_result_with_reply(
+                event,
+                [Plain("JM 下载、加密或私聊文件发送失败，请稍后重试。")],
+            )
         finally:
-            if job is not None:
-                await asyncio.to_thread(job.cleanup)
-        yield event.plain_result(response_text)
+            if delivery is not None:
+                await asyncio.to_thread(delivery.cleanup)
+            async with self._comic_active_requests_lock:
+                self._comic_active_request_count = max(
+                    0,
+                    self._comic_active_request_count - 1,
+                )
         event.stop_event()
 
     @filter.regex(FACTORIO_DOWNLOAD_PATTERN, desc="获取 Factorio Space Age Windows 安装包下载链接，需要本机已配置 Factorio 凭据。")

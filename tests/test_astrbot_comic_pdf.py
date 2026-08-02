@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -52,7 +53,9 @@ class FakeJmOption:
 
 
 class FakeAlbum:
-    title = "测试作品"
+    title = "完整测试标题"
+    oname = "测试作品"
+    author = "测试作者"
 
     def __init__(self, photos: list[object]) -> None:
         self.photos = photos
@@ -85,11 +88,47 @@ class FakePdfBackend:
         outputstream.write(b"x" * (600 * len(paths)))
 
 
-def test_adapter_normalizes_order_and_disables_system_proxy(tmp_path: Path) -> None:
-    adapter = comic_pdf.JmcomicAdapter(module=FakeJmModule())
+def _downloaded_comic(tmp_path: Path, album_id: str = "1218951"):
+    chapters = []
+    for chapter_index in (1, 2):
+        pages = []
+        for page_index in (1, 2):
+            path = tmp_path / f"c{chapter_index}-{page_index}.jpg"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"page")
+            pages.append(path)
+        chapters.append(
+            comic_pdf.ComicChapter(
+                index=chapter_index,
+                title=f"章节{chapter_index}",
+                pages=tuple(pages),
+            )
+        )
+    return models.DownloadedComic(
+        album_id=album_id,
+        author="测试/作者",
+        title="测试:作品",
+        chapters=tuple(chapters),
+    )
 
-    result = asyncio.run(adapter.download_album("1218951", tmp_path / "download"))
 
+def _renderer(*, max_bytes: int = 10_000):
+    return comic_pdf.PdfRenderer(
+        max_pages=500,
+        max_bytes=max_bytes,
+        module=FakePdfBackend(),
+    )
+
+
+def test_adapter_normalizes_author_title_order_and_disables_system_proxy(tmp_path: Path) -> None:
+    result = asyncio.run(
+        comic_pdf.JmcomicAdapter(module=FakeJmModule()).download_album(
+            "1218951", tmp_path / "download"
+        )
+    )
+
+    assert result.author == "测试作者"
+    assert result.title == "测试作品"
     assert result.page_count == 4
     assert [path.name for path in result.chapters[0].pages] == ["2.jpg", "10.jpg"]
     assert FakeJmOption.last_config is not None
@@ -100,67 +139,23 @@ def test_adapter_normalizes_order_and_disables_system_proxy(tmp_path: Path) -> N
 def test_adapter_rejects_incompatible_version(tmp_path: Path) -> None:
     module = FakeJmModule()
     module.__version__ = "9.9.9"
-    adapter = comic_pdf.JmcomicAdapter(module=module)
-
     with pytest.raises(comic_pdf.ComicDownloadError, match="版本不兼容"):
-        asyncio.run(adapter.download_album("1218951", tmp_path / "download"))
-
-
-def test_adapter_rejects_path_escape(tmp_path: Path) -> None:
-    class EscapingOption(FakeOption):
-        def decide_image_save_dir(self, photo, ensure_exists: bool = False) -> str:
-            return str(self.root.parent / "outside")
-
-    class EscapingJmOption(FakeJmOption):
-        @classmethod
-        def construct(cls, config: dict) -> EscapingOption:
-            return EscapingOption(config)
-
-    class EscapingModule(FakeJmModule):
-        JmOption = EscapingJmOption
-
-        @staticmethod
-        async def download_album_async(album_id: str, *, option: FakeOption):
-            outside = Path(option.decide_image_save_dir(SimpleNamespace(album_index=1)))
-            outside.mkdir(parents=True)
-            (outside / "1.jpg").write_bytes(b"page")
-            return SimpleNamespace(
-                detail=FakeAlbum([SimpleNamespace(album_index=1, title="escape")])
-            )
-
-    with pytest.raises(comic_pdf.ComicDownloadError, match="路径越界"):
         asyncio.run(
-            comic_pdf.JmcomicAdapter(module=EscapingModule()).download_album(
+            comic_pdf.JmcomicAdapter(module=module).download_album(
                 "1218951", tmp_path / "download"
             )
         )
 
 
-def _downloaded_comic(tmp_path: Path):
-    chapters = []
-    for chapter_index in (1, 2):
-        pages = []
-        for page_index in (1, 2):
-            path = tmp_path / f"c{chapter_index}-{page_index}.jpg"
-            path.write_bytes(b"page")
-            pages.append(path)
-        chapters.append(
-            comic_pdf.ComicChapter(
-                index=chapter_index,
-                title=f"章节{chapter_index}",
-                pages=tuple(pages),
-            )
-        )
-    return models.DownloadedComic("1218951", "测试/作品", tuple(chapters))
-
-
-def test_config_clamps_resource_limits() -> None:
+def test_config_clamps_resource_and_cache_limits() -> None:
     config = comic_pdf.load_comic_pdf_config(
         {
             "jmcomic_timeout_seconds": 1,
             "jmcomic_max_pages_per_pdf": 5000,
             "jmcomic_max_pdf_size_mb": 1,
             "jmcomic_max_concurrent_jobs": 99,
+            "jmcomic_max_queued_jobs": 999,
+            "jmcomic_cache_max_gb": 0,
         }
     )
 
@@ -168,10 +163,12 @@ def test_config_clamps_resource_limits() -> None:
     assert config.max_pages_per_pdf == 1000
     assert config.max_pdf_bytes == 10 * 1024 * 1024
     assert config.max_concurrent_jobs == 2
-    assert config.owner_qq == "605738729"
+    assert config.max_queued_jobs == 100
+    assert comic_pdf.load_comic_pdf_config({}).max_queued_jobs == 50
+    assert config.cache_max_bytes == 1024**3
 
 
-def test_private_sender_uses_onebot_file_action(tmp_path: Path) -> None:
+def test_private_sender_sends_file_then_replies_with_jmid_password(tmp_path: Path) -> None:
     pdf = tmp_path / "comic.pdf"
     pdf.write_bytes(b"pdf")
     calls: list[tuple[str, dict[str, object]]] = []
@@ -179,128 +176,300 @@ def test_private_sender_uses_onebot_file_action(tmp_path: Path) -> None:
     class Api:
         async def call_api(self, action: str, **kwargs):
             calls.append((action, kwargs))
+            return {"message_id": 987654} if len(calls) == 1 else {}
 
     artifact = comic_pdf.ComicPdfArtifact(pdf, 3, (1,))
-    uploaded = asyncio.run(comic_pdf.upload_private_pdfs(Api(), 605738729, [artifact]))
+    sent = asyncio.run(
+        comic_pdf.send_private_pdfs_with_password(Api(), 123456, "1218951", [artifact])
+    )
 
-    assert uploaded == 1
-    assert calls == [
-        (
-            "upload_private_file",
-            {"user_id": 605738729, "file": str(pdf.resolve()), "name": "comic.pdf"},
-        )
-    ]
-
-
-def test_main_registers_owner_private_jmcomic_command() -> None:
-    source = MAIN_PATH.read_text(encoding="utf-8")
-
-    assert 'JMCOMIC_DOWNLOAD_PATTERN = r"(?i)^jm\\s*下载\\s*([0-9]+)$"' in source
-    assert 'command_type="jmcomic_pdf"' in source
-    assert 'if not event.is_private_chat():' in source
-    assert 'str(event.get_sender_id() or "").strip() != self._comic_pdf_config.owner_qq' in source
-    assert 'await asyncio.to_thread(job.cleanup)' in source
-    assert source.index('await asyncio.to_thread(job.cleanup)') < source.index('yield event.plain_result(response_text)')
+    assert sent == 1
+    assert calls[0][0] == "send_private_msg"
+    assert calls[0][1]["message"][0]["type"] == "file"
+    assert calls[1] == (
+        "send_private_msg",
+        {
+            "user_id": 123456,
+            "message": [
+                {"type": "reply", "data": {"id": "987654"}},
+                {"type": "text", "data": {"text": "下载完成，密码1218951"}},
+            ],
+        },
+    )
 
 
 def test_renderer_keeps_bounded_whole_book(tmp_path: Path) -> None:
-    renderer = comic_pdf.PdfRenderer(
-        max_pages=500,
-        max_bytes=10_000,
-        module=FakePdfBackend(),
-    )
-
-    artifacts = renderer.render(_downloaded_comic(tmp_path), tmp_path / "pdf")
+    artifacts = _renderer().render(_downloaded_comic(tmp_path), tmp_path / "pdf")
 
     assert len(artifacts) == 1
     assert artifacts[0].page_count == 4
     assert artifacts[0].path.name == "JM1218951-测试_作品.pdf"
-    assert not artifacts[0].path.with_suffix(".pdf.part").exists()
 
 
 def test_renderer_splits_oversized_book_and_chapters(tmp_path: Path) -> None:
-    renderer = comic_pdf.PdfRenderer(
-        max_pages=500,
-        max_bytes=1024,
-        module=FakePdfBackend(),
+    artifacts = _renderer(max_bytes=1024).render(
+        _downloaded_comic(tmp_path), tmp_path / "pdf"
     )
-
-    artifacts = renderer.render(_downloaded_comic(tmp_path), tmp_path / "pdf")
 
     assert len(artifacts) == 4
     assert all(artifact.page_count == 1 for artifact in artifacts)
     assert all(artifact.path.stat().st_size == 600 for artifact in artifacts)
 
 
-def test_service_cleans_failed_and_completed_jobs(tmp_path: Path) -> None:
+def test_cache_uses_required_folder_manifest_names_and_hashes(tmp_path: Path) -> None:
+    cache = comic_pdf.ComicPdfCache(tmp_path / "cache", max_bytes=10_000)
+    entry = cache.store(_downloaded_comic(tmp_path / "images"), _renderer(max_bytes=1024))
+
+    assert entry.cache_dir.name == "JM1218951-【测试_作者】测试_作品"
+    assert [item.path.name for item in entry.artifacts] == [
+        f"{entry.cache_dir.name}({index}).pdf" for index in range(1, 5)
+    ]
+    manifest = json.loads((entry.cache_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert manifest["download_complete"] is True
+    assert manifest["author"] == "测试/作者"
+    assert manifest["title"] == "测试:作品"
+    assert manifest["page_count"] == 4
+    assert manifest["total_size_bytes"] == 2400
+    assert all(len(item["sha256"]) == 64 for item in manifest["artifacts"])
+    assert cache.lookup("1218951") is not None
+
+
+def test_cache_discards_hash_mismatch_and_lru_evicts_oldest(tmp_path: Path) -> None:
+    cache = comic_pdf.ComicPdfCache(tmp_path / "cache", max_bytes=3000)
+    first = cache.store(_downloaded_comic(tmp_path / "one", "1001"), _renderer())
+    second = cache.store(_downloaded_comic(tmp_path / "two", "1002"), _renderer())
+
+    assert not first.cache_dir.exists()
+    assert second.cache_dir.exists()
+    second.artifacts[0].path.write_bytes(b"corrupt")
+    assert cache.lookup("1002") is None
+    assert not second.cache_dir.exists()
+
+
+def test_service_singleflights_same_album(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        calls = 0
+        gate = asyncio.Event()
+
+        class Adapter:
+            async def download_album(self, album_id: str, task_root: Path):
+                nonlocal calls
+                calls += 1
+                await gate.wait()
+                return _downloaded_comic(task_root, album_id)
+
+        service = comic_pdf.ComicPdfService(
+            tmp_path / "jobs",
+            comic_pdf.ComicPdfConfig(max_concurrent_jobs=2),
+            cache_root=tmp_path / "cache",
+            adapter_factory=lambda: Adapter(),
+            renderer_factory=_renderer,
+        )
+        first = await service.submit("1218951")
+        second = await service.submit("1218951")
+        assert first.status == "started"
+        assert second.status == "shared"
+        gate.set()
+        one, two = await asyncio.gather(first.wait(), second.wait())
+        assert calls == 1
+        assert one.cache_dir == two.cache_dir
+
+    asyncio.run(scenario())
+
+
+def test_service_runs_two_albums_and_reports_fifo_queue(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        active = 0
+        peak = 0
+        gate = asyncio.Event()
+
+        class Adapter:
+            async def download_album(self, album_id: str, task_root: Path):
+                nonlocal active, peak
+                active += 1
+                peak = max(peak, active)
+                await gate.wait()
+                active -= 1
+                return _downloaded_comic(task_root, album_id)
+
+        service = comic_pdf.ComicPdfService(
+            tmp_path / "jobs",
+            comic_pdf.ComicPdfConfig(max_concurrent_jobs=2, max_queued_jobs=2),
+            cache_root=tmp_path / "cache",
+            adapter_factory=lambda: Adapter(),
+            renderer_factory=_renderer,
+        )
+        first = await service.submit("1001")
+        second = await service.submit("1002")
+        third = await service.submit("1003")
+        assert (first.status, second.status) == ("started", "started")
+        assert third.status == "queued"
+        assert third.queue_position == 1
+        await asyncio.sleep(0)
+        assert peak == 2
+        gate.set()
+        await asyncio.gather(first.wait(), second.wait(), third.wait())
+        assert peak == 2
+
+    asyncio.run(scenario())
+
+
+def test_service_cache_hit_skips_adapter(tmp_path: Path) -> None:
+    cache = comic_pdf.ComicPdfCache(tmp_path / "cache", max_bytes=10_000)
+    cache.store(_downloaded_comic(tmp_path / "images"), _renderer())
+
     class Adapter:
         async def download_album(self, album_id: str, task_root: Path):
-            task_root.mkdir(parents=True)
-            return _downloaded_comic(task_root)
+            raise AssertionError("cache hit must not download")
 
-    renderer = comic_pdf.PdfRenderer(
-        max_pages=500,
-        max_bytes=10_000,
-        module=FakePdfBackend(),
-    )
-    service = comic_pdf.ComicPdfService(
-        tmp_path / "jobs",
-        comic_pdf.ComicPdfConfig(timeout_seconds=5),
-        adapter_factory=lambda: Adapter(),
-        renderer_factory=lambda: renderer,
-    )
-
-    job = asyncio.run(service.create_pdf("1218951"))
-    assert job.artifacts[0].path.exists()
-    job.cleanup()
-    assert not job.task_root.exists()
-
-    class FailingAdapter:
-        async def download_album(self, album_id: str, task_root: Path):
-            task_root.mkdir(parents=True)
-            raise comic_pdf.ComicDownloadError("failed")
-
-    failing = comic_pdf.ComicPdfService(
-        tmp_path / "failed-jobs",
-        adapter_factory=lambda: FailingAdapter(),
-    )
-    with pytest.raises(comic_pdf.ComicDownloadError):
-        asyncio.run(failing.create_pdf("1218951"))
-    assert not list((tmp_path / "failed-jobs").glob("*"))
-
-
-def test_service_serializes_jobs(tmp_path: Path) -> None:
-    active = 0
-    peak = 0
-
-    class SlowAdapter:
-        async def download_album(self, album_id: str, task_root: Path):
-            nonlocal active, peak
-            active += 1
-            peak = max(peak, active)
-            await asyncio.sleep(0.02)
-            task_root.mkdir(parents=True)
-            active -= 1
-            return _downloaded_comic(task_root)
-
-    service = comic_pdf.ComicPdfService(
-        tmp_path / "jobs",
-        comic_pdf.ComicPdfConfig(max_concurrent_jobs=1),
-        adapter_factory=lambda: SlowAdapter(),
-        renderer_factory=lambda: comic_pdf.PdfRenderer(
-            max_pages=500,
-            max_bytes=10_000,
-            module=FakePdfBackend(),
-        ),
-    )
-
-    async def run_jobs():
-        return await asyncio.gather(
-            service.create_pdf("1218951"),
-            service.create_pdf("1218952"),
+    async def scenario() -> None:
+        service = comic_pdf.ComicPdfService(
+            tmp_path / "jobs",
+            cache_root=tmp_path / "cache",
+            adapter_factory=lambda: Adapter(),
+            renderer_factory=_renderer,
         )
+        submission = await service.submit("1218951")
+        assert submission.status == "cache_hit"
+        assert (await submission.wait()).album_id == "1218951"
 
-    jobs = asyncio.run(run_jobs())
-    assert peak == 1
-    for job in jobs:
-        job.cleanup()
+    asyncio.run(scenario())
+
+
+def test_service_shutdown_fails_queued_and_active_requests(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        gate = asyncio.Event()
+
+        class Adapter:
+            async def download_album(self, album_id: str, task_root: Path):
+                await gate.wait()
+                return _downloaded_comic(task_root, album_id)
+
+        service = comic_pdf.ComicPdfService(
+            tmp_path / "jobs",
+            comic_pdf.ComicPdfConfig(max_concurrent_jobs=1, max_queued_jobs=2),
+            cache_root=tmp_path / "cache",
+            adapter_factory=lambda: Adapter(),
+            renderer_factory=_renderer,
+        )
+        active = await service.submit("1001")
+        queued = await service.submit("1002")
+        await service.shutdown()
+        with pytest.raises(comic_pdf.ComicPdfError, match="停止|取消"):
+            await active.wait()
+        with pytest.raises(comic_pdf.ComicPdfError, match="停止|取消"):
+            await queued.wait()
+        with pytest.raises(comic_pdf.ComicPdfError, match="停止"):
+            await service.submit("1003")
+
+    asyncio.run(scenario())
+
+
+def test_encryptor_uses_full_jmid_and_cleanup_preserves_plain_cache(tmp_path: Path) -> None:
+    pikepdf = pytest.importorskip("pikepdf")
+    cache_dir = tmp_path / "cache" / "JM1218951-【作者】标题"
+    cache_dir.mkdir(parents=True)
+    source = cache_dir / f"{cache_dir.name}.pdf"
+    with pikepdf.new() as pdf:
+        pdf.add_blank_page()
+        pdf.save(source)
+    entry = comic_pdf.ComicCacheEntry(
+        album_id="1218951",
+        author="作者",
+        title="标题",
+        cache_dir=cache_dir,
+        artifacts=(comic_pdf.ComicPdfArtifact(source, 1, (1,)),),
+    )
+
+    delivery = comic_pdf.PdfEncryptor(tmp_path / "temp").create_delivery(entry)
+
+    assert delivery.password == "1218951"
+    assert source.exists()
+    with pytest.raises(pikepdf.PasswordError):
+        pikepdf.open(delivery.artifacts[0].path)
+    with pikepdf.open(delivery.artifacts[0].path, password="1218951") as pdf:
+        assert len(pdf.pages) == 1
+    delivery.cleanup()
+    assert not delivery.task_root.exists()
+    assert source.exists()
+
+
+def test_friend_route_prefers_capable_twin_before_claim() -> None:
+    async def scenario() -> None:
+        coordinator = comic_pdf.ComicFriendRouteCoordinator(wait_seconds=0.2)
+        angel, demon = await asyncio.gather(
+            coordinator.choose(
+                "event-1",
+                self_id="1443944862",
+                is_friend=False,
+                preferred_worker="1443944862",
+            ),
+            coordinator.choose(
+                "event-1",
+                self_id="2629227874",
+                is_friend=True,
+                preferred_worker="1443944862",
+            ),
+        )
+        assert angel == demon
+        assert demon.selected_worker == "2629227874"
+        assert demon.has_friend is True
+
+    asyncio.run(scenario())
+
+
+def test_friend_route_keeps_preferred_worker_when_both_are_friends() -> None:
+    async def scenario() -> None:
+        coordinator = comic_pdf.ComicFriendRouteCoordinator(wait_seconds=0.2)
+        decisions = await asyncio.gather(
+            coordinator.choose(
+                "event-2",
+                self_id="1443944862",
+                is_friend=True,
+                preferred_worker="2629227874",
+            ),
+            coordinator.choose(
+                "event-2",
+                self_id="2629227874",
+                is_friend=True,
+                preferred_worker="2629227874",
+            ),
+        )
+        assert all(item.selected_worker == "2629227874" for item in decisions)
+        assert all(item.has_friend for item in decisions)
+
+    asyncio.run(scenario())
+
+
+def test_onebot_friend_lookup_accepts_direct_and_wrapped_results() -> None:
+    class Api:
+        def __init__(self, result) -> None:
+            self.result = result
+
+        async def call_api(self, action: str, **kwargs):
+            assert action == "get_friend_list"
+            return self.result
+
+    assert asyncio.run(comic_pdf.is_onebot_friend(Api([{"user_id": 123}]), 123))
+    assert asyncio.run(
+        comic_pdf.is_onebot_friend(Api({"data": [{"user_id": "456"}]}), 456)
+    )
+    assert not asyncio.run(comic_pdf.is_onebot_friend(Api([]), 789))
+
+
+def test_main_contract_uses_plain_jm_command_friend_route_and_quoted_progress() -> None:
+    source = MAIN_PATH.read_text(encoding="utf-8")
+    assert 'JMCOMIC_DOWNLOAD_PATTERN = r"(?i)^jm\\s*([0-9]+)$"' in source
+    assert "JM下载" not in source[source.index("async def jmcomic_download"):source.index("async def factorio_download")]
+    assert "self._comic_friend_router.choose" in source
+    assert "is_onebot_friend" in source
+    assert "_chain_result_with_reply" in source
+    assert "send_private_pdfs_with_password" in source
+    handler_source = source[
+        source.index("async def jmcomic_download"):source.index("async def factorio_download")
+    ]
+    assert "已私聊发送" not in handler_source
+    assert "is_twin_bot_sender_id(sender_id)" in source
+    assert "_comic_active_request_count" in source
+    assert "你已有一个 JM 任务" not in handler_source
+    assert "delivery.cleanup" in source

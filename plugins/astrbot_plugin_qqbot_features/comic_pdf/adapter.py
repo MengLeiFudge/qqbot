@@ -123,9 +123,12 @@ class JmcomicAdapter:
         if not chapters:
             raise ComicDownloadError("JM 下载结果没有章节。")
         chapters.sort(key=lambda chapter: chapter.index)
+        author = str(getattr(album, "author", "") or "未知作者").strip()
+        title = str(getattr(album, "oname", "") or getattr(album, "title", "") or f"JM{album_id}").strip()
         return DownloadedComic(
             album_id=album_id,
-            title=str(getattr(album, "title", "") or f"JM{album_id}").strip(),
+            author=author,
+            title=title,
             chapters=tuple(chapters),
         )
 

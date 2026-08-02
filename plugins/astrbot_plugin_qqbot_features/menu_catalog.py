@@ -62,7 +62,7 @@ MENU_SECTIONS: tuple[MenuSection, ...] = (
     MenuSection(
         name="JM漫画",
         aliases=("JM", "漫画", "PDF"),
-        lines=("JM下载 作品ID：仅主人私聊下载整本并发送 PDF，超页数或大小时自动分卷",),
+        lines=("JM作品ID：好友可在群聊或私聊请求，进度引用回复，文件和密码仅私聊发送",),
     ),
     MenuSection(
         name="Factorio",
