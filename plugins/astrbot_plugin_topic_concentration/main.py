@@ -2,36 +2,48 @@ from __future__ import annotations
 
 import os
 import time
+from asyncio import CancelledError
 
 from astrbot.api import logger
 from astrbot.api.event import filter
 from astrbot.api.message_components import At, Plain, Poke, Reply
 from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
+from astrbot.core.agent.tool import FunctionTool, ToolSet
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
 from .logic import ACTIVATION_WINDOW_SECONDS
 from .logic import CANDIDATE_MAX_WAIT_SECONDS
 from .logic import DEACTIVATE_MARKER
+from .logic import POKE_MUTE_TOOL_NAME
 from .logic import SKIP_REPLY_MARKER
 from .logic import activate_group_chat
 from .logic import build_call_intent_prompt
 from .logic import build_group_activation_instruction
+from .logic import build_poke_interaction_instruction
 from .logic import chat_with_current_provider as _chat_with_current_decision_provider
 from .logic import classify_cotton_candy_call
 from .logic import clear_group_activations
+from .logic import clear_poke_interaction_state
 from .logic import contains_cotton_candy_marker
 from .logic import deactivate_group_chat
 from .logic import is_candidate_request_current
+from .logic import is_poke_mute_tool_eligible
 from .logic import looks_like_qqbot_fixed_command
+from .logic import mark_poke_mute_success
 from .logic import parse_call_intent_response
 from .logic import parse_reply_control
+from .logic import pick_poke_mute_duration
 from .logic import read_group_activation
+from .logic import record_poke_burst
+from .logic import release_poke_mute_claim
 from .logic import renew_group_chat_after_reply
 from .logic import retry_explicit_visible_reply
 from .logic import rewrite_last_assistant_history
 from .logic import should_activate_from_poke
 from .logic import should_normalize_empty_mention
+from .logic import try_claim_poke_mute
+from .logic import validate_poke_mute_execution
 from .twin_scheduler import complete_claim_response
 from .twin_scheduler import decide_llm_worker
 from .twin_scheduler import mark_claim_processing
@@ -70,6 +82,11 @@ PENDING_STATE_ACTION_EXTRA = "_qqbot_group_activation_pending_action"
 CANDIDATE_QUEUED_AT_EXTRA = "_qqbot_group_activation_candidate_queued_at"
 CANDIDATE_RESERVED_EXTRA = "_qqbot_group_activation_candidate_reserved"
 EMPTY_MENTION_CALL_EXTRA = "_qqbot_empty_mention_call"
+POKE_INTERACTION_EXTRA = "_qqbot_poke_interaction"
+POKE_COUNT_EXTRA = "_qqbot_poke_count"
+POKE_SENDER_EXTRA = "_qqbot_poke_sender_id"
+POKE_OBSERVED_AT_EXTRA = "_qqbot_poke_observed_at"
+POKE_MUTE_ATTEMPTED_EXTRA = "_qqbot_poke_mute_attempted"
 ROUTE_PRIVATE = "private"
 ROUTE_EXPLICIT = "explicit"
 ROUTE_CANDIDATE = "candidate"
@@ -84,12 +101,13 @@ EMPTY_MENTION_CALL_TEXT = "用户只@了你，没有附带其他内容"
     "astrbot_plugin_topic_concentration",
     "MengLei",
     "棉花糖群聊激活状态、显式呼叫与双 bot 普通 LLM worker 调度。",
-    "0.5.2",
+    "0.5.3",
 )
 class TopicConcentrationPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         clear_group_activations()
+        clear_poke_interaction_state()
         logger.info(
             "[TopicConcentration] loaded group activation gate: profile=%s other_bot_ids=%s activation_seconds=%.0f markers=%s,%s",
             read_bot_profile(),
@@ -113,6 +131,23 @@ class TopicConcentrationPlugin(Star):
         )
         if poke_target_id:
             event.message_str = POKE_CALL_TEXT
+            poke_observation = record_poke_burst(
+                event.get_group_id(),
+                self_id,
+                event.get_sender_id(),
+            )
+            if poke_observation is not None:
+                event.set_extra(POKE_INTERACTION_EXTRA, "1")
+                event.set_extra(POKE_COUNT_EXTRA, poke_observation.count)
+                event.set_extra(POKE_SENDER_EXTRA, poke_observation.sender_id)
+                event.set_extra(POKE_OBSERVED_AT_EXTRA, poke_observation.observed_at)
+                logger.info(
+                    "[TopicConcentration] poke burst: group=%s self=%s sender=%s count=%s",
+                    poke_observation.group_id,
+                    poke_observation.self_id,
+                    poke_observation.sender_id,
+                    poke_observation.count,
+                )
         elif empty_mention:
             event.message_str = EMPTY_MENTION_CALL_TEXT
             event.set_extra(EMPTY_MENTION_CALL_EXTRA, "1")
@@ -281,19 +316,145 @@ class TopicConcentrationPlugin(Star):
                     )
                 ).mark_as_temp()
             )
+        poke_count = int(event.get_extra(POKE_COUNT_EXTRA, 0) or 0)
+        mute_tool_attached = False
+        if route == ROUTE_EXPLICIT and event.get_extra(POKE_INTERACTION_EXTRA, ""):
+            mute_tool_attached = _maybe_attach_poke_mute_tool(self, event, req, poke_count=poke_count)
+            req.extra_user_content_parts.append(
+                TextPart(
+                    text=build_poke_interaction_instruction(
+                        poke_count=max(1, poke_count),
+                        mute_tool_available=mute_tool_attached,
+                    )
+                ).mark_as_temp()
+            )
         if route == ROUTE_EXPLICIT:
             event.set_extra(ACTIVATION_REQUEST_EXTRA, req)
         logger.info(
-            "[TopicConcentration] mark LLM worker busy: worker=%s session=%s request_session=%s claim=%s route=%s renewals=%s markers=%s,%s",
+            "[TopicConcentration] mark LLM worker busy: worker=%s session=%s request_session=%s claim=%s route=%s renewals=%s poke_count=%s mute_tool=%s markers=%s,%s",
             selected,
             getattr(event, "unified_msg_origin", ""),
             getattr(req, "session_id", ""),
             claim_key,
             route,
             int(event.get_extra(ACTIVATION_RENEWALS_EXTRA, 0) or 0),
+            poke_count,
+            mute_tool_attached,
             SKIP_REPLY_MARKER,
             DEACTIVATE_MARKER,
         )
+
+    async def qqbot_mute_repeated_poker(self, event, reason: str = "") -> str:
+        """Request-scoped poke mute tool. Target and duration are code-controlled."""
+        del reason  # optional model note only; never affects target/duration
+        group_id = event.get_group_id()
+        self_id = str(event.get_self_id() or "").strip()
+        sender_id = str(event.get_sender_id() or "").strip()
+        captured_sender = str(event.get_extra(POKE_SENDER_EXTRA, "") or "").strip()
+        captured_count = int(event.get_extra(POKE_COUNT_EXTRA, 0) or 0)
+        observed_at = float(event.get_extra(POKE_OBSERVED_AT_EXTRA, 0.0) or 0.0)
+        route = str(event.get_extra(LLM_ROUTE_EXTRA, "") or "")
+        if event.get_extra(POKE_MUTE_ATTEMPTED_EXTRA, ""):
+            logger.info(
+                "[TopicConcentration] poke mute rejected: reason=already_attempted group=%s self=%s sender=%s count=%s",
+                group_id,
+                self_id,
+                sender_id,
+                captured_count,
+            )
+            return "mute_rejected: already_attempted"
+        # Consume this event's single tool attempt before any route/validation/claim outcome.
+        event.set_extra(POKE_MUTE_ATTEMPTED_EXTRA, "1")
+        if event.is_private_chat() or route != ROUTE_EXPLICIT:
+            logger.info(
+                "[TopicConcentration] poke mute rejected: reason=invalid_route group=%s self=%s sender=%s route=%s private=%s count=%s",
+                group_id,
+                self_id,
+                sender_id,
+                route,
+                bool(event.is_private_chat()),
+                captured_count,
+            )
+            return "mute_rejected: invalid_route"
+        if not event.get_extra(POKE_INTERACTION_EXTRA, ""):
+            logger.info(
+                "[TopicConcentration] poke mute rejected: reason=not_poke group=%s self=%s sender=%s count=%s",
+                group_id,
+                self_id,
+                sender_id,
+                captured_count,
+            )
+            return "mute_rejected: not a repeated poke request"
+        failure = validate_poke_mute_execution(
+            event_group_id=group_id,
+            event_self_id=self_id,
+            event_sender_id=sender_id,
+            captured_sender_id=captured_sender,
+            captured_count=captured_count,
+            observed_at=observed_at,
+        )
+        if failure:
+            logger.info(
+                "[TopicConcentration] poke mute rejected: reason=%s group=%s self=%s sender=%s count=%s",
+                failure,
+                group_id,
+                self_id,
+                sender_id,
+                captured_count,
+            )
+            return f"mute_rejected: {failure}"
+        if not try_claim_poke_mute(group_id, self_id, sender_id):
+            logger.info(
+                "[TopicConcentration] poke mute rejected: reason=claim_busy group=%s self=%s sender=%s count=%s",
+                group_id,
+                self_id,
+                sender_id,
+                captured_count,
+            )
+            return "mute_rejected: claim_busy"
+
+        claimed = True
+        succeeded = False
+        duration = pick_poke_mute_duration()
+        try:
+            bot = getattr(event, "bot", None)
+            call_action = getattr(bot, "call_action", None) if bot is not None else None
+            if not callable(call_action):
+                raise RuntimeError("missing_bot_call_action")
+            await call_action(
+                "set_group_ban",
+                group_id=int(group_id),
+                user_id=int(sender_id),
+                duration=duration,
+            )
+            mark_poke_mute_success(group_id, self_id, sender_id)
+            claimed = False
+            succeeded = True
+            logger.info(
+                "[TopicConcentration] poke mute success: group=%s self=%s sender=%s count=%s duration=%s",
+                group_id,
+                self_id,
+                sender_id,
+                captured_count,
+                duration,
+            )
+            return f"mute_success: duration_seconds={duration}"
+        except CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[TopicConcentration] poke mute failed: group=%s self=%s sender=%s count=%s duration=%s error_type=%s",
+                group_id,
+                self_id,
+                sender_id,
+                captured_count,
+                duration,
+                type(exc).__name__,
+            )
+            return f"mute_failed: {type(exc).__name__}"
+        finally:
+            if claimed and not succeeded:
+                release_poke_mute_claim(group_id, self_id, sender_id)
 
     @filter.on_llm_response(
         priority=1000,
@@ -457,6 +618,53 @@ class TopicConcentrationPlugin(Star):
             applied,
             state.ordinary_reply_renewals if state is not None else 0,
         )
+
+
+def _maybe_attach_poke_mute_tool(plugin, event, req, *, poke_count: int) -> bool:
+    group_id = event.get_group_id()
+    self_id = str(event.get_self_id() or "").strip()
+    sender_id = str(event.get_extra(POKE_SENDER_EXTRA, "") or event.get_sender_id() or "").strip()
+    observed_at = float(event.get_extra(POKE_OBSERVED_AT_EXTRA, 0.0) or 0.0)
+    if not is_poke_mute_tool_eligible(
+        poke_count=poke_count,
+        observed_at=observed_at,
+        group_id=group_id,
+        self_id=self_id,
+        sender_id=sender_id,
+    ):
+        return False
+    if getattr(req, "func_tool", None) is None:
+        req.func_tool = ToolSet()
+    req.func_tool.add_tool(
+        FunctionTool(
+            name=POKE_MUTE_TOOL_NAME,
+            description=(
+                "仅用于当前短时重复拍一拍场景。当你判断对方拍得过头、需要轻微制止时调用。"
+                "不要也不必指定用户或时长；程序会固定对当前拍击者执行短时禁言。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "内部决策备注，可选，不影响禁言目标与时长",
+                    }
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+            handler=plugin.qqbot_mute_repeated_poker,
+        )
+    )
+    logger.info(
+        "[TopicConcentration] attach poke mute tool: group=%s self=%s sender=%s count=%s tool=%s",
+        group_id,
+        self_id,
+        sender_id,
+        poke_count,
+        POKE_MUTE_TOOL_NAME,
+    )
+    return True
 
 
 def _candidate_request_is_current(event) -> bool:

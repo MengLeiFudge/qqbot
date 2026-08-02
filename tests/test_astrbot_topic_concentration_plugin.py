@@ -32,32 +32,168 @@ astrbot_api_stub.logger = StubAstrBotLogger()
 sys.modules.setdefault("astrbot", types.ModuleType("astrbot"))
 sys.modules.setdefault("astrbot.api", astrbot_api_stub)
 
+# Minimal AstrBot stubs so main.py can be imported for formal side-effect tests.
+def _transparent_decorator(*_args, **_kwargs):
+    def wrap(fn):
+        return fn
+
+    if _args and callable(_args[0]) and len(_args) == 1 and not _kwargs:
+        return _args[0]
+    return wrap
+
+
+astrbot_event_stub = types.ModuleType("astrbot.api.event")
+astrbot_event_stub.filter = types.SimpleNamespace(
+    event_message_type=_transparent_decorator,
+    on_waiting_llm_request=_transparent_decorator,
+    on_llm_request=_transparent_decorator,
+    on_llm_response=_transparent_decorator,
+    on_agent_done=_transparent_decorator,
+    after_message_sent=_transparent_decorator,
+)
+sys.modules.setdefault("astrbot.api.event", astrbot_event_stub)
+
+astrbot_components_stub = types.ModuleType("astrbot.api.message_components")
+
+
+class _StubComponent:
+    pass
+
+
+astrbot_components_stub.At = type("At", (_StubComponent,), {})
+astrbot_components_stub.Plain = type("Plain", (_StubComponent,), {})
+astrbot_components_stub.Poke = type("Poke", (_StubComponent,), {})
+astrbot_components_stub.Reply = type("Reply", (_StubComponent,), {})
+sys.modules.setdefault("astrbot.api.message_components", astrbot_components_stub)
+
+astrbot_star_stub = types.ModuleType("astrbot.api.star")
+
+
+class _StubStar:
+    def __init__(self, context=None, config=None):
+        self.context = context
+        self.config = config
+
+
+def _register(*_args, **_kwargs):
+    def wrap(cls):
+        return cls
+
+    return wrap
+
+
+astrbot_star_stub.Context = object
+astrbot_star_stub.Star = _StubStar
+astrbot_star_stub.register = _register
+sys.modules.setdefault("astrbot.api.star", astrbot_star_stub)
+
+astrbot_core = types.ModuleType("astrbot.core")
+astrbot_core_agent = types.ModuleType("astrbot.core.agent")
+astrbot_core_agent_message = types.ModuleType("astrbot.core.agent.message")
+
+
+class _TextPart:
+    def __init__(self, text: str = ""):
+        self.text = text
+
+    def mark_as_temp(self):
+        return self
+
+
+astrbot_core_agent_message.TextPart = _TextPart
+astrbot_core_agent_tool = types.ModuleType("astrbot.core.agent.tool")
+
+
+class _FunctionTool:
+    def __init__(self, name="", description="", parameters=None, handler=None, **_kwargs):
+        self.name = name
+        self.description = description
+        self.parameters = parameters or {}
+        self.handler = handler
+
+
+class _ToolSet:
+    def __init__(self):
+        self.tools: list[_FunctionTool] = []
+
+    def add_tool(self, tool):
+        self.tools.append(tool)
+
+    def names(self):
+        return [tool.name for tool in self.tools]
+
+    def openai_schema(self):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            }
+            for tool in self.tools
+        ]
+
+
+astrbot_core_agent_tool.FunctionTool = _FunctionTool
+astrbot_core_agent_tool.ToolSet = _ToolSet
+astrbot_core_star = types.ModuleType("astrbot.core.star")
+astrbot_core_star_filter = types.ModuleType("astrbot.core.star.filter")
+astrbot_core_star_filter_event = types.ModuleType("astrbot.core.star.filter.event_message_type")
+astrbot_core_star_filter_event.EventMessageType = types.SimpleNamespace(ALL="ALL")
+sys.modules.setdefault("astrbot.core", astrbot_core)
+sys.modules.setdefault("astrbot.core.agent", astrbot_core_agent)
+sys.modules.setdefault("astrbot.core.agent.message", astrbot_core_agent_message)
+sys.modules.setdefault("astrbot.core.agent.tool", astrbot_core_agent_tool)
+sys.modules.setdefault("astrbot.core.star", astrbot_core_star)
+sys.modules.setdefault("astrbot.core.star.filter", astrbot_core_star_filter)
+sys.modules.setdefault("astrbot.core.star.filter.event_message_type", astrbot_core_star_filter_event)
+
 from astrbot_plugin_topic_concentration.logic import (
     ACTIVATION_WINDOW_SECONDS,
     CANDIDATE_MAX_WAIT_SECONDS,
     DEACTIVATE_MARKER,
+    POKE_BURST_MAX_TIMESTAMPS,
+    POKE_BURST_WINDOW_SECONDS,
+    POKE_MUTE_COOLDOWN_SECONDS,
+    POKE_MUTE_DURATION_MAX_SECONDS,
+    POKE_MUTE_DURATION_MIN_SECONDS,
+    POKE_MUTE_MIN_POKES,
+    POKE_MUTE_TOOL_NAME,
+    POKE_MUTE_TOOL_VALID_SECONDS,
     SKIP_REPLY_MARKER,
     activate_group_chat,
     build_call_intent_prompt,
     build_group_activation_instruction,
+    build_poke_interaction_instruction,
     chat_with_current_provider,
     classify_cotton_candy_call,
     clear_group_activations,
+    clear_poke_interaction_state,
     deactivate_group_chat,
     has_strong_topic_signal,
     is_candidate_request_current,
+    is_poke_mute_tool_eligible,
     is_recent_duplicate_observation,
     looks_like_direct_bot_call,
     looks_like_low_information,
     looks_like_qqbot_fixed_command,
+    mark_poke_mute_success,
     parse_call_intent_response,
     parse_reply_control,
+    pick_poke_mute_duration,
     read_group_activation,
+    read_poke_burst,
+    record_poke_burst,
+    release_poke_mute_claim,
     renew_group_chat_after_reply,
     retry_explicit_visible_reply,
     rewrite_last_assistant_history,
     should_activate_from_poke,
     should_normalize_empty_mention,
+    try_claim_poke_mute,
+    validate_poke_mute_execution,
 )
 from astrbot_plugin_topic_concentration.twin_scheduler import (
     calculate_angel_probability,
@@ -177,6 +313,7 @@ class ObservedMessage:
 class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
     def tearDown(self) -> None:
         clear_group_activations()
+        clear_poke_interaction_state()
         clear_scheduler_state()
 
     def test_decision_uses_only_astrbot_current_provider(self) -> None:
@@ -435,6 +572,496 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
                 target_id="2629227874",
                 bot_ids=bot_ids,
             )
+        )
+
+    def test_poke_burst_window_counts_and_isolates_keys(self) -> None:
+        first = record_poke_burst("10001", "2629227874", "3062317151", now=10.0)
+        second = record_poke_burst("10001", "2629227874", "3062317151", now=40.0)
+        other_user = record_poke_burst("10001", "2629227874", "1111111111", now=41.0)
+        other_bot = record_poke_burst("10001", "1443944862", "3062317151", now=42.0)
+        other_group = record_poke_burst("10002", "2629227874", "3062317151", now=43.0)
+
+        self.assertEqual(first.count, 1)
+        self.assertEqual(second.count, 2)
+        self.assertEqual(other_user.count, 1)
+        self.assertEqual(other_bot.count, 1)
+        self.assertEqual(other_group.count, 1)
+
+        after_first_expires = read_poke_burst(
+            "10001",
+            "2629227874",
+            "3062317151",
+            now=10.0 + POKE_BURST_WINDOW_SECONDS + 0.1,
+        )
+        self.assertIsNotNone(after_first_expires)
+        self.assertEqual(after_first_expires.count, 1)
+        self.assertEqual(after_first_expires.observed_at, 40.0)
+
+        expired = read_poke_burst(
+            "10001",
+            "2629227874",
+            "3062317151",
+            now=40.0 + POKE_BURST_WINDOW_SECONDS + 0.1,
+        )
+        self.assertIsNone(expired)
+
+        rolled = record_poke_burst(
+            "10001",
+            "2629227874",
+            "3062317151",
+            now=40.0 + POKE_BURST_WINDOW_SECONDS + 1.0,
+        )
+        self.assertEqual(rolled.count, 1)
+
+        # Global expiry cleanup: unrelated stale keys are dropped on later record/read.
+        record_poke_burst("20001", "2629227874", "3062317151", now=1.0)
+        record_poke_burst("20002", "2629227874", "3062317151", now=2.0)
+        alive = record_poke_burst("20003", "2629227874", "3062317151", now=1000.0)
+        self.assertEqual(alive.count, 1)
+        self.assertIsNone(read_poke_burst("20001", "2629227874", "3062317151", now=1000.0))
+        self.assertIsNone(read_poke_burst("20002", "2629227874", "3062317151", now=1000.0))
+
+        # Per-key window history is capped.
+        clear_poke_interaction_state()
+        last = None
+        for index in range(POKE_BURST_MAX_TIMESTAMPS + 5):
+            last = record_poke_burst("30001", "2629227874", "3062317151", now=float(index))
+        self.assertIsNotNone(last)
+        self.assertEqual(last.count, POKE_BURST_MAX_TIMESTAMPS)
+
+    def test_poke_interaction_prompt_branches_and_hides_internal_rules(self) -> None:
+        single = build_poke_interaction_instruction(poke_count=1, mute_tool_available=False)
+        light = build_poke_interaction_instruction(poke_count=3, mute_tool_available=True)
+        heavy = build_poke_interaction_instruction(poke_count=8, mute_tool_available=True)
+
+        self.assertIn("具体次数与内部重复等级只供你把握互动节奏", single)
+        self.assertIn("不得直接报出数字次数", single)
+        self.assertIn("首次拍击", single)
+        self.assertIn("不必强制不耐烦", single)
+        self.assertIn("不要机械复用最近回复", single)
+        self.assertIn("可参考当前时间", single)
+        self.assertIn("不能每次机械复述时段", single)
+        self.assertIn("没有开放额外管理工具", single)
+        self.assertNotIn(POKE_MUTE_TOOL_NAME, single)
+        self.assertNotIn("第 1 次", single)
+        self.assertNotIn("第1次", single)
+
+        self.assertIn("刚开始重复拍击", light)
+        self.assertIn("可略带不耐烦", light)
+        self.assertIn(POKE_MUTE_TOOL_NAME, light)
+        self.assertIn("同一请求最多调用一次", light)
+        self.assertIn("是否调用完全由你自主决定", light)
+        self.assertNotIn("非常频繁", light)
+        self.assertNotIn("第 3 次", light)
+        self.assertNotIn("第3次", light)
+        self.assertNotIn("60 秒", light)
+        self.assertNotIn(str(POKE_MUTE_MIN_POKES), light)
+
+        self.assertIn("非常频繁", heavy)
+        self.assertIn("更明显的不耐烦", heavy)
+        self.assertNotEqual(light, heavy)
+        self.assertNotIn("第 8 次", heavy)
+        self.assertNotIn("第8次", heavy)
+        self.assertNotIn(" 8 ", heavy)
+        self.assertNotIn("60 秒", heavy)
+
+    def test_poke_mute_eligibility_claim_cooldown_and_duration_bounds(self) -> None:
+        group_id = "10001"
+        self_id = "2629227874"
+        sender_id = "3062317151"
+        observed_at = 100.0
+
+        self.assertFalse(
+            is_poke_mute_tool_eligible(
+                poke_count=1,
+                observed_at=observed_at,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=100.0,
+            )
+        )
+        self.assertTrue(
+            is_poke_mute_tool_eligible(
+                poke_count=2,
+                observed_at=observed_at,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=100.0,
+            )
+        )
+        self.assertFalse(
+            is_poke_mute_tool_eligible(
+                poke_count=2,
+                observed_at=observed_at,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=observed_at + POKE_MUTE_TOOL_VALID_SECONDS + 0.1,
+            )
+        )
+        self.assertFalse(
+            is_poke_mute_tool_eligible(
+                poke_count=2,
+                observed_at=observed_at + 10.0,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=observed_at,
+            )
+        )
+
+        self.assertEqual(
+            validate_poke_mute_execution(
+                event_group_id=group_id,
+                event_self_id=self_id,
+                event_sender_id=sender_id,
+                captured_sender_id=sender_id,
+                captured_count=2,
+                observed_at=observed_at,
+                now=101.0,
+            ),
+            "",
+        )
+        self.assertEqual(
+            validate_poke_mute_execution(
+                event_group_id=group_id,
+                event_self_id=self_id,
+                event_sender_id=sender_id,
+                captured_sender_id=sender_id,
+                captured_count=2,
+                observed_at=observed_at + 50.0,
+                now=101.0,
+            ),
+            "observation_in_future",
+        )
+
+        # Expired cooldown keys are pruned on later eligibility checks.
+        mark_poke_mute_success(group_id, self_id, "777777777", now=50.0, cooldown_seconds=10.0)
+        self.assertTrue(
+            is_poke_mute_tool_eligible(
+                poke_count=2,
+                observed_at=70.0,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id="777777777",
+                now=70.0,
+            )
+        )
+        self.assertEqual(
+            validate_poke_mute_execution(
+                event_group_id=group_id,
+                event_self_id=self_id,
+                event_sender_id="999",
+                captured_sender_id=sender_id,
+                captured_count=2,
+                observed_at=observed_at,
+                now=101.0,
+            ),
+            "sender_mismatch",
+        )
+
+        self.assertTrue(try_claim_poke_mute(group_id, self_id, sender_id))
+        self.assertFalse(try_claim_poke_mute(group_id, self_id, sender_id))
+        self.assertFalse(
+            is_poke_mute_tool_eligible(
+                poke_count=2,
+                observed_at=observed_at,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=101.0,
+            )
+        )
+        self.assertEqual(
+            validate_poke_mute_execution(
+                event_group_id=group_id,
+                event_self_id=self_id,
+                event_sender_id=sender_id,
+                captured_sender_id=sender_id,
+                captured_count=2,
+                observed_at=observed_at,
+                now=101.0,
+            ),
+            "claim_busy",
+        )
+
+        release_poke_mute_claim(group_id, self_id, sender_id)
+        self.assertTrue(
+            is_poke_mute_tool_eligible(
+                poke_count=2,
+                observed_at=observed_at,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=101.0,
+            )
+        )
+
+        self.assertTrue(try_claim_poke_mute(group_id, self_id, sender_id))
+        mark_poke_mute_success(group_id, self_id, sender_id, now=110.0)
+        self.assertFalse(
+            is_poke_mute_tool_eligible(
+                poke_count=3,
+                observed_at=110.0,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=110.0 + POKE_MUTE_COOLDOWN_SECONDS - 1.0,
+            )
+        )
+        self.assertEqual(
+            validate_poke_mute_execution(
+                event_group_id=group_id,
+                event_self_id=self_id,
+                event_sender_id=sender_id,
+                captured_sender_id=sender_id,
+                captured_count=3,
+                observed_at=110.0,
+                now=110.0 + POKE_MUTE_COOLDOWN_SECONDS - 1.0,
+            ),
+            "cooldown_active",
+        )
+        self.assertTrue(
+            is_poke_mute_tool_eligible(
+                poke_count=3,
+                observed_at=110.0 + POKE_MUTE_COOLDOWN_SECONDS,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=110.0 + POKE_MUTE_COOLDOWN_SECONDS,
+            )
+        )
+
+        # Isolation: another group/self/sender remains eligible while this key cools down.
+        mark_poke_mute_success(group_id, self_id, sender_id, now=200.0)
+        self.assertTrue(
+            is_poke_mute_tool_eligible(
+                poke_count=2,
+                observed_at=200.0,
+                group_id="10002",
+                self_id=self_id,
+                sender_id=sender_id,
+                now=200.0,
+            )
+        )
+
+        fixed = pick_poke_mute_duration(rng=random.Random(0))
+        self.assertGreaterEqual(fixed, POKE_MUTE_DURATION_MIN_SECONDS)
+        self.assertLessEqual(fixed, POKE_MUTE_DURATION_MAX_SECONDS)
+        for seed in range(8):
+            value = pick_poke_mute_duration(rng=random.Random(seed))
+            self.assertGreaterEqual(value, POKE_MUTE_DURATION_MIN_SECONDS)
+            self.assertLessEqual(value, POKE_MUTE_DURATION_MAX_SECONDS)
+
+    def test_poke_mute_main_attach_and_side_effects(self) -> None:
+        import time as time_mod
+
+        from astrbot_plugin_topic_concentration import main as topic_main
+
+        plugin = topic_main.TopicConcentrationPlugin(context=object())
+        group_id = "10001"
+        self_id = "2629227874"
+        sender_id = "3062317151"
+        observed_at = time_mod.monotonic()
+
+        class MuteEvent:
+            def __init__(self) -> None:
+                self._extras: dict[str, object] = {}
+                self.bot = types.SimpleNamespace(call_action=self._call_action)
+                self._private = False
+                self.calls: list[dict] = []
+                self.fail_with: BaseException | None = None
+
+            def get_group_id(self):
+                return group_id
+
+            def get_self_id(self):
+                return self_id
+
+            def get_sender_id(self):
+                return sender_id
+
+            def is_private_chat(self):
+                return self._private
+
+            def get_extra(self, key, default=""):
+                return self._extras.get(key, default)
+
+            def set_extra(self, key, value):
+                self._extras[key] = value
+
+            async def _call_action(self, action, **kwargs):
+                self.calls.append({"action": action, **kwargs})
+                if self.fail_with is not None:
+                    raise self.fail_with
+
+        class MuteReq:
+            def __init__(self) -> None:
+                self.func_tool = None
+                self.extra_user_content_parts: list = []
+
+        # First poke: tool not attached.
+        first_event = MuteEvent()
+        first_event.set_extra(topic_main.POKE_INTERACTION_EXTRA, "1")
+        first_event.set_extra(topic_main.POKE_SENDER_EXTRA, sender_id)
+        first_event.set_extra(topic_main.POKE_COUNT_EXTRA, 1)
+        first_event.set_extra(topic_main.POKE_OBSERVED_AT_EXTRA, observed_at)
+        first_req = MuteReq()
+        self.assertFalse(
+            topic_main._maybe_attach_poke_mute_tool(plugin, first_event, first_req, poke_count=1)
+        )
+        self.assertIsNone(first_req.func_tool)
+
+        # Repeated poke: request-level tool with locked schema.
+        event = MuteEvent()
+        event.set_extra(topic_main.POKE_INTERACTION_EXTRA, "1")
+        event.set_extra(topic_main.POKE_SENDER_EXTRA, sender_id)
+        event.set_extra(topic_main.POKE_COUNT_EXTRA, 3)
+        event.set_extra(topic_main.POKE_OBSERVED_AT_EXTRA, observed_at)
+        event.set_extra(topic_main.LLM_ROUTE_EXTRA, topic_main.ROUTE_EXPLICIT)
+        req = MuteReq()
+        self.assertTrue(topic_main._maybe_attach_poke_mute_tool(plugin, event, req, poke_count=3))
+        self.assertIsNotNone(req.func_tool)
+        self.assertEqual(req.func_tool.names(), [POKE_MUTE_TOOL_NAME])
+        schema = req.func_tool.tools[0].parameters
+        self.assertEqual(schema.get("additionalProperties"), False)
+        self.assertEqual(set(schema.get("properties", {})), {"reason"})
+        self.assertNotIn("user_id", schema.get("properties", {}))
+        self.assertNotIn("group_id", schema.get("properties", {}))
+        self.assertNotIn("duration", schema.get("properties", {}))
+
+        # Success: fixed sender, duration bounds, cooldown, event attempt gate.
+        result = asyncio.run(plugin.qqbot_mute_repeated_poker(event, reason="too many"))
+        self.assertTrue(result.startswith("mute_success: duration_seconds="))
+        duration = int(result.rsplit("=", 1)[-1])
+        self.assertGreaterEqual(duration, POKE_MUTE_DURATION_MIN_SECONDS)
+        self.assertLessEqual(duration, POKE_MUTE_DURATION_MAX_SECONDS)
+        self.assertEqual(len(event.calls), 1)
+        self.assertEqual(event.calls[0]["action"], "set_group_ban")
+        self.assertEqual(event.calls[0]["group_id"], int(group_id))
+        self.assertEqual(event.calls[0]["user_id"], int(sender_id))
+        self.assertEqual(event.calls[0]["duration"], duration)
+        self.assertEqual(event.get_extra(topic_main.POKE_MUTE_ATTEMPTED_EXTRA, ""), "1")
+        self.assertFalse(
+            is_poke_mute_tool_eligible(
+                poke_count=4,
+                observed_at=observed_at,
+                group_id=group_id,
+                self_id=self_id,
+                sender_id=sender_id,
+                now=observed_at + 1.0,
+            )
+        )
+
+        # Same event second call: stable already_attempted, no extra API call.
+        second = asyncio.run(plugin.qqbot_mute_repeated_poker(event, reason="retry"))
+        self.assertEqual(second, "mute_rejected: already_attempted")
+        self.assertEqual(len(event.calls), 1)
+
+        # Ordinary failure releases global claim; new event can re-decide without cooldown
+        # only after claim release — cooldown only on success. Use a fresh key.
+        clear_poke_interaction_state()
+        fail_event = MuteEvent()
+        fail_event.set_extra(topic_main.POKE_INTERACTION_EXTRA, "1")
+        fail_event.set_extra(topic_main.POKE_SENDER_EXTRA, sender_id)
+        fail_event.set_extra(topic_main.POKE_COUNT_EXTRA, 2)
+        fail_event.set_extra(topic_main.POKE_OBSERVED_AT_EXTRA, observed_at)
+        fail_event.set_extra(topic_main.LLM_ROUTE_EXTRA, topic_main.ROUTE_EXPLICIT)
+        fail_event.fail_with = RuntimeError("ban_failed")
+        failed = asyncio.run(plugin.qqbot_mute_repeated_poker(fail_event))
+        self.assertEqual(failed, "mute_failed: RuntimeError")
+        self.assertEqual(fail_event.get_extra(topic_main.POKE_MUTE_ATTEMPTED_EXTRA, ""), "1")
+        self.assertEqual(
+            validate_poke_mute_execution(
+                event_group_id=group_id,
+                event_self_id=self_id,
+                event_sender_id=sender_id,
+                captured_sender_id=sender_id,
+                captured_count=2,
+                observed_at=observed_at,
+                now=observed_at + 1.0,
+            ),
+            "",
+        )
+        # Same event cannot re-call API after failure gate.
+        again = asyncio.run(plugin.qqbot_mute_repeated_poker(fail_event))
+        self.assertEqual(again, "mute_rejected: already_attempted")
+        self.assertEqual(len(fail_event.calls), 1)
+
+        # CancelledError propagates and still releases claim / marks attempted.
+        clear_poke_interaction_state()
+        cancel_event = MuteEvent()
+        cancel_event.set_extra(topic_main.POKE_INTERACTION_EXTRA, "1")
+        cancel_event.set_extra(topic_main.POKE_SENDER_EXTRA, sender_id)
+        cancel_event.set_extra(topic_main.POKE_COUNT_EXTRA, 2)
+        cancel_event.set_extra(topic_main.POKE_OBSERVED_AT_EXTRA, observed_at)
+        cancel_event.set_extra(topic_main.LLM_ROUTE_EXTRA, topic_main.ROUTE_EXPLICIT)
+        cancel_event.fail_with = asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            asyncio.run(plugin.qqbot_mute_repeated_poker(cancel_event))
+        self.assertEqual(cancel_event.get_extra(topic_main.POKE_MUTE_ATTEMPTED_EXTRA, ""), "1")
+        self.assertEqual(
+            validate_poke_mute_execution(
+                event_group_id=group_id,
+                event_self_id=self_id,
+                event_sender_id=sender_id,
+                captured_sender_id=sender_id,
+                captured_count=2,
+                observed_at=observed_at,
+                now=observed_at + 1.0,
+            ),
+            "",
+        )
+
+        # Representative rejection paths.
+        clear_poke_interaction_state()
+        private = MuteEvent()
+        private._private = True
+        private.set_extra(topic_main.LLM_ROUTE_EXTRA, topic_main.ROUTE_EXPLICIT)
+        private.set_extra(topic_main.POKE_INTERACTION_EXTRA, "1")
+        private.set_extra(topic_main.POKE_SENDER_EXTRA, sender_id)
+        private.set_extra(topic_main.POKE_COUNT_EXTRA, 2)
+        private.set_extra(topic_main.POKE_OBSERVED_AT_EXTRA, observed_at)
+        self.assertEqual(
+            asyncio.run(plugin.qqbot_mute_repeated_poker(private)),
+            "mute_rejected: invalid_route",
+        )
+
+        non_poke = MuteEvent()
+        non_poke.set_extra(topic_main.LLM_ROUTE_EXTRA, topic_main.ROUTE_EXPLICIT)
+        non_poke.set_extra(topic_main.POKE_SENDER_EXTRA, sender_id)
+        non_poke.set_extra(topic_main.POKE_COUNT_EXTRA, 2)
+        non_poke.set_extra(topic_main.POKE_OBSERVED_AT_EXTRA, observed_at)
+        self.assertEqual(
+            asyncio.run(plugin.qqbot_mute_repeated_poker(non_poke)),
+            "mute_rejected: not a repeated poke request",
+        )
+
+        mismatch = MuteEvent()
+        mismatch.set_extra(topic_main.LLM_ROUTE_EXTRA, topic_main.ROUTE_EXPLICIT)
+        mismatch.set_extra(topic_main.POKE_INTERACTION_EXTRA, "1")
+        mismatch.set_extra(topic_main.POKE_SENDER_EXTRA, "999")
+        mismatch.set_extra(topic_main.POKE_COUNT_EXTRA, 2)
+        mismatch.set_extra(topic_main.POKE_OBSERVED_AT_EXTRA, observed_at)
+        self.assertEqual(
+            asyncio.run(plugin.qqbot_mute_repeated_poker(mismatch)),
+            "mute_rejected: sender_mismatch",
+        )
+
+        expired = MuteEvent()
+        expired.set_extra(topic_main.LLM_ROUTE_EXTRA, topic_main.ROUTE_EXPLICIT)
+        expired.set_extra(topic_main.POKE_INTERACTION_EXTRA, "1")
+        expired.set_extra(topic_main.POKE_SENDER_EXTRA, sender_id)
+        expired.set_extra(topic_main.POKE_COUNT_EXTRA, 2)
+        expired.set_extra(
+            topic_main.POKE_OBSERVED_AT_EXTRA,
+            observed_at - POKE_MUTE_TOOL_VALID_SECONDS - 1.0,
+        )
+        self.assertEqual(
+            asyncio.run(plugin.qqbot_mute_repeated_poker(expired)),
+            "mute_rejected: observation_expired",
         )
 
     def test_only_current_bot_at_without_content_is_normalized_as_empty_mention(self) -> None:

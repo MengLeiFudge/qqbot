@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import random
 import re
 import time
 
@@ -10,6 +11,14 @@ ACTIVATION_WINDOW_SECONDS = 180.0
 CANDIDATE_MAX_WAIT_SECONDS = 30.0
 SKIP_REPLY_MARKER = "[[QQBOT_SKIP_REPLY]]"
 DEACTIVATE_MARKER = "[[QQBOT_DEACTIVATE]]"
+POKE_BURST_WINDOW_SECONDS = 60.0
+POKE_BURST_MAX_TIMESTAMPS = 16
+POKE_MUTE_MIN_POKES = 2
+POKE_MUTE_DURATION_MIN_SECONDS = 30
+POKE_MUTE_DURATION_MAX_SECONDS = 90
+POKE_MUTE_COOLDOWN_SECONDS = 90.0
+POKE_MUTE_TOOL_VALID_SECONDS = 120.0
+POKE_MUTE_TOOL_NAME = "qqbot_mute_repeated_poker"
 EXPLICIT_VISIBLE_RETRY_INSTRUCTION = (
     "上一轮没有产生可发送的可见文本。当前消息是用户对你的显式呼叫，"
     "现在必须重新输出至少一句符合你当前人格的简短可见回复，不能只输出任何内部控制标记。"
@@ -116,8 +125,22 @@ class ReplyControlDecision:
     deactivate: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class PokeBurstObservation:
+    """Internal observation of poke burst count and timing for rhythm judgment only.
+    Do not expose count, duration, or window length to users or external contexts."""
+    group_id: str
+    self_id: str
+    sender_id: str
+    count: int
+    observed_at: float
+
+
 _GROUP_ACTIVATIONS: dict[tuple[str, str], GroupActivationState] = {}
 _GROUP_ACTIVATION_GENERATIONS: dict[tuple[str, str], int] = {}
+_POKE_BURST_TIMESTAMPS: dict[tuple[str, str, str], list[float]] = {}
+_POKE_MUTE_CLAIMS: set[tuple[str, str, str]] = set()
+_POKE_MUTE_COOLDOWNS: dict[tuple[str, str, str], float] = {}
 
 
 def contains_cotton_candy_marker(text: str) -> bool:
@@ -320,6 +343,240 @@ def deactivate_group_chat(
 def clear_group_activations() -> None:
     _GROUP_ACTIVATIONS.clear()
     _GROUP_ACTIVATION_GENERATIONS.clear()
+
+
+def clear_poke_interaction_state() -> None:
+    """Clear in-memory poke burst counts, mute claims, and cooldowns."""
+    _POKE_BURST_TIMESTAMPS.clear()
+    _POKE_MUTE_CLAIMS.clear()
+    _POKE_MUTE_COOLDOWNS.clear()
+
+
+def record_poke_burst(
+    group_id: object,
+    self_id: object,
+    sender_id: object,
+    *,
+    now: float | None = None,
+    window_seconds: float = POKE_BURST_WINDOW_SECONDS,
+) -> PokeBurstObservation | None:
+    """Record one poke into the bounded group+self+sender burst window."""
+    key = _poke_key(group_id, self_id, sender_id)
+    if key is None:
+        return None
+    current = time.monotonic() if now is None else now
+    _prune_poke_global_state(now=current, window_seconds=window_seconds)
+    stamps = _active_poke_stamps(key, now=current, window_seconds=window_seconds)
+    stamps.append(current)
+    if len(stamps) > POKE_BURST_MAX_TIMESTAMPS:
+        stamps = stamps[-POKE_BURST_MAX_TIMESTAMPS:]
+    _POKE_BURST_TIMESTAMPS[key] = stamps
+    return PokeBurstObservation(
+        group_id=key[0],
+        self_id=key[1],
+        sender_id=key[2],
+        count=len(stamps),
+        observed_at=current,
+    )
+
+
+def read_poke_burst(
+    group_id: object,
+    self_id: object,
+    sender_id: object,
+    *,
+    now: float | None = None,
+    window_seconds: float = POKE_BURST_WINDOW_SECONDS,
+) -> PokeBurstObservation | None:
+    """Read the current poke burst observation for a group+self+sender key."""
+    key = _poke_key(group_id, self_id, sender_id)
+    if key is None:
+        return None
+    current = time.monotonic() if now is None else now
+    _prune_poke_global_state(now=current, window_seconds=window_seconds)
+    stamps = _active_poke_stamps(key, now=current, window_seconds=window_seconds)
+    if not stamps:
+        return None
+    return PokeBurstObservation(
+        group_id=key[0],
+        self_id=key[1],
+        sender_id=key[2],
+        count=len(stamps),
+        observed_at=stamps[-1],
+    )
+
+
+def is_poke_mute_tool_eligible(
+    *,
+    poke_count: int,
+    observed_at: float,
+    group_id: object,
+    self_id: object,
+    sender_id: object,
+    now: float | None = None,
+    min_pokes: int = POKE_MUTE_MIN_POKES,
+    tool_valid_seconds: float = POKE_MUTE_TOOL_VALID_SECONDS,
+) -> bool:
+    """Return whether a request-scoped poke mute tool may be attached now."""
+    key = _poke_key(group_id, self_id, sender_id)
+    if key is None:
+        return False
+    if int(poke_count) < max(1, int(min_pokes)):
+        return False
+    current = time.monotonic() if now is None else now
+    _prune_poke_global_state(now=current)
+    observed = float(observed_at)
+    if observed <= 0:
+        return False
+    if observed > current:
+        return False
+    if current - observed > max(0.0, float(tool_valid_seconds)):
+        return False
+    if key in _POKE_MUTE_CLAIMS:
+        return False
+    cooldown_until = _POKE_MUTE_COOLDOWNS.get(key)
+    if cooldown_until is not None and cooldown_until > current:
+        return False
+    return True
+
+
+def try_claim_poke_mute(
+    group_id: object,
+    self_id: object,
+    sender_id: object,
+) -> bool:
+    """Acquire the exclusive in-flight mute claim for one poke key."""
+    key = _poke_key(group_id, self_id, sender_id)
+    if key is None:
+        return False
+    if key in _POKE_MUTE_CLAIMS:
+        return False
+    _POKE_MUTE_CLAIMS.add(key)
+    return True
+
+
+def release_poke_mute_claim(
+    group_id: object,
+    self_id: object,
+    sender_id: object,
+) -> None:
+    """Release a mute claim after failure or cancellation without success cooldown."""
+    key = _poke_key(group_id, self_id, sender_id)
+    if key is None:
+        return
+    _POKE_MUTE_CLAIMS.discard(key)
+
+
+def mark_poke_mute_success(
+    group_id: object,
+    self_id: object,
+    sender_id: object,
+    *,
+    now: float | None = None,
+    cooldown_seconds: float = POKE_MUTE_COOLDOWN_SECONDS,
+) -> None:
+    """Clear claim and start success cooldown after a completed mute."""
+    key = _poke_key(group_id, self_id, sender_id)
+    if key is None:
+        return
+    current = time.monotonic() if now is None else now
+    _POKE_MUTE_CLAIMS.discard(key)
+    _POKE_MUTE_COOLDOWNS[key] = current + max(0.0, float(cooldown_seconds))
+
+
+def pick_poke_mute_duration(
+    *,
+    rng: random.Random | None = None,
+    min_seconds: int = POKE_MUTE_DURATION_MIN_SECONDS,
+    max_seconds: int = POKE_MUTE_DURATION_MAX_SECONDS,
+) -> int:
+    """Pick a random short mute duration within the configured bounds."""
+    low = max(1, int(min_seconds))
+    high = max(low, int(max_seconds))
+    chooser = rng if rng is not None else random
+    return int(chooser.randint(low, high))
+
+
+def validate_poke_mute_execution(
+    *,
+    event_group_id: object,
+    event_self_id: object,
+    event_sender_id: object,
+    captured_sender_id: object,
+    captured_count: int,
+    observed_at: float,
+    now: float | None = None,
+    min_pokes: int = POKE_MUTE_MIN_POKES,
+    tool_valid_seconds: float = POKE_MUTE_TOOL_VALID_SECONDS,
+) -> str:
+    """Return empty string when execution may proceed, otherwise a stable failure code."""
+    group_key = str(event_group_id or "").strip()
+    self_key = str(event_self_id or "").strip()
+    sender_key = str(event_sender_id or "").strip()
+    captured_sender = str(captured_sender_id or "").strip()
+    if not group_key or not self_key or not sender_key:
+        return "invalid_event"
+    if not captured_sender or captured_sender != sender_key:
+        return "sender_mismatch"
+    if int(captured_count) < max(1, int(min_pokes)):
+        return "count_below_threshold"
+    current = time.monotonic() if now is None else now
+    _prune_poke_global_state(now=current)
+    observed = float(observed_at)
+    if observed <= 0:
+        return "observation_expired"
+    if observed > current:
+        return "observation_in_future"
+    if current - observed > max(0.0, float(tool_valid_seconds)):
+        return "observation_expired"
+    key = (group_key, self_key, sender_key)
+    cooldown_until = _POKE_MUTE_COOLDOWNS.get(key)
+    if cooldown_until is not None and cooldown_until > current:
+        return "cooldown_active"
+    if key in _POKE_MUTE_CLAIMS:
+        return "claim_busy"
+    return ""
+
+
+def build_poke_interaction_instruction(
+    *,
+    poke_count: int,
+    mute_tool_available: bool,
+) -> str:
+    """Build poke reply guidance using qualitative rhythm only, never raw counts."""
+    count = max(1, int(poke_count))
+    lines = [
+        "当前用户通过拍一拍直接叫到了你。这是一次显式互动，你必须给出至少一句可见的简短回复。",
+        "具体次数与内部重复等级只供你把握互动节奏；最终回复不得直接报出数字次数、‘第几次’、重复等级或窗口长度。",
+        "结合当前人格、会话上下文和当下氛围自然回应；允许吐槽、接梗或轻松反应，但不要机械复用最近回复的句式、意象、时段/作息/放假/跑路等笑点。",
+        "可参考当前时间，但只有能形成新切入点时才使用，不能每次机械复述时段。",
+        "每次拍一拍的措辞和切入点都要有变化，避免模板化口癖堆砌。",
+        "不要解释插件规则、计数机制、工具权限或处理流程。",
+    ]
+    if count >= 8:
+        lines.append(
+            "内部节奏：对方短时内拍击已经非常频繁。可自然表现更明显的不耐烦，但不得固定套用某句，也不得无条件禁言，更不要向用户解释该等级。"
+        )
+    elif count >= 4:
+        lines.append(
+            "内部节奏：对方短时内拍击已明显频繁。可随重复程度自然逐步表现不耐烦，但不得固定套用某句，也不得无条件禁言，更不要向用户解释该等级。"
+        )
+    elif count >= 2:
+        lines.append(
+            "内部节奏：对方刚开始重复拍击。可略带不耐烦，但保持克制，不得固定套用某句，也不得无条件禁言，更不要向用户解释该等级。"
+        )
+    else:
+        lines.append("这是短时内首次拍击，正常自然回应即可，不必强制不耐烦。")
+    if mute_tool_available:
+        lines.append(
+            f"当前请求临时开放工具 {POKE_MUTE_TOOL_NAME}：仅当你判断短时重复拍击已经过头、需要轻微制止时才可调用。"
+            "同一请求最多调用一次，无论成功、失败或拒绝都根据结果收尾，不要在同一轮 agent loop 重试。"
+            "目标与禁言时长由程序固定，你不能也不需要指定用户或秒数；是否调用完全由你自主决定。"
+            "调用后根据工具返回的真实结果用短句收尾；失败时不要谎称已经禁言。"
+        )
+    else:
+        lines.append("当前这次拍一拍没有开放额外管理工具，正常互动回复即可。")
+    return "\n".join(lines)
 
 
 def build_group_activation_instruction(
@@ -675,6 +932,56 @@ def _activation_key(group_id: object, worker_id: object) -> tuple[str, str] | No
     if not group_key or not worker_key:
         return None
     return group_key, worker_key
+
+
+def _poke_key(
+    group_id: object,
+    self_id: object,
+    sender_id: object,
+) -> tuple[str, str, str] | None:
+    group_key = str(group_id or "").strip()
+    self_key = str(self_id or "").strip()
+    sender_key = str(sender_id or "").strip()
+    if not group_key or not self_key or not sender_key:
+        return None
+    return group_key, self_key, sender_key
+
+
+def _active_poke_stamps(
+    key: tuple[str, str, str],
+    *,
+    now: float,
+    window_seconds: float = POKE_BURST_WINDOW_SECONDS,
+) -> list[float]:
+    window = max(0.0, float(window_seconds))
+    stamps = [stamp for stamp in _POKE_BURST_TIMESTAMPS.get(key, []) if now - stamp <= window and stamp <= now]
+    if len(stamps) > POKE_BURST_MAX_TIMESTAMPS:
+        stamps = stamps[-POKE_BURST_MAX_TIMESTAMPS:]
+    if stamps:
+        _POKE_BURST_TIMESTAMPS[key] = stamps
+    else:
+        _POKE_BURST_TIMESTAMPS.pop(key, None)
+    return stamps
+
+
+def _prune_poke_global_state(
+    *,
+    now: float,
+    window_seconds: float = POKE_BURST_WINDOW_SECONDS,
+) -> None:
+    window = max(0.0, float(window_seconds))
+    expired_burst_keys = [
+        key
+        for key, stamps in list(_POKE_BURST_TIMESTAMPS.items())
+        if not any(now - stamp <= window and stamp <= now for stamp in stamps)
+    ]
+    for key in expired_burst_keys:
+        _POKE_BURST_TIMESTAMPS.pop(key, None)
+    expired_cooldown_keys = [
+        key for key, until in list(_POKE_MUTE_COOLDOWNS.items()) if until <= now
+    ]
+    for key in expired_cooldown_keys:
+        _POKE_MUTE_COOLDOWNS.pop(key, None)
 
 
 def _history_text_part_value(part) -> str | None:
