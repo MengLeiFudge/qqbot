@@ -23,6 +23,9 @@ from astrbot_plugin_qqbot_features.sub2api_usage import (  # noqa: E402
     build_account_user_ranking,
     build_rolling_user_costs,
     build_user_usage_ranking,
+    current_day_window_start,
+    current_week_window_start,
+    floor_to_hour,
     format_sub2api_http_error,
     format_sub2api_user_name,
     format_sub2api_usage_alert_message,
@@ -34,6 +37,7 @@ from astrbot_plugin_qqbot_features.sub2api_usage import (  # noqa: E402
     parse_sub2api_group_ids,
     parse_sub2api_usage_command,
     retain_failed_account_ranking,
+    thirty_day_window_start,
     update_sub2api_usage_alert_state,
 )
 
@@ -100,7 +104,7 @@ class StubSub2APIHttpClient:
                         ]
                     },
                 }
-            raise AssertionError(f"ordinary rolling windows must not call user-breakdown: {url}")
+            raise AssertionError(f"ordinary fixed windows must not call user-breakdown: {url}")
         if "/api/v1/admin/accounts/" in url and "/usage?" in url:
             return {
                 "code": 0,
@@ -140,22 +144,32 @@ class StubSub2APIHttpClient:
                         {"date": "2026-07-04", "user_id": 2, "actual_cost": 7.0},
                         {"date": "2026-07-11", "user_id": 1, "actual_cost": 60.0},
                         {"date": "2026-07-11", "user_id": 2, "actual_cost": 6.0},
+                        {"date": "2026-07-14", "user_id": 1, "actual_cost": 20.0},
+                        {"date": "2026-07-14", "user_id": 2, "actual_cost": 2.0},
                         {"date": "2026-07-17", "user_id": 1, "actual_cost": 10.0},
                         {"date": "2026-07-17", "user_id": 2, "actual_cost": 1.0},
                     ]
                 else:
+                    # Before-08:00 buckets stay excluded by start_hour filtering.
+                    before_boundary = {
+                        "2026-07-17": {1: 0.25, 2: 0.05},
+                        "2026-07-13": {1: 0.5, 2: 0.05},
+                        "2026-06-17": {1: 0.75, 2: 0.05},
+                    }.get(start_date, {})
                     hourly_costs = {
-                        "2026-07-16": {1: 1.0, 2: 0.1},
-                        "2026-07-10": {1: 2.0, 2: 0.2},
-                        "2026-07-03": {1: 3.0, 2: 0.3},
+                        "2026-07-17": {1: 5.0, 2: 0.5},
+                        "2026-07-13": {1: 3.0, 2: 0.3},
                         "2026-06-17": {1: 4.0, 2: 0.4},
+                        "2026-07-16": {1: 1.0, 2: 0.1},
                     }.get(start_date, {})
                     trend = [
-                        {"date": f"{start_date} 12:00", "user_id": 1, "actual_cost": 999.0},
+                        {"date": f"{start_date} 07:00", "user_id": 1, "actual_cost": before_boundary.get(1, 999.0)},
+                        {"date": f"{start_date} 07:00", "user_id": 2, "actual_cost": before_boundary.get(2, 99.0)},
                         *(
-                            {"date": f"{start_date} 13:00", "user_id": user_id, "actual_cost": actual_cost}
+                            {"date": f"{start_date} 08:00", "user_id": user_id, "actual_cost": actual_cost}
                             for user_id, actual_cost in hourly_costs.items()
                         ),
+                        {"date": f"{start_date} 12:00", "user_id": 1, "actual_cost": 0.0},
                     ]
             return {"code": 0, "data": {"users_trend": trend}}
         raise AssertionError(f"unexpected url: {url}")
@@ -263,7 +277,46 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         self.assertIn("force=true", str(stub.calls[1]["url"]))
         self.assertIn("source=active", str(stub.calls[2]["url"]))
 
-    def test_client_merges_four_rolling_windows_and_hides_zero_spend_users(self) -> None:
+    def test_fixed_business_window_starts_use_shanghai_eight_am(self) -> None:
+        """Day/week/30d boundaries snap to the latest arrived Asia/Shanghai 08:00."""
+        ordinary = datetime(2026, 7, 17, 4, 37, tzinfo=timezone.utc)  # Friday 12:37 +08
+        before_eight = datetime(2026, 7, 17, 7, 59, tzinfo=SUB2API_TIMEZONE)
+        monday_before_eight = datetime(2026, 7, 13, 7, 30, tzinfo=SUB2API_TIMEZONE)
+
+        self.assertEqual(
+            current_day_window_start(ordinary),
+            datetime(2026, 7, 17, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+        self.assertEqual(
+            current_week_window_start(ordinary),
+            datetime(2026, 7, 13, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+        self.assertEqual(
+            thirty_day_window_start(ordinary),
+            datetime(2026, 6, 17, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+        self.assertEqual(
+            current_day_window_start(before_eight),
+            datetime(2026, 7, 16, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+        self.assertEqual(
+            current_week_window_start(before_eight),
+            datetime(2026, 7, 13, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+        self.assertEqual(
+            thirty_day_window_start(before_eight),
+            datetime(2026, 6, 16, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+        self.assertEqual(
+            current_day_window_start(monday_before_eight),
+            datetime(2026, 7, 12, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+        self.assertEqual(
+            current_week_window_start(monday_before_eight),
+            datetime(2026, 7, 6, 8, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+
+    def test_client_merges_three_fixed_windows_and_hides_zero_spend_users(self) -> None:
         stub = StubSub2APIHttpClient()
         client = Sub2APIClient(
             base_url="https://ai.example.com",
@@ -278,14 +331,14 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         )
 
         self.assertEqual([usage.user_id for usage in ranking], [1, 2])
-        self.assertEqual(ranking[0].last_24_hours_actual_cost, 11.0)
-        self.assertEqual(ranking[0].seven_day_actual_cost, 72.0)
-        self.assertEqual(ranking[0].fourteen_day_actual_cost, 143.0)
-        self.assertEqual(ranking[0].thirty_day_actual_cost, 304.0)
-        self.assertAlmostEqual(ranking[1].last_24_hours_actual_cost, 1.1)
-        self.assertAlmostEqual(ranking[1].seven_day_actual_cost, 7.2)
-        self.assertAlmostEqual(ranking[1].fourteen_day_actual_cost, 14.3)
-        self.assertAlmostEqual(ranking[1].thirty_day_actual_cost, 30.4)
+        self.assertEqual(ranking[0].current_day_actual_cost, 5.0)
+        self.assertEqual(ranking[0].current_week_actual_cost, 33.0)
+        self.assertEqual(ranking[0].thirty_day_actual_cost, 324.0)
+        self.assertFalse(hasattr(ranking[0], "last_24_hours_actual_cost"))
+        self.assertFalse(hasattr(ranking[0], "fourteen_day_actual_cost"))
+        self.assertAlmostEqual(ranking[1].current_day_actual_cost, 0.5)
+        self.assertAlmostEqual(ranking[1].current_week_actual_cost, 3.3)
+        self.assertAlmostEqual(ranking[1].thirty_day_actual_cost, 32.4)
 
         hourly_calls = [
             call for call in stub.calls
@@ -293,13 +346,13 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             and "granularity=hour" in str(call["url"])
             and "account_id=" not in str(call["url"])
         ]
-        self.assertEqual(len(hourly_calls), 4)
+        self.assertEqual(len(hourly_calls), 3)
         self.assertEqual(
             {
                 parse_qs(urlparse(str(call["url"])).query)["start_date"][0]
                 for call in hourly_calls
             },
-            {"2026-07-16", "2026-07-10", "2026-07-03", "2026-06-17"},
+            {"2026-07-17", "2026-07-13", "2026-06-17"},
         )
         for call in hourly_calls:
             query = parse_qs(urlparse(str(call["url"])).query)
@@ -328,14 +381,14 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             for call in stub.calls
         ))
 
-    def test_rolling_window_includes_an_exact_start_hour(self) -> None:
+    def test_fixed_window_includes_an_exact_start_hour(self) -> None:
         client = Sub2APIClient(
             base_url="https://ai.example.com",
             admin_api_key="test-admin-key",
             http_client=StubSub2APIHttpClient(),
         )
 
-        window_started_at = datetime(2026, 7, 16, 12, 0, tzinfo=SUB2API_TIMEZONE)
+        window_started_at = datetime(2026, 7, 16, 8, 0, tzinfo=SUB2API_TIMEZONE)
         end_time = datetime(2026, 7, 17, 12, 0, tzinfo=SUB2API_TIMEZONE)
         hourly_costs = asyncio.run(
             client.fetch_hourly_user_costs(
@@ -353,7 +406,7 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual(costs[1], 1010.0)
+        self.assertEqual(costs[1], 11.0)
         self.assertAlmostEqual(costs[2], 1.1)
 
     def test_client_builds_separate_rankings_for_each_account(self) -> None:
@@ -378,13 +431,14 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             for account in accounts
         }
 
+        # resets_at 12:17 floors the cycle start to 12:00, so the 12:00 bucket is included.
         self.assertEqual(
             [(usage.user_id, usage.actual_cost) for usage in rankings[88]],
-            [(1, 21.0), (2, 5.5)],
+            [(1, 1020.0), (2, 5.5)],
         )
         self.assertEqual(
             [(usage.user_id, usage.actual_cost) for usage in rankings[89]],
-            [(2, 4.0), (1, 2.5)],
+            [(1, 1001.5), (2, 4.0)],
         )
         hourly_calls = [
             call for call in stub.calls
@@ -417,6 +471,68 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             query = parse_qs(urlparse(str(call["url"])).query)
             self.assertEqual(query["start_date"], ["2026-07-14"])
             self.assertEqual(query["end_date"], ["2026-07-17"])
+
+    def test_account_cycle_floors_to_the_containing_hour(self) -> None:
+        """A 09:10 cycle start floors to 09:00 instead of skipping that hour bucket."""
+        self.assertEqual(
+            floor_to_hour(datetime(2026, 7, 13, 9, 10, tzinfo=SUB2API_TIMEZONE)),
+            datetime(2026, 7, 13, 9, 0, tzinfo=SUB2API_TIMEZONE),
+        )
+
+        class FloorHourStub(StubSub2APIHttpClient):
+            async def get_json(self, url: str, *, headers: dict[str, str], timeout: float):
+                if "/api/v1/admin/dashboard/snapshot-v2?" in url and "account_id=" in url:
+                    self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+                    return {
+                        "code": 0,
+                        "data": {
+                            "users_trend": [
+                                {"date": "2026-07-13 08:00", "user_id": 1, "actual_cost": 50.0},
+                                {"date": "2026-07-13 09:00", "user_id": 1, "actual_cost": 7.0},
+                                {"date": "2026-07-13 09:00", "user_id": 2, "actual_cost": 1.5},
+                                {"date": "2026-07-13 10:00", "user_id": 1, "actual_cost": 3.0},
+                            ]
+                        },
+                    }
+                return await super().get_json(url, headers=headers, timeout=timeout)
+
+        stub = FloorHourStub()
+        client = Sub2APIClient(
+            base_url="https://ai.example.com",
+            admin_api_key="test-admin-key",
+            http_client=stub,
+        )
+        account = Sub2APIAccountUsage(
+            account_id=88,
+            name="Main",
+            seven_day=Sub2APIUsageWindow(resets_at="2026-07-20T09:10:00+08:00"),
+        )
+        users = (
+            Sub2APIUserUsage(user_id=1),
+            Sub2APIUserUsage(user_id=2),
+        )
+
+        ranking = asyncio.run(
+            client.get_account_seven_day_ranking(
+                account,
+                users,
+                now=datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+
+        self.assertEqual(ranking[0].user_id, 1)
+        self.assertEqual(ranking[0].actual_cost, 30.0)
+        self.assertEqual(ranking[1].actual_cost, 6.5)
+        hourly_calls = [
+            call for call in stub.calls
+            if "/api/v1/admin/dashboard/snapshot-v2?" in str(call["url"])
+            and "account_id=" in str(call["url"])
+        ]
+        self.assertEqual(len(hourly_calls), 1)
+        self.assertEqual(
+            parse_qs(urlparse(str(hourly_calls[0]["url"])).query)["start_date"],
+            ["2026-07-13"],
+        )
 
     def test_account_cycle_includes_an_exact_start_hour(self) -> None:
         """An exact reset-derived start hour is included rather than rounded away."""
@@ -552,7 +668,7 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "最多返回 200 位用户"):
             asyncio.run(client.get_user_usage_ranking())
 
-    def test_user_ranking_uses_four_actual_cost_windows_and_username_or_masked_email(self) -> None:
+    def test_user_ranking_uses_three_actual_cost_windows_and_username_or_masked_email(self) -> None:
         ranking = build_user_usage_ranking(
             [
                 {"id": 1, "username": "", "email": "one@example.com"},
@@ -561,7 +677,6 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
             ],
             {1: 5.0, 2: 10.0},
             {1: 10.0, 2: 10.0},
-            {1: 20.0, 2: 5.0},
             {1: 2.0, 2: 5.0},
         )
 
@@ -570,8 +685,9 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         self.assertEqual(format_sub2api_user_name(ranking[1]), "o*e@example.com")
         self.assertEqual(mask_sub2api_email("605738729@qq.com"), "605***729@qq.com")
         self.assertEqual(mask_sub2api_email("tursom@foxmail.com"), "tu**om@foxmail.com")
-        self.assertEqual(ranking[0].last_24_hours_actual_cost, 10.0)
-        self.assertEqual(ranking[0].seven_day_actual_cost, 10.0)
+        self.assertEqual(ranking[0].current_day_actual_cost, 10.0)
+        self.assertEqual(ranking[0].current_week_actual_cost, 10.0)
+        self.assertEqual(ranking[0].thirty_day_actual_cost, 5.0)
 
     def test_usage_cache_keeps_one_shared_snapshot(self) -> None:
         cache = Sub2APIUsageCache()
@@ -613,7 +729,7 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         self.assertIn("当前 5h：95%", message)
 
     def test_text_fallback_masks_email_and_reports_per_account_stale_errors(self) -> None:
-        """Text fallback mirrors per-account stale state and the global four-window table."""
+        """Text fallback mirrors per-account stale state and the global three-window table."""
         snapshot = Sub2APIUsageSnapshot(
             accounts=(
                 Sub2APIAccountUsage(
@@ -642,7 +758,6 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
                 {2: 1.0},
                 {},
                 {},
-                {},
             )),
             accounts_error="HTTP 502",
             users_error="timeout",
@@ -654,8 +769,10 @@ class AstrBotSub2APIUsageTest(unittest.TestCase):
         self.assertIn("刷新失败，已保留上次成功缓存：stats timeout", message)
         self.assertIn("b*b@example.com：$0.75", message)
         self.assertIn("用户刷新失败：timeout", message)
-        self.assertIn("全账号滚动消费榜（24h / 7d / 14d / 30d）：", message)
-        self.assertIn("b*b@example.com：24h $1.00", message)
+        self.assertIn("全账号消费榜（当日 / 本周 / 30d，Asia/Shanghai 08:00 边界）：", message)
+        self.assertIn("b*b@example.com：当日 $1.00", message)
+        self.assertNotIn("24h", message)
+        self.assertNotIn("14d", message)
         self.assertNotIn("用户消费（账号7d", message)
         self.assertIn("最近使用：2026-07-15 02:34", message)
         self.assertIn("更新时间：2026-07-15 02:35", message)

@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins"))
@@ -20,7 +20,21 @@ from astrbot_plugin_qqbot_features.sub2api_usage import (  # noqa: E402
     Sub2APIUsageWindow,
     Sub2APIUserUsage,
 )
-from astrbot_plugin_qqbot_features.sub2api_usage_image import render_sub2api_usage_image  # noqa: E402
+from astrbot_plugin_qqbot_features.sub2api_usage_image import (  # noqa: E402
+    _USER_DAY_COL,
+    _USER_NAME_MAX_WIDTH,
+    _USER_NAME_X,
+    _USER_THIRTY_COL,
+    _USER_WEEK_COL,
+    _ellipsize,
+    _fit_amount_text,
+    _format_amount_compact,
+    _format_amount_plain,
+    _format_amount_scientific,
+    render_sub2api_usage_image,
+    _Fonts,
+    _find_font_path,
+)
 
 
 class AstrBotSub2APIUsageImageTest(unittest.TestCase):
@@ -82,9 +96,8 @@ class AstrBotSub2APIUsageImageTest(unittest.TestCase):
                     user_id=index,
                     username="" if index % 2 else f"global-user-{index}",
                     email=f"user-{index}@example.com",
-                    last_24_hours_actual_cost=float(10 - index),
-                    seven_day_actual_cost=float(8 - index),
-                    fourteen_day_actual_cost=float(12 - index),
+                    current_day_actual_cost=float(10 - index),
+                    current_week_actual_cost=float(8 - index),
                     thirty_day_actual_cost=float(index),
                 )
                 for index in range(1, 9)
@@ -136,6 +149,77 @@ class AstrBotSub2APIUsageImageTest(unittest.TestCase):
                 self.assertEqual(image.width, 1240)
                 self.assertGreater(image.height, 500)
                 self.assertEqual(image.format, "PNG")
+
+    def test_global_amount_columns_are_disjoint_and_fit_large_values(self) -> None:
+        """Large same-row amounts stay inside fixed day/week/30d columns without overlap."""
+        day_left, day_right = _USER_DAY_COL
+        week_left, week_right = _USER_WEEK_COL
+        thirty_left, thirty_right = _USER_THIRTY_COL
+
+        self.assertLess(_USER_NAME_X + _USER_NAME_MAX_WIDTH, day_left)
+        self.assertLess(day_right, week_left)
+        self.assertLess(week_right, thirty_left)
+        self.assertLessEqual(thirty_right, 1176)
+
+        fonts = _Fonts(_find_font_path())
+        probe = Image.new("RGB", (8, 8))
+        draw = ImageDraw.Draw(probe)
+        samples = (
+            (999999.99, day_left, day_right),
+            (8888888.88, week_left, week_right),
+            (77777777.77, thirty_left, thirty_right),
+        )
+        for value, left_x, right_x in samples:
+            plain = _format_amount_plain(value)
+            text, font = _fit_amount_text(draw, fonts, plain, value, right_x - left_x)
+            width = draw.textlength(text, font=font)
+            self.assertLessEqual(width, right_x - left_x)
+            self.assertTrue(text.startswith("$") or text.startswith("-$"))
+            self.assertRegex(text, r"\d+(\.\d{2})?[KMB]?$")
+
+        long_name = "#1  " + ("超长用户名用于验证省略号与金额列互不碰撞" * 4)
+        ellipsized = _ellipsize(draw, fonts.body, long_name, _USER_NAME_MAX_WIDTH)
+        self.assertLessEqual(draw.textlength(ellipsized, font=fonts.body), _USER_NAME_MAX_WIDTH)
+
+        snapshot = Sub2APIUsageSnapshot(
+            users=(
+                Sub2APIUserUsage(
+                    user_id=1,
+                    username="large-amount-user-with-a-very-long-display-name",
+                    email="large@example.com",
+                    current_day_actual_cost=999999.99,
+                    current_week_actual_cost=8888888.88,
+                    thirty_day_actual_cost=77777777.77,
+                ),
+            ),
+            users_refreshed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = render_sub2api_usage_image(snapshot=snapshot, output_dir=Path(directory))
+            with Image.open(image_path) as image:
+                self.assertEqual(image.width, 1240)
+                self.assertEqual(image.format, "PNG")
+
+        self.assertEqual(_format_amount_compact(77777777.77), "$77.78M")
+        self.assertEqual(_format_amount_compact(8888888.88), "$8.89M")
+
+    def test_extreme_amounts_fit_fixed_column_min_width(self) -> None:
+        """1e100/1e308 fall back to scientific form that never exceeds the narrowest column."""
+        min_col_width = min(
+            _USER_DAY_COL[1] - _USER_DAY_COL[0],
+            _USER_WEEK_COL[1] - _USER_WEEK_COL[0],
+            _USER_THIRTY_COL[1] - _USER_THIRTY_COL[0],
+        )
+        fonts = _Fonts(_find_font_path())
+        draw = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+        for value in (1e100, 1e308):
+            plain = _format_amount_plain(value)
+            text, font = _fit_amount_text(draw, fonts, plain, value, min_col_width)
+            width = draw.textlength(text, font=font)
+            self.assertLessEqual(width, min_col_width, msg=f"value={value} text={text!r} width={width}")
+            self.assertTrue(text.startswith("$"))
+            self.assertIn("e", text.lower())
+            self.assertEqual(text, _format_amount_scientific(value))
 
 
 if __name__ == "__main__":

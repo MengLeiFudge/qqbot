@@ -36,7 +36,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     payload = {
         "kind": "sub2api-usage",
         "snapshot": asdict(snapshot),
-        "version": 4,
+        "version": 7,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
@@ -84,7 +84,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     draw.text((MARGIN, 36), "Sub2API 用量报告", font=fonts.title, fill=INK)
     draw.text(
         (MARGIN + 2, 98),
-        "各账号当前7d周期榜与额度来自后台缓存；底部消费按 Asia/Shanghai 滚动小时近似统计。",
+        "各账号当前7d周期榜与额度来自后台缓存；底部消费按 Asia/Shanghai 08:00 业务日边界统计。",
         font=fonts.subtitle,
         fill=MUTED,
     )
@@ -112,7 +112,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
             y += ranking_height + 26
 
     y += 18
-    draw.text((MARGIN, y), f"全账号滚动消费榜  共 {len(snapshot.users)} 人", font=fonts.section, fill=INK)
+    draw.text((MARGIN, y), f"全账号消费榜  共 {len(snapshot.users)} 人", font=fonts.section, fill=INK)
     y += 44
     _draw_user_table(draw, fonts, snapshot.users, y)
 
@@ -133,7 +133,7 @@ def _status_height(snapshot: Sub2APIUsageSnapshot) -> int:
 
 
 def _status_lines(snapshot: Sub2APIUsageSnapshot) -> list[tuple[str, tuple[int, int, int]]]:
-    """Describe only global account-list and rolling-user refresh state."""
+    """Describe only global account-list and fixed-window user refresh state."""
     lines: list[tuple[str, tuple[int, int, int]]] = []
     if snapshot.accounts_refreshed_at:
         lines.append((f"账号刷新：{format_datetime(snapshot.accounts_refreshed_at)}", GOOD))
@@ -296,8 +296,18 @@ def _draw_account_ranking_table(
 
 
 def _user_table_height(users: tuple[Sub2APIUserUsage, ...]) -> int:
-    """Measure the global rolling ranking with one explicit empty-state row."""
+    """Measure the global fixed-window ranking with one explicit empty-state row."""
     return 68 + max(1, len(users)) * ROW_HEIGHT
+
+
+# Fixed global ranking amount columns (right-aligned within [left, right]).
+# Geometry keeps a stable gap from the username column and between amount columns.
+_USER_NAME_X = MARGIN + 28
+_USER_DAY_COL = (690, 845)
+_USER_WEEK_COL = (861, 1016)
+_USER_THIRTY_COL = (1032, 1175)
+_USER_NAME_MAX_WIDTH = _USER_DAY_COL[0] - _USER_NAME_X - 16
+_AMOUNT_FONT_SIZES = (25, 22, 20, 18, 16, 14)
 
 
 def _draw_user_table(
@@ -306,21 +316,19 @@ def _draw_user_table(
     users: tuple[Sub2APIUserUsage, ...],
     y: int,
 ) -> None:
-    """Draw the global four-window ranking without any account-cycle aggregate."""
+    """Draw the global day/week/30d ranking without any account-cycle aggregate."""
     height = _user_table_height(users)
     _rounded_rect(draw, (MARGIN, y, CANVAS_WIDTH - MARGIN, y + height), radius=12, fill=PANEL, outline=BORDER)
     header_bottom = y + 68
     draw.rounded_rectangle((MARGIN + 1, y + 1, CANVAS_WIDTH - MARGIN - 1, header_bottom), radius=11, fill=(232, 240, 250))
-    name_x = MARGIN + 28
-    last_24_hours_x = 610
-    seven_x = 760
-    fourteen_x = 900
-    thirty_x = 1040
+    name_x = _USER_NAME_X
+    day_left, day_right = _USER_DAY_COL
+    week_left, week_right = _USER_WEEK_COL
+    thirty_left, thirty_right = _USER_THIRTY_COL
     draw.text((name_x, y + 20), "用户", font=fonts.body_bold, fill=INK)
-    draw.text((last_24_hours_x, y + 22), "近24小时", font=fonts.small, fill=INK)
-    draw.text((seven_x, y + 22), "近7天", font=fonts.small, fill=INK)
-    draw.text((fourteen_x, y + 22), "近14天", font=fonts.small, fill=INK)
-    draw.text((thirty_x, y + 22), "近30天", font=fonts.small, fill=INK)
+    # Header labels sit near each column's right edge without claiming body font width.
+    for label, right_x in (("当日", day_right), ("本周", week_right), ("30d", thirty_right)):
+        draw.text((right_x - draw.textlength(label, font=fonts.small), y + 22), label, font=fonts.small, fill=INK)
     if not users:
         draw.text((name_x, header_bottom + 16), "当前统计周期内暂无消费用户。", font=fonts.body, fill=MUTED)
         return
@@ -328,14 +336,104 @@ def _draw_user_table(
     for index, usage in enumerate(users, start=1):
         if index % 2 == 0:
             draw.rectangle((MARGIN + 1, row_y, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=(248, 250, 253))
-        label = _ellipsize(draw, fonts.body, f"#{index}  {format_sub2api_user_name(usage)}", 470)
+        label = _ellipsize(
+            draw,
+            fonts.body,
+            f"#{index}  {format_sub2api_user_name(usage)}",
+            _USER_NAME_MAX_WIDTH,
+        )
         draw.text((name_x, row_y + 13), label, font=fonts.body, fill=INK)
-        _draw_right_aligned(draw, fonts.body, f"${usage.last_24_hours_actual_cost:.2f}", 735, row_y + 13, GOOD)
-        _draw_right_aligned(draw, fonts.body, f"${usage.seven_day_actual_cost:.2f}", 875, row_y + 13, GOOD)
-        _draw_right_aligned(draw, fonts.body, f"${usage.fourteen_day_actual_cost:.2f}", 1015, row_y + 13, GOOD)
-        _draw_right_aligned(draw, fonts.body, f"${usage.thirty_day_actual_cost:.2f}", 1175, row_y + 13, GOOD)
+        _draw_amount_in_column(
+            draw,
+            fonts,
+            usage.current_day_actual_cost,
+            day_left,
+            day_right,
+            row_y + 13,
+        )
+        _draw_amount_in_column(
+            draw,
+            fonts,
+            usage.current_week_actual_cost,
+            week_left,
+            week_right,
+            row_y + 13,
+        )
+        _draw_amount_in_column(
+            draw,
+            fonts,
+            usage.thirty_day_actual_cost,
+            thirty_left,
+            thirty_right,
+            row_y + 13,
+        )
         draw.line((MARGIN + 1, row_y + ROW_HEIGHT, CANVAS_WIDTH - MARGIN - 1, row_y + ROW_HEIGHT), fill=BORDER, width=1)
         row_y += ROW_HEIGHT
+
+
+def _format_amount_plain(value: float) -> str:
+    """Default money text: currency symbol and two decimal places."""
+    return f"${value:.2f}"
+
+
+def _format_amount_compact(value: float) -> str:
+    """Non-misleading compact money text that still keeps $ and two decimals."""
+    sign = "-" if value < 0 else ""
+    magnitude = abs(value)
+    if magnitude >= 1_000_000_000:
+        return f"{sign}${magnitude / 1_000_000_000:.2f}B"
+    if magnitude >= 1_000_000:
+        return f"{sign}${magnitude / 1_000_000:.2f}M"
+    if magnitude >= 10_000:
+        return f"{sign}${magnitude / 1_000:.2f}K"
+    return _format_amount_plain(value)
+
+
+def _format_amount_scientific(value: float) -> str:
+    """Currency scientific form with two significant decimals, e.g. $1.00e+308."""
+    sign = "-" if value < 0 else ""
+    return f"{sign}${abs(value):.2e}"
+
+
+def _draw_amount_in_column(
+    draw: ImageDraw.ImageDraw,
+    fonts: _Fonts,
+    value: float,
+    left_x: int,
+    right_x: int,
+    y: int,
+) -> None:
+    """Right-align an amount inside a fixed column, shrinking font or compacting text."""
+    max_width = max(1, right_x - left_x)
+    plain = _format_amount_plain(value)
+    text, font = _fit_amount_text(draw, fonts, plain, value, max_width)
+    width = draw.textlength(text, font=font)
+    # Final text is required to fit; right-align within the fixed column.
+    x = right_x - width
+    draw.text((x, y), text, font=font, fill=GOOD)
+
+
+def _fit_amount_text(
+    draw: ImageDraw.ImageDraw,
+    fonts: _Fonts,
+    plain: str,
+    value: float,
+    max_width: int,
+) -> tuple[str, ImageFont.ImageFont]:
+    """Pick plain, compact, then scientific text with the largest fitting font."""
+    candidates = (
+        plain,
+        _format_amount_compact(value),
+        _format_amount_scientific(value),
+    )
+    for text in candidates:
+        for size in _AMOUNT_FONT_SIZES:
+            font = fonts.sized(size)
+            if draw.textlength(text, font=font) <= max_width:
+                return text, font
+    # Scientific at the smallest size is the last guaranteed short form for finite floats.
+    scientific = candidates[-1]
+    return scientific, fonts.sized(_AMOUNT_FONT_SIZES[-1])
 
 
 def _draw_empty_panel(draw: ImageDraw.ImageDraw, fonts: _Fonts, y: int, text: str) -> int:
@@ -388,12 +486,22 @@ def _rounded_rect(
 
 class _Fonts:
     def __init__(self, font_path: str | None) -> None:
-        self.title = _font(font_path, 46)
-        self.subtitle = _font(font_path, 24)
-        self.section = _font(font_path, 31)
-        self.body = _font(font_path, 25)
-        self.body_bold = _font(font_path, 27)
-        self.small = _font(font_path, 22)
+        self._font_path = font_path
+        self._sized: dict[int, ImageFont.ImageFont] = {}
+        self.title = self.sized(46)
+        self.subtitle = self.sized(24)
+        self.section = self.sized(31)
+        self.body = self.sized(25)
+        self.body_bold = self.sized(27)
+        self.small = self.sized(22)
+
+    def sized(self, size: int) -> ImageFont.ImageFont:
+        """Return a cached truetype/default font for the requested pixel size."""
+        font = self._sized.get(size)
+        if font is None:
+            font = _font(self._font_path, size)
+            self._sized[size] = font
+        return font
 
 
 def _find_font_path() -> str | None:

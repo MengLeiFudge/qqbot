@@ -72,14 +72,13 @@ class Sub2APIAccountUsage:
 
 @dataclass(frozen=True, slots=True)
 class Sub2APIUserUsage:
-    """One user's global rolling actual-cost totals."""
+    """One user's global actual-cost totals over fixed Shanghai business windows."""
 
     user_id: int
     username: str = ""
     email: str = ""
-    last_24_hours_actual_cost: float = 0.0
-    seven_day_actual_cost: float = 0.0
-    fourteen_day_actual_cost: float = 0.0
+    current_day_actual_cost: float = 0.0
+    current_week_actual_cost: float = 0.0
     thirty_day_actual_cost: float = 0.0
 
 
@@ -301,7 +300,7 @@ class Sub2APIClient:
         *,
         now: datetime | None = None,
     ) -> list[Sub2APIUserUsage]:
-        """Fetch four start days before one shared daily trend, then rank visible users."""
+        """Fetch fixed 08:00 business windows before one shared daily trend, then rank users."""
         if not self.base_url:
             raise ValueError("Sub2API 地址还没配置")
         if not self.admin_api_key:
@@ -313,51 +312,48 @@ class Sub2APIClient:
                 f"当前共有 {len(users)} 位用户，无法安全输出完整消费榜。"
             )
         end_time = normalize_sub2api_datetime(now or datetime.now(timezone.utc))
+        day_started_at = current_day_window_start(end_time)
+        week_started_at = current_week_window_start(end_time)
+        thirty_day_started_at = thirty_day_window_start(end_time)
         window_starts = {
-            days: end_time - timedelta(days=days)
-            for days in (1, 7, 14, 30)
+            "day": day_started_at,
+            "week": week_started_at,
+            "thirty_day": thirty_day_started_at,
         }
-        hourly_costs_by_days: dict[int, dict[int, float]] = {}
-        for days, window_started_at in window_starts.items():
-            hourly_costs_by_days[days] = await self.fetch_hourly_user_costs(
+        hourly_costs_by_window: dict[str, dict[int, float]] = {}
+        for window_name, window_started_at in window_starts.items():
+            hourly_costs_by_window[window_name] = await self.fetch_hourly_user_costs(
                 date_value=window_started_at.date(),
-                start_hour=ceil_to_hour(window_started_at),
+                start_hour=window_started_at,
                 end_time=end_time,
             )
-        earliest_full_day = window_starts[30].date() + timedelta(days=1)
+        earliest_full_day = thirty_day_started_at.date() + timedelta(days=1)
         daily_costs_by_date = await self.fetch_daily_user_costs(
             start_date=earliest_full_day,
             end_date=end_time.date(),
         )
-        last_24_hours_costs = build_rolling_user_costs(
-            window_started_at=window_starts[1],
+        current_day_costs = build_rolling_user_costs(
+            window_started_at=day_started_at,
             end_time=end_time,
-            hourly_costs=hourly_costs_by_days[1],
+            hourly_costs=hourly_costs_by_window["day"],
             daily_costs_by_date=daily_costs_by_date,
         )
-        seven_day_costs = build_rolling_user_costs(
-            window_started_at=window_starts[7],
+        current_week_costs = build_rolling_user_costs(
+            window_started_at=week_started_at,
             end_time=end_time,
-            hourly_costs=hourly_costs_by_days[7],
-            daily_costs_by_date=daily_costs_by_date,
-        )
-        fourteen_day_costs = build_rolling_user_costs(
-            window_started_at=window_starts[14],
-            end_time=end_time,
-            hourly_costs=hourly_costs_by_days[14],
+            hourly_costs=hourly_costs_by_window["week"],
             daily_costs_by_date=daily_costs_by_date,
         )
         thirty_day_costs = build_rolling_user_costs(
-            window_started_at=window_starts[30],
+            window_started_at=thirty_day_started_at,
             end_time=end_time,
-            hourly_costs=hourly_costs_by_days[30],
+            hourly_costs=hourly_costs_by_window["thirty_day"],
             daily_costs_by_date=daily_costs_by_date,
         )
         return build_user_usage_ranking(
             users,
-            last_24_hours_costs,
-            seven_day_costs,
-            fourteen_day_costs,
+            current_day_costs,
+            current_week_costs,
             thirty_day_costs,
         )
 
@@ -385,11 +381,11 @@ class Sub2APIClient:
             raise RuntimeError(f"Sub2API 账号 {account.name or account.account_id} 的 7d 重置时间已过期")
         window_started_at = resets_at - timedelta(days=7)
         costs = {usage.user_id: 0.0 for usage in users}
-        first_full_hour = ceil_to_hour(window_started_at)
-        if first_full_hour.date() == window_started_at.date() and first_full_hour <= end_time:
+        first_hour = floor_to_hour(window_started_at)
+        if first_hour.date() == window_started_at.date() and first_hour <= end_time:
             hourly_costs = await self.fetch_hourly_user_costs(
                 date_value=window_started_at.date(),
-                start_hour=first_full_hour,
+                start_hour=first_hour,
                 end_time=end_time,
                 account_id=account.account_id,
             )
@@ -462,7 +458,7 @@ class Sub2APIClient:
         start_date: date,
         end_date: date,
     ) -> dict[date, dict[int, float]]:
-        """Index per-user daily costs so several rolling windows can share one response."""
+        """Index per-user daily costs so several fixed windows can share one response."""
         trend = await self._fetch_user_cost_trend(
             start_date=start_date,
             end_date=end_date,
@@ -637,10 +633,29 @@ def normalize_sub2api_datetime(value: datetime) -> datetime:
     return value.astimezone(SUB2API_TIMEZONE)
 
 
-def ceil_to_hour(value: datetime) -> datetime:
-    """Return the first whole-hour boundary at or after a window start."""
-    hour = value.replace(minute=0, second=0, microsecond=0)
-    return hour if hour == value else hour + timedelta(hours=1)
+def floor_to_hour(value: datetime) -> datetime:
+    """Return the whole-hour boundary at or before a window start."""
+    return value.replace(minute=0, second=0, microsecond=0)
+
+
+def current_day_window_start(now: datetime) -> datetime:
+    """Return the latest Asia/Shanghai 08:00 that has already arrived."""
+    local_now = normalize_sub2api_datetime(now)
+    today_boundary = local_now.replace(hour=8, minute=0, second=0, microsecond=0)
+    if local_now >= today_boundary:
+        return today_boundary
+    return today_boundary - timedelta(days=1)
+
+
+def current_week_window_start(now: datetime) -> datetime:
+    """Return the latest Monday 08:00 Asia/Shanghai that has already arrived."""
+    day_started_at = current_day_window_start(now)
+    return day_started_at - timedelta(days=day_started_at.weekday())
+
+
+def thirty_day_window_start(now: datetime) -> datetime:
+    """Return the current-day 08:00 boundary minus 30 calendar days."""
+    return current_day_window_start(now) - timedelta(days=30)
 
 
 def build_rolling_user_costs(
@@ -663,12 +678,11 @@ def build_rolling_user_costs(
 
 def build_user_usage_ranking(
     users: list[dict[str, Any]],
-    last_24_hours_costs: dict[int, float],
-    seven_day_costs: dict[int, float],
-    fourteen_day_costs: dict[int, float],
+    current_day_costs: dict[int, float],
+    current_week_costs: dict[int, float],
     thirty_day_costs: dict[int, float],
 ) -> list[Sub2APIUserUsage]:
-    """Build the visible ranking from pre-aggregated rolling-window costs."""
+    """Build the visible ranking from pre-aggregated fixed-window costs."""
     results: list[Sub2APIUserUsage] = []
     seen_user_ids: set[int] = set()
     for user in users:
@@ -676,15 +690,13 @@ def build_user_usage_ranking(
         if user_id is None or user_id <= 0 or user_id in seen_user_ids:
             continue
         seen_user_ids.add(user_id)
-        last_24_hours_actual_cost = last_24_hours_costs.get(user_id, 0.0)
-        seven_day_actual_cost = seven_day_costs.get(user_id, 0.0)
-        fourteen_day_actual_cost = fourteen_day_costs.get(user_id, 0.0)
+        current_day_actual_cost = current_day_costs.get(user_id, 0.0)
+        current_week_actual_cost = current_week_costs.get(user_id, 0.0)
         thirty_day_actual_cost = thirty_day_costs.get(user_id, 0.0)
         if not any(
             (
-                last_24_hours_actual_cost,
-                seven_day_actual_cost,
-                fourteen_day_actual_cost,
+                current_day_actual_cost,
+                current_week_actual_cost,
                 thirty_day_actual_cost,
             )
         ):
@@ -694,18 +706,16 @@ def build_user_usage_ranking(
                 user_id=user_id,
                 username=str(user.get("username") or "").strip(),
                 email=str(user.get("email") or "").strip(),
-                last_24_hours_actual_cost=last_24_hours_actual_cost,
-                seven_day_actual_cost=seven_day_actual_cost,
-                fourteen_day_actual_cost=fourteen_day_actual_cost,
+                current_day_actual_cost=current_day_actual_cost,
+                current_week_actual_cost=current_week_actual_cost,
                 thirty_day_actual_cost=thirty_day_actual_cost,
             )
         )
     return sorted(
         results,
         key=lambda usage: (
-            -usage.last_24_hours_actual_cost,
-            -usage.seven_day_actual_cost,
-            -usage.fourteen_day_actual_cost,
+            -usage.current_day_actual_cost,
+            -usage.current_week_actual_cost,
             -usage.thirty_day_actual_cost,
             usage.user_id,
         ),
@@ -792,7 +802,7 @@ def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
                 f"{user_index}. {format_sub2api_user_name(usage)}："
                 f"${usage.actual_cost:.2f}"
             )
-    lines.append("全账号滚动消费榜（24h / 7d / 14d / 30d）：")
+    lines.append("全账号消费榜（当日 / 本周 / 30d，Asia/Shanghai 08:00 边界）：")
     if snapshot.users_refreshed_at:
         lines.append(f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}")
     if snapshot.users_error:
@@ -802,9 +812,8 @@ def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
     for index, usage in enumerate(snapshot.users, start=1):
         lines.append(
             f"{index}. {format_sub2api_user_name(usage)}："
-            f"24h ${usage.last_24_hours_actual_cost:.2f}，"
-            f"7d ${usage.seven_day_actual_cost:.2f}，"
-            f"14d ${usage.fourteen_day_actual_cost:.2f}，"
+            f"当日 ${usage.current_day_actual_cost:.2f}，"
+            f"本周 ${usage.current_week_actual_cost:.2f}，"
             f"30d ${usage.thirty_day_actual_cost:.2f}"
         )
     return "\n".join(lines)
