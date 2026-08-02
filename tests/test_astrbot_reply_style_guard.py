@@ -31,7 +31,8 @@ class Nodes:
 
 
 class Forward:
-    pass
+    def __init__(self, forward_id: str = "") -> None:
+        self.id = forward_id
 
 
 class Node:
@@ -55,7 +56,7 @@ chain_parser_stub = types.ModuleType("astrbot.core.utils.quoted_message.chain_pa
 
 class OneBotPayloadParser:
     def parse_get_forward_payload(self, payload):
-        return {"text": "", "forward_ids": []}
+        return payload
 
 
 chain_parser_stub.OneBotPayloadParser = OneBotPayloadParser
@@ -81,6 +82,87 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_followup
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_markdown_syntax
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_model_regex_segmenting
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_both_targeted_reply_instruction_text
+from astrbot_plugin_qqbot_features.reply_style_guard_runtime import extract_onebot_forward_text
+
+
+class ForwardEvent:
+    def __init__(self, forward_ids: list[str], payloads: dict[str, object]) -> None:
+        self._messages = [Forward(forward_id) for forward_id in forward_ids]
+        self._payloads = payloads
+        self.calls: list[str] = []
+        self.bot = types.SimpleNamespace(call_action=self.call_action)
+
+    def get_messages(self):
+        return self._messages
+
+    async def call_action(self, action: str, **params):
+        self.assert_action(action)
+        forward_id = str(params.get("message_id", params.get("id", "")))
+        self.calls.append(forward_id)
+        result = self._payloads[forward_id]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    @staticmethod
+    def assert_action(action: str) -> None:
+        if action != "get_forward_msg":
+            raise AssertionError(f"unexpected OneBot action: {action}")
+
+
+class AstrBotForwardMessageTest(unittest.IsolatedAsyncioTestCase):
+    async def test_extracts_top_level_forward_as_one_text(self) -> None:
+        event = ForwardEvent(
+            ["outer"],
+            {"outer": {"text": "第一条\n第二条", "forward_ids": []}},
+        )
+
+        text = await extract_onebot_forward_text(event)
+
+        self.assertEqual(text, "第一条\n第二条")
+        self.assertEqual(event.calls, ["outer"])
+
+    async def test_nested_failure_keeps_readable_outer_text(self) -> None:
+        event = ForwardEvent(
+            ["outer"],
+            {
+                "outer": {"text": "外层正文", "forward_ids": ["inner"]},
+                "inner": RuntimeError("forward message expired"),
+            },
+        )
+
+        text = await extract_onebot_forward_text(event)
+
+        self.assertEqual(text, "外层正文")
+        self.assertEqual(event.calls[0], "outer")
+        self.assertIn("inner", event.calls)
+
+    async def test_top_level_failure_returns_empty_text(self) -> None:
+        event = ForwardEvent(
+            ["expired"],
+            {"expired": RuntimeError("forward message expired")},
+        )
+
+        text = await extract_onebot_forward_text(event)
+
+        self.assertEqual(text, "")
+        self.assertTrue(event.calls)
+        self.assertEqual(set(event.calls), {"expired"})
+
+    async def test_aggregates_multiple_forwards_and_readable_nested_content(self) -> None:
+        event = ForwardEvent(
+            ["first", "second"],
+            {
+                "first": {"text": "第一组", "forward_ids": ["inner"]},
+                "second": {"text": "第二组", "forward_ids": []},
+                "inner": {"text": "内层补充", "forward_ids": []},
+            },
+        )
+
+        text = await extract_onebot_forward_text(event)
+
+        self.assertEqual(text, "第一组\n第二组\n内层补充")
+        self.assertEqual(event.calls, ["first", "second", "inner"])
 
 
 class AstrBotReplyStyleGuardTest(unittest.TestCase):

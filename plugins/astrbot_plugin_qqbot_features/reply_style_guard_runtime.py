@@ -78,7 +78,11 @@ async def extract_onebot_forward_text(event: object, *, max_fetch: int = 6) -> s
             continue
         seen.add(forward_id)
         fetch_count += 1
-        payload = await _call_onebot_action_compat(call_action, "get_forward_msg", forward_id)
+        payload = await _call_onebot_action_compat(
+            call_action,
+            "get_forward_msg",
+            forward_id,
+        )
         if not isinstance(payload, dict):
             continue
         parsed = parser.parse_get_forward_payload(payload)
@@ -123,12 +127,9 @@ async def _call_onebot_action_compat(call_action, action: str, message_id: str):
     if str(message_id).isdigit():
         int_id = int(message_id)
         params_list.extend([{"message_id": int_id}, {"id": int_id}])
-    last_error: Exception | None = None
     for params in params_list:
         try:
             return await _call_maybe_async(call_action, action, **params)
-        except Exception as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
+        except Exception:
+            continue
     return None
