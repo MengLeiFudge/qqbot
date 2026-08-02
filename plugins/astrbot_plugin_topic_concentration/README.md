@@ -8,6 +8,8 @@
 
 它不直接发送最终回复，不自己选择模型，不再 patch AstrBot Core 的 `GroupChatContext.need_active_reply`。provider、模型切换和回退链只使用 AstrBot 当前会话配置。
 
+本文档是本仓库拍一拍（Poke）状态机的唯一叙述性行为合同主真源：项目 `AGENTS.md`、根 `README.md` 和 `astrbot_plugin_qqbot_features` 的 README 只保留边界摘要与阅读路由。修改拍一拍行为前必须先阅读本文档，并同步阅读机械回归测试 `tests/test_astrbot_topic_concentration_plugin.py`。
+
 ## 核心行为
 
 - 直接 @ 当前 bot、引用当前 bot 或明确命名呼叫时，当前消息进入普通 LLM 链路，并把该 bot 在当前群激活 3 分钟。拍一拍当前 bot 走拍一拍状态机（见下文），非 MUTE 状态归一化为显式呼叫进入 LLM，仅实际发送可见文字回复才激活当前 bot。
