@@ -154,27 +154,37 @@ from astrbot_plugin_topic_concentration.logic import (
     ACTIVATION_WINDOW_SECONDS,
     CANDIDATE_MAX_WAIT_SECONDS,
     DEACTIVATE_MARKER,
+    POKE_AI_COOLDOWN_SECONDS,
+    POKE_BACK_TOOL_NAME,
     POKE_BURST_MAX_TIMESTAMPS,
     POKE_BURST_WINDOW_SECONDS,
     POKE_MUTE_COOLDOWN_SECONDS,
     POKE_MUTE_DURATION_MAX_SECONDS,
     POKE_MUTE_DURATION_MIN_SECONDS,
     POKE_MUTE_MIN_POKES,
+    POKE_MUTE_STATE_SECONDS,
     POKE_MUTE_TOOL_NAME,
     POKE_MUTE_TOOL_VALID_SECONDS,
+    POKE_STATE_ANNOYED,
+    POKE_STATE_ARMED,
+    POKE_STATE_CALM,
+    POKE_STATE_MUTE,
     SKIP_REPLY_MARKER,
     activate_group_chat,
     build_call_intent_prompt,
     build_group_activation_instruction,
     build_poke_interaction_instruction,
+    can_mute_poker,
     chat_with_current_provider,
     classify_cotton_candy_call,
     clear_group_activations,
     clear_poke_interaction_state,
+    enter_poke_mute,
     deactivate_group_chat,
     has_strong_topic_signal,
     is_candidate_request_current,
     is_poke_mute_tool_eligible,
+    is_poke_request_current,
     is_recent_duplicate_observation,
     looks_like_direct_bot_call,
     looks_like_low_information,
@@ -185,13 +195,17 @@ from astrbot_plugin_topic_concentration.logic import (
     pick_poke_mute_duration,
     read_group_activation,
     read_poke_burst,
+    read_poke_generation,
+    rebuild_poke_display_text,
     record_poke_burst,
+    release_poke_ai,
     release_poke_mute_claim,
     renew_group_chat_after_reply,
     retry_explicit_visible_reply,
     rewrite_last_assistant_history,
     should_activate_from_poke,
     should_normalize_empty_mention,
+    try_acquire_poke_ai,
     try_claim_poke_mute,
     validate_poke_mute_execution,
 )
@@ -574,7 +588,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             )
         )
 
-    def test_poke_burst_window_counts_and_isolates_keys(self) -> None:
+    def _legacy_poke_burst_window_counts_and_isolates_keys(self) -> None:
         first = record_poke_burst("10001", "2629227874", "3062317151", now=10.0)
         second = record_poke_burst("10001", "2629227874", "3062317151", now=40.0)
         other_user = record_poke_burst("10001", "2629227874", "1111111111", now=41.0)
@@ -629,7 +643,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertIsNotNone(last)
         self.assertEqual(last.count, POKE_BURST_MAX_TIMESTAMPS)
 
-    def test_poke_interaction_prompt_branches_and_hides_internal_rules(self) -> None:
+    def _legacy_poke_interaction_prompt_branches_and_hides_internal_rules(self) -> None:
         single = build_poke_interaction_instruction(poke_count=1, mute_tool_available=False)
         light = build_poke_interaction_instruction(poke_count=3, mute_tool_available=True)
         heavy = build_poke_interaction_instruction(poke_count=8, mute_tool_available=True)
@@ -665,7 +679,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         self.assertNotIn(" 8 ", heavy)
         self.assertNotIn("60 秒", heavy)
 
-    def test_poke_mute_eligibility_claim_cooldown_and_duration_bounds(self) -> None:
+    def _legacy_poke_mute_eligibility_claim_cooldown_and_duration_bounds(self) -> None:
         group_id = "10001"
         self_id = "2629227874"
         sender_id = "3062317151"
@@ -855,7 +869,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             self.assertGreaterEqual(value, POKE_MUTE_DURATION_MIN_SECONDS)
             self.assertLessEqual(value, POKE_MUTE_DURATION_MAX_SECONDS)
 
-    def test_poke_mute_main_attach_and_side_effects(self) -> None:
+    def _legacy_poke_mute_main_attach_and_side_effects(self) -> None:
         import time as time_mod
 
         from astrbot_plugin_topic_concentration import main as topic_main
@@ -1063,6 +1077,387 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             asyncio.run(plugin.qqbot_mute_repeated_poker(expired)),
             "mute_rejected: observation_expired",
         )
+
+    def test_poke_pressure_aggregates_users_and_resets_after_mute(self) -> None:
+        group_id = "10001"
+        self_id = "2629227874"
+        states = []
+        for index in range(9):
+            observation = record_poke_burst(
+                group_id, self_id, f"user-{index % 3}", now=100.0 + index
+            )
+            self.assertIsNotNone(observation)
+            states.append(observation.state)
+
+        self.assertEqual(states[:2], [POKE_STATE_CALM, POKE_STATE_CALM])
+        self.assertEqual(states[2:5], [POKE_STATE_ANNOYED] * 3)
+        self.assertEqual(states[5:8], [POKE_STATE_ARMED] * 3)
+        self.assertEqual(states[8], POKE_STATE_MUTE)
+        muted = record_poke_burst(group_id, self_id, "another", now=109.0)
+        self.assertEqual(muted.state, POKE_STATE_MUTE)
+
+        # MUTE expiry clears pre-MUTE pressure instead of immediately retriggering it.
+        reset = record_poke_burst(
+            group_id, self_id, "another", now=108.0 + POKE_MUTE_STATE_SECONDS
+        )
+        self.assertEqual(reset.state, POKE_STATE_CALM)
+        self.assertEqual(reset.count, 1)
+        self.assertEqual(
+            record_poke_burst("other-group", self_id, "another", now=109.0).state,
+            POKE_STATE_CALM,
+        )
+        self.assertEqual(
+            record_poke_burst(group_id, "1443944862", "another", now=109.0).state,
+            POKE_STATE_CALM,
+        )
+
+    def test_poke_ai_lease_and_cooldown_are_group_bot_scoped(self) -> None:
+        self.assertTrue(try_acquire_poke_ai("10001", "2629227874", now=10.0))
+        self.assertFalse(try_acquire_poke_ai("10001", "2629227874", now=11.0))
+        self.assertTrue(try_acquire_poke_ai("10001", "1443944862", now=11.0))
+        release_poke_ai("10001", "2629227874", now=12.0)
+        self.assertFalse(
+            try_acquire_poke_ai(
+                "10001", "2629227874", now=12.0 + POKE_AI_COOLDOWN_SECONDS - 0.01
+            )
+        )
+        self.assertTrue(
+            try_acquire_poke_ai(
+                "10001", "2629227874", now=12.0 + POKE_AI_COOLDOWN_SECONDS
+            )
+        )
+        # A lost request cannot block the key forever.
+        self.assertTrue(try_acquire_poke_ai("20001", "2629227874", now=1000.0))
+
+    def test_poke_text_rebuild_and_prompt_hide_numeric_rules(self) -> None:
+        raw_info = [
+            {"type": "qq", "uid": "123", "nm": "小明"},
+            {"type": "txt", "txt": "拍了拍"},
+            {"type": "qq", "uid": "2629227874", "nm": "棉花糖"},
+            {"type": "txt", "txt": "的头"},
+        ]
+        text = rebuild_poke_display_text(
+            raw_info,
+            lambda _user_id: self.fail("visible nm/txt fields should not need resolution"),
+        )
+        self.assertEqual(text, "小明拍了拍棉花糖的头")
+        self.assertEqual(
+            rebuild_poke_display_text(
+                {"items": [{"uid": "123"}, {"text": "摸了摸你的头"}]},
+                lambda user_id: {"123": "小明"}[user_id],
+            ),
+            "小明摸了摸你的头",
+        )
+        self.assertEqual(rebuild_poke_display_text({"items": "bad"}, lambda _: "x"), "")
+
+        prompt = build_poke_interaction_instruction(
+            poke_text=text, state=POKE_STATE_ARMED, mute_tool_available=True
+        )
+        self.assertIn(text, prompt)
+        self.assertIn(POKE_BACK_TOOL_NAME, prompt)
+        self.assertIn(POKE_MUTE_TOOL_NAME, prompt)
+        self.assertIn(SKIP_REPLY_MARKER, prompt)
+        for hidden in ("ARMED", "9", "60", "30", "90", "阈值", "概率"):
+            self.assertNotIn(hidden, prompt)
+
+    def test_poke_fallback_uses_shared_display_name_resolver(self) -> None:
+        from astrbot_plugin_topic_concentration import main as topic_main
+
+        calls = []
+        original = topic_main._resolve_qqbot_display_name
+        topic_main._resolve_qqbot_display_name = lambda group_id, user_id: (
+            calls.append((group_id, user_id)) or "统一群昵称"
+        )
+        try:
+            event = types.SimpleNamespace(
+                message_obj=types.SimpleNamespace(raw_message={"raw_info": []}),
+                get_group_id=lambda: "10001",
+                get_sender_id=lambda: "3062317151",
+            )
+            self.assertEqual(topic_main._current_poke_text(event), "统一群昵称摸了摸你的头")
+        finally:
+            topic_main._resolve_qqbot_display_name = original
+        self.assertEqual(calls, [("10001", "3062317151")])
+
+    def test_poke_scheduler_counts_before_throttle_and_handles_mute_locally(self) -> None:
+        import time as time_mod
+
+        from astrbot_plugin_topic_concentration import main as topic_main
+
+        plugin = topic_main.TopicConcentrationPlugin(context=object())
+        group_id = "10001"
+        self_id = "2629227874"
+
+        class Event:
+            unified_msg_origin = "aiocqhttp:GroupMessage:10001"
+            is_at_or_wake_command = False
+
+            def __init__(self, sender_id):
+                poke = topic_main.Poke()
+                poke.id = self_id
+                self._messages = [poke]
+                self._sender_id = sender_id
+                self._extras = {}
+                self.message_str = ""
+                self.stopped = False
+                self.llm_suppressed = False
+                self.calls = []
+                self.bot = types.SimpleNamespace(call_action=self.call_action)
+                self.message_obj = types.SimpleNamespace(raw_message={
+                    "post_type": "notice",
+                    "raw_info": [
+                        {"type": "qq", "uid": sender_id, "nm": f"用户{sender_id}"},
+                        {"type": "txt", "txt": "拍了拍棉花糖"},
+                    ],
+                })
+
+            def get_messages(self): return self._messages
+            def get_group_id(self): return group_id
+            def get_self_id(self): return self_id
+            def get_sender_id(self): return self._sender_id
+            def get_message_str(self): return self.message_str
+            def is_private_chat(self): return False
+            def get_extra(self, key, default=""): return self._extras.get(key, default)
+            def set_extra(self, key, value): self._extras[key] = value
+            def should_call_llm(self, value): self.llm_suppressed = value
+            def stop_event(self): self.stopped = True
+            async def call_action(self, action, **kwargs):
+                self.calls.append({"action": action, **kwargs})
+
+        now = time_mod.monotonic()
+        record_poke_burst(group_id, self_id, "first", now=now)
+        self.assertTrue(try_acquire_poke_ai(group_id, self_id, now=now))
+        throttled = Event("second")
+        asyncio.run(plugin.schedule_direct_llm_worker(throttled))
+        self.assertTrue(throttled.stopped)
+        self.assertTrue(throttled.llm_suppressed)
+        self.assertEqual(throttled.calls, [])
+        self.assertEqual(read_poke_burst(group_id, self_id, now=time_mod.monotonic()).count, 2)
+
+        clear_poke_interaction_state()
+        now = time_mod.monotonic()
+        for index in range(8):
+            record_poke_burst(group_id, self_id, f"user-{index}", now=now)
+        muted = Event("333")
+        asyncio.run(plugin.schedule_direct_llm_worker(muted))
+        self.assertTrue(muted.stopped)
+        self.assertTrue(muted.llm_suppressed)
+        self.assertEqual(len(muted.calls), 1)
+        self.assertEqual(muted.calls[0]["action"], "set_group_ban")
+        self.assertEqual(muted.calls[0]["user_id"], 333)
+        self.assertEqual(muted.get_extra(topic_main.LLM_WORKER_SELECTED_EXTRA, ""), "")
+        self.assertEqual(read_poke_burst(group_id, self_id).state, POKE_STATE_MUTE)
+
+    def test_poke_request_tools_lock_targets_and_share_attempt_gate(self) -> None:
+        from astrbot_plugin_topic_concentration import main as topic_main
+
+        plugin = topic_main.TopicConcentrationPlugin(context=object())
+        now = __import__("time").monotonic()
+
+        class Event:
+            def __init__(self, fail=False):
+                self._extras = {
+                    topic_main.POKE_INTERACTION_EXTRA: "1",
+                    topic_main.POKE_SENDER_EXTRA: "3062317151",
+                    topic_main.POKE_COUNT_EXTRA: 6,
+                    topic_main.POKE_OBSERVED_AT_EXTRA: now,
+                    topic_main.POKE_STATE_EXTRA: POKE_STATE_ARMED,
+                    topic_main.POKE_GENERATION_EXTRA: read_poke_generation(
+                        "10001", "2629227874"
+                    ),
+                    topic_main.LLM_ROUTE_EXTRA: topic_main.ROUTE_EXPLICIT,
+                }
+                self.calls = []
+                self.fail = fail
+                self.bot = types.SimpleNamespace(call_action=self.call_action)
+
+            def get_group_id(self): return "10001"
+            def get_self_id(self): return "2629227874"
+            def get_sender_id(self): return "3062317151"
+            def is_private_chat(self): return False
+            def get_extra(self, key, default=""): return self._extras.get(key, default)
+            def set_extra(self, key, value): self._extras[key] = value
+            async def call_action(self, action, **kwargs):
+                self.calls.append({"action": action, **kwargs})
+                if self.fail:
+                    raise RuntimeError("failed")
+
+        req = types.SimpleNamespace(func_tool=None, extra_user_content_parts=[])
+        event = Event()
+        self.assertTrue(topic_main._attach_poke_tools(plugin, event, req, poke_count=6))
+        self.assertEqual(set(req.func_tool.names()), {POKE_BACK_TOOL_NAME, POKE_MUTE_TOOL_NAME})
+        schemas = {tool.name: tool.parameters for tool in req.func_tool.tools}
+        self.assertEqual(schemas[POKE_BACK_TOOL_NAME]["properties"], {})
+        self.assertEqual(set(schemas[POKE_MUTE_TOOL_NAME]["properties"]), {"reason"})
+
+        self.assertEqual(asyncio.run(plugin.qqbot_poke_back(event)), "poke_success")
+        self.assertEqual(event.calls[0], {
+            "action": "send_poke", "group_id": "10001", "user_id": "3062317151",
+        })
+        self.assertEqual(
+            asyncio.run(plugin.qqbot_enable_poke_mute(event)),
+            "mute_rejected: already_attempted",
+        )
+        self.assertEqual(len(event.calls), 1)
+
+        arm_event = Event()
+        result = asyncio.run(plugin.qqbot_enable_poke_mute(arm_event))
+        self.assertTrue(result.startswith("mute_success: duration_seconds="))
+        self.assertEqual(arm_event.calls[0]["action"], "set_group_ban")
+        self.assertEqual(arm_event.calls[0]["user_id"], 3062317151)
+        self.assertEqual(read_poke_burst("10001", "2629227874", now=now).state, POKE_STATE_MUTE)
+
+    def test_poke_ai_may_skip_without_retry_and_only_text_activates(self) -> None:
+        from astrbot_plugin_topic_concentration import main as topic_main
+
+        plugin = topic_main.TopicConcentrationPlugin(context=object())
+
+        class Event:
+            def __init__(self):
+                self._extras = {
+                    topic_main.LLM_WORKER_SELECTED_EXTRA: "2629227874",
+                    topic_main.LLM_ROUTE_EXTRA: topic_main.ROUTE_EXPLICIT,
+                    topic_main.POKE_INTERACTION_EXTRA: "1",
+                    topic_main.POKE_AI_RESERVED_EXTRA: "1",
+                    topic_main.POKE_GENERATION_EXTRA: read_poke_generation(
+                        "10001", "2629227874"
+                    ),
+                }
+            def get_group_id(self): return "10001"
+            def get_self_id(self): return "2629227874"
+            def is_private_chat(self): return False
+            def get_extra(self, key, default=""): return self._extras.get(key, default)
+            def set_extra(self, key, value): self._extras[key] = value
+
+        skipped_event = Event()
+        skipped = types.SimpleNamespace(
+            completion_text=SKIP_REPLY_MARKER, result_chain=None,
+            reasoning_content=None, reasoning_signature=None,
+        )
+        asyncio.run(plugin.release_direct_llm_worker(skipped_event, skipped))
+        self.assertEqual(skipped.completion_text, "")
+        self.assertIsNone(read_group_activation("10001", "2629227874"))
+        self.assertEqual(skipped_event.get_extra(topic_main.POKE_AI_RESERVED_EXTRA), "")
+
+        visible_event = Event()
+        visible = types.SimpleNamespace(completion_text="别闹。", result_chain=None)
+        asyncio.run(plugin.release_direct_llm_worker(visible_event, visible))
+        self.assertEqual(
+            visible_event.get_extra(topic_main.PENDING_STATE_ACTION_EXTRA),
+            topic_main.ACTION_ACTIVATE_POKE,
+        )
+        self.assertIsNone(read_group_activation("10001", "2629227874"))
+        asyncio.run(plugin.update_activation_after_message_sent(visible_event))
+        self.assertIsNotNone(read_group_activation("10001", "2629227874"))
+
+    def test_poke_mute_generation_invalidates_old_tools_and_text_after_expiry(self) -> None:
+        from astrbot_plugin_topic_concentration import main as topic_main
+
+        plugin = topic_main.TopicConcentrationPlugin(context=object())
+        group_id = "10001"
+        self_id = "2629227874"
+        sender_id = "3062317151"
+        generation = read_poke_generation(group_id, self_id)
+
+        class Event:
+            def __init__(self):
+                self._extras = {
+                    topic_main.LLM_WORKER_SELECTED_EXTRA: self_id,
+                    topic_main.LLM_ROUTE_EXTRA: topic_main.ROUTE_EXPLICIT,
+                    topic_main.POKE_INTERACTION_EXTRA: "1",
+                    topic_main.POKE_AI_RESERVED_EXTRA: "1",
+                    topic_main.POKE_GENERATION_EXTRA: generation,
+                    topic_main.POKE_SENDER_EXTRA: sender_id,
+                    topic_main.POKE_COUNT_EXTRA: 6,
+                    topic_main.POKE_OBSERVED_AT_EXTRA: __import__("time").monotonic(),
+                    topic_main.POKE_STATE_EXTRA: POKE_STATE_ARMED,
+                }
+                self.calls = []
+                self.bot = types.SimpleNamespace(call_action=self.call_action)
+
+            def get_group_id(self): return group_id
+            def get_self_id(self): return self_id
+            def get_sender_id(self): return sender_id
+            def is_private_chat(self): return False
+            def get_extra(self, key, default=""): return self._extras.get(key, default)
+            def set_extra(self, key, value): self._extras[key] = value
+            async def call_action(self, action, **kwargs):
+                self.calls.append({"action": action, **kwargs})
+
+        poke_back_event = Event()
+        mute_tool_event = Event()
+        response_event = Event()
+        observations = [
+            record_poke_burst(group_id, self_id, f"later-{index}", now=100.0 + index)
+            for index in range(9)
+        ]
+        self.assertEqual(observations[-1].state, POKE_STATE_MUTE)
+
+        self.assertFalse(
+            is_poke_request_current(
+                group_id, self_id, expected_generation=generation
+            )
+        )
+        self.assertIsNone(
+            read_poke_burst(
+                group_id,
+                self_id,
+                now=108.0 + POKE_MUTE_STATE_SECONDS,
+            )
+        )
+        self.assertFalse(
+            is_poke_request_current(
+                group_id, self_id, expected_generation=generation
+            )
+        )
+
+        self.assertEqual(
+            asyncio.run(plugin.qqbot_poke_back(poke_back_event)),
+            "poke_rejected: stale_generation",
+        )
+        self.assertEqual(
+            asyncio.run(plugin.qqbot_enable_poke_mute(mute_tool_event)),
+            "mute_rejected: stale_generation",
+        )
+        self.assertEqual(poke_back_event.calls, [])
+        self.assertEqual(mute_tool_event.calls, [])
+
+        response_event.set_extra(
+            topic_main.PENDING_STATE_ACTION_EXTRA, topic_main.ACTION_ACTIVATE_POKE
+        )
+        response_event.set_extra(topic_main.RETRY_VISIBLE_TEXT_EXTRA, "旧文字")
+        response = types.SimpleNamespace(
+            completion_text=f"旧文字{SKIP_REPLY_MARKER}",
+            result_chain=["旧文字"],
+            reasoning_content="internal",
+            reasoning_signature="signature",
+        )
+        asyncio.run(plugin.release_direct_llm_worker(response_event, response))
+        self.assertEqual(response.completion_text, "")
+        self.assertIsNone(response.result_chain)
+        self.assertIsNone(response.reasoning_content)
+        self.assertIsNone(response.reasoning_signature)
+        self.assertEqual(response_event.get_extra(topic_main.POKE_AI_RESERVED_EXTRA), "")
+        self.assertEqual(response_event.get_extra(topic_main.PENDING_STATE_ACTION_EXTRA), "")
+        self.assertEqual(response_event.get_extra(topic_main.RETRY_VISIBLE_TEXT_EXTRA), "")
+        asyncio.run(plugin.update_activation_after_message_sent(response_event))
+        self.assertIsNone(read_group_activation(group_id, self_id))
+
+    def test_poke_mute_failure_has_no_sender_success_cooldown(self) -> None:
+        from astrbot_plugin_topic_concentration import main as topic_main
+
+        class Event:
+            def __init__(self):
+                self.bot = types.SimpleNamespace(call_action=self.call_action)
+            def get_group_id(self): return "10001"
+            def get_self_id(self): return "2629227874"
+            def get_sender_id(self): return "777"
+            async def call_action(self, *_args, **_kwargs): raise RuntimeError("failed")
+
+        success, result = asyncio.run(topic_main._mute_current_poker(Event(), source="test"))
+        self.assertFalse(success)
+        self.assertEqual(result, "mute_failed: RuntimeError")
+        self.assertTrue(can_mute_poker("10001", "2629227874", "777"))
 
     def test_only_current_bot_at_without_content_is_normalized_as_empty_mention(self) -> None:
         self.assertTrue(
