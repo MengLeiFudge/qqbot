@@ -18,6 +18,10 @@ class Plain:
 class Reply:
     def __init__(self, **kwargs) -> None:
         self.id = kwargs.get("id", "")
+        self.chain = kwargs.get("chain", [])
+        self.sender_id = kwargs.get("sender_id", "")
+        self.message_str = kwargs.get("message_str", "")
+        self.text = self.message_str
 
 
 class At:
@@ -82,12 +86,16 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_followup
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_markdown_syntax
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_model_regex_segmenting
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_both_targeted_reply_instruction_text
+from astrbot_plugin_qqbot_features.request_context import format_source_messages
+from astrbot_plugin_qqbot_features.reply_style_guard_runtime import extract_onebot_forward_sources
 from astrbot_plugin_qqbot_features.reply_style_guard_runtime import extract_onebot_forward_text
+from astrbot_plugin_qqbot_features.reply_style_guard_runtime import extract_onebot_source_tree
 
 
 class ForwardEvent:
-    def __init__(self, forward_ids: list[str], payloads: dict[str, object]) -> None:
-        self._messages = [Forward(forward_id) for forward_id in forward_ids]
+    def __init__(self, forward_ids: list[str], payloads: dict[str, object], *, in_reply: bool = False) -> None:
+        forwards = [Forward(forward_id) for forward_id in forward_ids]
+        self._messages = [Reply(chain=forwards)] if in_reply else forwards
         self._payloads = payloads
         self.calls: list[str] = []
         self.bot = types.SimpleNamespace(call_action=self.call_action)
@@ -108,6 +116,26 @@ class ForwardEvent:
     def assert_action(action: str) -> None:
         if action != "get_forward_msg":
             raise AssertionError(f"unexpected OneBot action: {action}")
+
+
+class SourceTreeEvent:
+    def __init__(self, messages: list[object], payloads: dict[str, object]) -> None:
+        self._messages = messages
+        self._payloads = payloads
+        self.calls: list[str] = []
+        self.bot = types.SimpleNamespace(api=types.SimpleNamespace(call_action=self.call_action))
+
+    def get_messages(self):
+        return self._messages
+
+    async def call_action(self, action: str, **params):
+        ForwardEvent.assert_action(action)
+        forward_id = str(params.get("message_id", params.get("id", "")))
+        self.calls.append(forward_id)
+        result = self._payloads[forward_id]
+        if isinstance(result, Exception):
+            raise result
+        return result
 
 
 class AstrBotForwardMessageTest(unittest.IsolatedAsyncioTestCase):
@@ -149,6 +177,17 @@ class AstrBotForwardMessageTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(event.calls)
         self.assertEqual(set(event.calls), {"expired"})
 
+    async def test_source_tree_top_level_failure_returns_no_sources(self) -> None:
+        event = ForwardEvent(
+            ["expired"],
+            {"expired": RuntimeError("forward message expired")},
+        )
+
+        sources = await extract_onebot_source_tree(event)
+
+        self.assertEqual(format_source_messages(sources), "")
+        self.assertEqual(set(event.calls), {"expired"})
+
     async def test_aggregates_multiple_forwards_and_readable_nested_content(self) -> None:
         event = ForwardEvent(
             ["first", "second"],
@@ -163,6 +202,236 @@ class AstrBotForwardMessageTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(text, "第一组\n第二组\n内层补充")
         self.assertEqual(event.calls, ["first", "second", "inner"])
+
+    async def test_complete_tree_keeps_reply_sender_above_nested_forward_senders(self) -> None:
+        event = SourceTreeEvent(
+            [Reply(sender_id="111", message_str="引用根", chain=[Forward("outer")])],
+            {
+                "outer": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "222"},
+                            "content": [
+                                {"type": "text", "data": {"text": "外层转发"}},
+                                {"type": "forward", "data": {"id": "inner"}},
+                            ],
+                        }
+                    ]
+                },
+                "inner": {
+                    "nodeList": [
+                        {
+                            "sender": {"user_id": "333"},
+                            "content": [{"type": "text", "data": {"text": "内层转发"}}],
+                        }
+                    ]
+                },
+            },
+        )
+
+        tree = await extract_onebot_source_tree(event)
+
+        self.assertEqual(len(tree), 1)
+        self.assertEqual(tree[0].sender_qq, "111")
+        self.assertEqual(tree[0].text, "引用根")
+        self.assertEqual(tree[0].children[0].sender_qq, "222")
+        self.assertEqual(tree[0].children[0].text, "外层转发")
+        self.assertEqual(tree[0].children[0].children[0].sender_qq, "333")
+        self.assertEqual(tree[0].children[0].children[0].text, "内层转发")
+        self.assertEqual(event.calls, ["outer", "inner"])
+
+    async def test_formatted_source_tree_keeps_qq_and_current_message_separate(self) -> None:
+        event = SourceTreeEvent(
+            [Reply(sender_id="111", message_str="引用根", chain=[Forward("outer")])],
+            {
+                "outer": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "222"},
+                            "content": [{"type": "text", "data": {"text": "转发正文"}}],
+                        }
+                    ]
+                }
+            },
+        )
+
+        source_text = format_source_messages(await extract_onebot_source_tree(event))
+        injection = f"来源消息：\n{source_text}\n当前消息：请解释这段"
+
+        self.assertIn("发送者 QQ：111", injection)
+        self.assertIn("引用根", injection)
+        self.assertIn("发送者 QQ：222", injection)
+        self.assertIn("转发正文", injection)
+        self.assertIn("当前消息：请解释这段", injection)
+        self.assertNotIn("当前 bot", injection)
+        self.assertNotIn("天使", injection)
+        self.assertNotIn("恶魔", injection)
+        self.assertEqual(event.calls, ["outer"])
+
+    async def test_multiple_reply_and_forward_roots_keep_their_own_subtrees(self) -> None:
+        event = SourceTreeEvent(
+            [
+                Reply(sender_id="111", message_str="第一引用", chain=[Forward("first")]),
+                Reply(sender_id="444", message_str="第二引用", chain=[Forward("second")]),
+                Forward("top"),
+            ],
+            {
+                "first": {
+                    "message": [
+                        {
+                            "sender": {"user_id": "222"},
+                            "content": [{"type": "text", "data": {"text": "第一子树"}}],
+                        }
+                    ]
+                },
+                "second": {
+                    "nodes": [
+                        {
+                            "sender": {"user_id": "555"},
+                            "content": [{"type": "text", "data": {"text": "第二子树"}}],
+                        }
+                    ]
+                },
+                "top": {
+                    "nodeList": [
+                        {
+                            "sender": {"user_id": "666"},
+                            "content": [{"type": "text", "data": {"text": "顶层转发"}}],
+                        }
+                    ]
+                },
+            },
+        )
+
+        tree = await extract_onebot_source_tree(event)
+
+        self.assertEqual([root.sender_qq for root in tree], ["111", "444", "666"])
+        self.assertEqual(tree[0].children[0].sender_qq, "222")
+        self.assertEqual(tree[0].children[0].text, "第一子树")
+        self.assertEqual(tree[1].children[0].sender_qq, "555")
+        self.assertEqual(tree[1].children[0].text, "第二子树")
+        self.assertEqual(tree[2].text, "顶层转发")
+        self.assertEqual(event.calls, ["first", "second", "top"])
+
+    async def test_raw_nodes_preserve_sender_qq_and_unknown_sender(self) -> None:
+        event = ForwardEvent(
+            ["outer"],
+            {
+                "outer": {
+                    "data": {
+                        "messages": [
+                            {
+                                "sender": {"user_id": 12345, "nickname": "不能替代QQ"},
+                                "content": [{"type": "text", "data": {"text": "已知来源"}}],
+                            },
+                            {
+                                "sender": {"user_id": 0, "nickname": "只有昵称"},
+                                "content": [{"type": "text", "data": {"text": "未知来源"}}],
+                            },
+                        ]
+                    }
+                }
+            },
+        )
+
+        sources = await extract_onebot_forward_sources(event)
+        text = await extract_onebot_forward_text(event)
+
+        self.assertEqual([source.sender_qq for source in sources], ["12345", ""])
+        self.assertIn("发送者 QQ：12345", text)
+        self.assertNotIn("只有昵称", text)
+        self.assertEqual(text.count("发送者 QQ"), 1)
+        self.assertIn("未知来源", text)
+
+    async def test_forward_inside_reply_chain_and_nested_forward_are_expanded(self) -> None:
+        event = ForwardEvent(
+            ["outer"],
+            {
+                "outer": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "111"},
+                            "content": [
+                                {"type": "text", "data": {"text": "外层"}},
+                                {"type": "forward", "data": {"id": "inner"}},
+                            ],
+                        }
+                    ]
+                },
+                "inner": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "222"},
+                            "content": [{"type": "text", "data": {"text": "内层"}}],
+                        }
+                    ]
+                },
+            },
+            in_reply=True,
+        )
+
+        sources = await extract_onebot_forward_sources(event)
+
+        self.assertEqual(sources[0].sender_qq, "111")
+        self.assertEqual(sources[0].children[0].sender_qq, "222")
+        self.assertEqual(sources[0].children[0].text, "内层")
+        self.assertEqual(event.calls, ["outer", "inner"])
+
+    async def test_cycle_and_partial_failure_keep_successful_content_with_fetch_bound(self) -> None:
+        event = ForwardEvent(
+            ["outer"],
+            {
+                "outer": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "111"},
+                            "content": [
+                                {"type": "text", "data": {"text": "保留正文"}},
+                                {"type": "forward", "data": {"id": "cycle"}},
+                                {"type": "forward", "data": {"id": "expired"}},
+                            ],
+                        }
+                    ]
+                },
+                "cycle": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "222"},
+                            "content": [
+                                {"type": "text", "data": {"text": "循环前可读"}},
+                                {"type": "forward", "data": {"id": "outer"}},
+                            ],
+                        }
+                    ]
+                },
+                "expired": RuntimeError("forward message expired"),
+            },
+        )
+
+        sources = await extract_onebot_forward_sources(event, max_fetch=6)
+        text = format_source_messages(sources)
+
+        self.assertIn("保留正文", text)
+        self.assertIn("循环前可读", text)
+        self.assertLessEqual(len(set(event.calls)), 3)
+        self.assertIn("expired", event.calls)
+
+    async def test_fetch_limit_keeps_already_read_content(self) -> None:
+        event = ForwardEvent(
+            ["one"],
+            {
+                "one": {"text": "第一层", "forward_ids": ["two"]},
+                "two": {"text": "第二层", "forward_ids": ["three"]},
+                "three": {"text": "不应读取", "forward_ids": []},
+            },
+        )
+
+        text = await extract_onebot_forward_text(event, max_fetch=2)
+
+        self.assertIn("第一层", text)
+        self.assertIn("第二层", text)
+        self.assertNotIn("不应读取", text)
+        self.assertNotIn("three", event.calls)
 
 
 class AstrBotReplyStyleGuardTest(unittest.TestCase):

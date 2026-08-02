@@ -95,6 +95,7 @@ from .request_context import canonical_event_claim_key
 from .request_context import extract_at_ids
 from .request_context import extract_image_sources
 from .request_context import extract_plain_text as extract_event_plain_text
+from .request_context import format_source_messages
 from .reread_state import RereadRepeatState
 from .runtime_temp import TempDuplicateCleaner
 from .runtime_temp import load_temp_dedupe_config
@@ -111,7 +112,7 @@ from .reply_style_guard_logic import should_disable_model_regex_segmenting
 from .reply_style_guard_logic import should_reply_too_long_to_read
 from .reply_style_guard_logic import split_chat_bubble_lines
 from .reply_style_guard_runtime import build_folded_reply_chain
-from .reply_style_guard_runtime import extract_onebot_forward_text
+from .reply_style_guard_runtime import extract_onebot_source_tree
 from .reply_style_guard_runtime import has_forward_message
 from .social_events import GROUP_MEMBER_WELCOME_EXPRESSIONS
 from .social_events import format_group_member_welcome
@@ -417,7 +418,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.15.1",
+    "0.15.2",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -850,8 +851,9 @@ class QQBotFeaturesPlugin(Star):
             return
         if is_twin_bot_sender(event):
             return
-        forward_text = await extract_onebot_forward_text(event)
-        if not forward_text:
+        source_tree = await extract_onebot_source_tree(event)
+        source_text = format_source_messages(source_tree)
+        if not source_text:
             logger.warning(
                 "[QQBotFeatures] private forward message has no readable text: session=%s sender=%s",
                 getattr(event, "unified_msg_origin", ""),
@@ -864,11 +866,11 @@ class QQBotFeaturesPlugin(Star):
         prompt_parts: list[str] = []
         if current_text:
             prompt_parts.append(f"用户私聊附言：{current_text}")
-        prompt_parts.append(f"用户私聊发送了一条折叠/合并转发消息，内容如下：\n{forward_text}")
+        prompt_parts.append(f"用户私聊发送了一条折叠/合并转发消息，内容如下：\n{source_text}")
         logger.info(
             "[QQBotFeatures] private forward message expanded for LLM: session=%s chars=%s",
             getattr(event, "unified_msg_origin", ""),
-            len(forward_text),
+            len(source_text),
         )
         yield event.request_llm(prompt="\n\n".join(prompt_parts), contexts=[])
         event.stop_event()
@@ -1094,6 +1096,7 @@ class QQBotFeaturesPlugin(Star):
         sender_id = str(event.get_sender_id() or "").strip()
         if not sender_id.isdigit() or is_twin_bot_sender_id(sender_id):
             return
+        event.stop_event()
         claim_key = _command_claim_key(event, command_type="jmcomic_pdf")
         api = AstrBotOneBotApi(event)
         try:
@@ -1599,22 +1602,24 @@ class QQBotFeaturesPlugin(Star):
     @filter.on_llm_request(desc="在 LLM 请求前把被引用消息作为当前请求原文补入上下文。")
     async def inject_quoted_request_source(self, event: AstrMessageEvent, req: ProviderRequest):
         request_context = build_current_request_context(event, req.prompt or "")
-        if not request_context.reply_texts or not request_context.combined_query:
+        source_tree = await extract_onebot_source_tree(event)
+        source_text = format_source_messages(source_tree)
+        if not source_text:
             return
-        req.extra_user_content_parts.append(
-            TextPart(
-                text=(
-                    "用户当前请求包含引用/接力语境。下面是本轮请求原文，回答时必须把被引用消息当作用户正在问的内容，"
-                    "不要只按当前短句理解：\n"
-                    f"{request_context.combined_query}"
-                )
-            ).mark_as_temp()
+        current_text = request_context.current_text
+        request_text = (
+            "用户当前请求包含引用/接力语境。下面是本轮请求的来源消息。每条“发送者 QQ”都来自 OneBot 原始消息，"
+            "必须区分不同发送者，并把消息内容作为当前请求的上下文事实，不要只按当前短句理解：\n"
+            f"{source_text}"
         )
+        if current_text:
+            request_text += f"\n当前消息：{current_text}"
+        req.extra_user_content_parts.append(TextPart(text=request_text).mark_as_temp())
         logger.info(
             "[QQBotFeatures] injected quoted request source: session=%s replies=%s chars=%s",
             getattr(event, "unified_msg_origin", ""),
-            len(request_context.reply_texts),
-            len(request_context.combined_query),
+            len(source_tree),
+            len(source_text),
         )
 
     @filter.event_message_type(EventMessageType.ALL, desc="RightCodes 生图总入口，处理生图、模型切换、积分查询与排行。")

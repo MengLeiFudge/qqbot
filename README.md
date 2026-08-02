@@ -64,7 +64,7 @@ AstrBot 启动入口支持显式选择 bot 身份：日常默认是 `both/full`�
 
 AstrBot 双平台下，普通闲聊、显式呼叫和群聊激活窗口内的候选消息允许两个棉花糖共同参与；群聊固定命令只由一个账号执行。没有明确 @ 或私聊时，固定命令默认由恶魔账号 `2629227874` 处理，可用 `QQBOT_ASTRBOT_COMMAND_OWNER` 覆盖；明确 @、引用或拍一拍天使/恶魔时，由当前被叫到的 bot 处理；同时 @ 两只的普通聊天会让两只各自用自己的身份回答；私聊由当前收到私聊的 bot 独立处理，命中固定命令就执行对应命令，未命中固定命令就进入当前 bot 的 LLM 链路。`菜单`、`帮助`、`指令` 会发送统一图片菜单，总览按 `群务管理`、`棉花糖互动`、`养鲲`、`落樱之都`、`Arcaea`、`Factorio`、`异形工厂` 分组；`菜单模块名` 会发送模块详情图。
 
-`astrbot_plugin_qqbot_features` 不再读取旧公开群上下文 JSON；群聊 LLM 上下文交给 AstrBot 当前会话上下文和本轮引用消息。旧 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\` 只作为历史快照清理对象，不再作为 prompt 事实源，也不再提供“棉花记录/导出 md”命令。
+`astrbot_plugin_qqbot_features` 不再读取旧公开群上下文 JSON；群聊 LLM 上下文交给 AstrBot 当前会话上下文和本轮引用消息。引用上下文会保留外层消息发送者 QQ，并在合并转发和嵌套转发中逐条保留内层节点发送者 QQ，让模型按当前 `self_id` 自行判断身份，不按昵称猜测。旧 `data\astrbot\data\plugin_data\qqbot_features_runtime\ai\group_context\` 只作为历史快照清理对象，不再作为 prompt 事实源，也不再提供“棉花记录/导出 md”命令。
 
 `astrbot_plugin_qqbot_features` 内部的双子互动模块负责天使/恶魔两个棉花糖的双子互动增强：当用户明确围绕天使、恶魔、姐姐/妹妹、双子关系或另一个 bot 发问时，模块会给本轮 LLM 请求注入当前 bot、另一个 bot 的账号事实和互动边界。它不注入固定人设或语气文本，只让当前 bot 用自己的 WebUI 人格回应，不替另一个 bot 发言、认错、解释或承诺修改；用户说“你姐”“你妹”“姐姐”“妹妹”时按当前消息的 `self_id` 视角理解，避免天使把自己当恶魔或恶魔把自己当天使。另一个 bot 发出的普通消息不会触发当前 bot 自动接话。用户让被点名 bot 和另一只抱抱、贴贴、道歉、哄人、叫出来或转告这类目标专属双子互动时，只允许被点名目标自己处理；目标正忙时另一只不代班完整回答。配置项集中到功能合集卡片下，以 `twin_interaction_` 为前缀。
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+from typing import Iterable
 
 try:
     from astrbot.api.message_components import At, Image, Plain, Reply
@@ -12,6 +13,16 @@ except Exception:  # pragma: no cover - imported by lightweight unit tests.
 
 
 BOT_NAME_MARKERS = ("棉花糖", "天使棉花糖", "恶魔棉花糖", "呼叫棉花糖")
+
+
+@dataclass(frozen=True, slots=True)
+class SourceMessage:
+    """One message with its protocol-level sender and nested message children."""
+
+    sender_qq: str = ""
+    text: str = ""
+    children: tuple[SourceMessage, ...] = ()
+    forward_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,14 +77,103 @@ def extract_plain_text(event: object) -> str:
 
 
 def extract_reply_texts(event: object) -> list[str]:
-    texts: list[str] = []
-    for segment in safe_get_messages(event):
-        if not is_reply_segment(segment):
-            continue
-        text = reply_segment_text(segment)
-        if text:
-            texts.append(text)
-    return dedupe_keep_order(texts)
+    texts = [
+        format_source_messages((source,))
+        for source in extract_reply_source_messages(event)
+    ]
+    return dedupe_keep_order([text for text in texts if text])
+
+
+def extract_reply_source_messages(event: object) -> tuple[SourceMessage, ...]:
+    return tuple(
+        source_message_from_reply(segment)
+        for segment in safe_get_messages(event)
+        if is_reply_segment(segment)
+    )
+
+
+def source_message_from_reply(segment: object) -> SourceMessage:
+    children, _ = source_messages_from_chain(getattr(segment, "chain", None) or ())
+    return SourceMessage(
+        sender_qq=normalize_sender_qq(getattr(segment, "sender_id", "")),
+        text=reply_segment_text(segment),
+        children=children,
+    )
+
+
+def source_messages_from_chain(chain: Iterable[object]) -> tuple[tuple[SourceMessage, ...], str]:
+    children: list[SourceMessage] = []
+    text_parts: list[str] = []
+    for item in chain:
+        if is_plain_segment(item):
+            text_parts.append(str(getattr(item, "text", "") or ""))
+        elif is_node_segment(item):
+            children.append(source_message_from_node(item))
+        elif is_nodes_segment(item):
+            for node in getattr(item, "nodes", None) or ():
+                children.append(source_message_from_node(node))
+        elif is_forward_segment(item):
+            forward_id = normalize_forward_id(getattr(item, "id", ""))
+            if forward_id:
+                children.append(SourceMessage(forward_id=forward_id))
+    return tuple(children), normalize_space("".join(text_parts))
+
+
+def source_message_from_node(node: object) -> SourceMessage:
+    content = getattr(node, "content", None)
+    if isinstance(content, str):
+        text = normalize_space(content)
+        children: tuple[SourceMessage, ...] = ()
+    else:
+        children, text = source_messages_from_chain(content or ())
+    return SourceMessage(
+        sender_qq=normalize_sender_qq(getattr(node, "uin", "")),
+        text=text,
+        children=children,
+    )
+
+
+def format_source_messages(
+    messages: Iterable[SourceMessage],
+    *,
+    max_depth: int = 8,
+    max_chars: int = 12000,
+) -> str:
+    """Format a bounded source tree without inventing missing sender identities."""
+
+    if max_chars <= 0:
+        return ""
+    lines: list[str] = []
+    remaining = max_chars
+
+    def append_line(line: str) -> None:
+        nonlocal remaining
+        if remaining <= 0:
+            return
+        separator_size = 1 if lines else 0
+        if remaining <= separator_size:
+            remaining = 0
+            return
+        value = line[: remaining - separator_size]
+        lines.append(value)
+        remaining -= separator_size + len(value)
+
+    def append_message(message: SourceMessage, depth: int) -> None:
+        if depth > max(0, max_depth) or remaining <= 0:
+            return
+        indent = "  " * depth
+        if message.sender_qq:
+            append_line(f"{indent}发送者 QQ：{message.sender_qq}")
+        if message.text:
+            message_text = str(message.text).strip()
+            for line in message_text.splitlines():
+                append_line(f"{indent}{line}")
+        for child in message.children:
+            append_message(child, depth + 1)
+
+    for message in messages:
+        append_message(message, 0)
+    return "\n".join(lines).strip()
 
 
 def reply_segment_text(segment: object) -> str:
@@ -242,6 +342,15 @@ def is_media_placeholder_text(text: object) -> bool:
     return re.fullmatch(r"\[(?:图片|表情|视频|语音|文件|卡片消息|转发消息)(?:[^\]]*)\]", normalized) is not None
 
 
+def normalize_sender_qq(value: object) -> str:
+    text = str(value or "").strip()
+    return text if text.isdigit() and int(text) > 0 else ""
+
+
+def normalize_forward_id(value: object) -> str:
+    return str(value or "").strip()
+
+
 def normalize_space(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
 
@@ -293,6 +402,18 @@ def is_image_segment(segment: object) -> bool:
 
 def is_reply_segment(segment: object) -> bool:
     return (_ASTRBOT_COMPONENTS_AVAILABLE and isinstance(segment, Reply)) or segment.__class__.__name__.lower() == "reply"
+
+
+def is_node_segment(segment: object) -> bool:
+    return segment.__class__.__name__.lower() == "node"
+
+
+def is_nodes_segment(segment: object) -> bool:
+    return segment.__class__.__name__.lower() == "nodes"
+
+
+def is_forward_segment(segment: object) -> bool:
+    return segment.__class__.__name__.lower() == "forward"
 
 
 def dedupe_keep_order(values: list[str]) -> list[str]:

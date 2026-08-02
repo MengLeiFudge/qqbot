@@ -11,6 +11,8 @@ sys.path.insert(0, str(ROOT / "plugins"))
 from astrbot_plugin_qqbot_features.request_context import build_current_request_context
 from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_key
 from astrbot_plugin_qqbot_features.request_context import extract_image_sources
+from astrbot_plugin_qqbot_features.request_context import extract_reply_source_messages
+from astrbot_plugin_qqbot_features.request_context import format_source_messages
 
 
 class Plain:
@@ -19,11 +21,35 @@ class Plain:
 
 
 class Reply:
-    def __init__(self, *, message_str: str = "", reply_id: str = "", chain: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        message_str: str = "",
+        reply_id: str = "",
+        chain: list[object] | None = None,
+        sender_id: object = "",
+    ) -> None:
         self.message_str = message_str
         self.text = message_str
         self.id = reply_id
         self.chain = chain or []
+        self.sender_id = sender_id
+
+
+class Node:
+    def __init__(self, *, uin: object = "", content: object = None) -> None:
+        self.uin = uin
+        self.content = [] if content is None else content
+
+
+class Nodes:
+    def __init__(self, nodes: list[object] | None = None) -> None:
+        self.nodes = nodes or []
+
+
+class Forward:
+    def __init__(self, forward_id: object = "") -> None:
+        self.id = forward_id
 
 
 class At:
@@ -92,6 +118,78 @@ class AstrBotRequestContextTest(unittest.TestCase):
         self.assertEqual(context.reply_texts, ("如何生成画图支持分辨率：1K、2K、4K",))
         self.assertIn("被引用消息1：如何生成画图支持分辨率：1K、2K、4K", context.combined_query)
         self.assertIn("当前消息：回答一下", context.combined_query)
+
+    def test_reply_source_tree_preserves_reply_and_node_qq(self) -> None:
+        event = StubEvent(
+            [
+                Reply(
+                    sender_id="11101",
+                    message_str="顶层引用",
+                    chain=[
+                        Plain("顶层引用"),
+                        Nodes(
+                            [
+                                Node(uin="22202", content=[Plain("第一条")]),
+                                Node(
+                                    uin=33303,
+                                    content=[Plain("第二条"), Forward("nested-forward")],
+                                ),
+                            ]
+                        ),
+                    ],
+                )
+            ]
+        )
+
+        sources = extract_reply_source_messages(event)
+        text = format_source_messages(sources)
+
+        self.assertEqual(sources[0].sender_qq, "11101")
+        self.assertEqual(sources[0].text, "顶层引用")
+        self.assertEqual([child.sender_qq for child in sources[0].children], ["22202", "33303"])
+        self.assertEqual(sources[0].children[1].children[0].forward_id, "nested-forward")
+        self.assertIn("发送者 QQ：11101", text)
+        self.assertIn("发送者 QQ：22202", text)
+        self.assertIn("发送者 QQ：33303", text)
+        self.assertIn("第一条", text)
+        self.assertIn("第二条", text)
+
+    def test_unknown_or_zero_sender_is_not_guessed(self) -> None:
+        event = StubEvent(
+            [
+                Reply(
+                    sender_id=0,
+                    message_str="未知顶层",
+                    chain=[Node(uin="", content=[Plain("未知内层")])],
+                )
+            ]
+        )
+
+        text = format_source_messages(extract_reply_source_messages(event))
+
+        self.assertNotIn("发送者 QQ", text)
+        self.assertIn("未知顶层", text)
+        self.assertIn("未知内层", text)
+
+    def test_source_formatter_bounds_depth_and_text_growth(self) -> None:
+        event = StubEvent(
+            [
+                Reply(
+                    sender_id="1",
+                    message_str="root",
+                    chain=[Node(uin="2", content=[Node(uin="3", content=[Plain("deep")])])],
+                )
+            ]
+        )
+
+        text = format_source_messages(
+            extract_reply_source_messages(event),
+            max_depth=1,
+            max_chars=30,
+        )
+
+        self.assertLessEqual(len(text), 30)
+        self.assertNotIn("发送者 QQ：3", text)
 
     def test_named_call_is_detected_from_current_text(self) -> None:
         event = StubEvent([Plain("呼叫棉花糖")])
