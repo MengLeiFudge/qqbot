@@ -119,6 +119,6 @@ Set-Location D:\project\qqbot
 
 NapCat 更新会先查询 GitHub 最新 release；如果本地记录已经是最新 release，则直接跳过下载和替换，并顺手清理旧更新缓存。本地旧包没有 release 标记时，会回看最近成功的 NapCat 更新日志作为版本来源；仍无法确认时显示当前版本为 unknown，并在下载前询问。确认后才下载 Windows Shell OneKey zip 并解压到临时目录，确认新包准备好后再停止本工作区关联的 NapCat/QQ 进程，临时移走旧 `napcat\onekey`，替换程序包后自动迁移 `napcat_*.json`、`napcat_protocol_*.json` 和 `onebot11_*.json` 账号配置；成功更新后删除本次下载包、解压目录和临时旧包备份。
 
-AstrBot 更新在用户确认后，会停止本工作区正在运行的 AstrBot uv tool 进程，再使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。如果 Windows PATH 找不到 `uv`，脚本会在确认后用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
+AstrBot 更新在用户确认后，会停止本工作区正在运行的 AstrBot uv tool 进程，再使用当前 Windows 已安装的 Python 3.14，执行 `uv tool upgrade astrbot --python 3.14`；如果本机还没有安装 AstrBot tool，则改为 `uv tool install astrbot --python 3.14`。Core 安装或升级完成后，脚本还会把 `tools/runtime-scripts/astrbot-extra-requirements.txt` 中固定版本的本地插件依赖安装进同一个 uv tool Python；日常启动不会联网补依赖。如果 Windows PATH 找不到 `uv`，脚本会在确认后用 `py -3.14 -m pip install --user -U uv` 安装用户级 uv。更新日志写入 `data/astrbot/logs/updates/`。
 
 更新后使用 `scripts\start-all.bat` 启动 bot2。`astrbot/` 是官方源码 submodule，修改或切换它不会影响实际运行的 bot2；实际运行版本以 uv tool 安装包为准。

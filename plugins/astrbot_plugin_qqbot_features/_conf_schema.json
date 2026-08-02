@@ -45,6 +45,42 @@
     "default": 240,
     "hint": "生图通常超过 1 分钟；超过该时间仍未返回时，插件回复失败并退回本次扣除的积分。"
   },
+  "jmcomic_enabled": {
+    "description": "启用 JM 下载转 PDF",
+    "type": "bool",
+    "default": true,
+    "hint": "仅主人 605738729 私聊可执行 JM下载 <作品ID>；群聊和其他用户不会启动下载。"
+  },
+  "jmcomic_proxy": {
+    "description": "JM 下载代理",
+    "type": "string",
+    "default": "",
+    "hint": "可选 HTTP/HTTPS 代理地址。留空时显式禁用系统代理继承，不保存 cookie。"
+  },
+  "jmcomic_timeout_seconds": {
+    "description": "JM 下载总超时秒数",
+    "type": "int",
+    "default": 1800,
+    "hint": "单个作品下载和图片整理的总超时，范围 60-7200 秒。"
+  },
+  "jmcomic_max_pages_per_pdf": {
+    "description": "单个 JM PDF 最大页数",
+    "type": "int",
+    "default": 500,
+    "hint": "整本超过该页数时按章节分卷；单章仍超限时继续按页拆分，范围 10-1000。"
+  },
+  "jmcomic_max_pdf_size_mb": {
+    "description": "单个 JM PDF 最大 MiB",
+    "type": "int",
+    "default": 100,
+    "hint": "整本超过该大小时删除整本并按章节分卷；单章仍超限时继续拆分，范围 10-500 MiB。"
+  },
+  "jmcomic_max_concurrent_jobs": {
+    "description": "JM 下载最大并发任务数",
+    "type": "int",
+    "default": 1,
+    "hint": "限制下载、转换和磁盘占用；推荐保持 1，最大 2。"
+  },
   "sub2api_base_url": {
     "description": "Sub2API 管理端地址",
     "type": "string",

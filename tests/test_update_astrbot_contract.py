@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 UPDATE_ASTRBOT = ROOT / "tools" / "runtime-scripts" / "update-astrbot.ps1"
 UPDATE_NAPCAT = ROOT / "tools" / "runtime-scripts" / "update-napcat.ps1"
 UPDATE_ALL = ROOT / "tools" / "runtime-scripts" / "update-all.ps1"
+EXTRA_REQUIREMENTS = ROOT / "tools" / "runtime-scripts" / "astrbot-extra-requirements.txt"
 
 
 class UpdateAstrBotContractTest(unittest.TestCase):
@@ -19,6 +20,18 @@ class UpdateAstrBotContractTest(unittest.TestCase):
         self.assertIn('$toolListCommand = @($UvCommand) + @("tool", "list", "--show-paths")', script)
         self.assertIn('Invoke-LoggedCommand (@($uvCommand) + @("tool", "upgrade", "astrbot", "--python", $PythonVersion))', script)
         self.assertIn('Invoke-LoggedCommand (@($uvCommand) + @("tool", "install", "astrbot", "--python", $PythonVersion))', script)
+
+    def test_update_astrbot_installs_pinned_plugin_dependencies(self) -> None:
+        script = UPDATE_ASTRBOT.read_text(encoding="utf-8-sig")
+        requirements = EXTRA_REQUIREMENTS.read_text(encoding="utf-8")
+
+        self.assertIn('$ExtraRequirements = Join-Path $ScriptRoot "astrbot-extra-requirements.txt"', script)
+        self.assertIn('ToolPath = if ($toolMatch.Success)', script)
+        self.assertIn('$astrBotToolPython = Join-Path $postInstallToolState.ToolPath "Scripts\\python.exe"', script)
+        self.assertIn('Pinned plugin dependencies: $ExtraRequirements', script)
+        self.assertIn('"--requirements",', script)
+        self.assertIn("jmcomic==2.7.2", requirements)
+        self.assertIn("img2pdf==0.6.3", requirements)
 
     def test_start_process_wrappers_do_not_pass_empty_argument_list(self) -> None:
         script = UPDATE_ASTRBOT.read_text(encoding="utf-8-sig")

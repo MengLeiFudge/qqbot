@@ -60,6 +60,11 @@ MENU_SECTIONS: tuple[MenuSection, ...] = (
         ),
     ),
     MenuSection(
+        name="JM漫画",
+        aliases=("JM", "漫画", "PDF"),
+        lines=("JM下载 作品ID：仅主人私聊下载整本并发送 PDF，超页数或大小时自动分卷",),
+    ),
+    MenuSection(
         name="Factorio",
         aliases=("异星工厂", "太空时代", "Space Age", "spaceage"),
         lines=("Factorio下载链接 / 异星下载链接：获取 Space Age Windows 安装包下载链接",),

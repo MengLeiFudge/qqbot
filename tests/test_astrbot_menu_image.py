@@ -34,11 +34,12 @@ class AstrBotMenuImageTest(unittest.TestCase):
 
         self.assertEqual(
             names,
-            ["群务管理", "棉花糖互动", "养鲲", "落樱之都", "Arcaea", "Factorio", "异形工厂"],
+            ["群务管理", "棉花糖互动", "养鲲", "落樱之都", "Arcaea", "JM漫画", "Factorio", "异形工厂"],
         )
         self.assertEqual(find_menu_section("Arc").name, "Arcaea")
         self.assertEqual(find_menu_section("生图").name, "棉花糖互动")
         self.assertEqual(find_menu_section("群管").name, "群务管理")
+        self.assertEqual(find_menu_section("PDF").name, "JM漫画")
         self.assertNotIn("戳一戳", "\n".join(find_menu_section("互动").lines))
 
     def test_render_overview_menu_image_creates_cached_png(self) -> None:

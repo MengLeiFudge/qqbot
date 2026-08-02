@@ -4,7 +4,7 @@
 
 ## 插件用途
 
-本插件是 AstrBot 当前固定功能入口，覆盖群务、菜单、生图、美图、表情管理、复读、养鲲、落樱之都、Arcaea、Factorio 和异形工厂。拍一拍不在这里生成特殊回复，也不生成拍一拍专属文案；Poke 由 `astrbot_plugin_topic_concentration` 归一化为显式呼叫并动态注入按拍击重复程度组织的提示，第 2 次起还会在该请求上附加请求级 `qqbot_mute_repeated_poker` 禁言工具。
+本插件是 AstrBot 当前固定功能入口，覆盖群务、菜单、生图、美图、表情管理、复读、养鲲、落樱之都、Arcaea、JM 漫画 PDF、Factorio 和异形工厂。拍一拍不在这里生成特殊回复，也不生成拍一拍专属文案；Poke 由 `astrbot_plugin_topic_concentration` 归一化为显式呼叫并动态注入按拍击重复程度组织的提示，第 2 次起还会在该请求上附加请求级 `qqbot_mute_repeated_poker` 禁言工具。
 
 固定指令统一使用同一套触发规则：群聊和私聊都可触发；群聊可以 @ 当前 bot 后发送，也可以不 @ 直接发送；每个功能只把主指令展示在菜单里，别名只参与触发解析；指令不使用 `/` 这类特殊前缀，直接使用中文或英文字母。
 
@@ -142,6 +142,15 @@
 - `xz` / `arcxz`
   - 作者限定，查询并下载 Arcaea 相关安装包。
 
+## JM 漫画 PDF
+
+- `JM下载 <作品ID>`
+  - 仅主人 `605738729` 私聊可用；群聊只提示转私聊，其他用户不能启动下载。
+  - 使用锁定版本的 `jmcomic` 下载整本，按上游章节顺序和自然页序生成 PDF，不保存 cookie。
+  - 默认单个 PDF 最多 500 页、100 MiB；整本超限时按章节分卷，单章仍超限时继续按页拆分。
+  - 同时只执行一个任务，默认总超时 1800 秒。上传完成、失败或超时后都会清理下载图片和 PDF，不持久缓存漫画内容。
+  - `image2pdf` 上游仓库仅作为排序和转换行为参考；运行时使用本插件自有 `PdfRenderer` 和锁定的 `img2pdf` 编码依赖，不导入该仓库的硬编码脚本。
+
 ## Factorio
 
 - `Factorio下载链接` / `异星下载链接` / `太空时代下载链接`
@@ -199,6 +208,16 @@
   - 只限制群聊；私聊不限制。固定命令、生图、群管、下载、积分等副作用入口不会被这个长输入短路吞掉。
 - `reply_style_guard_long_input_tldr_text`
   - 默认 `太长不看喵`。
+- `jmcomic_enabled`
+  - 默认开启。关闭后 `JM下载 <作品ID>` 不执行下载。
+- `jmcomic_proxy`
+  - 可选 HTTP/HTTPS 代理地址；留空时显式禁用 JMComic 的系统代理继承，不保存 cookie。
+- `jmcomic_timeout_seconds`
+  - 单任务总超时，默认 1800 秒，范围 60-7200。
+- `jmcomic_max_pages_per_pdf` / `jmcomic_max_pdf_size_mb`
+  - 单个 PDF 默认最多 500 页、100 MiB；超限时按章节和页数继续拆分。
+- `jmcomic_max_concurrent_jobs`
+  - 默认 1，最大 2；用于限制网络、CPU 和临时磁盘占用。
 - `source_knowledge_max_results` / `source_knowledge_max_chars`
   - 默认 `4` / `2600`。源码知识按低成本运行，需要追查大文件或更完整源码证据时再临时调高。
 - `meme_manager_webui_port`
@@ -229,6 +248,7 @@
 ## 数据与安全边界
 
 - 使用 `data\astrbot\data\plugin_data\qqbot_features_runtime` 作为游戏、Arcaea、RightCodes 积分和本地 artifact 发布状态目录；游戏、Arcaea 会话/缓存、复读/thunder/Lolicon 群配置、Shapez 群文件清理状态和 RightCodes 积分优先写入 `db\qqbot_features.sqlite3`。
+- JM 漫画图片和 PDF 只写入 AstrBot Core temp 下的 `qqbot_features\jmcomic\<job>` 独立任务目录，上传完成、失败或超时后由任务立即清理，不写入 SQLite 或其他持久缓存。
 - Lolicon 元数据写入 `db\lolicon.sqlite3`，图片不再下载到本地；菜单图、Arc 猜歌面板、shapez 渲染图和临时面板写入 AstrBot Core 的 `data\temp\qqbot_features\` 子目录，进入 Core `temp_dir_max_size` 容量清理范围。插件后台只删除超过安全窗口的重复图片副本，不做独立按日期清理；旧 AI 记忆、TTS、头像和 shapez 静态旧目录不再作为日常运行态保留。
 - 使用 `data\astrbot\data\plugin_data\meme_manager` 作为本地表情包运行态目录；这是兼容保留的数据路径，不再对应独立 AstrBot 插件。
 - 旧公开群上下文快照不再作为 prompt 事实源，也不提供群聊记录导出命令。

@@ -16,6 +16,7 @@ catch {
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $WorkspaceRoot = Split-Path -Parent (Split-Path -Parent $ScriptRoot)
+$ExtraRequirements = Join-Path $ScriptRoot "astrbot-extra-requirements.txt"
 $AstrRoot = Join-Path $WorkspaceRoot "data\astrbot"
 $LogRoot = Join-Path $AstrRoot "logs\updates"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -311,9 +312,14 @@ function Get-UvToolInstalledState {
     }
     Add-Content -Path $logFile -Value $toolList -Encoding UTF8
 
+    $toolMatch = [regex]::Match(
+        $toolList,
+        '(?m)^astrbot\s+[^\r\n]*\((?<path>[^)\r\n]+)\)\s*$'
+    )
     return [pscustomobject]@{
-        IsInstalled = ($toolList -match "(?m)^astrbot\s")
+        IsInstalled = $toolMatch.Success
         ToolList = $toolList
+        ToolPath = if ($toolMatch.Success) { $toolMatch.Groups["path"].Value } else { "" }
     }
 }
 
@@ -350,6 +356,7 @@ function Confirm-AstrBotUpdate {
     Write-Step "  Existing uv tool package: $(if ($IsInstalled) { 'astrbot installed' } else { 'astrbot not installed' })"
     Write-Step "  Planned action: $Action"
     Write-Step "  Planned command: $commandPreview"
+    Write-Step "  Pinned plugin dependencies: $ExtraRequirements"
     if ($WillInstallUv) {
         Write-Step "  uv bootstrap command before update: py -$PythonVersion -m pip install --user -U uv"
     }
@@ -489,6 +496,47 @@ else {
     else {
         Invoke-LoggedCommand (@($uvCommand) + @("tool", "install", "astrbot", "--python", $PythonVersion))
     }
+}
+
+if ($DryRun) {
+    $dryRunToolRoot = if (-not [string]::IsNullOrWhiteSpace($toolState.ToolPath)) {
+        $toolState.ToolPath
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($env:UV_TOOL_DIR)) {
+        Join-Path $env:UV_TOOL_DIR "astrbot"
+    }
+    else {
+        Join-Path $env:APPDATA "uv\tools\astrbot"
+    }
+    $astrBotToolPython = Join-Path $dryRunToolRoot "Scripts\python.exe"
+}
+else {
+    $postInstallToolState = Get-UvToolInstalledState -UvCommand $uvCommand
+    if (-not $postInstallToolState.IsInstalled -or [string]::IsNullOrWhiteSpace($postInstallToolState.ToolPath)) {
+        throw "AstrBot uv tool path is unavailable after install or upgrade."
+    }
+    $astrBotToolPython = Join-Path $postInstallToolState.ToolPath "Scripts\python.exe"
+}
+if ($DryRun) {
+    Write-Step "Would install pinned AstrBot plugin dependencies from: $ExtraRequirements"
+    Write-Step "Would run: uv pip install --python $astrBotToolPython --requirements $ExtraRequirements"
+}
+else {
+    if (-not (Test-Path $ExtraRequirements -PathType Leaf)) {
+        throw "AstrBot plugin dependency manifest is missing: $ExtraRequirements"
+    }
+    if (-not (Test-Path $astrBotToolPython -PathType Leaf)) {
+        throw "AstrBot uv tool Python is missing after install or upgrade: $astrBotToolPython"
+    }
+    Write-Step "Installing pinned AstrBot plugin dependencies."
+    Invoke-LoggedCommand (@($uvCommand) + @(
+        "pip",
+        "install",
+        "--python",
+        $astrBotToolPython,
+        "--requirements",
+        $ExtraRequirements
+    ))
 }
 
 Write-Step "AstrBot version after update:"

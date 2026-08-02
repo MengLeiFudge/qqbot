@@ -34,6 +34,7 @@
 - `plugins/astrbot_plugin_qqbot_features`
 - `plugins/astrbot_plugin_topic_concentration`
 - `plugins/astrbot_plugin_local_artifact_api`
+- `tools/runtime-scripts/astrbot-extra-requirements.txt` 中锁定的本地插件 Python 依赖；容器或 venv 必须安装同一版本
 - `config/astrbot/` 里的脱敏配置示例，用作服务器 WebUI / 数据库配置参考
 - 必要的运行态数据：表情包、游戏存档、RightCodes 积分、Lolicon 元数据和 artifact 发布状态
 
@@ -46,7 +47,7 @@
 ## 部署步骤
 
 1. 在 1Panel 安装 AstrBot，确认 WebUI 端口 6185 可访问。
-2. 在 AstrBot 数据目录中放入本仓库三个本地插件，保持目录名不变。
+2. 在 AstrBot 数据目录中放入本仓库三个本地插件，保持目录名不变；在 AstrBot 实际 Python 环境中安装 `tools/runtime-scripts/astrbot-extra-requirements.txt` 锁定的依赖。
 3. 在 AstrBot WebUI 中配置两个 aiocqhttp 平台：
    - 天使：`ws://127.0.0.1:6200/ws`
    - 恶魔：`ws://127.0.0.1:6201/ws`

@@ -27,6 +27,10 @@ from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
 from .command_guard import record_command_handled
 from .command_guard import try_claim_command
+from .comic_pdf import ComicPdfError
+from .comic_pdf import ComicPdfService
+from .comic_pdf import load_comic_pdf_config
+from .comic_pdf import upload_private_pdfs
 from .image_summary import prepare_onebot_image_summary_chain
 from .image_summary import random_summary_image_from_file
 from .image_summary import random_summary_image_from_url
@@ -156,6 +160,7 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
 FACTORIO_DOWNLOAD_PATTERN = (
     r"(?i)^.*(?:factorio|异星|太空时代|space\s*age|spaceage).*(?:下载|安装包).*(?:链接|地址)?$"
 )
+JMCOMIC_DOWNLOAD_PATTERN = r"(?i)^jm\s*下载\s*([0-9]+)$"
 MENU_PATTERN = r"^(?:菜单|帮助|指令)$"
 FEATURE_MENU_PATTERN = r"^菜单\s*(?!\d+$)\S+$"
 GROUP_FILE_CLEANUP_PATTERN = r"^(?:通知)?(?:大家|全员|群友)?(?:清理|整理)(?:群)?文件$|^(?:群)?文件(?:清理|整理)(?:通知)?$"
@@ -188,6 +193,7 @@ FIXED_COMMAND_PATTERNS = tuple(
         GROUP_FILE_CLEANUP_PATTERN,
         SUB2API_USAGE_PATTERN,
         FACTORIO_DOWNLOAD_PATTERN,
+        JMCOMIC_DOWNLOAD_PATTERN,
         SHAPEZ_PATTERN,
         LOLICON_ADMIN_PATTERN,
         LOLICON_PATTERN,
@@ -409,7 +415,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.13.2",
+    "0.14.0",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -430,6 +436,11 @@ class QQBotFeaturesPlugin(Star):
         self._llm_error_notice_cooldown = LlmErrorNoticeCooldown()
         self._arc_apk_update_manager = None
         self._rightcodes_config = load_rightcodes_config(config)
+        self._comic_pdf_config = load_comic_pdf_config(config)
+        self._comic_pdf_service = ComicPdfService(
+            get_plugin_temp_root("jmcomic"),
+            self._comic_pdf_config,
+        )
         self._meme_runtime = MemeManagerRuntime(
             self.context,
             ScopedPluginConfig(
@@ -1063,6 +1074,53 @@ class QQBotFeaturesPlugin(Star):
             await run_group_file_cleanup(event)
         except Exception as exc:
             yield event.plain_result(f"群文件清理失败：{exc}")
+        event.stop_event()
+
+    @filter.platform_adapter_type("aiocqhttp")
+    @filter.regex(JMCOMIC_DOWNLOAD_PATTERN, desc="主人私聊下载 JM 作品并转换为受限大小的 PDF 文件。")
+    async def jmcomic_download(self, event: AstrMessageEvent):
+        if not _should_handle_migrated_command(event, self._feature_mode, command_type="jmcomic_pdf"):
+            return
+        if str(event.get_sender_id() or "").strip() != self._comic_pdf_config.owner_qq:
+            yield event.plain_result("这个命令仅主人私聊可用。")
+            event.stop_event()
+            return
+        if not event.is_private_chat():
+            yield event.plain_result("请私聊发送 JM下载 <作品ID>。")
+            event.stop_event()
+            return
+        if not self._comic_pdf_config.enabled:
+            yield event.plain_result("JM 下载功能当前未启用。")
+            event.stop_event()
+            return
+        match = re.fullmatch(JMCOMIC_DOWNLOAD_PATTERN, extract_plain_text(event).strip())
+        if match is None:
+            return
+        album_id = match.group(1)
+        job = None
+        response_text = ""
+        yield event.plain_result(f"开始下载 JM{album_id}，完成后会直接发送 PDF。")
+        try:
+            job = await self._comic_pdf_service.create_pdf(album_id)
+            count = await upload_private_pdfs(
+                AstrBotOneBotApi(event),
+                int(self._comic_pdf_config.owner_qq),
+                job.artifacts,
+            )
+            response_text = f"JM{album_id} 已发送，共 {count} 个 PDF，临时文件已清理。"
+        except ComicPdfError as exc:
+            response_text = str(exc)
+        except Exception as exc:
+            logger.error(
+                "[QQBotFeatures] JM PDF task failed: album_id=%s error_type=%s",
+                album_id,
+                type(exc).__name__,
+            )
+            response_text = "JM 下载或文件发送失败，临时文件已清理。"
+        finally:
+            if job is not None:
+                await asyncio.to_thread(job.cleanup)
+        yield event.plain_result(response_text)
         event.stop_event()
 
     @filter.regex(FACTORIO_DOWNLOAD_PATTERN, desc="获取 Factorio Space Age Windows 安装包下载链接，需要本机已配置 Factorio 凭据。")
