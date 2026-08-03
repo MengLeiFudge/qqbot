@@ -132,7 +132,7 @@
   },
   "platform": [
     {
-      "id": "😇棉花糖😇",
+      "id": "云栖",
       "type": "aiocqhttp",
       "enable": true,
       "ws_reverse_host": "0.0.0.0",
@@ -140,7 +140,7 @@
       "ws_reverse_token": ""
     },
     {
-      "id": "👿棉花糖👿",
+      "id": "夜凛",
       "type": "aiocqhttp",
       "enable": true,
       "ws_reverse_host": "0.0.0.0",

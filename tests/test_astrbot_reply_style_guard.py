@@ -266,8 +266,8 @@ class AstrBotForwardMessageTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("转发正文", injection)
         self.assertIn("当前消息：请解释这段", injection)
         self.assertNotIn("当前 bot", injection)
-        self.assertNotIn("天使", injection)
-        self.assertNotIn("恶魔", injection)
+        self.assertNotIn("云栖", injection)
+        self.assertNotIn("夜凛", injection)
         self.assertEqual(event.calls, ["outer"])
 
     async def test_multiple_reply_and_forward_roots_keep_their_own_subtrees(self) -> None:

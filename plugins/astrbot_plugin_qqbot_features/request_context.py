@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover - imported by lightweight unit tests.
     _ASTRBOT_COMPONENTS_AVAILABLE = False
 
 
-BOT_NAME_MARKERS = ("棉花糖", "天使棉花糖", "恶魔棉花糖", "呼叫棉花糖")
+BOT_NAME_MARKERS = ("棉花糖", "云栖", "夜凛", "呼叫棉花糖")
 
 
 @dataclass(frozen=True, slots=True)

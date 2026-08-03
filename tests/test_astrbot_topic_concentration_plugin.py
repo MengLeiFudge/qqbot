@@ -1558,7 +1558,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             at_ids=("1443944862",),
             message_key="message:def:llm",
             group_id="10001",
-            original_text="@天使 配置怎么看",
+            original_text="@云栖 配置怎么看",
             allow_delegation=True,
             now=20.0,
         )
@@ -1567,7 +1567,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
             at_ids=("1443944862",),
             message_key="message:def:llm",
             group_id="10001",
-            original_text="@天使 配置怎么看",
+            original_text="@云栖 配置怎么看",
             allow_delegation=True,
             now=21.0,
         )
@@ -1585,7 +1585,7 @@ class AstrBotTopicConcentrationPluginTest(unittest.TestCase):
         assert comment is not None
         self.assertEqual(comment.commenter_id, "1443944862")
         self.assertEqual(comment.responder_id, "2629227874")
-        self.assertEqual(comment.original_text, "@天使 配置怎么看")
+        self.assertEqual(comment.original_text, "@云栖 配置怎么看")
         self.assertEqual(read_group_balance("10001"), 1.0)
 
         popped = pop_pending_delegated_comment(

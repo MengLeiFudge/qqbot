@@ -241,11 +241,11 @@ INTERNAL_ERROR_PREFIXES = (
 BOT_PROFILES = {
     "angel": {
         "bot_id": "1443944862",
-        "bot_name": "😇棉花糖😇",
+        "bot_name": "云栖",
     },
     "demon": {
         "bot_id": "2629227874",
-        "bot_name": "👿棉花糖👿",
+        "bot_name": "夜凛",
     },
 }
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
@@ -287,7 +287,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         name="入群欢迎",
         aliases=("欢迎", "新人欢迎", "社交事件"),
-        lines=("新成员入群时天使和恶魔各自按身份发送欢迎；双 bot 互相入群不欢迎",),
+        lines=("新成员入群时云栖和夜凛各自按身份发送欢迎；双 bot 互相入群不欢迎",),
     ),
     FeatureSpec(
         name="复读",
@@ -666,7 +666,7 @@ class QQBotFeaturesPlugin(Star):
                 TextPart(text=build_both_targeted_reply_instruction_text()).mark_as_temp()
             )
 
-    @filter.on_llm_request(desc="在 LLM 请求前注入当前 self_id 对应的天使/恶魔身份事实。")
+    @filter.on_llm_request(desc="在 LLM 请求前注入当前 self_id 对应的云栖/夜凛身份事实。")
     async def inject_current_identity_fact(self, event: AstrMessageEvent, req: ProviderRequest):
         profile = self._profile_for_event(event)
         if is_bot_sender(event, profile):
@@ -714,7 +714,7 @@ class QQBotFeaturesPlugin(Star):
             len(injection),
         )
 
-    @filter.on_llm_request(desc="在 LLM 请求前注入当前 bot 与另一个棉花糖的双子关系边界，不替对方发言。")
+    @filter.on_llm_request(desc="在 LLM 请求前注入当前 bot 与另一个棉花糖的姐妹关系边界，不替对方发言。")
     async def inject_twin_context(self, event: AstrMessageEvent, req: ProviderRequest):
         profile = self._profile_for_event(event)
         if is_bot_sender(event, profile):
@@ -920,7 +920,7 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result("这条折叠消息我读不到内容。")
         event.stop_event()
 
-    @filter.event_message_type(EventMessageType.ALL, desc="处理明确询问姐姐、妹妹、天使或恶魔的互动请求，只让当前 bot 以自己身份回应。")
+    @filter.event_message_type(EventMessageType.ALL, desc="处理明确询问姐姐、妹妹、云栖或夜凛的互动请求，只让当前 bot 以自己身份回应。")
     async def handle_explicit_twin_request(self, event: AstrMessageEvent):
         if not self._twin_config.direct_handler_enabled:
             return
@@ -1187,7 +1187,7 @@ class QQBotFeaturesPlugin(Star):
         if not has_friend:
             yield _chain_result_with_reply(
                 event,
-                [Plain("需要先添加天使或恶魔任意一只为好友，再重新发送。")],
+                [Plain("需要先添加云栖或夜凛任意一只为好友，再重新发送。")],
             )
             event.stop_event()
             return

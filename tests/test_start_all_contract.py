@@ -157,6 +157,25 @@ class StartAllContractTest(unittest.TestCase):
             script.index('$napcatComponents += "napcat-astrbot-demon"'),
         )
 
+    def test_start_all_keeps_experiment_napcat_accounts_online(self) -> None:
+        script = START_ALL.read_text(encoding="utf-8-sig")
+
+        self.assertIn("function Ensure-ExperimentNapCatAccounts", script)
+        self.assertIn("function Ensure-MaiBotExperimentCores", script)
+        self.assertIn("ensure-maibot-experiments.sh", script)
+        self.assertEqual(script.count("Ensure-MaiBotExperimentCores"), 3)
+        self.assertIn("function Test-NapCatAccountPortOwnership", script)
+        self.assertIn('throw "$label OneBot port $port is owned by an unexpected process."', script)
+        self.assertIn('@{ Account = "3056830689"; Port = 8096; Label = "Xingyao" }', script)
+        self.assertIn('@{ Account = "3109326090"; Port = 8095; Label = "Yuecheng" }', script)
+        self.assertIn('Start-Process -FilePath "powershell.exe" -WindowStyle Hidden', script)
+        self.assertIn('Set-NapCatQuickLoginReady -Account $account -Ready $true', script)
+        self.assertEqual(script.count("Ensure-ExperimentNapCatAccounts -RunId $runId"), 2)
+        self.assertLess(
+            script.index('Stop-NapCatWorkspaceProcesses -Reason "force restart"'),
+            script.rindex("Ensure-ExperimentNapCatAccounts -RunId $runId"),
+        )
+
     def test_start_astrbot_reports_launch_mode(self) -> None:
         script = START_ASTRBOT.read_text(encoding="utf-8-sig")
 
@@ -169,6 +188,10 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("Run scripts\\update-all.bat first", script)
         self.assertIn("To bootstrap from PyPI during startup, rerun with -AllowUvToolRun", script)
         self.assertIn("function Write-StartupPhase", script)
+        self.assertIn("demon = (Join-CodePoints @(0x591C, 0x51DB))", script)
+        self.assertIn("angel = (Join-CodePoints @(0x4E91, 0x6816))", script)
+        self.assertNotIn("0xD83D", script)
+        self.assertNotIn("0x68C9, 0x82B1, 0x7CD6", script)
         self.assertIn("AstrBot startup phase [{0}]: {1}", script)
         self.assertIn('Get-Date -Format "HH:mm:ss.fff"', script)
         self.assertIn('Write-StartupPhase "sync profile config begin"', script)

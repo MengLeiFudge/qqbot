@@ -186,8 +186,8 @@ def _font(font_path: str | None, size: int) -> ImageFont.ImageFont:
 def _draw_header(draw: ImageDraw.ImageDraw, fonts: _Fonts, title: str, subtitle: str) -> None:
     draw.text((40, 38), title, font=fonts.title, fill=INK)
     draw.text((42, 100), subtitle, font=fonts.subtitle, fill=MUTED)
-    _badge(draw, fonts, (884, 48), "天使 6200", ANGEL)
-    _badge(draw, fonts, (884, 92), "恶魔 6201", DEMON)
+    _badge(draw, fonts, (884, 48), "云栖 6200", ANGEL)
+    _badge(draw, fonts, (884, 92), "夜凛 6201", DEMON)
 
 
 def _draw_mode_strip(draw: ImageDraw.ImageDraw, fonts: _Fonts, feature_mode: str, y: int) -> None:

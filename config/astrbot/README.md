@@ -20,4 +20,4 @@ python3 tools/maintenance-scripts/export-astrbot-config-examples.py
 
 初始化新机器时，先启动 AstrBot 生成默认配置，再参考本目录的示例补充本机值。
 
-天使/恶魔人格文本只从 AstrBot WebUI 人格配置导出为 `personas.example.json`；本地插件不再内嵌或覆盖固定人设提示词。
+云栖/夜凛人格文本只从 AstrBot WebUI 人格配置导出为 `personas.example.json`；本地插件不再内嵌或覆盖固定人设提示词。

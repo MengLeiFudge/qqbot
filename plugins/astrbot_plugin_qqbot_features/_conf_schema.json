@@ -443,21 +443,21 @@
     "hint": "Python fallback 索引缓存刷新间隔。"
   },
   "twin_interaction_enabled_groups": {
-    "description": "双子互动启用群号",
+    "description": "姐妹互动启用群号",
     "type": "string",
     "default": "",
-    "hint": "英文逗号分隔群号；留空表示所有群和私聊都允许双子关系上下文。"
+    "hint": "英文逗号分隔群号；留空表示所有群和私聊都允许姐妹关系上下文。"
   },
   "twin_interaction_direct_handler_enabled": {
-    "description": "双子明确请求接管",
+    "description": "姐妹明确请求接管",
     "type": "bool",
     "default": true,
-    "hint": "开启后，明确询问天使/恶魔/姐姐/妹妹/双子关系时由当前 bot 直接发起本轮 LLM 回复。"
+    "hint": "开启后，明确询问云栖/夜凛/姐姐/妹妹/姐妹关系时由当前 bot 直接发起本轮 LLM 回复。"
   },
   "twin_interaction_max_context_chars": {
-    "description": "双子上下文最大字符数",
+    "description": "姐妹上下文最大字符数",
     "type": "int",
     "default": 1200,
-    "hint": "限制双子上下文注入长度。"
+    "hint": "限制姐妹上下文注入长度。"
   }
 }

@@ -49,8 +49,8 @@
 1. 在 1Panel 安装 AstrBot，确认 WebUI 端口 6185 可访问。
 2. 在 AstrBot 数据目录中放入本仓库三个本地插件，保持目录名不变；在 AstrBot 实际 Python 环境中安装 `tools/runtime-scripts/astrbot-extra-requirements.txt` 锁定的依赖。
 3. 在 AstrBot WebUI 中配置两个 aiocqhttp 平台：
-   - 天使：`ws://127.0.0.1:6200/ws`
-   - 恶魔：`ws://127.0.0.1:6201/ws`
+   - 云栖：`ws://127.0.0.1:6200/ws`
+   - 夜凛：`ws://127.0.0.1:6201/ws`
 4. 在服务器安装并启动两个 NapCat 实例，分别登录 `1443944862` 和 `2629227874`，反连对应端口。
 5. 在 AstrBot WebUI 中恢复两个人格和插件运行态配置；密钥只填服务器运行态，不写回仓库。
 6. 迁移必要的 `plugin_data` 运行态目录。Windows 路径要改成 Linux 路径，尤其是源码知识根、表情图片根和导出目录。

@@ -50,7 +50,7 @@ FIXED_COMMAND_PREFIX_RE = re.compile(
     r"|^(?:养鲲|摸鲲|抓鲲|捕鲲|属性|道具|背包|商城|签到|boss|Boss|查看boss|查看Boss|挑战|落樱之都|更新日志|玩法|个人信息|恢复|回复).*$",
     re.IGNORECASE,
 )
-BOT_NAME_MARKERS = ("棉花糖", "天使棉花糖", "恶魔棉花糖", "萌萌棉花糖", "qqbot")
+BOT_NAME_MARKERS = ("棉花糖", "云栖", "夜凛", "萌萌棉花糖", "qqbot")
 CALL_ACTION_MARKERS = (
     "帮",
     "帮我",

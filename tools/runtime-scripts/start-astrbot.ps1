@@ -43,12 +43,12 @@ function Join-CodePoints {
 }
 
 $ProfileDisplayNames = @{
-    demon = ((Join-CodePoints @(0xD83D, 0xDC7F)) + (Join-CodePoints @(0x68C9, 0x82B1, 0x7CD6)) + (Join-CodePoints @(0xD83D, 0xDC7F)))
-    angel = ((Join-CodePoints @(0xD83D, 0xDE07)) + (Join-CodePoints @(0x68C9, 0x82B1, 0x7CD6)) + (Join-CodePoints @(0xD83D, 0xDE07)))
+    demon = (Join-CodePoints @(0x591C, 0x51DB))
+    angel = (Join-CodePoints @(0x4E91, 0x6816))
 }
 $ProfilePersonaNames = @{
-    demon = (Join-CodePoints @(0x6076, 0x9B54, 0x68C9, 0x82B1, 0x7CD6))
-    angel = (Join-CodePoints @(0x5929, 0x4F7F, 0x68C9, 0x82B1, 0x7CD6))
+    demon = (Join-CodePoints @(0x591C, 0x51DB))
+    angel = (Join-CodePoints @(0x4E91, 0x6816))
 }
 $ProfileAccounts = @{
     demon = "2629227874"

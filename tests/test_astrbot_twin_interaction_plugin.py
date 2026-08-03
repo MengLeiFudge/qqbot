@@ -25,8 +25,8 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
     def test_detects_twin_related_text_without_generic_noise(self) -> None:
         profile = read_profile("angel")
 
-        self.assertTrue(is_twin_related_text("天使棉花糖你怎么看恶魔刚才那句", profile))
-        self.assertTrue(is_twin_related_text("你们双子今天谁值班", profile))
+        self.assertTrue(is_twin_related_text("云栖你怎么看夜凛刚才那句", profile))
+        self.assertTrue(is_twin_related_text("你们姐妹今天谁值班", profile))
         self.assertFalse(is_twin_related_text("普通 Factorio 下载链接", profile))
 
     def test_direct_request_requires_private_wake_or_current_bot_mention(self) -> None:
@@ -34,7 +34,7 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
 
         self.assertTrue(
             should_handle_direct_twin_request(
-                "天使棉花糖你点评一下恶魔刚才那句",
+                "云栖你点评一下夜凛刚才那句",
                 profile,
                 is_private=False,
                 is_at_or_wake_command=False,
@@ -42,7 +42,7 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         )
         self.assertTrue(
             should_handle_direct_twin_request(
-                "恶魔刚才那句怎么理解",
+                "夜凛刚才那句怎么理解",
                 profile,
                 is_private=False,
                 is_at_or_wake_command=True,
@@ -50,7 +50,7 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         )
         self.assertFalse(
             should_handle_direct_twin_request(
-                "恶魔刚才那句怎么理解",
+                "夜凛刚才那句怎么理解",
                 profile,
                 is_private=False,
                 is_at_or_wake_command=False,
@@ -60,9 +60,9 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
     def test_bare_dual_bot_call_is_treated_as_calling_current_bot(self) -> None:
         profile = read_profile("angel")
 
-        self.assertTrue(is_bare_dual_bot_call("@😇棉花糖😇 @👿棉花糖👿", profile))
+        self.assertTrue(is_bare_dual_bot_call("@云栖 @夜凛", profile))
         self.assertTrue(is_bare_dual_bot_call("[At:1443944862] [At:2629227874]", profile))
-        self.assertFalse(is_bare_dual_bot_call("😇棉花糖😇 👿棉花糖👿 说句话", profile))
+        self.assertFalse(is_bare_dual_bot_call("云栖 夜凛 说句话", profile))
 
         config = TwinInteractionConfig(
             enabled_groups=set(),
@@ -127,14 +127,15 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         angel_injection = build_identity_fact_injection(angel)
         demon_injection = build_identity_fact_injection(demon)
 
-        self.assertIn("你现在就是 😇棉花糖😇", angel_injection)
-        self.assertIn("另一个 bot 是 👿棉花糖👿", angel_injection)
-        self.assertIn("是你的妹妹", angel_injection)
-        self.assertIn("不能把自己说成 恶魔棉花糖", angel_injection)
-        self.assertIn("你现在就是 👿棉花糖👿", demon_injection)
-        self.assertIn("另一个 bot 是 😇棉花糖😇", demon_injection)
-        self.assertIn("是你的姐姐", demon_injection)
-        self.assertIn("不能把自己说成 天使棉花糖", demon_injection)
+        self.assertIn("你现在就是 云栖 / QQ 1443944862", angel_injection)
+        self.assertIn("四姐妹顺序固定：云栖是大姐，夜凛是二姐，星遥是三妹，月澄是四妹", angel_injection)
+        self.assertIn("另一位 bot 是 夜凛 / QQ 2629227874，是你的二妹", angel_injection)
+        self.assertIn("星遥 / QQ 3056830689 是三妹", angel_injection)
+        self.assertIn("月澄 / QQ 3109326090 是四妹", angel_injection)
+        self.assertIn("不能把自己说成 夜凛", angel_injection)
+        self.assertIn("你现在就是 夜凛 / QQ 2629227874", demon_injection)
+        self.assertIn("另一位 bot 是 云栖 / QQ 1443944862，是你的大姐", demon_injection)
+        self.assertIn("不能把自己说成 云栖", demon_injection)
 
     def test_injection_and_direct_prompt_keep_identity_boundary(self) -> None:
         profile = read_profile("angel")
@@ -145,23 +146,25 @@ class AstrBotTwinInteractionPluginTest(unittest.TestCase):
         )
 
         injection = build_twin_injection(
-            text="天使棉花糖让你妹妹说句话",
+            text="云栖让你妹妹说句话",
             group_id="123",
             profile=profile,
             config=config,
         )
         prompt = build_direct_twin_prompt(
-            text="天使棉花糖让你妹妹说句话",
+            text="云栖让你妹妹说句话",
             group_id="123",
             profile=profile,
             config=config,
         )
 
-        self.assertIn("当前 bot：😇棉花糖😇", injection)
-        self.assertIn("另一个 bot：👿棉花糖👿", injection)
+        self.assertIn("当前 bot：云栖 / QQ 1443944862", injection)
+        self.assertIn("另一位 bot：夜凛 / QQ 2629227874", injection)
+        self.assertIn("星遥 / QQ 3056830689 是三妹", injection)
+        self.assertIn("月澄 / QQ 3109326090 是四妹", injection)
         self.assertIn("禁止：冒充另一个 bot 输出", injection)
         self.assertIn("除非用户明确要求代发/代答", prompt)
-        self.assertIn("用户原话：天使棉花糖让你妹妹说句话", prompt)
+        self.assertIn("用户原话：云栖让你妹妹说句话", prompt)
 
 
 if __name__ == "__main__":

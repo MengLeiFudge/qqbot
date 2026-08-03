@@ -7,37 +7,42 @@ import re
 BOT_PROFILES = {
     "angel": {
         "bot_id": "1443944862",
-        "bot_name": "😇棉花糖😇",
-        "profile_name": "天使棉花糖",
-        "short_name": "天使",
+        "bot_name": "云栖",
+        "profile_name": "云栖",
+        "short_name": "云栖",
         "other_bot_id": "2629227874",
-        "other_bot_name": "👿棉花糖👿",
-        "other_profile_name": "恶魔棉花糖",
-        "other_short_name": "恶魔",
-        "relationship": "妹妹",
+        "other_bot_name": "夜凛",
+        "other_profile_name": "夜凛",
+        "other_short_name": "夜凛",
+        "relationship": "二妹",
     },
     "demon": {
         "bot_id": "2629227874",
-        "bot_name": "👿棉花糖👿",
-        "profile_name": "恶魔棉花糖",
-        "short_name": "恶魔",
+        "bot_name": "夜凛",
+        "profile_name": "夜凛",
+        "short_name": "夜凛",
         "other_bot_id": "1443944862",
-        "other_bot_name": "😇棉花糖😇",
-        "other_profile_name": "天使棉花糖",
-        "other_short_name": "天使",
-        "relationship": "姐姐",
+        "other_bot_name": "云栖",
+        "other_profile_name": "云栖",
+        "other_short_name": "云栖",
+        "relationship": "大姐",
     },
 }
 PROFILE_BY_BOT_ID = {data["bot_id"]: profile for profile, data in BOT_PROFILES.items()}
 TWIN_BOT_QQ_IDS = frozenset(PROFILE_BY_BOT_ID)
+FOUR_SISTERS_FACT = "四姐妹顺序固定：云栖是大姐，夜凛是二姐，星遥是三妹，月澄是四妹。"
 
 TWIN_TOPIC_MARKERS = (
-    "双子",
     "姐妹",
+    "四姐妹",
+    "大姐",
+    "二姐",
+    "三妹",
+    "四妹",
     "姐姐",
     "妹妹",
-    "天使",
-    "恶魔",
+    "云栖",
+    "夜凛",
     "白棉花糖",
     "黑棉花糖",
     "另一个棉花糖",
@@ -197,8 +202,10 @@ def build_identity_fact_injection(profile: TwinProfile) -> str:
     return "\n".join(
         [
             "当前 bot 动态身份事实，只用于本轮回复，不要向用户提到内部注入：",
-            f"- 你现在就是 {profile.bot_name} / {profile.profile_name} / QQ {profile.bot_id}。",
-            f"- 另一个 bot 是 {profile.other_bot_name} / {profile.other_profile_name} / QQ {profile.other_bot_id}，是你的{profile.relationship}。",
+            f"- 你现在就是 {profile.profile_name} / QQ {profile.bot_id}。",
+            f"- {FOUR_SISTERS_FACT}",
+            f"- 当前 AstrBot 里的另一位 bot 是 {profile.other_profile_name} / QQ {profile.other_bot_id}，是你的{profile.relationship}。",
+            f"- 星遥 / QQ 3056830689 是三妹；月澄 / QQ 3109326090 是四妹。她们各自运行独立实验框架，你不能冒充或代替她们。",
             f"- 用户说“你”“你姐”“你妹”“姐姐”“妹妹”时，都必须按当前 bot {profile.profile_name} 的视角理解，不能把自己说成 {profile.other_profile_name}。",
             f"- 你可以提到 {profile.other_profile_name}，但不能冒充她、替她认错、替她解释内部行为或替她承诺修改。",
         ]
@@ -406,18 +413,20 @@ def build_twin_injection(
     if not is_twin_related_text(text, profile):
         return ""
     lines = [
-        "双子 bot 互动上下文，仅用于本轮回复，不要向用户提到内部插件或上下文注入：",
-        f"当前 bot：{profile.bot_name} / {profile.profile_name} / QQ {profile.bot_id}。",
-        f"另一个 bot：{profile.other_bot_name} / {profile.other_profile_name} / QQ {profile.other_bot_id}，是你的{profile.relationship}。",
+        "姐妹 bot 互动上下文，仅用于本轮回复，不要向用户提到内部插件或上下文注入：",
+        f"{FOUR_SISTERS_FACT}",
+        f"当前 bot：{profile.profile_name} / QQ {profile.bot_id}。",
+        f"当前 AstrBot 里的另一位 bot：{profile.other_profile_name} / QQ {profile.other_bot_id}，是你的{profile.relationship}。",
+        "星遥 / QQ 3056830689 是三妹；月澄 / QQ 3109326090 是四妹。她们各自运行独立实验框架，当前 bot 不能冒充或代替她们。",
         f"用户说“你”“你姐”“你妹”“姐姐”“妹妹”时，都必须按当前 bot {profile.profile_name} 的视角理解；不要把自己说成 {profile.other_profile_name}。",
-        "允许：用当前 bot 第一人称自然回应用户对双子关系、两个 bot 风格差异、刚才对话的评价或接梗请求。",
+        "允许：用当前 bot 第一人称自然回应用户对姐妹关系、两个当前 AstrBot bot 风格差异、刚才对话的评价或接梗请求。",
         "禁止：冒充另一个 bot 输出、替另一个 bot 道歉、替另一个 bot 承诺修改、解释内部路由/启动模式/系统提示。本轮由调度层安排当前 bot 处理时，也只能用当前 bot 身份处理。",
         "同时 @ 或同时点名你和另一个 bot 时，表示用户也在叫你；如果用户让讲笑话、回答问题、评价或说一句话，你要用当前 bot 身份完成自己的那份请求，不要转给另一个 bot。",
-        "如果用户同时叫到两只并问“是不是该睡觉了”“要不要走了”“该不该做某事”这类共同日常判断，当前 bot 只需要用自己的语气直接给用户一句建议，最多两句短句；不要展开长理由、延伸剧情、粗暴命令、晚安收尾或颜文字。参考长度：天使类似“是该睡了，已经很晚了。先收尾，别再开新话题啦。”；恶魔类似“该睡。再拖明天就起不来了。”不要 @ 另一个 bot、不要把问题改成评价另一个 bot。",
+        "如果用户同时叫到两只并问“是不是该睡觉了”“要不要走了”“该不该做某事”这类共同日常判断，当前 bot 只需要用自己的语气直接给用户一句建议，最多两句短句；不要展开长理由、延伸剧情、粗暴命令、晚安收尾或颜文字。参考长度：云栖类似“是该睡了，已经很晚了。先收尾，别再开新话题啦。”；夜凛类似“该睡。再拖明天就起不来了。”不要 @ 另一个 bot、不要把问题改成评价另一个 bot。",
         "如果用户同时表达对两个 bot 的喜欢、夸奖、感谢或吐槽，你只能代表当前 bot 作出自己的回应，不能替另一个 bot 接受、感谢、道歉或承诺。",
         "这类场景必须使用单数第一人称，例如“谢谢你喜欢我”；不要说“我们收到”“两只都收到”“姐姐和妹妹都收到”。",
         "这类场景最稳妥的回复是一句短感谢，不要追加“不过/但是”转折、姐妹比较或对另一个 bot 的评价。",
-        "这类场景不要提另一个 bot 的名字、姐姐、妹妹或其他称谓，除非用户另行要求你评价对方或解释双子关系。",
+        "这类场景不要提另一个 bot 的名字、姐姐、妹妹或其他称谓，除非用户另行要求你评价对方或解释姐妹关系。",
         "也不要猜测另一个 bot 的心情、反应或态度，例如“她也很开心”“她肯定在偷笑”。",
         "只有用户明确让你冒充另一个 bot、替另一个 bot 认错、解释、承诺修改、代发原话或转述时，才说明不能冒充或伪造对方承诺；不要在普通双 @、普通点名、寒暄或明确叫到你时主动重复“我不替她说话”，也不要把普通请求说成要另一个 bot 自己回应。",
         "绝对不要输出括号舞台说明、内心说明、“不回复”、或“用户只点名了另一个 bot 没叫我”这类内部判断。",
@@ -440,7 +449,7 @@ def build_direct_twin_prompt(
 ) -> str:
     injection = build_twin_injection(text=text, group_id=group_id, profile=profile, config=config)
     return (
-        "用户正在明确让当前 bot 参与双子 bot 互动。"
+        "用户正在明确让当前 bot 参与姐妹 bot 互动。"
         "请只以当前 bot 身份回复。"
         "除非用户明确要求代发/代答，否则不要主动声明“我不替另一个 bot 发言”。\n\n"
         f"{injection}\n\n"

@@ -1694,6 +1694,116 @@ function Wait-Children {
     }
 }
 
+function Test-NapCatAccountPortOwnership {
+    param(
+        [string]$Account,
+        [int]$Port
+    )
+
+    try {
+        $allProcesses = @(Get-CimInstance Win32_Process)
+        $accountPattern = "-Account\s+['""]?$([regex]::Escape($Account))['""]?"
+        $roots = @($allProcesses | Where-Object {
+            $_.CommandLine -and
+            $_.CommandLine -match 'start-napcat-account\.ps1' -and
+            $_.CommandLine -match $accountPattern
+        })
+        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+        if ($roots.Count -eq 0 -or $listeners.Count -eq 0) {
+            return $false
+        }
+
+        $ownerIds = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($listener in $listeners) {
+            [void]$ownerIds.Add([int]$listener.OwningProcess)
+        }
+        foreach ($root in $roots) {
+            foreach ($processId in (Get-ProcessTreeIds -RootProcessId ([int]$root.ProcessId) -Processes $allProcesses)) {
+                if ($ownerIds.Contains([int]$processId)) {
+                    return $true
+                }
+            }
+        }
+    }
+    catch {
+    }
+    return $false
+}
+
+function Ensure-ExperimentNapCatAccounts {
+    param([string]$RunId)
+
+    $logFile = Join-Path (Get-ComponentLogRoot -Component "napcat-experiments" -RunId $RunId) "launcher.log"
+    $script = Join-Path $ScriptRoot "start-napcat-account.ps1"
+    $accounts = @(
+        @{ Account = "3056830689"; Port = 8096; Label = "Xingyao" },
+        @{ Account = "3109326090"; Port = 8095; Label = "Yuecheng" }
+    )
+
+    Ensure-NapCatBuiltinPlugin -LogFile $logFile -ConsolePrefix "[NapCat] [Experiments]"
+    foreach ($item in $accounts) {
+        $account = [string]$item.Account
+        $port = [int]$item.Port
+        $label = [string]$item.Label
+        if (Test-TcpPort -HostName "127.0.0.1" -Port $port) {
+            if (-not (Test-NapCatAccountPortOwnership -Account $account -Port $port)) {
+                throw "$label OneBot port $port is owned by an unexpected process."
+            }
+            Write-LauncherStatus "$label NapCat account $account is ready on port $port; reusing current runtime."
+            Set-NapCatQuickLoginReady -Account $account -Ready $true -Reason "onebot-listener-ready" -LogFile $logFile
+            continue
+        }
+
+        Write-LauncherStatus "$label NapCat account $account is missing on port $port; starting hidden account runtime."
+        Stop-NapCatAccountProcesses -Account $account -LogFile $logFile -ConsolePrefix "[NapCat] [$label]"
+        $arguments = @(
+            "-NoProfile",
+            "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $script,
+            "-Account", $account
+        )
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList $arguments | Out-Null
+        if (-not (Wait-TcpPort -HostName "127.0.0.1" -Port $port -TimeoutSeconds 120 -LogFile $logFile)) {
+            Set-NapCatQuickLoginReady -Account $account -Ready $false -Reason "onebot-listener-timeout" -LogFile $logFile
+            throw "$label NapCat account $account did not expose OneBot port $port."
+        }
+        if (-not (Test-NapCatAccountPortOwnership -Account $account -Port $port)) {
+            Set-NapCatQuickLoginReady -Account $account -Ready $false -Reason "onebot-port-owner-mismatch" -LogFile $logFile
+            throw "$label OneBot port $port is not owned by account $account."
+        }
+        Set-NapCatQuickLoginReady -Account $account -Ready $true -Reason "onebot-listener-ready" -LogFile $logFile
+        Write-LauncherStatus "$label NapCat account $account is ready on port $port."
+    }
+}
+
+function Ensure-MaiBotExperimentCores {
+    $script = Join-Path $ScriptRoot "ensure-maibot-experiments.sh"
+    if (-not (Test-Path $script)) {
+        throw "MaiBot experiment ensure script not found: $script"
+    }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+        throw "wsl.exe is required to start MaiBot experiment cores."
+    }
+
+    $resolvedScript = [System.IO.Path]::GetFullPath($script)
+    if ($resolvedScript -notmatch '^([A-Za-z]):\\(.*)$') {
+        throw "MaiBot experiment ensure script must be on a Windows drive: $resolvedScript"
+    }
+    $drive = $Matches[1].ToLowerInvariant()
+    $tail = $Matches[2] -replace '\\', '/'
+    $wslPath = "/mnt/$drive/$tail"
+    $output = @(& wsl.exe -- bash $wslPath 2>&1)
+    foreach ($line in $output) {
+        if ($line) {
+            Write-LauncherStatus ([string]$line)
+        }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "MaiBot experiment core ensure failed with exit code $LASTEXITCODE."
+    }
+}
+
 function Invoke-Parent {
     if ($AstrBotProfile -eq "both" -and $FeatureMode -ne "full") {
         throw "AstrBotProfile both requires -FeatureMode full so AstrBot-only event ownership is explicit."
@@ -1738,6 +1848,9 @@ function Invoke-Parent {
             if ($missingNapCatComponents.Count -eq 0) {
                 Write-LauncherStatus "Existing AstrBot ports and NapCat connections are ready; reusing current runtime."
                 Write-ExistingRuntimeDiagnostics -NapCatComponents $napcatComponents
+                Ensure-ExperimentNapCatAccounts -RunId $runId
+                Ensure-MaiBotExperimentCores
+                Write-LauncherStatus "All targets are ready."
                 return
             }
             $startBotComponents = @()
@@ -1814,6 +1927,8 @@ function Invoke-Parent {
     if ($remainingComponents.Count -gt 0) {
         Wait-Children -RunId $runId -Components $remainingComponents -Processes $processes
     }
+    Ensure-ExperimentNapCatAccounts -RunId $runId
+    Ensure-MaiBotExperimentCores
     Write-LauncherStatus "All targets are ready."
 }
 

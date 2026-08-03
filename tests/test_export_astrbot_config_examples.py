@@ -25,7 +25,7 @@ def test_sanitize_config_drops_llm_routing_and_masks_secrets() -> None:
     sanitized = module.sanitize_config(
         {
             "provider_sources": [{"id": "openai", "key": "secret", "api_base": "https://example.invalid"}],
-            "provider_settings": {"default_provider_id": "openai/model", "default_personality": "恶魔棉花糖"},
+            "provider_settings": {"default_provider_id": "openai/model", "default_personality": "夜凛"},
             "platform": [{"id": "棉花糖", "ws_reverse_port": 6200, "ws_reverse_token": "secret"}],
             "plugin_set": {"astrbot_plugin_qqbot_features": True},
             "api_key": "secret",
@@ -95,7 +95,7 @@ def test_export_examples_writes_sanitized_configs_and_personas(tmp_path: Path) -
     connection.execute(
         """
         insert into personas (created_at, updated_at, persona_id, system_prompt, begin_dialogs, tools, skills, sort_order)
-        values ('now', 'now', '恶魔棉花糖', '只来自 WebUI 的人格', '[]', '[]', '[]', 1)
+        values ('now', 'now', '夜凛', '只来自 WebUI 的人格', '[]', '[]', '[]', 1)
         """
     )
     connection.commit()
@@ -116,5 +116,5 @@ def test_export_examples_writes_sanitized_configs_and_personas(tmp_path: Path) -
     assert not (plugin_output_root / "meme_manager.example.json").exists()
     assert not (plugin_output_root / "astrbot_plugin_reply_style_guard.example.json").exists()
     assert not (output_root / "meme-manager.example.json").exists()
-    assert personas[0]["persona_id"] == "恶魔棉花糖"
+    assert personas[0]["persona_id"] == "夜凛"
     assert personas[0]["system_prompt"] == "只来自 WebUI 的人格"
