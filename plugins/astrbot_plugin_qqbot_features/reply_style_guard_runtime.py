@@ -13,6 +13,7 @@ from .reply_style_guard_logic import should_fold_long_reply
 from .reply_style_guard_logic import split_forward_text
 from .request_context import SourceMessage
 from .request_context import format_source_messages
+from .request_context import looks_like_image_source
 from .request_context import normalize_forward_id
 from .request_context import normalize_sender_qq
 from .request_context import source_message_from_reply
@@ -55,7 +56,7 @@ def build_folded_reply_chain(
 
 
 def has_forward_message(event: object) -> bool:
-    return any(isinstance(segment, CoreForward) for segment in _safe_get_messages(event))
+    return bool(_forward_ids_from_segments(_safe_get_messages(event)))
 
 
 async def extract_onebot_source_tree(
@@ -149,6 +150,7 @@ async def _expand_forward_references(
             SourceMessage(
                 sender_qq=source.sender_qq,
                 text=source.text,
+                image_sources=source.image_sources,
                 children=tuple(children),
             ),
         )
@@ -204,6 +206,7 @@ def _without_forward_references(source: SourceMessage) -> tuple[SourceMessage, t
         SourceMessage(
             sender_qq=source.sender_qq,
             text=source.text,
+            image_sources=source.image_sources,
             children=tuple(children),
         ),
         tuple(nested_ids),
@@ -265,16 +268,26 @@ def _source_message_from_onebot_node(raw: dict[str, object]) -> SourceMessage:
     sender_qq = normalize_sender_qq(sender.get("user_id", ""))
     if not sender_qq:
         sender_qq = normalize_sender_qq(raw.get("user_id", raw.get("uin", "")))
-    text, children = _source_content_from_onebot(raw.get("content", raw.get("message", [])))
-    return SourceMessage(sender_qq=sender_qq, text=text, children=children)
+    text, image_sources, children = _source_content_from_onebot(
+        raw.get("content", raw.get("message", []))
+    )
+    return SourceMessage(
+        sender_qq=sender_qq,
+        text=text,
+        image_sources=image_sources,
+        children=children,
+    )
 
 
-def _source_content_from_onebot(content: object) -> tuple[str, tuple[SourceMessage, ...]]:
+def _source_content_from_onebot(
+    content: object,
+) -> tuple[str, tuple[str, ...], tuple[SourceMessage, ...]]:
     if isinstance(content, str):
-        return content.strip(), ()
+        return content.strip(), (), ()
     if not isinstance(content, list):
-        return "", ()
+        return "", (), ()
     text_parts: list[str] = []
+    image_sources: list[str] = []
     children: list[SourceMessage] = []
     for segment in content:
         if isinstance(segment, str):
@@ -286,6 +299,11 @@ def _source_content_from_onebot(content: object) -> tuple[str, tuple[SourceMessa
         data = segment.get("data") if isinstance(segment.get("data"), dict) else {}
         if segment_type == "text":
             text_parts.append(str(data.get("text", "") or ""))
+        elif segment_type == "image":
+            for key in ("url", "file", "path"):
+                source = str(data.get(key, "") or "").strip()
+                if looks_like_image_source(source) and source not in image_sources:
+                    image_sources.append(source)
         elif segment_type == "forward":
             forward_id = normalize_forward_id(data.get("id", data.get("message_id", "")))
             if forward_id:
@@ -295,7 +313,7 @@ def _source_content_from_onebot(content: object) -> tuple[str, tuple[SourceMessa
             if "content" not in node_raw and "message" in node_raw:
                 node_raw["content"] = node_raw["message"]
             children.append(_source_message_from_onebot_node(node_raw))
-    return "".join(text_parts).strip(), tuple(children)
+    return "".join(text_parts).strip(), tuple(image_sources), tuple(children)
 
 
 def _safe_get_messages(event: object) -> tuple[object, ...]:

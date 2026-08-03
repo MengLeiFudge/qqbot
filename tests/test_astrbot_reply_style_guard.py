@@ -87,9 +87,11 @@ from astrbot_plugin_qqbot_features.reply_style_guard_logic import strip_markdown
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import should_disable_model_regex_segmenting
 from astrbot_plugin_qqbot_features.reply_style_guard_logic import build_both_targeted_reply_instruction_text
 from astrbot_plugin_qqbot_features.request_context import format_source_messages
+from astrbot_plugin_qqbot_features.request_context import collect_source_image_sources
 from astrbot_plugin_qqbot_features.reply_style_guard_runtime import extract_onebot_forward_sources
 from astrbot_plugin_qqbot_features.reply_style_guard_runtime import extract_onebot_forward_text
 from astrbot_plugin_qqbot_features.reply_style_guard_runtime import extract_onebot_source_tree
+from astrbot_plugin_qqbot_features.reply_style_guard_runtime import has_forward_message
 
 
 class ForwardEvent:
@@ -372,10 +374,58 @@ class AstrBotForwardMessageTest(unittest.IsolatedAsyncioTestCase):
 
         sources = await extract_onebot_forward_sources(event)
 
+        self.assertTrue(has_forward_message(event))
         self.assertEqual(sources[0].sender_qq, "111")
         self.assertEqual(sources[0].children[0].sender_qq, "222")
         self.assertEqual(sources[0].children[0].text, "内层")
         self.assertEqual(event.calls, ["outer", "inner"])
+
+    async def test_forward_images_keep_outer_order_before_nested_images(self) -> None:
+        event = ForwardEvent(
+            ["outer"],
+            {
+                "outer": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "111"},
+                            "content": [
+                                {"type": "image", "data": {"url": "https://example.invalid/first.png"}},
+                                {"type": "image", "data": {"file": "https://example.invalid/second.png"}},
+                                {"type": "forward", "data": {"id": "inner"}},
+                            ],
+                        }
+                    ]
+                },
+                "inner": {
+                    "messages": [
+                        {
+                            "sender": {"user_id": "222"},
+                            "content": [
+                                {"type": "image", "data": {"url": "https://example.invalid/nested.png"}}
+                            ],
+                        }
+                    ]
+                },
+            },
+        )
+
+        sources = await extract_onebot_forward_sources(event)
+
+        self.assertEqual(
+            collect_source_image_sources(sources),
+            (
+                "https://example.invalid/first.png",
+                "https://example.invalid/second.png",
+                "https://example.invalid/nested.png",
+            ),
+        )
+        self.assertEqual(
+            collect_source_image_sources(sources, max_images=2),
+            (
+                "https://example.invalid/first.png",
+                "https://example.invalid/second.png",
+            ),
+        )
 
     async def test_cycle_and_partial_failure_keep_successful_content_with_fetch_bound(self) -> None:
         event = ForwardEvent(

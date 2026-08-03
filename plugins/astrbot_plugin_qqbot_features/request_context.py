@@ -21,6 +21,7 @@ class SourceMessage:
 
     sender_qq: str = ""
     text: str = ""
+    image_sources: tuple[str, ...] = ()
     children: tuple[SourceMessage, ...] = ()
     forward_id: str = ""
 
@@ -174,6 +175,48 @@ def format_source_messages(
     for message in messages:
         append_message(message, 0)
     return "\n".join(lines).strip()
+
+
+def collect_source_image_sources(
+    messages: Iterable[SourceMessage],
+    *,
+    max_images: int = 12,
+) -> tuple[str, ...]:
+    """Collect direct images before deeper forwarded images, with a request-size bound."""
+
+    if max_images <= 0:
+        return ()
+    sources: list[str] = []
+    pending = list(messages)
+    while pending and len(sources) < max_images:
+        message = pending.pop(0)
+        for source in message.image_sources:
+            if source not in sources:
+                sources.append(source)
+                if len(sources) >= max_images:
+                    break
+        pending.extend(message.children)
+    return tuple(sources)
+
+
+def remove_empty_assistant_contexts(contexts: list[dict]) -> int:
+    """Drop assistant history entries rejected by strict OpenAI-compatible APIs."""
+
+    cleaned: list[dict] = []
+    removed = 0
+    for context in contexts:
+        if not isinstance(context, dict) or context.get("role") != "assistant":
+            cleaned.append(context)
+            continue
+        content = context.get("content")
+        has_content = content not in (None, "", [])
+        if has_content or context.get("tool_calls") or context.get("reasoning_content"):
+            cleaned.append(context)
+            continue
+        removed += 1
+    if removed:
+        contexts[:] = cleaned
+    return removed
 
 
 def reply_segment_text(segment: object) -> str:

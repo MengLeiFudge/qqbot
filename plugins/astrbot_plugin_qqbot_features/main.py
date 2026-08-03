@@ -17,7 +17,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import filter
-from astrbot.api.message_components import At, Plain, Reply
+from astrbot.api.message_components import At, Image, Plain, Reply
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import TextPart
@@ -92,10 +92,12 @@ from .rightcodes_draw_rewrite import parse_rightcodes_draw_rewrite_response
 from .rightcodes_draw_rewrite import should_rewrite_rightcodes_draw_prompt
 from .request_context import build_current_request_context
 from .request_context import canonical_event_claim_key
+from .request_context import collect_source_image_sources
 from .request_context import extract_at_ids
 from .request_context import extract_image_sources
 from .request_context import extract_plain_text as extract_event_plain_text
 from .request_context import format_source_messages
+from .request_context import remove_empty_assistant_contexts
 from .reread_state import RereadRepeatState
 from .runtime_temp import TempDuplicateCleaner
 from .runtime_temp import load_temp_dedupe_config
@@ -226,6 +228,8 @@ DEFAULT_LONG_REPLY_FOLD_THRESHOLD_CHARS = 300
 DEFAULT_LONG_INPUT_TLDR_THRESHOLD_CHARS = 300
 DEFAULT_LONG_INPUT_TLDR_TEXT = "太长不看喵"
 LLM_STARTED_AT_EXTRA = "_qqbot_reply_style_guard_llm_started_at"
+FORWARD_SOURCE_TREE_EXTRA = "qqbot_features_forward_source_tree"
+MAX_FORWARD_IMAGE_ATTACHMENTS = 12
 LLM_REQUEST_SESSION_EXTRA = "_qqbot_reply_style_guard_llm_request_session"
 BOTH_TARGETED_EXTRA = "_qqbot_twin_llm_both_targeted"
 EMPTY_MENTION_CALL_EXTRA = "_qqbot_empty_mention_call"
@@ -586,11 +590,57 @@ class QQBotFeaturesPlugin(Star):
         self._arc_background_task = None
         await self._meme_runtime.terminate()
 
+    @filter.event_message_type(
+        EventMessageType.ALL,
+        priority=900,
+        desc="展开聊天记录第一层图片，交给 AstrBot 原生图片理解链路。",
+    )
+    async def expose_forward_images_to_astrbot(self, event: AstrMessageEvent):
+        if not has_forward_message(event):
+            return
+        if not event.is_private_chat() and not getattr(event, "is_at_or_wake_command", False):
+            return
+        source_tree = await extract_onebot_source_tree(event)
+        event.set_extra(FORWARD_SOURCE_TREE_EXTRA, source_tree)
+        image_sources = collect_source_image_sources(
+            source_tree,
+            max_images=MAX_FORWARD_IMAGE_ATTACHMENTS,
+        )
+        if not image_sources:
+            return
+        existing_sources = set(extract_image_sources(event))
+        appended = 0
+        for source in image_sources:
+            if source in existing_sources:
+                continue
+            image = (
+                Image.fromURL(source)
+                if source.startswith(("http://", "https://"))
+                else Image(file=source)
+            )
+            event.message_obj.message.append(image)
+            existing_sources.add(source)
+            appended += 1
+        if appended:
+            logger.info(
+                "[QQBotFeatures] exposed forwarded images to AstrBot: session=%s images=%s limit=%s",
+                getattr(event, "unified_msg_origin", ""),
+                appended,
+                MAX_FORWARD_IMAGE_ATTACHMENTS,
+            )
+
     @filter.on_llm_request(desc="在 LLM 请求前记录耗时、移除非主人私聊本机工具并注入纯文本回复边界。")
     async def inject_reply_style_guard(self, event: AstrMessageEvent, req: ProviderRequest):
         started = time.monotonic()
         event.set_extra(LLM_STARTED_AT_EXTRA, started)
         event.set_extra(LLM_REQUEST_SESSION_EXTRA, req.session_id or "")
+        removed_contexts = remove_empty_assistant_contexts(req.contexts)
+        if removed_contexts:
+            logger.warning(
+                "[QQBotFeatures] removed invalid empty assistant contexts: session=%s count=%s",
+                getattr(event, "unified_msg_origin", ""),
+                removed_contexts,
+            )
         logger.info(
             "[QQBotFeatures] LLM request started: session=%s message_type=%s "
             "request_session=%s model=%s prompt_chars=%s image_count=%s audio_count=%s has_tools=%s",
@@ -845,34 +895,29 @@ class QQBotFeaturesPlugin(Star):
         yield event.plain_result(self._reply_long_input_tldr_text)
         event.stop_event()
 
-    @filter.event_message_type(EventMessageType.PRIVATE_MESSAGE, priority=2000, desc="私聊合并转发消息解包后进入当前 bot LLM。")
-    async def handle_private_forward_message(self, event: AstrMessageEvent):
+    @filter.event_message_type(
+        EventMessageType.PRIVATE_MESSAGE,
+        priority=800,
+        desc="私聊聊天记录无法展开任何文字或图片时给出明确提示。",
+    )
+    async def handle_unreadable_private_forward(self, event: AstrMessageEvent):
         if not has_forward_message(event):
             return
         if is_twin_bot_sender(event):
             return
-        source_tree = await extract_onebot_source_tree(event)
-        source_text = format_source_messages(source_tree)
-        if not source_text:
-            logger.warning(
-                "[QQBotFeatures] private forward message has no readable text: session=%s sender=%s",
-                getattr(event, "unified_msg_origin", ""),
-                event.get_sender_id(),
-            )
-            yield event.plain_result("这条折叠消息我读不到内容。")
-            event.stop_event()
+        cached_source_tree = event.get_extra(FORWARD_SOURCE_TREE_EXTRA)
+        source_tree = cached_source_tree if isinstance(cached_source_tree, tuple) else ()
+        if format_source_messages(source_tree) or collect_source_image_sources(
+            source_tree,
+            max_images=MAX_FORWARD_IMAGE_ATTACHMENTS,
+        ):
             return
-        current_text = extract_event_plain_text(event)
-        prompt_parts: list[str] = []
-        if current_text:
-            prompt_parts.append(f"用户私聊附言：{current_text}")
-        prompt_parts.append(f"用户私聊发送了一条折叠/合并转发消息，内容如下：\n{source_text}")
-        logger.info(
-            "[QQBotFeatures] private forward message expanded for LLM: session=%s chars=%s",
+        logger.warning(
+            "[QQBotFeatures] private forward message has no readable content: session=%s sender=%s",
             getattr(event, "unified_msg_origin", ""),
-            len(source_text),
+            event.get_sender_id(),
         )
-        yield event.request_llm(prompt="\n\n".join(prompt_parts), contexts=[])
+        yield event.plain_result("这条折叠消息我读不到内容。")
         event.stop_event()
 
     @filter.event_message_type(EventMessageType.ALL, desc="处理明确询问姐姐、妹妹、天使或恶魔的互动请求，只让当前 bot 以自己身份回应。")
@@ -1602,7 +1647,12 @@ class QQBotFeaturesPlugin(Star):
     @filter.on_llm_request(desc="在 LLM 请求前把被引用消息作为当前请求原文补入上下文。")
     async def inject_quoted_request_source(self, event: AstrMessageEvent, req: ProviderRequest):
         request_context = build_current_request_context(event, req.prompt or "")
-        source_tree = await extract_onebot_source_tree(event)
+        cached_source_tree = event.get_extra(FORWARD_SOURCE_TREE_EXTRA)
+        source_tree = (
+            cached_source_tree
+            if isinstance(cached_source_tree, tuple)
+            else await extract_onebot_source_tree(event)
+        )
         source_text = format_source_messages(source_tree)
         if not source_text:
             return

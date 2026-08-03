@@ -13,6 +13,7 @@ from astrbot_plugin_qqbot_features.request_context import canonical_event_claim_
 from astrbot_plugin_qqbot_features.request_context import extract_image_sources
 from astrbot_plugin_qqbot_features.request_context import extract_reply_source_messages
 from astrbot_plugin_qqbot_features.request_context import format_source_messages
+from astrbot_plugin_qqbot_features.request_context import remove_empty_assistant_contexts
 
 
 class Plain:
@@ -104,6 +105,22 @@ class StubEvent:
 
 
 class AstrBotRequestContextTest(unittest.TestCase):
+    def test_removes_only_invalid_empty_assistant_contexts(self) -> None:
+        contexts = [
+            {"role": "user", "content": "问题"},
+            {"role": "assistant", "content": []},
+            {"role": "assistant", "content": "回答"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "call-1"}]},
+            {"role": "assistant", "content": None, "reasoning_content": "推理"},
+        ]
+
+        removed = remove_empty_assistant_contexts(contexts)
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(len(contexts), 4)
+        self.assertEqual(contexts[0]["role"], "user")
+        self.assertEqual(contexts[1]["content"], "回答")
+
     def test_quoted_message_is_combined_with_current_text(self) -> None:
         event = StubEvent(
             [
