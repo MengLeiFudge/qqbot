@@ -473,10 +473,21 @@ def test_main_contract_uses_plain_jm_command_friend_route_and_quoted_progress() 
     assert "_comic_active_request_count" in source
     assert "你已有一个 JM 任务" not in handler_source
     assert "delivery.cleanup" in source
-    stop_index = handler_source.index("event.stop_event()")
+    assert (
+        'event.stop_event()\n        claim_key = _command_claim_key(event, command_type="jmcomic_pdf")'
+        not in handler_source
+    )
     claim_index = handler_source.index(
         'claim_key = _command_claim_key(event, command_type="jmcomic_pdf")'
     )
-    friend_lookup_index = handler_source.index("current_is_friend = await is_onebot_friend")
-    worker_route_index = handler_source.index("preferred = decide_migrated_command_route")
-    assert stop_index < claim_index < friend_lookup_index < worker_route_index
+    friend_lookup_index = handler_source.index(
+        "current_is_friend = await is_onebot_friend"
+    )
+    worker_route_index = handler_source.index(
+        "preferred = decide_migrated_command_route"
+    )
+    status_index = handler_source.index(
+        "yield _chain_result_with_reply(event, [Plain(status_text)])"
+    )
+    stop_index = handler_source.rindex("event.stop_event()")
+    assert claim_index < friend_lookup_index < worker_route_index < status_index < stop_index

@@ -1141,7 +1141,6 @@ class QQBotFeaturesPlugin(Star):
         sender_id = str(event.get_sender_id() or "").strip()
         if not sender_id.isdigit() or is_twin_bot_sender_id(sender_id):
             return
-        event.stop_event()
         claim_key = _command_claim_key(event, command_type="jmcomic_pdf")
         api = AstrBotOneBotApi(event)
         try:
