@@ -4,46 +4,50 @@ import re
 
 
 RIGHTCODES_DRAW_CATALOG_TEXT = """RightCodes 生图接口知识库：
-资料来源：Right Code 官方文档 https://docs.right.codes/docs/rc_draw/ ，最近核对 2026-07-13。
+资料来源：Right Code 官方文档 https://docs.right.codes/docs/rc_draw/ ，最近核对 2026-08-03。
 
 基础信息：
-- 统一基础地址：https://www.right.codes/draw
+- 绘图基础地址：https://www.rightapi.ai/draw
+- 任务查询地址：https://www.rightapi.ai/v1/tasks/{task_id}，查询接口不带 /draw。
 - 统一鉴权头：Authorization: Bearer sk-xxxxx
-- 总览页列出两个入口：/v1/chat/completions 和 /v1/images/generations。
+- 所有绘图请求统一使用异步流程：提交时固定带 async=true，取得 task_id 后轮询任务查询接口。
 
 /v1/images/generations：
-- 用途：OpenAI 原生图片生成接口。如果用户只是要生成图并拿图片直链，优先推荐这个接口。
-- 方法：POST /v1/images/generations
-- 字段：model 必填，prompt 必填，image 可选，size 可选，response_format 可选。
-- size 支持形如 1024x1024 的像素写法；用户问 body 里怎么写 1024x1024 时，明确回答写 "size": "1024x1024"。
+- 用途：OpenAI Images 兼容的异步文生图和参考图生图接口。
+- 方法：POST https://www.rightapi.ai/draw/v1/images/generations
+- 字段：model、prompt、async=true 必填；n、size、imageSize、image 可选。
+- size 支持 1:1、16:9、9:16、4:3，或 1024x1024 这类像素串；imageSize 仅支持 1K、2K、4K。
+- image 参考图必须是 data URL 数组，不是普通图片 URL。
 - 示例 body：
 {
   "model": "gpt-image-2",
   "prompt": "一只白猫",
-  "image": [],
-  "size": "1024x1024",
-  "response_format": "url"
+  "n": 1,
+  "size": "1:1",
+  "imageSize": "1K",
+  "async": true
 }
-- 返回里 data[0].url 是常用图片直链。
 
-/v1/chat/completions：
-- 用途：兼容 OpenAI 聊天格式，支持纯文本和带图提问。用户要流式输出、避免长请求被 Cloudflare 超时影响时，建议用这个接口并设置 stream=true。
-- 方法：POST /v1/chat/completions
-- 纯文本 body 结构是 model、stream、messages；messages 里 role=user，content 可以是字符串。
-- 带图提问时 content 是数组，包含 type=text 和 type=image_url。
-- stream=true 时按 SSE 分片返回，看 choices[0].delta.content，最后一个 chunk 会带 usage。
-- chat/completions 文档没有把 size 列为独立图片生成字段；如果用户坚持走 chat/completions 控制尺寸，建议把 1024x1024、方图、1K 写进 content 文本里。
+/v1beta/models/{model}:generateContent：
+- 用途：Gemini generateContent 兼容的异步生图接口。
+- 方法：POST https://www.rightapi.ai/draw/v1beta/models/{model}:generateContent
+- 请求体固定带 async=true；提示词放在 contents[].parts[].text。
+- 比例和分辨率分别放在 generationConfig.imageConfig.aspectRatio 与 imageSize。
+- 参考图使用 contents[].parts[].inline_data，包含 mime_type 和 base64 data。
 
-模型说明：
+/v1/tasks/{task_id}：
+- 方法：GET https://www.rightapi.ai/v1/tasks/{task_id}
+- queued / in_progress 表示继续轮询，completed 从 data 或 candidates 取图，failed 查看 error.message。
+- 实际 Images 完成响应也可能直接返回 created 和 data，不带 status；此时从 data 取图。
+
+当前经真实 Images 接口生成验证可用的模型：
 - gpt-image-2：$0.04/次，OpenAI 画图模型，支持 1K。
 - gpt-image-2-vip：$0.13/次，OpenAI 官方直连，当前支持 1K；官方已停止 2K、4K。
-- nano-banana：$0.14/次，即 gemini-2.5-flash-image，支持 1K。
-- nano-banana-2：$0.12/次，即 gemini-3.1-flash-image-preview，支持 1K、2K、4K。
 - nano-banana-2-lite：$0.05/次，即 gemini-3.1-flash-lite-image，支持 1K。
 - nano-banana-pro：$0.18/次，即 gemini-3-pro-image-preview，支持 1K、2K、4K。
 
 回答风格要求：
-- 回答 RightCodes 生图接口问题时，区分 images/generations 和 chat/completions，不要说“没有明确图像参数位”。
+- 回答 RightCodes 生图接口问题时，明确说明当前是异步提交加任务轮询，不要再推荐旧域名或同步等待方式。
 - 允许输出保留缩进的 JSON 示例；这是 QQ 纯文本，不要包 Markdown 代码块，不要加 ```。
 - 如用户问“body 里写什么”，直接给可复制 JSON。"""
 
@@ -62,7 +66,8 @@ _RIGHTCODES_DRAW_CATALOG_KEYWORDS = (
     "图片生成",
     "图像生成",
     "images/generations",
-    "chat/completions",
+    "generatecontent",
+    "v1/tasks",
     "1024x1024",
     "2048x2048",
     "4096x4096",

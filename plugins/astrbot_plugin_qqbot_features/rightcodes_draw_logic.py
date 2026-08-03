@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -19,14 +20,15 @@ from .runtime_storage import RuntimeJsonStore
 from .runtime_storage import read_json_file
 
 
-RIGHTCODES_DRAW_BASE_URL = "https://www.right.codes/draw"
+logger = logging.getLogger(__name__)
+RIGHTCODES_DRAW_BASE_URL = "https://www.rightapi.ai/draw"
+RIGHTCODES_DRAW_TASK_BASE_URL = "https://www.rightapi.ai"
+RIGHTCODES_DRAW_USER_AGENT = "QQBot-RightCodes/1.0"
 RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
 RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 1000
 RIGHTCODES_DRAW_MODEL_ORDER = (
     "gpt-image-2",
     "gpt-image-2-vip",
-    "nano-banana",
-    "nano-banana-2",
     "nano-banana-2-lite",
     "nano-banana-pro",
 )
@@ -34,16 +36,12 @@ RIGHTCODES_DRAW_MODELS = set(RIGHTCODES_DRAW_MODEL_ORDER)
 RIGHTCODES_DRAW_MODEL_PRICES = {
     "gpt-image-2": Decimal("0.04"),
     "gpt-image-2-vip": Decimal("0.13"),
-    "nano-banana": Decimal("0.14"),
-    "nano-banana-2": Decimal("0.12"),
     "nano-banana-2-lite": Decimal("0.05"),
     "nano-banana-pro": Decimal("0.18"),
 }
 RIGHTCODES_DRAW_MODEL_DESCRIPTIONS = {
     "gpt-image-2": "OpenAI 画图模型，上游支持 1K",
     "gpt-image-2-vip": "OpenAI 官方直连，上游当前支持 1K，官方已停止 2K、4K",
-    "nano-banana": "即 gemini-2.5-flash-image，上游支持 1K",
-    "nano-banana-2": "即 gemini-3.1-flash-image-preview，上游支持 1K、2K、4K",
     "nano-banana-2-lite": "即 gemini-3.1-flash-lite-image，上游支持 1K",
     "nano-banana-pro": "即 gemini-3-pro-image-preview，上游支持 1K、2K、4K",
 }
@@ -123,6 +121,15 @@ class AsyncDrawHttpClient(Protocol):
     ) -> Any:
         ...
 
+    async def get_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> Any:
+        ...
+
 
 class RightCodesDrawClient:
     def __init__(
@@ -130,40 +137,104 @@ class RightCodesDrawClient:
         *,
         api_key: str,
         base_url: str = RIGHTCODES_DRAW_BASE_URL,
+        task_base_url: str = RIGHTCODES_DRAW_TASK_BASE_URL,
         timeout_seconds: float = 180.0,
+        poll_interval_seconds: float = 2.0,
         http_client: AsyncDrawHttpClient | None = None,
     ) -> None:
         self.api_key = api_key.strip()
         self.base_url = base_url.rstrip("/")
+        self.task_base_url = task_base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.poll_interval_seconds = max(0.0, poll_interval_seconds)
         self.http_client = http_client
 
     async def draw(self, request: RightCodesDrawRequest) -> RightCodesDrawResult:
         if not self.api_key:
             raise ValueError("缺少 RightCodes 生图 API Key")
         started = time.perf_counter()
+        deadline = started + self.timeout_seconds
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": RIGHTCODES_DRAW_USER_AGENT,
+        }
         data = await self._post_json(
             f"{self.base_url}/v1/images/generations",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             json={
                 "model": request.model,
                 "prompt": request.prompt,
                 "image": list(request.image_urls),
-                "size": "1024x1024",
-                "response_format": "url",
+                "n": 1,
+                "size": "1:1",
+                "imageSize": "1K",
+                "async": True,
             },
             timeout=self.timeout_seconds,
         )
         image_url = extract_image_url_from_object(data)
-        if not image_url:
-            raise RuntimeError("RightCodes 生图没有返回图片 URL")
-        return RightCodesDrawResult(
-            image_url=image_url,
-            total_seconds=time.perf_counter() - started,
+        if image_url:
+            return RightCodesDrawResult(image_url=image_url, total_seconds=time.perf_counter() - started)
+        task_id = extract_rightcodes_draw_task_id(data)
+        if not task_id:
+            raise RuntimeError(extract_rightcodes_task_error(data) or "RightCodes 生图没有返回任务 ID")
+        last_status = extract_rightcodes_task_status(data) or "submitted"
+        progress = extract_rightcodes_task_progress(data)
+        last_logged_at = started
+        logger.info(
+            "[QQBotFeatures] RightCodes draw task submitted: model=%s task_id=%s status=%s progress=%s",
+            request.model,
+            task_id,
+            last_status,
+            progress,
         )
+
+        while True:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                raise RightCodesDrawTimeoutError(self.timeout_seconds)
+            await asyncio.sleep(min(self.poll_interval_seconds, remaining))
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                raise RightCodesDrawTimeoutError(self.timeout_seconds)
+            data = await self._get_json(
+                f"{self.task_base_url}/v1/tasks/{task_id}",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Accept": "application/json",
+                    "User-Agent": RIGHTCODES_DRAW_USER_AGENT,
+                },
+                timeout=remaining,
+            )
+            image_url = extract_image_url_from_object(data)
+            if image_url:
+                logger.info(
+                    "[QQBotFeatures] RightCodes draw task completed: model=%s task_id=%s elapsed=%.2fs",
+                    request.model,
+                    task_id,
+                    time.perf_counter() - started,
+                )
+                return RightCodesDrawResult(image_url=image_url, total_seconds=time.perf_counter() - started)
+            status = extract_rightcodes_task_status(data)
+            progress = extract_rightcodes_task_progress(data)
+            now = time.perf_counter()
+            if status != last_status or now - last_logged_at >= 30.0:
+                logger.info(
+                    "[QQBotFeatures] RightCodes draw task pending: model=%s task_id=%s status=%s progress=%s elapsed=%.2fs",
+                    request.model,
+                    task_id,
+                    status or "unknown",
+                    progress,
+                    now - started,
+                )
+                last_status = status
+                last_logged_at = now
+            if status == "failed":
+                raise RuntimeError(extract_rightcodes_task_error(data) or "RightCodes 生图任务失败")
+            if status == "completed":
+                raise RuntimeError("RightCodes 生图任务完成但没有返回图片")
 
     async def _post_json(
         self,
@@ -176,6 +247,17 @@ class RightCodesDrawClient:
         if self.http_client is not None:
             return await self.http_client.post_json(url, headers=headers, json=json, timeout=timeout)
         return await post_json(url, headers, json, timeout)
+
+    async def _get_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> object:
+        if self.http_client is not None:
+            return await self.http_client.get_json(url, headers=headers, timeout=timeout)
+        return await get_json(url, headers, timeout)
 
 
 class RightCodesDrawQuotaStore:
@@ -687,6 +769,15 @@ async def post_json(
     return await run_urlopen_json(request, timeout)
 
 
+async def get_json(
+    url: str,
+    headers: dict[str, str],
+    timeout: float,
+) -> object:
+    request = Request(url, headers=headers, method="GET")
+    return await run_urlopen_json(request, timeout)
+
+
 async def run_urlopen_json(request: Request, timeout: float) -> object:
     def read_response() -> object:
         with urlopen(request, timeout=timeout) as response:
@@ -720,6 +811,42 @@ def read_http_error_detail(exc: HTTPError) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return body[:200]
+
+
+def extract_rightcodes_draw_task_id(data: object) -> str:
+    if not isinstance(data, dict):
+        return ""
+    value = data.get("task_id")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def extract_rightcodes_task_status(data: object) -> str:
+    if not isinstance(data, dict):
+        return ""
+    value = data.get("status")
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def extract_rightcodes_task_progress(data: object) -> int | None:
+    if not isinstance(data, dict):
+        return None
+    value = data.get("progress")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_rightcodes_task_error(data: object) -> str:
+    if not isinstance(data, dict):
+        return ""
+    error = data.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    message = data.get("message")
+    return message.strip() if isinstance(message, str) else ""
 
 
 def extract_image_url_from_object(data: object) -> str:

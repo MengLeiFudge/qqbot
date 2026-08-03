@@ -16,6 +16,7 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     RightCodesDrawClient,
     RightCodesDrawQuotaStore,
     RightCodesDrawRequest,
+    RightCodesDrawTimeoutError,
     calculate_rightcodes_draw_model_points,
     extract_removed_rightcodes_draw_temporary_model,
     format_draw_start_message,
@@ -35,6 +36,7 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_logic import (
     looks_like_rightcodes_draw_points_query,
     looks_like_rightcodes_draw_points_ranking,
     looks_like_rightcodes_draw_suggestion,
+    normalize_rightcodes_draw_model,
     parse_rightcodes_draw_command,
     parse_rightcodes_draw_model_switch,
     should_record_passive_group_points,
@@ -54,12 +56,20 @@ from astrbot_plugin_qqbot_features.rightcodes_draw_rewrite import (
 
 
 class StubDrawHttpClient:
-    def __init__(self) -> None:
+    def __init__(self, poll_responses: list[object] | None = None) -> None:
         self.calls: list[dict[str, object]] = []
+        self.poll_responses = list(
+            poll_responses
+            or [{"created": 1, "data": [{"url": "https://example.invalid/draw.png"}]}]
+        )
 
     async def post_json(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float):
-        self.calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
-        return {"data": [{"url": "https://example.invalid/draw.png"}]}
+        self.calls.append({"method": "POST", "url": url, "headers": headers, "json": json, "timeout": timeout})
+        return {"task_id": "task_test", "status": "processing"}
+
+    async def get_json(self, url: str, *, headers: dict[str, str], timeout: float):
+        self.calls.append({"method": "GET", "url": url, "headers": headers, "timeout": timeout})
+        return self.poll_responses.pop(0)
 
 
 class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
@@ -98,15 +108,16 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
         self.assertTrue(looks_like_rightcodes_draw_feature_request("棉花糖生图 一只白猫"))
         self.assertTrue(looks_like_rightcodes_draw_feature_request("查询生图积分"))
         self.assertTrue(looks_like_rightcodes_draw_feature_request("生图模型说明"))
-        self.assertTrue(looks_like_rightcodes_draw_feature_request("切换生图模型nano-banana-2"))
+        self.assertTrue(looks_like_rightcodes_draw_feature_request("切换生图模型nano-banana-2-lite"))
         self.assertTrue(looks_like_rightcodes_draw_feature_request("积分排行榜"))
 
     def test_rightcodes_draw_catalog_mentions_size_body(self) -> None:
         self.assertTrue(should_inject_rightcodes_draw_catalog("我要 1024x1024 body 里写什么"))
         injection = format_rightcodes_draw_catalog_injection("我要 1024x1024 body 里写什么")
-        self.assertIn('"size": "1024x1024"', injection)
+        self.assertIn('"size": "1:1"', injection)
+        self.assertIn('"imageSize": "1K"', injection)
         self.assertIn("/v1/images/generations", injection)
-        self.assertIn("stream=true", injection)
+        self.assertIn("async=true", injection)
         self.assertIn("nano-banana-2-lite", injection)
         self.assertIn("$0.05/次", injection)
         self.assertIn("官方已停止 2K、4K", injection)
@@ -121,16 +132,16 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
 
     def test_model_switch_accepts_spaced_and_compact_commands(self) -> None:
         commands = (
-            "切换生图模型 nano-banana-2",
-            "切换生图模型nano-banana-2",
-            "切换 生图 模型 nano-banana-2",
-            "生图模型 nano-banana-2",
-            "生图模型nano-banana-2",
+            "切换生图模型 nano-banana-2-lite",
+            "切换生图模型nano-banana-2-lite",
+            "切换 生图 模型 nano-banana-2-lite",
+            "生图模型 nano-banana-2-lite",
+            "生图模型nano-banana-2-lite",
         )
         for command in commands:
             with self.subTest(command=command):
                 self.assertTrue(looks_like_rightcodes_draw_model_switch(command))
-                self.assertEqual(parse_rightcodes_draw_model_switch(command), "nano-banana-2")
+                self.assertEqual(parse_rightcodes_draw_model_switch(command), "nano-banana-2-lite")
         self.assertTrue(looks_like_rightcodes_draw_model_switch("切换生图模型 unknown"))
         self.assertIsNone(parse_rightcodes_draw_model_switch("切换生图模型 unknown"))
 
@@ -290,8 +301,6 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
     def test_model_price_table_matches_current_rightcodes_prices(self) -> None:
         self.assertEqual(calculate_rightcodes_draw_model_points("gpt-image-2"), 40)
         self.assertEqual(calculate_rightcodes_draw_model_points("gpt-image-2-vip"), 130)
-        self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana"), 140)
-        self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana-2"), 120)
         self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana-2-lite"), 50)
         self.assertEqual(calculate_rightcodes_draw_model_points("nano-banana-pro"), 180)
         help_text = format_rightcodes_draw_model_help("nano-banana-2-lite")
@@ -304,33 +313,110 @@ class AstrBotRightCodesDrawPluginTest(unittest.TestCase):
 
     def test_draw_client_uses_rightcodes_image_generation_payload(self) -> None:
         stub = StubDrawHttpClient()
-        client = RightCodesDrawClient(api_key="test-key", http_client=stub)
+        client = RightCodesDrawClient(api_key="test-key", poll_interval_seconds=0, http_client=stub)
 
-        result = asyncio.run(
-            client.draw(
-                RightCodesDrawRequest(
-                    prompt="一只白猫",
-                    model="nano-banana-pro",
-                    image_urls=("https://example.invalid/ref.png",),
+        with self.assertLogs(
+            "astrbot_plugin_qqbot_features.rightcodes_draw_logic",
+            level="INFO",
+        ) as captured_logs:
+            result = asyncio.run(
+                client.draw(
+                    RightCodesDrawRequest(
+                        prompt="一只白猫",
+                        model="nano-banana-pro",
+                        image_urls=("https://example.invalid/ref.png",),
+                    )
                 )
             )
-        )
+
+        diagnostic_logs = "\n".join(captured_logs.output)
+        self.assertIn("task_id=task_test", diagnostic_logs)
+        self.assertIn("task completed", diagnostic_logs)
+        self.assertNotIn("一只白猫", diagnostic_logs)
 
         self.assertEqual(result.image_url, "https://example.invalid/draw.png")
-        self.assertEqual(len(stub.calls), 1)
-        call = stub.calls[0]
-        self.assertEqual(call["url"], "https://www.right.codes/draw/v1/images/generations")
-        self.assertEqual(call["headers"], {"Authorization": "Bearer test-key", "Content-Type": "application/json"})
+        self.assertEqual(len(stub.calls), 2)
+        submit_call, poll_call = stub.calls
+        self.assertEqual(submit_call["method"], "POST")
+        self.assertEqual(submit_call["url"], "https://www.rightapi.ai/draw/v1/images/generations")
         self.assertEqual(
-            call["json"],
+            submit_call["headers"],
+            {
+                "Authorization": "Bearer test-key",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "QQBot-RightCodes/1.0",
+            },
+        )
+        self.assertEqual(
+            submit_call["json"],
             {
                 "model": "nano-banana-pro",
                 "prompt": "一只白猫",
                 "image": ["https://example.invalid/ref.png"],
-                "size": "1024x1024",
-                "response_format": "url",
+                "n": 1,
+                "size": "1:1",
+                "imageSize": "1K",
+                "async": True,
             },
         )
+        self.assertEqual(poll_call["method"], "GET")
+        self.assertEqual(poll_call["url"], "https://www.rightapi.ai/v1/tasks/task_test")
+        self.assertEqual(
+            poll_call["headers"],
+            {
+                "Authorization": "Bearer test-key",
+                "Accept": "application/json",
+                "User-Agent": "QQBot-RightCodes/1.0",
+            },
+        )
+
+    def test_draw_client_polls_until_completed(self) -> None:
+        stub = StubDrawHttpClient(
+            [
+                {"status": "queued", "progress": 0},
+                {"status": "in_progress", "progress": 50},
+                {"status": "completed", "data": [{"url": "https://example.invalid/final.png"}]},
+            ]
+        )
+        client = RightCodesDrawClient(api_key="test-key", poll_interval_seconds=0, http_client=stub)
+
+        result = asyncio.run(client.draw(RightCodesDrawRequest(prompt="一只白猫")))
+
+        self.assertEqual(result.image_url, "https://example.invalid/final.png")
+        self.assertEqual([call["method"] for call in stub.calls], ["POST", "GET", "GET", "GET"])
+
+    def test_draw_client_raises_task_failure_detail(self) -> None:
+        stub = StubDrawHttpClient([{"status": "failed", "error": {"message": "generate failed"}}])
+        client = RightCodesDrawClient(api_key="test-key", poll_interval_seconds=0, http_client=stub)
+
+        with self.assertRaisesRegex(RuntimeError, "generate failed"):
+            asyncio.run(client.draw(RightCodesDrawRequest(prompt="一只白猫")))
+
+    def test_draw_client_rejects_completed_task_without_image(self) -> None:
+        stub = StubDrawHttpClient([{"status": "completed", "data": []}])
+        client = RightCodesDrawClient(api_key="test-key", poll_interval_seconds=0, http_client=stub)
+
+        with self.assertRaisesRegex(RuntimeError, "完成但没有返回图片"):
+            asyncio.run(client.draw(RightCodesDrawRequest(prompt="一只白猫")))
+
+    def test_draw_client_enforces_total_timeout_before_polling(self) -> None:
+        stub = StubDrawHttpClient()
+        client = RightCodesDrawClient(
+            api_key="test-key",
+            timeout_seconds=0,
+            poll_interval_seconds=0,
+            http_client=stub,
+        )
+
+        with self.assertRaises(RightCodesDrawTimeoutError):
+            asyncio.run(client.draw(RightCodesDrawRequest(prompt="一只白猫")))
+        self.assertEqual([call["method"] for call in stub.calls], ["POST"])
+
+    def test_removed_models_fall_back_to_default(self) -> None:
+        self.assertEqual(normalize_rightcodes_draw_model("nano-banana"), RIGHTCODES_DRAW_DEFAULT_MODEL)
+        self.assertEqual(normalize_rightcodes_draw_model("nano-banana-2"), RIGHTCODES_DRAW_DEFAULT_MODEL)
+        self.assertIsNone(parse_rightcodes_draw_model_switch("切换生图模型 nano-banana-2"))
 
     def test_draw_prompt_rewrite_only_triggers_for_contextual_prompt(self) -> None:
         plain = RightCodesDrawRequest(prompt="一只白猫，水彩风，干净背景")

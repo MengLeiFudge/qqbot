@@ -1734,37 +1734,56 @@ class QQBotFeaturesPlugin(Star):
             event.stop_event()
             return
 
-        yield event.plain_result(format_draw_start_message(quota))
-        api_key = self._rightcodes_config.api_key
-        if not api_key:
-            await asyncio.to_thread(store.refund, quota)
-            yield event.plain_result("RightCodes 生图 API Key 还没配置。")
-            event.stop_event()
-            return
+        timeout_seconds = self._rightcodes_config.draw_timeout_seconds
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        refunded = False
+        generated = False
 
-        async with self._rightcodes_draw_lock:
+        async def refund_once() -> None:
+            nonlocal refunded
+            if refunded:
+                return
+            refunded = True
+            await asyncio.shield(asyncio.to_thread(store.refund, quota))
+
+        try:
+            yield event.plain_result(format_draw_start_message(quota))
+            api_key = self._rightcodes_config.api_key
+            if not api_key:
+                await refund_once()
+                yield event.plain_result("RightCodes 生图 API Key 还没配置。")
+                event.stop_event()
+                return
+
             try:
-                timeout_seconds = self._rightcodes_config.draw_timeout_seconds
-                result = await asyncio.wait_for(
-                    RightCodesDrawClient(
-                        api_key=api_key,
-                        timeout_seconds=timeout_seconds,
-                    ).draw(draw_request),
-                    timeout=timeout_seconds + 5.0,
-                )
+                async with asyncio.timeout_at(deadline):
+                    async with self._rightcodes_draw_lock:
+                        remaining = deadline - asyncio.get_running_loop().time()
+                        result = await RightCodesDrawClient(
+                            api_key=api_key,
+                            timeout_seconds=remaining,
+                        ).draw(draw_request)
+                        generated = True
             except asyncio.TimeoutError:
-                await asyncio.to_thread(store.refund, quota)
+                await refund_once()
                 yield _chain_result_with_reply(
                     event,
-                    [Plain(format_rightcodes_draw_timeout(self._rightcodes_config.draw_timeout_seconds))],
+                    [Plain(format_rightcodes_draw_timeout(timeout_seconds))],
                 )
                 event.stop_event()
                 return
             except Exception as exc:
-                await asyncio.to_thread(store.refund, quota)
+                await refund_once()
                 yield _chain_result_with_reply(event, [Plain(format_rightcodes_draw_failure(exc))])
                 event.stop_event()
                 return
+        except asyncio.CancelledError:
+            if not generated:
+                await refund_once()
+            raise
+        except Exception:
+            await refund_once()
+            raise
 
         message = format_rightcodes_draw_success(result, model=draw_request.model)
         if result.image_url.startswith(("http://", "https://")):

@@ -51,18 +51,19 @@
   - 初始默认模型是 `gpt-image-2`，模型选择跨群、跨天使/恶魔共用。
   - 提示词包含“仿照上面、这张图、参考、聊天记录”等上下文指代，或引用了图片时，会先用当前会话 AstrBot provider 整理成准确生图提示词，再扣积分调用 RightCodes。
   - 如果只有 `[图片]` 这类占位、没有可用引用图片 URL/路径或引用文本，插件会直接提示补充引用或写完整提示词，不扣积分。
+  - 生图调用当前官方异步协议：向 `https://www.rightapi.ai/draw/v1/images/generations` 提交 `async=true` 任务，再轮询站点级 `/v1/tasks/{task_id}` 取得图片。
   - 生图成功、失败或超时失败都会引用原始生图请求；默认 240 秒总超时，失败后退回本次扣除的积分，并提示模型查看和切换指令。
   - “生成一张 xxx 图片”这类自然语言请求只提示生图指令和积分消耗，不直接执行扣费生图。
 - RightCodes 生图接口知识库
-  - 用户询问 RightCodes 画图接口、`body`、`size`、`1024x1024`、`/v1/images/generations` 或 `/v1/chat/completions` 时，会在 LLM 请求前注入官方接口资料。
+  - 用户询问 RightCodes 画图接口、`body`、`size`、`imageSize`、`async`、`/v1/images/generations`、`generateContent` 或 `/v1/tasks/{task_id}` 时，会在 LLM 请求前注入官方接口资料。
   - 如果用户引用上一条问题后只说“回答一下”，被引用消息会作为当前请求原文参与 RightCodes 知识库判定和 LLM 上下文，不只看当前短句。
-  - `POST /v1/images/generations` 支持 `size` 字段，形如 `"1024x1024"`；流式防超时建议走 `/v1/chat/completions` 并设置 `stream=true`。
+  - 当前协议固定异步提交并轮询任务；Images 接口的 `size` 支持比例或像素串，`imageSize` 支持 1K、2K、4K。
 - `生图模型` / `生图价格`
   - 查看当前模型、可用模型、价格、积分消耗和上游分辨率说明。
-  - 默认倍率 1000 下：`gpt-image-2` 40、`gpt-image-2-vip` 130、`nano-banana` 140、`nano-banana-2` 120、`nano-banana-2-lite` 50、`nano-banana-pro` 180 积分/次。
+  - 默认倍率 1000 下：`gpt-image-2` 40、`gpt-image-2-vip` 130、`nano-banana-2-lite` 50、`nano-banana-pro` 180 积分/次；仅展示本次真实调用成功并下载到有效图片的模型。
 - `切换生图模型 <模型名>`
   - 持久切换当前 QQ 的生图模型；`生图模型 <模型名>` 是不进菜单的别名。
-  - `切换生图模型nano-banana-2`、`切换生图模型 nano-banana-2` 和 `切换 生图 模型 nano-banana-2` 都能匹配。
+  - `切换生图模型nano-banana-2-lite`、`切换生图模型 nano-banana-2-lite` 和 `切换 生图 模型 nano-banana-2-lite` 都能匹配。
 - `查看积分` / `balance` / `points`
   - 查询当前 QQ 的积分、当前模型和该模型单次积分消耗，不展示历史累计消息数。
   - 回复末尾提示 `生图模型` 和主切换指令 `切换生图模型 <模型名>`，不展示隐藏别名。
