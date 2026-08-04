@@ -10,17 +10,40 @@ async def send_private_pdfs_with_password(
     user_id: int,
     album_id: str,
     artifacts: Iterable[ComicPdfArtifact],
+    *,
+    title: str,
+    author: str,
+    tags: Iterable[str] = (),
 ) -> int:
-    """Send each private file, then reply to that file with its JMID password."""
+    """Announce one encrypted delivery, send every part, then confirm completion."""
     password = str(album_id or "").strip()
     if not password.isdigit():
         raise ComicPdfError("JM PDF 密码无法由作品 ID 生成。")
+    parts = tuple(artifacts)
+    if not parts:
+        raise ComicPdfError("待发送 PDF 不存在，任务已终止。")
+    paths = tuple(_validated_pdf_path(artifact) for artifact in parts)
+    tag_text = "、".join(
+        dict.fromkeys(
+            text
+            for item in tags
+            if (text := str(item or "").strip())
+        )
+    ) or "未提供"
+    summary = (
+        f"JM{password} 加密完成，准备发送。\n"
+        f"名称：JM{password}\n"
+        f"标题：{str(title or '').strip() or f'JM{password}'}\n"
+        f"作者：{str(author or '').strip() or '未知作者'}\n"
+        f"标签：{tag_text}\n"
+        f"文件切片：共 {len(paths)} 份\n"
+        f"密码：{password}"
+    )
+    await _send_text(api, user_id, summary)
+
     sent = 0
-    for artifact in artifacts:
-        path = artifact.path.resolve()
-        if not path.is_file() or path.suffix.lower() != ".pdf":
-            raise ComicPdfError("待发送 PDF 不存在，任务已终止。")
-        result = await api.call_api(
+    for path in paths:
+        await api.call_api(
             "send_private_msg",
             user_id=int(user_id),
             message=[
@@ -30,25 +53,22 @@ async def send_private_pdfs_with_password(
                 }
             ],
         )
-        message_id = _message_id(result)
-        if not message_id:
-            raise ComicPdfError("PDF 已上传，但无法取得文件消息 ID。")
-        await api.call_api(
-            "send_private_msg",
-            user_id=int(user_id),
-            message=[
-                {"type": "reply", "data": {"id": message_id}},
-                {"type": "text", "data": {"text": f"下载完成，密码{password}"}},
-            ],
-        )
         sent += 1
+
+    await _send_text(api, user_id, f"JM{password}发送完成")
     return sent
 
 
-def _message_id(result: object) -> str:
-    if isinstance(result, dict):
-        value = result.get("message_id")
-        if value is None and isinstance(result.get("data"), dict):
-            value = result["data"].get("message_id")
-        return str(value or "").strip()
-    return ""
+def _validated_pdf_path(artifact: ComicPdfArtifact):
+    path = artifact.path.resolve()
+    if not path.is_file() or path.suffix.lower() != ".pdf":
+        raise ComicPdfError("待发送 PDF 不存在，任务已终止。")
+    return path
+
+
+async def _send_text(api, user_id: int, text: str) -> None:
+    await api.call_api(
+        "send_private_msg",
+        user_id=int(user_id),
+        message=[{"type": "text", "data": {"text": text}}],
+    )

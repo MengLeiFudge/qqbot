@@ -75,7 +75,12 @@ class ComicPdfService:
         async with self._lock:
             shared = self._inflight.get(normalized_id)
             if shared is not None:
-                return ComicPdfSubmission(normalized_id, "shared", 0, shared)
+                return ComicPdfSubmission(
+                    normalized_id,
+                    "shared",
+                    self._queue_position(normalized_id),
+                    shared,
+                )
 
         if not force_refresh:
             cached = await asyncio.to_thread(self._cache.lookup, normalized_id)
@@ -91,7 +96,12 @@ class ComicPdfService:
         async with self._lock:
             shared = self._inflight.get(normalized_id)
             if shared is not None:
-                return ComicPdfSubmission(normalized_id, "shared", 0, shared)
+                return ComicPdfSubmission(
+                    normalized_id,
+                    "shared",
+                    self._queue_position(normalized_id),
+                    shared,
+                )
             self._inflight[normalized_id] = future
             if self._active_count < max(1, self.config.max_concurrent_jobs):
                 self._active_count += 1
@@ -124,6 +134,17 @@ class ComicPdfService:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _queue_position(self, album_id: str) -> int:
+        """Return the current one-based FIFO position, or zero for an active task."""
+        return next(
+            (
+                position
+                for position, pending in enumerate(self._queue, start=1)
+                if pending.album_id == album_id
+            ),
+            0,
+        )
 
     def _start_download(self, pending: _PendingDownload) -> None:
         task = asyncio.create_task(

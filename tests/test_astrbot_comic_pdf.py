@@ -56,6 +56,7 @@ class FakeAlbum:
     title = "完整测试标题"
     oname = "测试作品"
     author = "测试作者"
+    tags = ["纯爱", "校园", "纯爱"]
 
     def __init__(self, photos: list[object]) -> None:
         self.photos = photos
@@ -109,6 +110,7 @@ def _downloaded_comic(tmp_path: Path, album_id: str = "1218951"):
         author="测试/作者",
         title="测试:作品",
         chapters=tuple(chapters),
+        tags=("测试标签", "长篇"),
     )
 
 
@@ -129,6 +131,7 @@ def test_adapter_normalizes_author_title_order_and_disables_system_proxy(tmp_pat
 
     assert result.author == "测试作者"
     assert result.title == "测试作品"
+    assert result.tags == ("纯爱", "校园")
     assert result.page_count == 4
     assert [path.name for path in result.chapters[0].pages] == ["2.jpg", "10.jpg"]
     assert FakeJmOption.last_config is not None
@@ -168,34 +171,116 @@ def test_config_clamps_resource_and_cache_limits() -> None:
     assert config.cache_max_bytes == 1024**3
 
 
-def test_private_sender_sends_file_then_replies_with_jmid_password(tmp_path: Path) -> None:
-    pdf = tmp_path / "comic.pdf"
-    pdf.write_bytes(b"pdf")
+def test_private_sender_announces_metadata_then_sends_all_parts_and_completion(tmp_path: Path) -> None:
+    first = tmp_path / "comic(1).pdf"
+    second = tmp_path / "comic(2).pdf"
+    first.write_bytes(b"pdf-1")
+    second.write_bytes(b"pdf-2")
     calls: list[tuple[str, dict[str, object]]] = []
 
     class Api:
         async def call_api(self, action: str, **kwargs):
             calls.append((action, kwargs))
-            return {"message_id": 987654} if len(calls) == 1 else {}
+            return {}
 
-    artifact = comic_pdf.ComicPdfArtifact(pdf, 3, (1,))
+    artifacts = [
+        comic_pdf.ComicPdfArtifact(first, 3, (1,)),
+        comic_pdf.ComicPdfArtifact(second, 2, (2,)),
+    ]
     sent = asyncio.run(
-        comic_pdf.send_private_pdfs_with_password(Api(), 123456, "1218951", [artifact])
+        comic_pdf.send_private_pdfs_with_password(
+            Api(),
+            123456,
+            "1218951",
+            artifacts,
+            title="测试作品",
+            author="测试作者",
+            tags=("纯爱", "校园"),
+        )
     )
 
-    assert sent == 1
-    assert calls[0][0] == "send_private_msg"
-    assert calls[0][1]["message"][0]["type"] == "file"
-    assert calls[1] == (
+    assert sent == 2
+    assert calls[0] == (
         "send_private_msg",
         {
             "user_id": 123456,
             "message": [
-                {"type": "reply", "data": {"id": "987654"}},
-                {"type": "text", "data": {"text": "下载完成，密码1218951"}},
+                {
+                    "type": "text",
+                    "data": {
+                        "text": (
+                            "JM1218951 加密完成，准备发送。\n"
+                            "名称：JM1218951\n"
+                            "标题：测试作品\n"
+                            "作者：测试作者\n"
+                            "标签：纯爱、校园\n"
+                            "文件切片：共 2 份\n"
+                            "密码：1218951"
+                        )
+                    },
+                }
             ],
         },
     )
+    assert [call[1]["message"][0]["data"]["name"] for call in calls[1:3]] == [
+        "comic(1).pdf",
+        "comic(2).pdf",
+    ]
+    assert calls[3] == (
+        "send_private_msg",
+        {
+            "user_id": 123456,
+            "message": [
+                {"type": "text", "data": {"text": "JM1218951发送完成"}}
+            ],
+        },
+    )
+    assert all(
+        segment["type"] != "reply"
+        for _, kwargs in calls
+        for segment in kwargs["message"]
+    )
+
+
+def test_private_sender_does_not_confirm_after_a_part_fails(tmp_path: Path) -> None:
+    first = tmp_path / "comic(1).pdf"
+    second = tmp_path / "comic(2).pdf"
+    first.write_bytes(b"pdf-1")
+    second.write_bytes(b"pdf-2")
+    sent_texts: list[str] = []
+    file_calls = 0
+
+    class Api:
+        async def call_api(self, action: str, **kwargs):
+            nonlocal file_calls
+            message = kwargs["message"]
+            if message[0]["type"] == "text":
+                sent_texts.append(message[0]["data"]["text"])
+            else:
+                file_calls += 1
+                if file_calls == 2:
+                    raise RuntimeError("upload failed")
+            return {}
+
+    artifacts = [
+        comic_pdf.ComicPdfArtifact(first, 3, (1,)),
+        comic_pdf.ComicPdfArtifact(second, 2, (2,)),
+    ]
+    with pytest.raises(RuntimeError, match="upload failed"):
+        asyncio.run(
+            comic_pdf.send_private_pdfs_with_password(
+                Api(),
+                123456,
+                "1218951",
+                artifacts,
+                title="测试作品",
+                author="测试作者",
+            )
+        )
+
+    assert len(sent_texts) == 1
+    assert "加密完成" in sent_texts[0]
+    assert all("发送完成" not in text for text in sent_texts)
 
 
 def test_renderer_keeps_bounded_whole_book(tmp_path: Path) -> None:
@@ -228,10 +313,29 @@ def test_cache_uses_required_folder_manifest_names_and_hashes(tmp_path: Path) ->
     assert manifest["download_complete"] is True
     assert manifest["author"] == "测试/作者"
     assert manifest["title"] == "测试:作品"
+    assert manifest["tags"] == ["测试标签", "长篇"]
     assert manifest["page_count"] == 4
     assert manifest["total_size_bytes"] == 2400
     assert all(len(item["sha256"]) == 64 for item in manifest["artifacts"])
     assert cache.lookup("1218951") is not None
+
+
+def test_cache_accepts_legacy_manifest_without_tags(tmp_path: Path) -> None:
+    cache = comic_pdf.ComicPdfCache(tmp_path / "cache", max_bytes=10_000)
+    stored = cache.store(_downloaded_comic(tmp_path / "images"), _renderer())
+    manifest_path = stored.cache_dir / "metadata.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("tags")
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    entry = cache.lookup("1218951")
+
+    assert entry is not None
+    assert entry.tags == ()
+    assert stored.cache_dir.is_dir()
 
 
 def test_cache_discards_hash_mismatch_and_lru_evicts_oldest(tmp_path: Path) -> None:
@@ -302,9 +406,12 @@ def test_service_runs_two_albums_and_reports_fifo_queue(tmp_path: Path) -> None:
         first = await service.submit("1001")
         second = await service.submit("1002")
         third = await service.submit("1003")
+        shared_third = await service.submit("1003")
         assert (first.status, second.status) == ("started", "started")
         assert third.status == "queued"
         assert third.queue_position == 1
+        assert shared_third.status == "shared"
+        assert shared_third.queue_position == 1
         await asyncio.sleep(0)
         assert peak == 2
         gate.set()
@@ -457,13 +564,12 @@ def test_onebot_friend_lookup_accepts_direct_and_wrapped_results() -> None:
     assert not asyncio.run(comic_pdf.is_onebot_friend(Api([]), 789))
 
 
-def test_main_contract_uses_plain_jm_command_friend_route_and_quoted_progress() -> None:
+def test_main_contract_uses_plain_jm_command_friend_route_and_unquoted_progress() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
     assert 'JMCOMIC_DOWNLOAD_PATTERN = r"(?i)^jm\\s*([0-9]+)$"' in source
     assert "JM下载" not in source[source.index("async def jmcomic_download"):source.index("async def factorio_download")]
     assert "self._comic_friend_router.choose" in source
     assert "is_onebot_friend" in source
-    assert "_chain_result_with_reply" in source
     assert "send_private_pdfs_with_password" in source
     handler_source = source[
         source.index("async def jmcomic_download"):source.index("async def factorio_download")
@@ -486,8 +592,10 @@ def test_main_contract_uses_plain_jm_command_friend_route_and_quoted_progress() 
     worker_route_index = handler_source.index(
         "preferred = decide_migrated_command_route"
     )
-    status_index = handler_source.index(
-        "yield _chain_result_with_reply(event, [Plain(status_text)])"
-    )
+    status_index = handler_source.index("yield event.plain_result(status_text)")
+    assert "_chain_result_with_reply" not in handler_source
+    assert "缓存命中，开始处理" in handler_source
+    assert "开始下载，预计约" in handler_source
+    assert "_comic_download_estimate_minutes" in handler_source
     stop_index = handler_source.rindex("event.stop_event()")
     assert claim_index < friend_lookup_index < worker_route_index < status_index < stop_index

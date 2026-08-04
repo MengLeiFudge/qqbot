@@ -71,6 +71,7 @@ class ComicPdfCache:
             "album_id": album_id,
             "author": comic.author,
             "title": comic.title,
+            "tags": list(comic.tags),
             "folder_name": folder_name,
             "download_complete": False,
             "created_at": _utc_now(),
@@ -193,6 +194,7 @@ class ComicPdfCache:
                 title=str(manifest.get("title") or f"JM{album_id}"),
                 cache_dir=directory,
                 artifacts=tuple(artifacts),
+                tags=_manifest_tags(manifest.get("tags")),
             ),
             manifest,
         )
@@ -251,6 +253,18 @@ class ComicPdfCache:
         directory = _require_under_root(Path(path).resolve(), self.root)
         if directory != self.root:
             shutil.rmtree(directory, ignore_errors=True)
+
+
+def _manifest_tags(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            text
+            for item in value
+            if (text := str(item or "").strip())
+        )
+    )
 
 
 def _cache_base_name(album_id: str, author: str, title: str) -> str:

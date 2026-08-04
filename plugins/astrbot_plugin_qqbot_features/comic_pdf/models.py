@@ -49,6 +49,7 @@ class DownloadedComic:
     author: str
     title: str
     chapters: tuple[ComicChapter, ...]
+    tags: tuple[str, ...] = ()
 
     @property
     def page_count(self) -> int:
@@ -76,6 +77,7 @@ class ComicCacheEntry:
     title: str
     cache_dir: Path
     artifacts: tuple[ComicPdfArtifact, ...]
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)

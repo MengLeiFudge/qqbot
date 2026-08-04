@@ -125,12 +125,30 @@ class JmcomicAdapter:
         chapters.sort(key=lambda chapter: chapter.index)
         author = str(getattr(album, "author", "") or "未知作者").strip()
         title = str(getattr(album, "oname", "") or getattr(album, "title", "") or f"JM{album_id}").strip()
+        tags = _normalize_tags(getattr(album, "tags", ()))
         return DownloadedComic(
             album_id=album_id,
             author=author,
             title=title,
             chapters=tuple(chapters),
+            tags=tags,
         )
+
+
+def _normalize_tags(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        candidates = re.split(r"[,，/|]", value)
+    elif isinstance(value, (list, tuple, set)):
+        candidates = value
+    else:
+        candidates = ()
+    return tuple(
+        dict.fromkeys(
+            text
+            for item in candidates
+            if (text := str(item or "").strip())
+        )
+    )
 
 
 def _positive_int(value: object, fallback: int) -> int:

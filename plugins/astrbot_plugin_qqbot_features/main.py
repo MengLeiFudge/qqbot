@@ -1185,14 +1185,11 @@ class QQBotFeaturesPlugin(Star):
             return
         record_command_handled(event.get_group_id(), event.get_self_id())
         if not has_friend:
-            yield _chain_result_with_reply(
-                event,
-                [Plain("需要先添加云栖或夜凛任意一只为好友，再重新发送。")],
-            )
+            yield event.plain_result("需要先添加云栖或夜凛任意一只为好友，再重新发送。")
             event.stop_event()
             return
         if not self._comic_pdf_config.enabled:
-            yield _chain_result_with_reply(event, [Plain("JM 下载功能当前未启用。")])
+            yield event.plain_result("JM 下载功能当前未启用。")
             event.stop_event()
             return
 
@@ -1207,23 +1204,37 @@ class QQBotFeaturesPlugin(Star):
                 self._comic_active_request_count += 1
                 request_accepted = True
         if not request_accepted:
-            yield _chain_result_with_reply(
-                event,
-                [Plain("JM 下载队列已满，请稍后再试。")],
-            )
+            yield event.plain_result("JM 下载队列已满，请稍后再试。")
             event.stop_event()
             return
 
         delivery = None
         try:
             submission = await self._comic_pdf_service.submit(album_id)
+            estimate_low, estimate_high = _comic_download_estimate_minutes(
+                submission.queue_position,
+                self._comic_pdf_config.max_concurrent_jobs,
+            )
             status_text = {
-                "cache_hit": f"JM{album_id} 缓存命中，正在准备私聊文件。",
-                "started": f"JM{album_id} 已开始下载，完成后私聊发送。",
-                "shared": f"JM{album_id} 正在由其他请求处理，已加入等待。",
-                "queued": f"JM{album_id} 已进入队列，排队第 {submission.queue_position} 个。",
-            }.get(submission.status, f"JM{album_id} 已接受处理。")
-            yield _chain_result_with_reply(event, [Plain(status_text)])
+                "cache_hit": f"JM{album_id} 缓存命中，开始处理。",
+                "started": (
+                    f"JM{album_id} 开始下载，预计约 {estimate_low}-{estimate_high} 分钟完成。"
+                ),
+                "shared": (
+                    f"JM{album_id} 正在下载，已加入等待"
+                    + (
+                        f"，当前排队第 {submission.queue_position} 个"
+                        if submission.queue_position > 0
+                        else ""
+                    )
+                    + f"，预计约 {estimate_low}-{estimate_high} 分钟完成。"
+                ),
+                "queued": (
+                    f"JM{album_id} 开始下载，当前排队第 {submission.queue_position} 个，"
+                    f"预计约 {estimate_low}-{estimate_high} 分钟完成。"
+                ),
+            }.get(submission.status, f"JM{album_id} 开始处理。")
+            yield event.plain_result(status_text)
             cache_entry = await submission.wait()
             if not await is_onebot_friend(api, int(sender_id)):
                 raise ComicPdfError("发送前检测到好友关系已失效，请重新添加好友后再试。")
@@ -1233,9 +1244,12 @@ class QQBotFeaturesPlugin(Star):
                 int(sender_id),
                 album_id,
                 delivery.artifacts,
+                title=cache_entry.title,
+                author=cache_entry.author,
+                tags=cache_entry.tags,
             )
         except ComicPdfError as exc:
-            yield _chain_result_with_reply(event, [Plain(str(exc))])
+            yield event.plain_result(str(exc))
         except Exception as exc:
             logger.error(
                 "[QQBotFeatures] JM PDF task failed: album_id=%s user=%s error_type=%s",
@@ -1243,10 +1257,7 @@ class QQBotFeaturesPlugin(Star):
                 sender_id,
                 type(exc).__name__,
             )
-            yield _chain_result_with_reply(
-                event,
-                [Plain("JM 下载、加密或私聊文件发送失败，请稍后重试。")],
-            )
+            yield event.plain_result("JM 下载、加密或私聊文件发送失败，请稍后重试。")
         finally:
             if delivery is not None:
                 await asyncio.to_thread(delivery.cleanup)
@@ -2399,6 +2410,17 @@ def read_command_owner_qq() -> str:
 
 def is_twin_bot_sender(event: AstrMessageEvent) -> bool:
     return is_twin_bot_sender_id(event.get_sender_id())
+
+
+def _comic_download_estimate_minutes(
+    queue_position: int,
+    max_concurrent_jobs: int,
+) -> tuple[int, int]:
+    """Return a rough completion range from the FIFO position and concurrency."""
+    concurrency = max(1, int(max_concurrent_jobs))
+    position = max(0, int(queue_position))
+    batches = 1 + ((position + concurrency - 1) // concurrency if position else 0)
+    return 5 * batches, 15 * batches
 
 
 def _chain_result_with_reply(event: AstrMessageEvent, chain: list[object]):
