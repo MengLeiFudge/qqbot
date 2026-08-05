@@ -115,7 +115,7 @@
     "description": "Sub2API 后台刷新间隔秒数",
     "type": "int",
     "default": 300,
-    "hint": "插件启动后后台定时使用 source=active&force=true 刷新全部账号；群里发送 用量 时只返回最近一次缓存图片，不等待刷新请求。"
+    "hint": "插件启动后后台定时使用 source=active&force=true 刷新全部账号，并独立刷新 CodexRadar 智力效率公开数据；群里发送 用量 时只返回最近一次缓存图片，不等待刷新请求。"
   },
   "sub2api_alert_group_ids": {
     "description": "Sub2API 用量提醒目标群号",

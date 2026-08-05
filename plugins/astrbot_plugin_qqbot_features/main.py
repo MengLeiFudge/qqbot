@@ -27,6 +27,8 @@ from .command_guard import decide_migrated_command_route
 from .command_guard import is_twin_bot_sender_id
 from .command_guard import record_command_handled
 from .command_guard import try_claim_command
+from .codexradar_efficiency import fetch_codexradar_efficiency
+from .codexradar_efficiency import render_codexradar_efficiency_image
 from .comic_pdf import ComicFriendRouteCoordinator
 from .comic_pdf import ComicPdfError
 from .comic_pdf import ComicPdfService
@@ -422,7 +424,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     "astrbot_plugin_qqbot_features",
     "MengLei",
     "棉花糖群务、互动、生图、游戏、LLM 上下文和回复守卫功能合集。",
-    "0.15.2",
+    "0.15.3",
 )
 class QQBotFeaturesPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -462,6 +464,8 @@ class QQBotFeaturesPlugin(Star):
         self._sub2api_config = load_sub2api_config(config)
         self._sub2api_usage_cache = Sub2APIUsageCache()
         self._sub2api_refresh_task: asyncio.Task | None = None
+        self._codexradar_efficiency_task: asyncio.Task | None = None
+        self._codexradar_efficiency_image_path: Path | None = None
         self._arc_background_task: asyncio.Task | None = None
         temp_dedupe_config = load_temp_dedupe_config(config)
         self._temp_duplicate_cleaner = TempDuplicateCleaner(
@@ -559,6 +563,9 @@ class QQBotFeaturesPlugin(Star):
     async def initialize(self) -> None:
         if self._sub2api_config.base_url and self._sub2api_config.admin_api_key:
             self._sub2api_refresh_task = asyncio.create_task(self._sub2api_usage_refresh_loop())
+            self._codexradar_efficiency_task = asyncio.create_task(
+                self._codexradar_efficiency_refresh_loop()
+            )
         self._arc_background_task = asyncio.create_task(self._arc_background_loop())
         self._temp_duplicate_cleanup_task = asyncio.create_task(
             self._temp_duplicate_cleaner.run(logger=logger)
@@ -581,6 +588,13 @@ class QQBotFeaturesPlugin(Star):
             except asyncio.CancelledError:
                 pass
         self._sub2api_refresh_task = None
+        if self._codexradar_efficiency_task is not None:
+            self._codexradar_efficiency_task.cancel()
+            try:
+                await self._codexradar_efficiency_task
+            except asyncio.CancelledError:
+                pass
+        self._codexradar_efficiency_task = None
         if self._arc_background_task is not None:
             self._arc_background_task.cancel()
             try:
@@ -1283,7 +1297,7 @@ class QQBotFeaturesPlugin(Star):
         )
         event.stop_event()
 
-    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询全部 Sub2API 账号额度、各账号当前7d周期用户消费榜和全账号当日 / 本周 / 30d 消费；直接返回后台刷新缓存图片。")
+    @filter.regex(SUB2API_USAGE_PATTERN, desc="查询全部 Sub2API 账号额度和消费榜，并在末尾附加后台缓存的 CodexRadar 智力效率图。")
     async def sub2api_usage(self, event: AstrMessageEvent):
         text = extract_plain_text(event).strip()
         command = parse_sub2api_usage_command(text)
@@ -1301,7 +1315,11 @@ class QQBotFeaturesPlugin(Star):
                 snapshot=snapshot,
                 output_dir=get_sub2api_usage_image_cache_root(),
             )
-            yield event.chain_result([random_summary_image_from_file(image_path)])
+            chain = [random_summary_image_from_file(image_path)]
+            codexradar_path = self._codexradar_efficiency_image_path
+            if codexradar_path is not None and codexradar_path.is_file():
+                chain.append(random_summary_image_from_file(codexradar_path))
+            yield event.chain_result(chain)
         except Exception as exc:
             logger.exception("[QQBotFeatures] failed to render Sub2API usage image: %s", exc)
             yield event.plain_result(format_sub2api_usage_response(snapshot))
@@ -1466,6 +1484,27 @@ class QQBotFeaturesPlugin(Star):
             except Exception as exc:
                 logger.warning("[QQBotFeatures] failed to refresh Sub2API usage cache: %s", exc)
             await asyncio.sleep(phase_interval)
+
+    async def _codexradar_efficiency_refresh_loop(self) -> None:
+        """Refresh the optional public CodexRadar panel without delaying commands."""
+        while True:
+            try:
+                snapshot = await asyncio.to_thread(fetch_codexradar_efficiency)
+                self._codexradar_efficiency_image_path = await asyncio.to_thread(
+                    render_codexradar_efficiency_image,
+                    snapshot=snapshot,
+                    output_dir=get_codexradar_efficiency_image_cache_root(),
+                )
+                logger.info(
+                    "[QQBotFeatures] refreshed CodexRadar efficiency cache, points=%s runs_24h=%s",
+                    len(snapshot.points),
+                    snapshot.runs_24h_total,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("[QQBotFeatures] failed to refresh CodexRadar efficiency cache: %s", exc)
+            await asyncio.sleep(300)
 
     async def _send_sub2api_usage_alerts(self, alerts: list[Sub2APIUsageAlert]) -> None:
         if not alerts or not self._sub2api_config.alert_group_ids:
@@ -3235,6 +3274,10 @@ def get_menu_image_cache_root() -> Path:
 
 def get_sub2api_usage_image_cache_root() -> Path:
     return get_plugin_temp_root("sub2api-usage")
+
+
+def get_codexradar_efficiency_image_cache_root() -> Path:
+    return get_plugin_temp_root("codexradar-efficiency")
 
 
 def get_qqbot_config_value(section: str, key: str, default: str = "") -> str:
