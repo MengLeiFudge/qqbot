@@ -10,6 +10,7 @@ SCRIPTS_ROOT = ROOT / "scripts"
 START_ALL = ROOT / "tools" / "runtime-scripts" / "start-all.ps1"
 START_ASTRBOT = ROOT / "tools" / "runtime-scripts" / "start-astrbot.ps1"
 ENSURE_NAPCAT_BUILTIN = ROOT / "tools" / "runtime-scripts" / "ensure-napcat-builtin-plugin.ps1"
+ENSURE_MAIBOT_EXPERIMENTS = ROOT / "tools" / "runtime-scripts" / "ensure-maibot-experiments.sh"
 START_ALL_BAT = ROOT / "scripts" / "start-all.bat"
 
 
@@ -163,6 +164,7 @@ class StartAllContractTest(unittest.TestCase):
         self.assertIn("function Ensure-ExperimentNapCatAccounts", script)
         self.assertIn("function Ensure-MaiBotExperimentCores", script)
         self.assertIn("ensure-maibot-experiments.sh", script)
+        self.assertIn('$arguments += "--force-restart"', script)
         self.assertEqual(script.count("Ensure-MaiBotExperimentCores"), 3)
         self.assertIn("function Test-NapCatAccountPortOwnership", script)
         self.assertIn('throw "$label OneBot port $port is owned by an unexpected process."', script)
@@ -174,6 +176,17 @@ class StartAllContractTest(unittest.TestCase):
         self.assertLess(
             script.index('Stop-NapCatWorkspaceProcesses -Reason "force restart"'),
             script.rindex("Ensure-ExperimentNapCatAccounts -RunId $runId"),
+        )
+
+    def test_maibot_ensure_honors_force_restart(self) -> None:
+        script = ENSURE_MAIBOT_EXPERIMENTS.read_text(encoding="utf-8")
+
+        self.assertIn('if [[ "${1:-}" == "--force-restart" ]]', script)
+        self.assertIn('if $force_restart && [[ -n "$(find_instance_runner_pids "$root")" ]]', script)
+        self.assertIn('echo "[MaiBot] [$label] force restart requested"', script)
+        self.assertLess(
+            script.index('stop_instance "$root"', script.index("force restart requested")),
+            script.index('if instance_ready "$root" "$web_port" "$onebot_port"'),
         )
 
     def test_start_astrbot_reports_launch_mode(self) -> None:

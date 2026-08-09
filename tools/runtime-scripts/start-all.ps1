@@ -1793,7 +1793,11 @@ function Ensure-MaiBotExperimentCores {
     $drive = $Matches[1].ToLowerInvariant()
     $tail = $Matches[2] -replace '\\', '/'
     $wslPath = "/mnt/$drive/$tail"
-    $output = @(& wsl.exe -- bash $wslPath 2>&1)
+    $arguments = @("--", "bash", $wslPath)
+    if ($ForceRestart) {
+        $arguments += "--force-restart"
+    }
+    $output = @(& wsl.exe @arguments 2>&1)
     foreach ($line in $output) {
         if ($line) {
             Write-LauncherStatus ([string]$line)

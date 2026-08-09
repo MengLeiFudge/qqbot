@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+force_restart=false
+if [[ "${1:-}" == "--force-restart" ]]; then
+  force_restart=true
+  shift
+fi
+if (($#)); then
+  echo "Usage: $0 [--force-restart]" >&2
+  exit 2
+fi
+
 instances=(
   "/mnt/d/project/maibot|Yuecheng|8001|8095"
   "/mnt/d/project/maibot-xingyao|Xingyao|8002|8096"
@@ -92,6 +102,11 @@ ensure_instance() {
 
   [[ -f "$root/bot.py" ]] || { echo "[MaiBot] [$label] missing instance root: $root" >&2; return 1; }
   [[ -x "$root/.venv/bin/python" ]] || { echo "[MaiBot] [$label] missing Python environment" >&2; return 1; }
+
+  if $force_restart && [[ -n "$(find_instance_runner_pids "$root")" ]]; then
+    echo "[MaiBot] [$label] force restart requested"
+    stop_instance "$root"
+  fi
 
   if instance_ready "$root" "$web_port" "$onebot_port"; then
     echo "[MaiBot] [$label] ready: web=$web_port onebot=$onebot_port"
