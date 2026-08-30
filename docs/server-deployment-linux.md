@@ -1,86 +1,45 @@
-# Linux / 1Panel 部署双棉花糖
+# Linux / 1Panel 部署边界
 
-结论：1Panel 可以用来安装和托管 AstrBot Core，但它只解决 AstrBot 管理端本身；本仓库的双棉花糖还需要同步本地插件、两路 aiocqhttp 平台配置、两个 NapCat 协议端和运行态数据。
+本工作区的事实拓扑是两个独立框架项目加一个共享 NapCat 接入层，不再是单个 AstrBot Core 承载两个账号。
 
-官方部署边界：
-
-- AstrBot 1Panel 文档：https://docs.astrbot.app/deploy/astrbot/1panel.html
-- AstrBot Docker 文档：https://docs.astrbot.app/deploy/astrbot/docker.html
-- AstrBot aiocqhttp / OneBot 文档：https://docs.astrbot.app/platform/aiocqhttp.html
-
-## 推荐拓扑
+## 组件拓扑
 
 ```text
-服务器
-├── 1Panel / Docker
-│   └── AstrBot Core
-│       ├── WebUI: 6185
-│       ├── aiocqhttp angel: 6200/ws
-│       ├── aiocqhttp demon: 6201/ws
-│       └── data/plugins/  # 从本仓库 plugins 同步
-├── NapCat angel 1443944862 -> ws://127.0.0.1:6200/ws
-├── NapCat demon 2629227874 -> ws://127.0.0.1:6201/ws
-└── qqbot 仓库工作副本
-    ├── astrbot/  # 官方源码 submodule，仅作参考
-    ├── plugins/
-    ├── config/astrbot/
-    └── tools/maintenance-scripts/
+qqbot superproject
+├── astrbot/          云栖 1443944862，WebUI 6185，OneBot 6200，artifact API 8080
+├── maibot-yelin/     夜凛 2629227874，WebUI 8003，连接 NapCat 6201
+└── napcat/           四账号 QQ/OneBot 接入；星遥和月澄当前没有 Bot Core
 ```
 
-官方 1Panel 安装后的容器数据目录应持久化。若使用官方 Docker 路径，重点是把 AstrBot 的 `/AstrBot/data` 挂载出来，后续插件、配置和运行态都落在这个持久化数据目录下。
+AstrBot 与 MaiBot 必须使用各自 fork 的 `deployment` 分支和该分支固定的稳定 Release。1Panel 或 Docker 只负责托管具体组件，不能替代 fork 中的本地插件、chat-only 策略或账号配置。
 
-## 必须迁移的仓库内容
+## 持久化边界
 
-- `plugins/astrbot_plugin_qqbot_features`
-- `plugins/astrbot_plugin_topic_concentration`
-- `plugins/astrbot_plugin_local_artifact_api`
-- `tools/runtime-scripts/astrbot-extra-requirements.txt` 中锁定的本地插件 Python 依赖；容器或 venv 必须安装同一版本
-- `config/astrbot/` 里的脱敏配置示例，用作服务器 WebUI / 数据库配置参考
-- 必要的运行态数据：表情包、游戏存档、RightCodes 积分、Lolicon 元数据和 artifact 发布状态
+云栖 AstrBot 需要持久化 `astrbot/data/`，其中包括实际 Core 配置、本地插件配置、数据库、插件数据和日志。插件源码由 AstrBot fork 自身的 `data/plugins/` 提供，不从 qqbot 根目录同步。
 
-不要迁移或提交：
+夜凛 MaiBot 需要持久化 `maibot-yelin/config/`、`data/`、`logs/` 和插件实际 `config.toml`。不得恢复已归档的云栖 MaiBot 数据；夜凛使用自己的全新记忆。启动 Core 前必须执行 `scripts/enforce_chat_only.py`，确保第三方插件只有 `napcat_adapter` 可启用。
 
-- LLM provider key、OneBot token、QQ 登录态、cookies、数据库密钥
-- 私聊记录、运行日志、临时缓存
-- 本机 Windows 启动脚本作为服务器运行入口
+NapCat 的程序包、QQ 登录态、实际 OneBot 配置和日志位于 `napcat/onekey/`、`napcat/data/`。这些内容不随 Git 分发，应通过受控备份恢复或在目标主机重新登录。部署平台必须确认所选 NapCat/QQ 运行方式受该系统支持；Windows 根 PowerShell 启动器不能直接作为 Linux service 入口。
 
 ## 部署步骤
 
-1. 在 1Panel 安装 AstrBot，确认 WebUI 端口 6185 可访问。
-2. 在 AstrBot 数据目录中放入本仓库三个本地插件，保持目录名不变；在 AstrBot 实际 Python 环境中安装 `tools/runtime-scripts/astrbot-extra-requirements.txt` 锁定的依赖。
-3. 在 AstrBot WebUI 中配置两个 aiocqhttp 平台：
-   - 云栖：`ws://127.0.0.1:6200/ws`
-   - 夜凛：`ws://127.0.0.1:6201/ws`
-4. 在服务器安装并启动两个 NapCat 实例，分别登录 `1443944862` 和 `2629227874`，反连对应端口。
-5. 在 AstrBot WebUI 中恢复两个人格和插件运行态配置；密钥只填服务器运行态，不写回仓库。
-6. 迁移必要的 `plugin_data` 运行态目录。Windows 路径要改成 Linux 路径，尤其是源码知识根、表情图片根和导出目录。
-7. 重启 AstrBot 和两个 NapCat，检查：
-   - WebUI 6185 ready
-   - OneBot 6200 / 6201 已建立反连
-   - 插件列表包含三个本地插件
-   - 两个 QQ 账号都能各自私聊触发普通 LLM
-   - 群聊固定命令只执行一次
+1. 使用 `git clone --recurse-submodules` 获取 qqbot，并确认两个 submodule 都位于采用版本。
+2. 分别为 AstrBot 和 MaiBot 恢复本机运行配置，只在运行环境填写 provider key、OneBot token 和其他密钥。
+3. 为云栖配置 NapCat reverse WebSocket client `ws://127.0.0.1:6200/ws`。
+4. 为夜凛配置 NapCat forward WebSocket server `127.0.0.1:6201`，MaiBot `napcat_adapter` 使用同一端口和 `connection_id=yelin`。
+5. 分别使用项目自己的依赖环境和启动入口建立服务；不要从 qqbot 根目录复制框架插件或配置。
+6. 将 AstrBot `6185/6200/8080`、MaiBot `8003` 和 NapCat `6201` 的监听/连接状态纳入平台健康检查。
 
-## 后续修改路线
+星遥 `3056830689:6202` 与月澄 `3109326090:6203` 当前只保留 NapCat 配置，不部署 AstrBot 或 MaiBot，也不加入默认服务启动组。
 
-推荐唯一主线：本机改动 -> 本机验证 -> Git 提交 -> 服务器 `git pull` -> 同步插件到 AstrBot 数据目录 -> 重启 AstrBot / NapCat。
+## 更新与发布
 
-原因：
+更新必须显式执行：先在对应 fork 的 `deployment` 分支合入官方最新稳定 Release，处理本地兼容并提交，再更新 qqbot 的 submodule 指针。启动服务时不得自动追踪 upstream 或自动升级。
 
-- 本机仓库已经有完整测试、启动脚本、历史 draft 和提交规则。
-- 服务器应保持运行态干净，减少临时调试文件、密钥和登录态被误提交的风险。
-- 所有改动先进入 Git，服务器只部署可追溯版本，回滚也更明确。
+三个仓库分别发布：
 
-服务器上直接用 Codex 改只作为紧急热修：修完必须把 diff 拉回本机，复核后提交，并让服务器回到 Git 跟踪版本。不要让服务器成为第二个长期开发源。
+1. `MengLeiFudge/AstrBot` 的 deployment 提交。
+2. `MengLeiFudge/MaiBot` 的 deployment 提交。
+3. `MengLeiFudge/qqbot` 的 NapCat/编排变更和两个新 gitlink。
 
-## 成本控制口径
-
-截图里的主要支出来自 `deepseek-v4-flash`，2026-07-03 单日约 151 次请求、9,130,552 tokens，平均每次请求约 60k tokens。降低请求次数只能解决一部分，更关键的是压缩每次 LLM 请求前注入的公开上下文、源码知识和主动接话批量窗口。
-
-当前低成本默认：
-
-- 公开群上下文：最多 8 条、1200 字。
-- 源码知识：最多 4 条、2600 字，单域 Python fallback 扫描 80 个文件，单文件 220000 字节。
-- 主动接话批量判定：窗口 480 秒、触发上限 50 条，送入模型的有效消息最多 40 条；主动历史注入最多 24 条、2400 字。
-
-复杂技术追查需要更完整证据时，再临时调高这些运行态配置；不要把大 prompt 档作为日常默认值。
+真实 token、QQ 登录态、cookies、数据库、日志、会话记录和运行配置不得进入 Git 或部署日志。服务器热修必须回流到对应 fork；不要让服务器副本形成新的源码事实源。

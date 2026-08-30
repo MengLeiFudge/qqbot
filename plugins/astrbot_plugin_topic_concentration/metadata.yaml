@@ -1,6 +1,0 @@
-name: astrbot_plugin_topic_concentration
-display_name: 棉花糖群聊激活调度
-desc: "控制棉花糖群聊激活、命名呼叫、双 bot worker 调度和按群权重选择。"
-version: v0.5.4
-author: MengLei
-repo: ""

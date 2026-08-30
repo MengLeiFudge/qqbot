@@ -1,2 +1,0 @@
-"""Arc/Arcaea feature."""
-

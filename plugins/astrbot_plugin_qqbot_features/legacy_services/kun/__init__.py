@@ -1,2 +1,0 @@
-"""Kun game feature."""
-

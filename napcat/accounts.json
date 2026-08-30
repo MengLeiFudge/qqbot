@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "accounts": [
+    {
+      "target": "yunqi",
+      "label": "Yunqi",
+      "qq": "1443944862",
+      "oneBotPort": 6200,
+      "autoStart": true,
+      "connectionMode": "reverse-client",
+      "connectionName": "yunqi-astrbot-reverse-ws",
+      "framework": {
+        "name": "astrbot",
+        "root": "astrbot",
+        "startScript": "astrbot/scripts/start.ps1"
+      }
+    },
+    {
+      "target": "yelin",
+      "label": "Yelin",
+      "qq": "2629227874",
+      "oneBotPort": 6201,
+      "autoStart": true,
+      "connectionMode": "forward-server",
+      "connectionName": "yelin-maibot-forward-ws",
+      "framework": {
+        "name": "maibot-yelin",
+        "root": "maibot-yelin",
+        "startScript": "maibot-yelin/scripts/start.ps1"
+      }
+    },
+    {
+      "target": "xingyao",
+      "label": "Xingyao",
+      "qq": "3056830689",
+      "oneBotPort": 6202,
+      "autoStart": false,
+      "connectionMode": "forward-server",
+      "connectionName": "xingyao-forward-ws",
+      "framework": null
+    },
+    {
+      "target": "yuecheng",
+      "label": "Yuecheng",
+      "qq": "3109326090",
+      "oneBotPort": 6203,
+      "autoStart": false,
+      "connectionMode": "forward-server",
+      "connectionName": "yuecheng-forward-ws",
+      "framework": null
+    }
+  ]
+}

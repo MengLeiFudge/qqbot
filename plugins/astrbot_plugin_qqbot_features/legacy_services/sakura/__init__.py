@@ -1,2 +1,0 @@
-"""Sakura game feature."""
-

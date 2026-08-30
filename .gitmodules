@@ -1,3 +1,8 @@
 [submodule "astrbot"]
 	path = astrbot
-	url = https://github.com/AstrBotDevs/AstrBot
+	url = https://github.com/MengLeiFudge/AstrBot.git
+	branch = deployment
+[submodule "maibot-yelin"]
+	path = maibot-yelin
+	url = https://github.com/MengLeiFudge/MaiBot.git
+	branch = deployment

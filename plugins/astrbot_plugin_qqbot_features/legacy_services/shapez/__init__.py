@@ -1,2 +1,0 @@
-"""Shapez render feature."""
-

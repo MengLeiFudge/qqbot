@@ -1,51 +1,60 @@
-# Local runtime data
-data/
+# Local agent and editor state
+/.codex/
+/.agents/
+/.idea/
+.vscode/
 
-# Local and generated files
-.env
-*.log
-*.pid
+# Python and tool caches
 __pycache__/
 *.py[cod]
-**/__pycache__/
-**/*.py[cod]
+*$py.class
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.pyright/
 .cache/
-.idea/
-.codex/
-.agents/
+
+# Local environments
 .venv/
 venv/
-venv-old/
-venv_old/
-.venv_old/
-source_.venv_old/
+env/
+ENV/
 
-# Python build output
-build/
-dist/
-htmlcov/
-*.egg-info/
+# Generic runtime output
+*.log
+*.pid
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
 
-# Node/frontend output
-node_modules/
-.npm/
-.pnpm-debug.log*
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-*.tsbuildinfo
+# Root-local runtime directories
+/data/
+/logs/
+/temp/
+/tmp/
 
-# NapCat local package and login/runtime data
-napcat/
+# NapCat is managed by qqbot, but its package, login state and logs stay local.
+/napcat/*
+!/napcat/accounts.json
+!/napcat/README.md
+!/napcat/scripts/
+!/napcat/scripts/**
+/napcat/data/
+/napcat/onekey/
 
-# Legacy app-local runtime paths after monorepo migration
-nonebot2/run/
-nonebot2/logs/
-nonebot2/.venv/
-
-# Generated artifacts
-ModZips/
-.DS_Store
+# Local dependency caches
+/node_modules/
+.pnpm-store/
