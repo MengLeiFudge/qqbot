@@ -59,6 +59,8 @@ function Invoke-PowerShellScript {
         -ArgumentList $invokeArguments `
         -NoNewWindow `
         -PassThru
+    # Windows PowerShell 5.1 loses ExitCode for fast children unless their handle is opened before exit.
+    [void]$process.Handle
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) {
         throw "$Label failed with exit code $($process.ExitCode)."
@@ -175,6 +177,8 @@ function Start-AccountWorker {
         -WorkingDirectory $WorkspaceRoot `
         -WindowStyle Normal `
         -PassThru
+    # Keep ExitCode available when an already-ready account worker closes immediately.
+    [void]$process.Handle
     Write-Host "[qqbot] Opened $($Account.label) startup window. PID: $($process.Id)."
     return [pscustomobject]@{
         Account = $Account
