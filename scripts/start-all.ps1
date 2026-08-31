@@ -49,10 +49,19 @@ function Invoke-PowerShellScript {
     if (-not (Test-Path $Path)) {
         throw "$Label script not found: $Path"
     }
-    $invokeArguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $Path) + $Arguments
-    & powershell.exe @invokeArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Label failed with exit code $LASTEXITCODE."
+    $invokeArguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", ('"{0}"' -f $Path)
+    ) + $Arguments
+    $process = Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList $invokeArguments `
+        -NoNewWindow `
+        -PassThru
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) {
+        throw "$Label failed with exit code $($process.ExitCode)."
     }
 }
 
@@ -144,7 +153,7 @@ function Start-AccountWorker {
     $arguments = @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
-        "-File", $PSCommandPath,
+        "-File", ('"{0}"' -f $PSCommandPath),
         "-Target", [string]$Account.target,
         "-TimeoutSeconds", [string]$TimeoutSeconds,
         "-AccountWorker",
