@@ -51,9 +51,9 @@ Set-Location D:\project\qqbot
 .\scripts\start-all.bat yelin
 ```
 
-`all` 只启动云栖和夜凛。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛先启动 NapCat `6201` 服务，再启动 MaiBot 并等待 adapter 建立连接。各子项目在成功路径输出自己管理的 PID 和日志位置，根入口最后按账号汇总 ready。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
+`all` 只启动云栖和夜凛。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛先启动 NapCat `6201` 服务，再启动 MaiBot 并等待 adapter 建立连接。根入口为每个账号打开独立启动窗口；首次登录需要扫码时，窗口会保留到登录和 OneBot 连接完成。成功后账号 owned 的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
 
-PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。根脚本只分发和汇总状态，不修改框架配置、不复制插件，也不替框架安装依赖。
+PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。根脚本只分发、等待账号连接并汇总状态，不修改框架配置、不复制插件，也不替框架安装依赖。
 
 ## Chat-only 边界
 

@@ -7,6 +7,7 @@
 - `accounts.json`：账号名称、QQ、固定 OneBot 端口、连接方向和当前框架归属。
 - `scripts/configure-account.ps1`：把账号清单落实到本机 OneBot 配置。
 - `scripts/ensure-account.ps1`：按账号确保配置、内置插件、进程和端口 ready。
+- `scripts/hide-account-windows.ps1`：连接完成后只隐藏精确账号进程树拥有的窗口。
 - `scripts/start-account.ps1`：兼容 NapCat OneKey 启动器的底层单账号入口。
 - `scripts/ensure-builtin-plugin.ps1`：校验或恢复官方内置插件。
 - `scripts/update.ps1`：显式更新 NapCat 最新稳定 Release，并迁移账号配置。
@@ -34,4 +35,4 @@
 .\scripts\ensure-account.ps1 -Target yuecheng
 ```
 
-首次登录可能需要二维码。快速登录成功标记位于 `data/quick-login/<QQ>.ready`；标记和实际登录态均只属于本机。
+首次登录可能需要二维码。根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口；脚本不会按窗口标题、进程名或 QQ 号扫描其他进程。失败或超时时不收窗。快速登录成功标记位于 `data/quick-login/<QQ>.ready`；标记和实际登录态均只属于本机。
