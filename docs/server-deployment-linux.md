@@ -6,18 +6,20 @@
 
 ```text
 qqbot superproject
-├── astrbot/          云栖 1443944862，WebUI 6185，OneBot 6200，artifact API 8080
+├── astrbot/          云栖 1443944862，WebUI 6185，OneBot 6200，artifact API 8080，DSP knowledge API 8081
 ├── maibot-yelin/     夜凛 2629227874，WebUI 8003，连接 NapCat 6201
 └── napcat/           四账号 QQ/OneBot 接入；星遥和月澄当前没有 Bot Core
 ```
 
-AstrBot 与 MaiBot 必须使用各自 fork 的 `deployment` 分支和该分支固定的稳定 Release。1Panel 或 Docker 只负责托管具体组件，不能替代 fork 中的本地插件、chat-only 策略或账号配置。
+AstrBot 与 MaiBot 必须使用各自 fork 的 `deployment` 分支和该分支固定的稳定 Release。1Panel 或 Docker 只负责托管具体组件，不能替代 fork 中的本地插件、夜凛插件允许策略或账号配置。
 
 ## 持久化边界
 
 云栖 AstrBot 需要持久化 `astrbot/data/`，其中包括实际 Core 配置、本地插件配置、数据库、插件数据和日志。插件源码由 AstrBot fork 自身的 `data/plugins/` 提供，不从 qqbot 根目录同步。
 
-夜凛 MaiBot 需要持久化 `maibot-yelin/config/`、`data/`、`logs/` 和插件实际 `config.toml`。不得恢复已归档的云栖 MaiBot 数据；夜凛使用自己的全新记忆。启动 Core 前必须执行 `scripts/enforce_chat_only.py`，确保第三方插件只有 `napcat_adapter` 可启用。
+夜凛 MaiBot 需要持久化 `maibot-yelin/config/`、`data/`、`logs/` 和插件实际 `config.toml`。不得恢复已归档的云栖 MaiBot 数据；夜凛使用自己的全新记忆。启动 Core 前必须执行 `scripts/enforce_chat_only.py`，确保只有 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 和 `qqbot_visual` 可启用。
+
+共享 DSP 向量库及同步清单随 AstrBot 数据持久化，六个只读模组源码根只挂载给 AstrBot。Linux 部署必须把 `astrbot_plugin_dsp_knowledge` 的 `source_root` 改为实际挂载路径；MaiBot 只访问同主机 `127.0.0.1:8081`，不挂载源码也不复制索引。
 
 NapCat 的程序包、QQ 登录态、实际 OneBot 配置和日志位于 `napcat/onekey/`、`napcat/data/`。这些内容不随 Git 分发，应通过受控备份恢复或在目标主机重新登录。部署平台必须确认所选 NapCat/QQ 运行方式受该系统支持；Windows 根 PowerShell 启动器不能直接作为 Linux service 入口。
 
@@ -28,7 +30,7 @@ NapCat 的程序包、QQ 登录态、实际 OneBot 配置和日志位于 `napcat
 3. 为云栖配置 NapCat reverse WebSocket client `ws://127.0.0.1:6200/ws`。
 4. 为夜凛配置 NapCat forward WebSocket server `127.0.0.1:6201`，MaiBot `napcat_adapter` 使用同一端口和 `connection_id=yelin`。
 5. 分别使用项目自己的依赖环境和启动入口建立服务；不要从 qqbot 根目录复制框架插件或配置。
-6. 将 AstrBot `6185/6200/8080`、MaiBot `8003` 和 NapCat `6201` 的监听/连接状态纳入平台健康检查。
+6. 将 AstrBot `6185/6200/8080/8081`、MaiBot `8003` 和 NapCat `6201` 的监听/连接状态纳入平台健康检查。
 
 星遥 `3056830689:6202` 与月澄 `3109326090:6203` 当前只保留 NapCat 配置，不部署 AstrBot 或 MaiBot，也不加入默认服务启动组。
 

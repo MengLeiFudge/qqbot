@@ -7,11 +7,11 @@
 | Target | 账号 | QQ | OneBot | 当前职责 |
 | --- | --- | --- | --- | --- |
 | `yunqi` | 云栖 | `1443944862` | `6200` reverse client | AstrBot，聊天和全部固定功能 |
-| `yelin` | 夜凛 | `2629227874` | `6201` forward server | MaiBot，只聊天 |
+| `yelin` | 夜凛 | `2629227874` | `6201` forward server | MaiBot，聊天、拍一拍和只读知识问答 |
 | 无根 Target | 星遥 | `3056830689` | `6202` forward server | 仅保留 NapCat |
 | 无根 Target | 月澄 | `3109326090` | `6203` forward server | 仅保留 NapCat |
 
-非敏感映射真源是 `napcat/accounts.json`。云栖 AstrBot 还使用 WebUI `6185` 和本地 artifact API `8080`；夜凛 MaiBot WebUI 固定为 `8003`。
+非敏感映射真源是 `napcat/accounts.json`。云栖 AstrBot 还使用 WebUI `6185`、本地 artifact API `8080` 和 DSP knowledge API `8081`；夜凛 MaiBot WebUI 固定为 `8003`。
 
 ## 目录边界
 
@@ -53,11 +53,23 @@ Set-Location D:\project\qqbot
 
 `all` 只启动云栖和夜凛。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛先启动 NapCat `6201` 服务，再启动 MaiBot 并等待 adapter 建立连接。根入口为每个账号打开独立启动窗口；首次登录需要扫码时，窗口会保留到登录和 OneBot 连接完成。成功后账号 owned 的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
 
-PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。根脚本只分发、等待账号连接并汇总状态，不修改框架配置、不复制插件，也不替框架安装依赖。
+PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。日常启动与重启复用两个项目已有的 `.venv`，不重复同步或安装依赖；环境缺失时才执行首次安装，`-SkipInstall` 则在环境缺失时直接失败。更新依赖使用对应项目的更新入口或显式 `uv` 安装命令。
 
-## Chat-only 边界
+重载两套框架插件时执行：
 
-夜凛保留 MaiBot 原生聊天、上下文、记忆、表情和图片理解。第三方插件白名单只有 `napcat_adapter`；18 个 `qqbot_*` 插件保留源码但实际配置必须为 `plugin.enabled=false`。`maibot-yelin/scripts/enforce_chat_only.py` 在 Core 启动前纠正并复核该策略，失败时阻止启动。
+```powershell
+.\scripts\start-all.bat all -ForceRestart
+```
+
+`-ForceRestart` 只重启 AstrBot 和 MaiBot，不重启 NapCat 或重新登录 QQ。已有快速登录标记时，两套框架并行启动；NapCat 临时断连只等待自动重连。已运行的 NapCat 会直接复用，不重复改写账号配置或检查内置插件；连接未恢复会报错并保留登录进程，不自动杀掉 QQ。只有确需维护协议端时，才单独执行 `napcat/scripts/ensure-account.ps1 -Target yunqi -ForceRestart`（夜凛使用 `yelin`）。首次扫码仍保留串行保护，避免两个账号覆盖共享二维码。
+
+各入口输出阶段耗时，就绪后立即返回，后台框架独立写入原日志。MaiBot 每次启动前仍执行夜凛插件允许策略，不能跳过。根脚本只分发、等待账号连接并汇总状态，不修改框架配置、不复制插件，也不替框架安装依赖。
+
+## 夜凛插件边界
+
+夜凛保留 MaiBot 原生聊天、上下文、记忆、表情和图片理解，并允许 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual` 五个插件启用；其余 `qqbot_*` 插件保留源码但实际配置必须为 `plugin.enabled=false`。`maibot-yelin/scripts/enforce_chat_only.py` 在 Core 启动前纠正并复核该策略，失败时阻止启动。
+
+DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持有和增量同步。夜凛 `qqbot_knowledge` 通过 `127.0.0.1:8081` 读取同一组召回、融合与 rerank 结果，再交给夜凛自己的聊天模型回答；不会建立第二份 DSP 库。共享服务不可用时，夜凛继续普通聊天但不注入 DSP 证据。
 
 云栖是固定功能的唯一运行 owner。AstrBot 仅保留云栖平台，不存在 `both`、`angel`、`demon` profile、双 worker、跨账号 command claim 或忙闲代班。
 
@@ -77,7 +89,7 @@ PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。根脚本只分发�
 ## Git 提交顺序
 
 1. 在 `astrbot/` 提交 AstrBot Core 适配、插件和项目脚本。
-2. 在 `maibot-yelin/` 提交 MaiBot chat-only 适配、插件和项目脚本。
+2. 在 `maibot-yelin/` 提交 MaiBot 夜凛适配、插件和项目脚本。
 3. 在根 `qqbot/` 提交 NapCat、账号编排、文档和两个 gitlink。
 
 三个仓库分别审查和提交。根仓不能提交 submodule 内普通文件，也不能用根 `.gitignore` 代替子项目的敏感数据规则。任何 push 都必须单独明确授权。架构取舍见 `docs/adr/0002-account-superproject.md`。
