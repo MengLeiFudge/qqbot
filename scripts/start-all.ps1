@@ -11,6 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$timer = [System.Diagnostics.Stopwatch]::StartNew()
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $WorkspaceRoot = Split-Path -Parent $ScriptRoot
 $AccountsPath = Join-Path $WorkspaceRoot "napcat\accounts.json"
@@ -43,7 +44,8 @@ function Invoke-PowerShellScript {
     param(
         [string]$Path,
         [string[]]$Arguments,
-        [string]$Label
+        [string]$Label,
+        [switch]$WaitForLogin
     )
 
     if (-not (Test-Path $Path)) {
@@ -61,9 +63,17 @@ function Invoke-PowerShellScript {
         -PassThru
     # Windows PowerShell 5.1 loses ExitCode for fast children unless their handle is opened before exit.
     [void]$process.Handle
-    $process.WaitForExit()
-    if ($process.ExitCode -ne 0) {
-        throw "$Label failed with exit code $($process.ExitCode)."
+    if ($WaitForLogin) {
+        # NapCat owns the startup timeout and suspends it while QQ requires a QR scan.
+        $process.WaitForExit()
+    }
+    elseif (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        throw "$Label startup command timed out after $TimeoutSeconds seconds; PID: $($process.Id). The runtime was not stopped."
+    }
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    if ($exitCode -ne 0) {
+        throw "$Label failed with exit code $exitCode."
     }
 }
 
@@ -91,10 +101,7 @@ function Invoke-NapCatStart {
         "-Target", [string]$Account.target,
         "-TimeoutSeconds", [string]$TimeoutSeconds
     )
-    if ($ForceRestart) {
-        $arguments += "-ForceRestart"
-    }
-    Invoke-PowerShellScript -Path $NapCatEnsureScript -Arguments $arguments -Label ("NapCat/{0}" -f $Account.target)
+    Invoke-PowerShellScript -Path $NapCatEnsureScript -Arguments $arguments -Label ("NapCat/{0}" -f $Account.target) -WaitForLogin
 }
 
 function Invoke-NapCatWindowHide {
@@ -113,16 +120,18 @@ function Wait-OneBotPeer {
     )
 
     $port = [int]$Account.oneBotPort
-    $deadline = (Get-Date).AddSeconds($Timeout)
-    while ((Get-Date) -lt $deadline) {
-        $connections = @(Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Where-Object {
-            $_.LocalPort -eq $port -or $_.RemotePort -eq $port
+    $deadline = [DateTime]::UtcNow.AddSeconds($Timeout)
+    $network = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties()
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $connections = @($network.GetActiveTcpConnections() | Where-Object {
+            $_.State -eq [System.Net.NetworkInformation.TcpState]::Established -and
+            ($_.LocalEndPoint.Port -eq $port -or $_.RemoteEndPoint.Port -eq $port)
         })
         if ($connections.Count -gt 0) {
             Write-Host "[qqbot] $($Account.label) OneBot peer is connected on port $port."
             return
         }
-        Start-Sleep -Seconds 1
+        Start-Sleep -Milliseconds 250
     }
     throw "$($Account.label) did not establish its OneBot connection on port $port within $Timeout seconds."
 }
@@ -190,11 +199,22 @@ function Wait-AccountWorkers {
     param([object[]]$Workers)
 
     $failures = [System.Collections.Generic.List[string]]::new()
-    foreach ($worker in $Workers) {
-        $worker.Process.WaitForExit()
-        if ($worker.Process.ExitCode -ne 0) {
-            [void]$failures.Add("$($worker.Account.label)=$($worker.Process.ExitCode)")
+    $pending = @($Workers)
+    # Stage owners enforce timeouts; an account can legitimately wait indefinitely for a QR scan.
+    while ($pending.Count -gt 0) {
+        foreach ($worker in $pending) {
+            if ($worker.Process.HasExited) {
+                if ($worker.Process.ExitCode -ne 0) {
+                    [void]$failures.Add("$($worker.Account.label)=$($worker.Process.ExitCode)")
+                }
+                $worker.Process.Dispose()
+                $pending = @($pending | Where-Object { $_ -ne $worker })
+            }
         }
+        if ($pending.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
     }
     if ($failures.Count -gt 0) {
         throw "Account startup worker failed: $($failures -join ', ')."
@@ -231,7 +251,7 @@ if ($AccountWorker) {
 
         $summary = Invoke-AccountStart -Account $accounts[0]
         Write-Host "[qqbot] READY $summary"
-        Write-Host "[qqbot] Startup is complete. Closing this window."
+        Write-Host ("[qqbot] $Target ready in {0:F2}s. Closing this window." -f $timer.Elapsed.TotalSeconds)
         exit 0
     }
     catch {
@@ -259,7 +279,7 @@ else {
     }
 }
 
-Write-Host "[qqbot] Target '$Target' is ready."
+Write-Host ("[qqbot] Target '$Target' is ready in {0:F2}s." -f $timer.Elapsed.TotalSeconds)
 foreach ($account in $accounts) {
     $summary = "{0}({1}) framework={2} onebot={3}" -f $account.label, $account.qq, $account.framework.name, $account.oneBotPort
     Write-Host "[qqbot] READY $summary"
