@@ -14,7 +14,7 @@
 - 根 `qqbot`：维护 `astrbot`、`maibot-yelin`、`maibot-lanling` 三个 gitlink，维护 `napcat/`、`napcat/accounts.json`、根 `scripts/` 和跨项目文档。
 - `astrbot/`：独立的 `MengLeiFudge/AstrBot` fork 工作树，维护云栖 Core、插件、配置示例、项目脚本和项目内运行态。
 - `maibot-yelin/`：独立的 `MengLeiFudge/MaiBot` fork 工作树，维护夜凛 Core、插件允许策略、配置示例、项目脚本和项目内运行态。
-- `maibot-lanling/`：独立的 `MengLeiFudge/MaiBot` fork 工作树，维护蓝铃部署，使用与夜凛一致的插件允许策略及独立运行态。
+- `maibot-lanling/`：独立的 `MengLeiFudge/MaiBot` fork 工作树，维护蓝铃独立部署、插件启用配置及运行态，不参与棉花糖家族插件同步。
 - `napcat/`：五个 QQ 账号共享的协议端项目；程序包和实际账号配置保留在本机，非敏感账号映射与维护脚本由根仓跟踪。
 
 根目录不得重新建立框架级 `config/`、`plugins/`、`data/`、虚拟环境或框架内部启动逻辑。根脚本只能读取账号清单、调用子项目入口和汇总 ready 状态。
@@ -32,7 +32,7 @@
 ## AstrBot 边界
 
 - AstrBot 只绑定云栖，不得恢复 `both/angel/demon` profile、夜凛平台、双 worker、跨账号 command claim、忙闲代班或可选择 command owner。
-- 云栖是所有现有固定命令、数据写入、群务和副作用功能的唯一运行 owner。
+- 在棉花糖家族内，云栖是所有现有固定命令、数据写入、群务和副作用功能的唯一运行 owner。
 - 本地插件源码放在 `astrbot/data/plugins/` 的原生位置；真实插件配置、数据库、日志、缓存和 `plugin_data` 不跟踪。
 - 行为调整必须遵守“框架核心边界”，通过现有配置和本地插件 API 实现，禁止直接修改 AstrBot Core。
 - AstrBot 自己的 `scripts/start.ps1` 和 `scripts/update.ps1` 必须可从项目目录独立使用，不依赖根文件。
@@ -40,16 +40,19 @@
 ## MaiBot 边界
 
 - MaiBot 分为夜凛与蓝铃两个独立工作目录，WebUI 分别为 `8003/8004`，消息服务分别为 `8020/8021`。两者配置、虚拟环境、`data/` 和记忆独立，不复制其他账号的运行数据。
-- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`；`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 与 `qqbot_visual` 是允许启用的聊天辅助插件。
+- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`。夜凛允许启用 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 与 `qqbot_visual` 四个聊天辅助插件。
 - `qqbot_knowledge` 只通过 `127.0.0.1:8081` 使用云栖持有的 DSP 向量检索结果，不在 MaiBot 侧建立额外 DSP 索引；云栖不可用时退回无 DSP 证据的普通聊天。
-- 除 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual` 外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
-- 每次启动 Core 前必须执行 `scripts/enforce_chat_only.py`。无法解析配置或无法确认禁用时必须失败关闭，不得绕过策略启动。
-- QQ 内插件管理入口保持禁用，不能通过聊天重新启用业务插件。
+- 夜凛除上述四个聊天辅助插件外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
+- 夜凛每次启动 Core 前必须执行 `scripts/enforce_chat_only.py`。无法解析配置或无法确认禁用时必须失败关闭，不得绕过策略启动。
+- 蓝铃作为独立 bot 维护插件源码与启用配置，不套用家族插件同步或夜凛允许列表。启动前执行本项目 `scripts/validate_plugin_config.py`，配置无效时停止；不得自动改写插件启用选择。
+- 夜凛的 QQ 内插件管理入口保持禁用，不能通过聊天重新启用家族业务插件。
 - MaiBot 自己的 `scripts/start.ps1` 和 `scripts/update.ps1` 必须可从项目目录独立使用，不依赖根文件。
 
 ## 跨框架功能维护
 
-同一有副作用的固定功能后续需要同时维护 AstrBot 与 MaiBot 两套插件源码：AstrBot 侧运行启用，MaiBot 侧运行禁用。只读辅助能力可以按明确合同例外：拍一拍由两框架各自插件处理；DSP 知识由 AstrBot 维护唯一物理向量库，MaiBot 只调用 localhost 检索接口。本轮迁移不以此规则补齐其他历史功能差异。修改时分别进入对应框架 submodule，在各自项目风格和 API 内完成，不在根目录建立共享源码副本或同步脚本。
+本节的插件同步及统一启用合同仅适用于棉花糖家族，目前只在云栖（AstrBot）与夜凛（MaiBot）之间同步。蓝铃是独立 bot，不参与这套同步与启用合同。
+
+家族内同一有副作用的固定功能后续需要同时维护云栖与夜凛两套插件源码：云栖侧运行启用，夜凛侧运行禁用。只读辅助能力可以按明确合同例外：拍一拍由两框架各自插件处理；DSP 知识由 AstrBot 维护唯一物理向量库，MaiBot 只调用 localhost 检索接口。本轮迁移不以此规则补齐其他历史功能差异。修改时分别进入对应框架 submodule，在各自项目风格和 API 内完成，不在根目录建立共享源码副本或同步脚本。
 
 ## NapCat 边界
 
