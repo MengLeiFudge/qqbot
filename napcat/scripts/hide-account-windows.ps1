@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("yunqi", "yelin", "xingyao", "yuecheng")]
+    [ValidateSet("yunqi", "yelin", "xingyao", "yuecheng", "lanling")]
     [string]$Target
 )
 

@@ -48,6 +48,20 @@
       "connectionMode": "forward-server",
       "connectionName": "yuecheng-forward-ws",
       "framework": null
+    },
+    {
+      "target": "lanling",
+      "label": "Lanling",
+      "qq": "3600812036",
+      "oneBotPort": 6204,
+      "autoStart": true,
+      "connectionMode": "forward-server",
+      "connectionName": "lanling-maibot-forward-ws",
+      "framework": {
+        "name": "maibot-lanling",
+        "root": "maibot-lanling",
+        "startScript": "maibot-lanling/scripts/start.ps1"
+      }
     }
   ]
 }

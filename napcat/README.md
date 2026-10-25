@@ -1,6 +1,6 @@
 # NapCat 账号项目
 
-本目录由 qqbot 根仓库管理，负责四个 QQ 账号的 NapCat/OneBot 接入，不属于 AstrBot 或 MaiBot。
+本目录由 qqbot 根仓库管理，负责账号清单中各 QQ 账号的 NapCat/OneBot 接入，不属于 AstrBot 或 MaiBot。
 
 ## 可提交内容
 
@@ -27,8 +27,9 @@
 - 夜凛 `2629227874`：forward server `127.0.0.1:6201`
 - 星遥 `3056830689`：forward server `127.0.0.1:6202`
 - 月澄 `3109326090`：forward server `127.0.0.1:6203`
+- 蓝铃 `3600812036`：forward server `127.0.0.1:6204`
 
-根 `all/yunqi/yelin` 入口只自动管理云栖和夜凛。单独维护星遥或月澄时可在 Windows PowerShell 中运行：
+根 `all/yunqi/yelin/lanling` 入口自动管理云栖、夜凛和蓝铃。单独维护星遥或月澄时可在 Windows PowerShell 中运行：
 
 ```powershell
 .\scripts\ensure-account.ps1 -Target xingyao
