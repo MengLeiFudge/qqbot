@@ -36,4 +36,12 @@
 .\scripts\ensure-account.ps1 -Target yuecheng
 ```
 
-首次登录可能需要二维码。根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口；脚本不会按窗口标题、进程名或 QQ 号扫描其他进程。失败或超时时不收窗。快速登录成功标记位于 `data/quick-login/<QQ>.ready`；标记和实际登录态均只属于本机。
+首次登录可能需要二维码。再次启动时，`ensure-account.ps1` 先读取当前账号运行日志；检测到 QQ 离线会只重启该账号一次，重新进入登录流程，健康账号继续复用。多个账号需要新启动时，共用登录锁逐个等待登录完成，避免覆盖同一个二维码图片；已在线账号的复用仍可并行。OneBot 端口存在不能覆盖日志中明确的离线或待扫码状态。根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口；脚本不会按窗口标题、进程名或 QQ 号扫描其他进程。失败或超时时不收窗。快速登录成功标记位于 `data/quick-login/<QQ>.ready`；标记和实际登录态均只属于本机。
+
+需要手动重新打开蓝铃登录窗口时，在 `D:\project\qqbot` 的 PowerShell 中运行：
+
+```powershell
+.\napcat\scripts\ensure-account.ps1 -Target lanling -ForceRestart -UseChildWindow
+```
+
+使用蓝铃账号的手机 QQ 扫描窗口里的二维码并确认登录。窗口也会打印当前二维码图片路径，二维码刷新后需重新打开图片。这个命令只重启蓝铃的 NapCat，不清除登录数据。正常使用仍运行根 `scripts\start-all.bat`，等待扫码期间不要重复启动。

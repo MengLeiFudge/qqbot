@@ -166,7 +166,15 @@ function Get-NapCatLoginStatus {
     $qrLines = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $lines) {
         $line = $line -replace '\x1b\[[0-?]*[ -/]*[@-~]', ''
-        if (
+        if ($line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[info\].*\u8d26\u53f7\u72b6\u6001\u53d8\u66f4\u4e3a\u79bb\u7ebf\s*$') {
+            $login.State = "Offline"
+            $qrLines.Clear()
+        }
+        elseif ($line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[info\].*\u8d26\u53f7\u72b6\u6001\u53d8\u66f4\u4e3a\u5728\u7ebf\s*$') {
+            $login.State = "LoggedIn"
+            $qrLines.Clear()
+        }
+        elseif (
             $line -match '^\[NapCat\] \[WebUi\] \u81ea\u52a8.*\u767b\u5f55\u6210\u529f:' -or
             $line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[(debug|info)\] (\u672c\u8d26\u53f7\u6570\u636e/\u7f13\u5b58\u76ee\u5f55|\[Core\] \[Config\]|\[AdapterManager\])'
         ) {
@@ -203,6 +211,8 @@ function Wait-AccountReady {
     Account launcher processes whose lifetime bounds the login wait.
     .PARAMETER LogPath
     Current stdout path; when omitted, resolves a log created for the reused launcher.
+    .OUTPUTS
+    True when ready; false when QQ reports offline so the caller can replace a stale runtime once.
     #>
     param(
         [System.Diagnostics.Process[]]$Processes,
@@ -231,13 +241,18 @@ function Wait-AccountReady {
     $qrStamp = ""
     $lastState = "Unknown"
     while ($true) {
-        if (Test-AccountConnectionReady) {
-            return
-        }
         if (@($Processes | Where-Object { -not $_.HasExited }).Count -eq 0) {
             throw "NapCat account $account exited before OneBot port $port became ready. Logs: $LogRoot"
         }
         $login = Get-NapCatLoginStatus -LogPath $LogPath
+        # A live OneBot socket survives QQ logout; inspect account state before accepting the port.
+        if ($login.State -eq "Offline") {
+            Write-Host "[NapCat] $($item.label) ($account) is logged out; its OneBot port does not indicate a valid QQ login."
+            return $false
+        }
+        if ($login.State -notin @("WaitingForQr", "QuickLoginFailed") -and (Test-AccountConnectionReady)) {
+            return $true
+        }
         if ($login.State -eq "WaitingForQr") {
             if (-not $waitingForQr) {
                 $waitingForQr = $true
@@ -277,63 +292,101 @@ if (-not $ForceRestart) {
     if ($readyProcessIds.Count -gt 0) {
         Write-Host "[NapCat] Reusing $($item.label) login; waiting for OneBot port $port."
         $runs = @(Get-Process -Id $readyProcessIds -ErrorAction SilentlyContinue)
-        Wait-AccountReady -Processes $runs
-        Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
-        Write-Host ("[NapCat] {0} ready in {1:F2}s; existing PIDs: {2}. Logs: {3}" -f `
-            $item.label, $timer.Elapsed.TotalSeconds, ($readyProcessIds -join ','), $LogRoot)
-        exit 0
+        if (Wait-AccountReady -Processes $runs) {
+            Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
+            Write-Host ("[NapCat] {0} ready in {1:F2}s; existing PIDs: {2}. Logs: {3}" -f `
+                $item.label, $timer.Elapsed.TotalSeconds, ($readyProcessIds -join ','), $LogRoot)
+            exit 0
+        }
+        Write-Host "[NapCat] Restarting only $($item.label)'s offline runtime once to restore the QQ login prompt."
     }
 }
 
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ConfigureScript -Target $Target
-if ($LASTEXITCODE -ne 0) {
-    throw "NapCat config policy failed for target '$Target'."
-}
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $BuiltinScript
-if ($LASTEXITCODE -ne 0) {
-    throw "NapCat builtin plugin check failed."
-}
-
-if ($item.connectionMode -eq "forward-server" -and (Test-TcpPort -Port $port)) {
-    $knownIds = @(Get-AccountProcessIds)
-    if ($knownIds.Count -eq 0) {
-        throw "OneBot port $port is already owned by an unrelated process. Use a deliberate process cleanup before retrying."
+# Accounts share one QR image. Serialize new logins even when stale ready markers
+# made the root launcher start account workers in parallel; healthy reuse stays parallel.
+$loginMutex = [System.Threading.Mutex]::new($false, "Local\QQBot-NapCat-Login")
+$ownsLoginMutex = $false
+try {
+    Write-Host "[NapCat] $($item.label) is waiting for the shared login slot. Finish any other account's QR login first."
+    while (-not $ownsLoginMutex) {
+        try {
+            $ownsLoginMutex = $loginMutex.WaitOne(1000)
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            $ownsLoginMutex = $true
+        }
     }
-}
+    # Another startup request may have restored this account while this request waited.
+    if (-not $ForceRestart) {
+        $readyProcessIds = @(Get-AccountProcessIds -RootsOnly | Sort-Object -Unique)
+        if ($readyProcessIds.Count -gt 0) {
+            $runs = @(Get-Process -Id $readyProcessIds -ErrorAction SilentlyContinue)
+            if (Wait-AccountReady -Processes $runs) {
+                Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
+                Write-Host "[NapCat] $($item.label) is ready; reused the login completed by another startup request."
+                exit 0
+            }
+        }
+    }
 
-Stop-AccountProcesses
-if (Test-Path $markerPath) {
-    Remove-Item -Path $markerPath -Force
-}
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ConfigureScript -Target $Target
+    if ($LASTEXITCODE -ne 0) {
+        throw "NapCat config policy failed for target '$Target'."
+    }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $BuiltinScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "NapCat builtin plugin check failed."
+    }
 
-$arguments = @(
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-File", $StartScript,
-    "-Account", $account
-)
-$start = @{
-    FilePath = "powershell.exe"
-    ArgumentList = $arguments
-    PassThru = $true
-}
-if ($UseChildWindow) {
-    $start.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
-    # Tee preserves the interactive console and supplies account-owned login diagnostics to the parent.
-    $command = '"& ''{0}'' -Account ''{1}'' | Tee-Object -FilePath ''{2}''; exit $LASTEXITCODE"' -f `
-        $StartScript.Replace("'", "''"), $account, $stdoutLog.Replace("'", "''")
-    $start.ArgumentList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command)
-}
-else {
-    $start.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $start.RedirectStandardOutput = $stdoutLog
-    $start.RedirectStandardError = $stderrLog
-}
-$process = Start-Process @start
-Write-Host "[NapCat] Starting $($item.label) account $account. pid=$($process.Id)"
+    if ($item.connectionMode -eq "forward-server" -and (Test-TcpPort -Port $port)) {
+        $knownIds = @(Get-AccountProcessIds)
+        if ($knownIds.Count -eq 0) {
+            throw "OneBot port $port is already owned by an unrelated process. Use a deliberate process cleanup before retrying."
+        }
+    }
 
-Wait-AccountReady -Processes @($process) -LogPath $stdoutLog
-Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
-$logSummary = if ($UseChildWindow) { "child window ; $stdoutLog" } else { "$stdoutLog ; $stderrLog" }
-Write-Host "[NapCat] $($item.label) is ready on OneBot port $port. PID: $($process.Id). Logs: $logSummary"
-exit 0
+    Stop-AccountProcesses
+    if (Test-Path $markerPath) {
+        Remove-Item -Path $markerPath -Force
+    }
+
+    $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $StartScript,
+        "-Account", $account
+    )
+    $start = @{
+        FilePath = "powershell.exe"
+        ArgumentList = $arguments
+        PassThru = $true
+    }
+    if ($UseChildWindow) {
+        $start.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
+        # Tee preserves the interactive console and supplies account-owned login diagnostics to the parent.
+        $command = '"& ''{0}'' -Account ''{1}'' | Tee-Object -FilePath ''{2}''; exit $LASTEXITCODE"' -f `
+            $StartScript.Replace("'", "''"), $account, $stdoutLog.Replace("'", "''")
+        $start.ArgumentList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command)
+    }
+    else {
+        $start.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        $start.RedirectStandardOutput = $stdoutLog
+        $start.RedirectStandardError = $stderrLog
+    }
+    $process = Start-Process @start
+    Write-Host "[NapCat] Starting $($item.label) account $account. pid=$($process.Id)"
+
+    if (-not (Wait-AccountReady -Processes @($process) -LogPath $stdoutLog)) {
+        throw "NapCat account $account logged out during startup. The runtime was not restarted again. Check its login window and logs: $LogRoot"
+    }
+    Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
+    $logSummary = if ($UseChildWindow) { "child window ; $stdoutLog" } else { "$stdoutLog ; $stderrLog" }
+    Write-Host "[NapCat] $($item.label) is ready on OneBot port $port. PID: $($process.Id). Logs: $logSummary"
+    exit 0
+}
+finally {
+    if ($ownsLoginMutex) {
+        $loginMutex.ReleaseMutex()
+    }
+    $loginMutex.Dispose()
+}
