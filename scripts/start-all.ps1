@@ -17,7 +17,6 @@ $WorkspaceRoot = Split-Path -Parent $ScriptRoot
 $AccountsPath = Join-Path $WorkspaceRoot "napcat\accounts.json"
 $NapCatEnsureScript = Join-Path $WorkspaceRoot "napcat\scripts\ensure-account.ps1"
 $NapCatHideScript = Join-Path $WorkspaceRoot "napcat\scripts\hide-account-windows.ps1"
-$QuickLoginRoot = Join-Path $WorkspaceRoot "napcat\data\quick-login"
 
 if (-not (Test-Path $AccountsPath)) {
     throw "Account manifest not found: $AccountsPath"
@@ -221,21 +220,6 @@ function Wait-AccountWorkers {
     }
 }
 
-function Test-ParallelAccountStart {
-    param([object[]]$SelectedAccounts)
-
-    if ($SelectedAccounts.Count -lt 2) {
-        return $false
-    }
-    foreach ($account in $SelectedAccounts) {
-        $markerPath = Join-Path $QuickLoginRoot ("{0}.ready" -f $account.qq)
-        if (-not (Test-Path $markerPath -PathType Leaf)) {
-            return $false
-        }
-    }
-    return $true
-}
-
 if ($AccountWorker) {
     try {
         if ($Target -eq "all" -or $accounts.Count -ne 1) {
@@ -264,20 +248,9 @@ if ($AccountWorker) {
 }
 
 Write-Host "[qqbot] Starting target '$Target'."
-if (Test-ParallelAccountStart -SelectedAccounts $accounts) {
-    Write-Host "[qqbot] Quick-login markers are present; opening account windows in parallel."
-    $workers = @($accounts | ForEach-Object { Start-AccountWorker -Account $_ })
-    Wait-AccountWorkers -Workers $workers
-}
-else {
-    if ($accounts.Count -gt 1) {
-        Write-Host "[qqbot] A quick-login marker is missing; opening account windows serially to protect the shared QR image."
-    }
-    foreach ($account in $accounts) {
-        $worker = Start-AccountWorker -Account $account
-        Wait-AccountWorkers -Workers @($worker)
-    }
-}
+Write-Host "[qqbot] Opening all account windows. NapCat queues new logins to protect the shared QR image."
+$workers = @($accounts | ForEach-Object { Start-AccountWorker -Account $_ })
+Wait-AccountWorkers -Workers $workers
 
 Write-Host ("[qqbot] Target '$Target' is ready in {0:F2}s." -f $timer.Elapsed.TotalSeconds)
 foreach ($account in $accounts) {

@@ -54,7 +54,7 @@ Set-Location D:\project\qqbot
 .\scripts\start-all.bat lanling
 ```
 
-`all` 启动云栖、夜凛和蓝铃。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛和蓝铃先启动各自 NapCat `6201/6204` 服务，再启动对应 MaiBot 并等待 adapter 建立连接。根入口为每个账号打开独立启动窗口；首次登录需要扫码时，窗口会保留到登录和 OneBot 连接完成。成功后账号 owned 的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
+`all` 启动云栖、夜凛和蓝铃。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛和蓝铃先启动各自 NapCat `6201/6204` 服务，再启动对应 MaiBot 并等待 adapter 建立连接。根入口保留主控窗口，并同时为每个账号打开独立启动窗口（`all` 共四个窗口）；首次登录需要扫码时，各账号窗口会保留到自身登录和 OneBot 连接完成，主控窗口等待所有账号完成后关闭。需要新登录的账号由 NapCat 登录锁依次放行，其余账号窗口显示等待提示。成功后账号 owned 的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
 
 PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。日常启动与重启复用各项目已有的 `.venv`，不重复同步或安装依赖；环境缺失时才执行首次安装，`-SkipInstall` 则在环境缺失时直接失败。更新依赖使用对应项目的更新入口或显式 `uv` 安装命令。
 
@@ -64,7 +64,7 @@ PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。日常启动与重�
 .\scripts\start-all.bat all -ForceRestart
 ```
 
-`-ForceRestart` 只重启 AstrBot 和 MaiBot，不重启 NapCat 或重新登录 QQ。已有快速登录标记时，各框架实例并行启动；NapCat 临时断连只等待自动重连。已运行的 NapCat 会直接复用，不重复改写账号配置或检查内置插件；连接未恢复会报错并保留登录进程，不自动杀掉 QQ。只有确需维护协议端时，才单独执行 `napcat/scripts/ensure-account.ps1 -Target yunqi -ForceRestart`（夜凛使用 `yelin`，蓝铃使用 `lanling`）。首次扫码仍保留串行保护，避免多个账号覆盖共享二维码。
+`-ForceRestart` 只强制重启 AstrBot 和 MaiBot，健康 NapCat 登录继续复用。各账号窗口并行启动，不依赖快速登录标记；NapCat 明确记录 QQ 离线时，只重启该账号一次并重新进入登录流程。仅连接暂未建立时仍等待连接，不循环重启。需要手动重启协议端时，执行 `napcat/scripts/ensure-account.ps1 -Target yunqi -ForceRestart`（夜凛使用 `yelin`，蓝铃使用 `lanling`）。新登录的扫码等待由 NapCat 登录锁串行保护，避免多个账号覆盖共享二维码。
 
 各入口输出阶段耗时，就绪后立即返回，后台框架独立写入原日志。MaiBot 每次启动前仍执行聊天实例插件允许策略，不能跳过。根脚本只分发、等待账号连接并汇总状态，不修改框架配置、不复制插件，也不替框架安装依赖。
 
