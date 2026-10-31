@@ -50,6 +50,8 @@ ENV/
 /napcat/*
 !/napcat/accounts.json
 !/napcat/README.md
+!/napcat/plugins/
+!/napcat/plugins/**
 !/napcat/scripts/
 !/napcat/scripts/**
 /napcat/data/

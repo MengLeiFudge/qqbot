@@ -1,0 +1,9 @@
+{
+  "name": "napcat-plugin-qqbot-social",
+  "plugin": "QQBot 好友与群请求",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.mjs",
+  "description": "为仅使用 NapCat 的账号自动同意好友申请、群邀请和成员加群申请",
+  "author": "MengLeiFudge"
+}

@@ -5,11 +5,12 @@
 ## 可提交内容
 
 - `accounts.json`：账号名称、QQ、固定 OneBot 端口、连接方向和当前框架归属。
-- `scripts/configure-account.ps1`：把账号清单落实到本机 OneBot 配置。
+- `scripts/configure-account.ps1`：把账号清单落实到本机 OneBot 配置，并部署本地社交请求插件。
 - `scripts/ensure-account.ps1`：按账号确保配置、内置插件、进程和端口 ready。
 - `scripts/hide-account-windows.ps1`：连接完成后只隐藏精确账号进程树拥有的窗口。
 - `scripts/start-account.ps1`：兼容 NapCat OneKey 启动器的底层单账号入口。
 - `scripts/ensure-builtin-plugin.ps1`：校验或恢复官方内置插件。
+- `scripts/ensure-social-plugin.ps1`：部署并启用 `plugins/napcat-plugin-qqbot-social/`，从账号清单生成仅使用 NapCat 的账号集合。
 - `scripts/update.ps1`：显式更新 NapCat 最新稳定 Release，并迁移账号配置。
 
 ## 本机运行态
@@ -20,6 +21,12 @@
 - `data/` 保存账号日志、快速登录标记、下载、归档和更新状态。
 
 这些目录可能包含 token、登录态和日志，不得强制加入 Git。更新器替换 OneKey 包后会迁移已有账号配置，并重新按 `accounts.json` 校正连接方向和端口。
+
+## 自动同意请求
+
+所有账号自动同意好友申请、邀请机器人入群和成员加群申请。云栖由 AstrBot 的 `astrbot_plugin_qqbot_features` 处理；夜凛、蓝铃由各自 MaiBot 的 `napcat_adapter` 接入层处理；账号清单中未绑定框架的账号由 `napcat-plugin-qqbot-social` 处理，避免重复执行。
+
+`configure-account.ps1` 会把本地插件复制到实际 NapCat 插件目录并启用；账号启动和更新入口均调用该配置步骤。仅使用 NapCat 的账号在下一次启动时加载该插件；现有进程需要重新加载插件或重启对应 NapCat。申请处理不发送聊天消息，失败写入各自运行日志。
 
 ## 固定端口
 

@@ -77,4 +77,8 @@ else {
 }
 
 $config | ConvertTo-Json -Depth 100 | Set-Content -Path $configPath -Encoding UTF8
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptRoot "ensure-social-plugin.ps1")
+if ($LASTEXITCODE -ne 0) {
+    throw "NapCat social plugin deployment failed for target '$($item.target)'."
+}
 Write-Host ("[NapCat] Configured {0} ({1}) on OneBot port {2} as {3}." -f $item.label, $item.qq, $item.oneBotPort, $item.connectionMode)
