@@ -89,6 +89,26 @@ DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持�
 
 框架更新器只在干净的 `deployment` 分支上获取各自官方 upstream 的最新稳定 Release，合入本地部署分支并同步项目依赖；NapCat 更新器只维护 NapCat。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛与蓝铃。完成兼容处理并分别提交各框架工作树后，再在 qqbot 中提交新的 submodule 指针。
 
+NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命令启用，并立即开始首次检查：
+
+```powershell
+.\napcat\scripts\register-auto-update.ps1
+```
+
+任务 `QQBot-NapCat-AutoUpdate` 在用户登录期间每小时检查官方最新稳定 Release，并在登录两分钟后检查。可用 `-IntervalMinutes` 调整间隔。没有新版时保持运行；发现新版后先核对系统 QQ 实际选择的构建与架构，再验证完整 Shell 包的大小、SHA-256 和包内版本。只有这些步骤成功才切换运行包，并保留配置、插件和运行数据。QQ 程序由系统安装管理，更新器只校验兼容性。
+
+自动更新需要重载正在运行的协议端时，通过根 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 恢复云栖、夜凛与蓝铃。更新前没有机器人运行时保持停用。星遥或月澄正在运行时，自动更新会暂缓切换共享包。旧运行包保存在 `napcat/data/archives/`；临时事务文件移入根 `.codex/trash/`。激活或重启失败会暂停该版本的自动重试，等待人工查看状态和日志。
+
+查看计划任务、最近结果或移除自动更新：
+
+```powershell
+Get-ScheduledTaskInfo -TaskName QQBot-NapCat-AutoUpdate
+Get-Content .\napcat\data\updates\napcat.json -Encoding UTF8
+.\napcat\scripts\register-auto-update.ps1 -Remove
+```
+
+更新日志位于 `napcat/data/logs/updates/`，其中记录重启 PID、截止时间和独立的启动日志。人工运行 `napcat/scripts/update.ps1 -AssumeYes` 可以重试失败版本，完成后使用根启动入口恢复连接。
+
 ## Git 提交顺序
 
 1. 在 `astrbot/` 提交 AstrBot Core 适配、插件和项目脚本。

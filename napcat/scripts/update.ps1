@@ -1,7 +1,8 @@
 param(
     [switch]$DryRun,
     [switch]$NoStopProcesses,
-    [switch]$AssumeYes
+    [switch]$AssumeYes,
+    [switch]$Automatic
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,10 @@ $ArchiveRoot = Join-Path $DataRoot "archives"
 $LogRoot = Join-Path $DataRoot "logs\updates"
 $NapCatReleaseMarker = Join-Path $OneKeyRoot ".qqbot-napcat-release.json"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$WorkspaceRoot = Split-Path -Parent $ProjectRoot
+$RuntimeRoot = Join-Path $OneKeyRoot "napcat"
+$StatePath = Join-Path $DataRoot "updates\napcat.json"
+$TrashRoot = Join-Path $WorkspaceRoot ".codex\trash\$timestamp\napcat-update"
 $logFile = Join-Path $LogRoot "update-napcat-$timestamp.log"
 
 New-Item -ItemType Directory -Path $NapCatRoot -Force | Out-Null
@@ -35,6 +40,8 @@ function Write-Step {
     Add-Content -Path $logFile -Value $line -Encoding UTF8
 }
 
+. (Join-Path $ScriptRoot "update-runtime.ps1")
+
 function Get-NormalizedReleaseTag {
     param([string]$Tag)
 
@@ -45,43 +52,10 @@ function Get-NormalizedReleaseTag {
 }
 
 function Get-InstalledNapCatRelease {
-    if (-not (Test-Path $NapCatReleaseMarker)) {
-        $updateLogs = @(Get-ChildItem -Path $LogRoot -File -Filter "update-napcat-*.log" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending)
-        foreach ($updateLog in $updateLogs) {
-            try {
-                $content = Get-Content -Path $updateLog.FullName -Raw -Encoding UTF8
-                $tagMatch = [regex]::Match($content, '(?m)Latest release:\s*(\S+)')
-                if ($tagMatch.Success -and $content -match 'NapCat update finished') {
-                    return [pscustomobject]@{
-                        Tag = [string]$tagMatch.Groups[1].Value
-                        Source = $updateLog.FullName
-                    }
-                }
-            }
-            catch {
-            }
-        }
-
-        return [pscustomobject]@{
-            Tag = ""
-            Source = "missing-marker"
-        }
-    }
-
-    try {
-        $marker = Get-Content -Path $NapCatReleaseMarker -Raw -Encoding UTF8 | ConvertFrom-Json
-        return [pscustomobject]@{
-            Tag = [string]$marker.tag_name
-            Source = $NapCatReleaseMarker
-        }
-    }
-    catch {
-        Write-Step "Failed to read NapCat release marker: $($_.Exception.Message)"
-        return [pscustomobject]@{
-            Tag = ""
-            Source = "invalid-marker"
-        }
+    $version = Get-NapCatBundleVersion -Root $RuntimeRoot
+    return [pscustomobject]@{
+        Tag = $version
+        Source = Join-Path $RuntimeRoot "napcat.mjs"
     }
 }
 
@@ -95,95 +69,12 @@ function Write-NapCatReleaseMarker {
         tag_name = $Tag
         asset_name = [string]$Asset.name
         asset_url = [string]$Asset.browser_download_url
+        bundle_sha256 = (Get-FileHash -LiteralPath (Join-Path $RuntimeRoot "napcat.mjs") -Algorithm SHA256).Hash.ToLowerInvariant()
+        qq_version = $qqRuntime.Key
         updated_at = (Get-Date).ToString("o")
     }
     $marker | ConvertTo-Json -Depth 4 | Set-Content -Path $NapCatReleaseMarker -Encoding UTF8
     Write-Step "Wrote NapCat release marker: $NapCatReleaseMarker"
-}
-
-function Remove-PathIfExists {
-    param(
-        [string]$Path,
-        [string]$Description
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    Write-Step "Cleaning $Description`: $Path"
-    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-}
-
-function Remove-EmptyDirectoryIfExists {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $children = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)
-    if ($children.Count -eq 0) {
-        Write-Step "Removing empty cache directory: $Path"
-        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Clear-NapCatUpdateCaches {
-    param(
-        [string]$Reason,
-        [string[]]$SpecificPaths = @(),
-        [switch]$All
-    )
-
-    if ($DryRun) {
-        Write-Step "DryRun enabled; would clean NapCat update caches. reason=$Reason"
-        return
-    }
-
-    $targets = [System.Collections.Generic.List[string]]::new()
-    foreach ($path in @($SpecificPaths)) {
-        if (-not [string]::IsNullOrWhiteSpace($path)) {
-            [void]$targets.Add($path)
-        }
-    }
-
-    if ($All) {
-        foreach ($root in @($DownloadRoot)) {
-            if (Test-Path -LiteralPath $root) {
-                foreach ($child in @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue)) {
-                    [void]$targets.Add($child.FullName)
-                }
-            }
-        }
-        if (Test-Path -LiteralPath $OneKeyRoot) {
-            if (Test-Path -LiteralPath $ArchiveRoot) {
-                foreach ($child in @(Get-ChildItem -LiteralPath $ArchiveRoot -Force -ErrorAction SilentlyContinue)) {
-                    [void]$targets.Add($child.FullName)
-                }
-            }
-        }
-        else {
-            Write-Step "Keeping NapCat archives because current onekey is missing; archives may be needed for manual recovery."
-        }
-    }
-
-    if ($targets.Count -eq 0) {
-        Remove-EmptyDirectoryIfExists -Path $DownloadRoot
-        Remove-EmptyDirectoryIfExists -Path $ArchiveRoot
-        return
-    }
-
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($target in @($targets)) {
-        if (-not $seen.Add([System.IO.Path]::GetFullPath($target))) {
-            continue
-        }
-        Remove-PathIfExists -Path $target -Description "NapCat update cache ($Reason)"
-    }
-
-    Remove-EmptyDirectoryIfExists -Path $DownloadRoot
-    Remove-EmptyDirectoryIfExists -Path $ArchiveRoot
 }
 
 function Confirm-NapCatUpdate {
@@ -214,8 +105,8 @@ function Confirm-NapCatUpdate {
     }
     Write-Step "  Account OneBot configs will be migrated after activation."
 
-    if ($AssumeYes) {
-        Write-Step "AssumeYes enabled; auto-confirming NapCat update."
+    if ($AssumeYes -or $Automatic) {
+        Write-Step "Automatic update confirmation accepted."
         return $true
     }
     if ($DryRun) {
@@ -234,12 +125,9 @@ function Confirm-NapCatUpdate {
 }
 
 function Get-NapCatProcesses {
-    $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $allProcesses = @(Get-CimInstance Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop)
     $targetIds = [System.Collections.Generic.HashSet[int]]::new()
-    $roots = @($allProcesses | Where-Object {
-        (Test-NapCatProcessRoot -ProcessInfo $_) -or
-        (Test-NapCatQQRoot -ProcessInfo $_)
-    })
+    $roots = @($allProcesses | Where-Object { Test-NapCatProcessRoot -ProcessInfo $_ })
 
     foreach ($root in $roots) {
         foreach ($processId in (Get-ProcessTreeIds -RootProcessId ([int]$root.ProcessId) -Processes $allProcesses)) {
@@ -387,18 +275,6 @@ function Test-NapCatProcessRoot {
     return ($referencesOneKey -or ($referencesWorkspace -and $hasNapCatMarker))
 }
 
-function Test-NapCatQQRoot {
-    param([object]$ProcessInfo)
-
-    $name = [string]$ProcessInfo.Name
-    $commandLine = [string]$ProcessInfo.CommandLine
-    return (
-        $name -match '(?i)^QQ\.exe$' -and
-        $commandLine -match '(?i)\s--enable-logging(\s|$)' -and
-        $commandLine -notmatch '(?i)\s--type='
-    )
-}
-
 function Get-ProcessTreeIds {
     param(
         [int]$RootProcessId,
@@ -461,107 +337,6 @@ function Wait-DirectoryCanMove {
     throw "NapCat onekey directory is still locked: $Path. Remaining related processes: $(Format-ProcessSummary $remaining). Last error: $lastError"
 }
 
-function Get-OneKeyConfigRoot {
-    param([string]$Root)
-
-    $currentConfig = Join-Path $Root "napcat\config"
-    if (Test-Path $currentConfig) {
-        return $currentConfig
-    }
-
-    $legacyConfig = Get-ChildItem -Path $Root -Directory -Filter "NapCat.*.Shell" -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            Get-ChildItem -Path (Join-Path $_.FullName "versions") -Directory -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1
-        } |
-        ForEach-Object {
-            $candidate = Join-Path $_.FullName "resources\app\napcat\config"
-            if (Test-Path $candidate) {
-                $candidate
-            }
-        } |
-        Select-Object -First 1
-
-    if ($legacyConfig) {
-        return $legacyConfig
-    }
-
-    $bootmainConfig = Join-Path $Root "bootmain\config"
-    if (Test-Path $bootmainConfig) {
-        return $bootmainConfig
-    }
-
-    return ""
-}
-
-function Test-OneKeyHasAccountConfigs {
-    param([string]$Root)
-
-    $configRoot = Get-OneKeyConfigRoot -Root $Root
-    if (-not $configRoot) {
-        return $false
-    }
-
-    foreach ($pattern in @("napcat_*.json", "napcat_protocol_*.json", "onebot11_*.json")) {
-        $files = @(Get-ChildItem -Path $configRoot -File -Filter $pattern -ErrorAction SilentlyContinue)
-        if ($files.Count -gt 0) {
-            return $true
-        }
-    }
-
-    return $false
-}
-
-function Get-NapCatConfigMigrationRoot {
-    param([string[]]$PreferredRoots)
-
-    foreach ($root in @($PreferredRoots)) {
-        if ($root -and (Test-Path $root) -and (Test-OneKeyHasAccountConfigs -Root $root)) {
-            return $root
-        }
-    }
-
-    $archives = @(Get-ChildItem -Path $ArchiveRoot -Directory -Filter "onekey-*" -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending)
-    foreach ($archive in $archives) {
-        if (Test-OneKeyHasAccountConfigs -Root $archive.FullName) {
-            return $archive.FullName
-        }
-    }
-
-    return ""
-}
-
-function Copy-NapCatAccountConfigs {
-    param(
-        [string]$FromRoot,
-        [string]$ToRoot
-    )
-
-    $sourceConfig = Get-OneKeyConfigRoot -Root $FromRoot
-    $targetConfig = Get-OneKeyConfigRoot -Root $ToRoot
-    if (-not $sourceConfig) {
-        Write-Step "No previous NapCat account config directory found; skipping config migration."
-        return
-    }
-    if (-not $targetConfig) {
-        $targetConfig = Join-Path $ToRoot "napcat\config"
-        New-Item -ItemType Directory -Path $targetConfig -Force | Out-Null
-    }
-
-    $patterns = @("napcat_*.json", "napcat_protocol_*.json", "onebot11_*.json")
-    $copied = 0
-    foreach ($pattern in $patterns) {
-        $files = @(Get-ChildItem -Path $sourceConfig -File -Filter $pattern -ErrorAction SilentlyContinue)
-        foreach ($file in $files) {
-            Copy-Item -Path $file.FullName -Destination (Join-Path $targetConfig $file.Name) -Force
-            $copied += 1
-        }
-    }
-    Write-Step "Migrated NapCat account config files: $copied"
-}
-
 function Ensure-NapCatBuiltinPlugin {
     param(
         [string]$TargetRoot
@@ -575,7 +350,7 @@ function Ensure-NapCatBuiltinPlugin {
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", $script,
-        "-NapCatRoot", (Join-Path $TargetRoot "napcat"),
+        "-NapCatRoot", $TargetRoot,
         "-LogFile", $logFile,
         "-ConsolePrefix", "[NapCatUpdate]"
     )
@@ -608,153 +383,225 @@ function Sync-NapCatAccountPolicies {
     }
 }
 
-Write-Step "NapCat update started."
+Write-Step "NapCat update started. Automatic=$Automatic"
 Write-Step "Project: $ProjectRoot"
 Write-Step "Log: $logFile"
-if ($DryRun) {
-    Write-Step "DryRun enabled; no download or package replacement will be executed."
-}
-
-$api = "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
-if ($DryRun) {
-    Write-Step "Would query latest release: $api"
-}
-
-$headers = @{ "User-Agent" = "qqbot-update-script" }
-$release = Invoke-RestMethod -Uri $api -Headers $headers -TimeoutSec 30
-$asset = @($release.assets | Where-Object {
-    $_.name -match '(?i)NapCat.*Shell.*Windows.*OneKey.*\.zip$' -or
-    $_.name -match '(?i)NapCat.*Windows.*OneKey.*\.zip$' -or
-    $_.name -match '(?i)NapCat.*Shell.*\.zip$'
-} | Select-Object -First 1)
-
-if (-not $asset) {
-    $assetNames = ($release.assets | ForEach-Object { $_.name }) -join ", "
-    throw "No matching NapCat Windows Shell zip asset found in latest release. Assets: $assetNames"
-}
-
-$version = if ($release.tag_name) { $release.tag_name } else { "latest" }
-$zipPath = Join-Path $DownloadRoot ("NapCat-{0}-{1}.zip" -f $version, $timestamp)
-$extractRoot = Join-Path $DownloadRoot ("extract-$timestamp")
-$newOneKeyRoot = Join-Path $NapCatRoot ("onekey.new-$timestamp")
-$archivePath = Join-Path $ArchiveRoot ("onekey-$timestamp")
-$installedRelease = Get-InstalledNapCatRelease
-$installedVersion = if ($installedRelease.Tag) { $installedRelease.Tag } else { "(unknown)" }
-
-Write-Step "Latest release: $version"
-Write-Step "Installed release: $installedVersion (source: $($installedRelease.Source))"
-if (
-    $installedRelease.Tag -and
-    (Get-NormalizedReleaseTag -Tag $installedRelease.Tag) -eq (Get-NormalizedReleaseTag -Tag $version)
-) {
-    Write-Step "NapCat is already at latest release $version; skipping download and package replacement."
-    Ensure-NapCatBuiltinPlugin -TargetRoot $OneKeyRoot
-    Sync-NapCatAccountPolicies
-    Clear-NapCatUpdateCaches -Reason "already latest" -All
-    exit 0
-}
-
-if (-not (Confirm-NapCatUpdate `
-    -InstalledVersion $installedVersion `
-    -TargetVersion $version `
-    -Asset $asset `
-    -ZipPath $zipPath `
-    -ExtractRoot $extractRoot `
-    -NewOneKeyRoot $newOneKeyRoot `
-    -ArchivePath $archivePath)) {
-    Clear-NapCatUpdateCaches -Reason "skipped before download" -All
-    exit 0
-}
-
-if ($DryRun) {
-    $running = @(Get-NapCatProcesses)
-    Write-Step "Would download asset: $($asset.name)"
-    Write-Step "Would extract the new package into: $newOneKeyRoot"
-    if ($running.Count -gt 0) {
-        if ($NoStopProcesses) {
-            Write-Step "Would require these processes to be closed manually before activation: $(Format-ProcessSummary $running)"
-        }
-        else {
-            Write-Step "Would stop running NapCat/QQ processes before activation: $(Format-ProcessSummary $running)"
-        }
-    }
-    Write-Step "Would archive current napcat\onekey to: $archivePath"
-    Write-Step "Would activate the prepared package as napcat\onekey."
-    Write-Step "Would ensure NapCat builtin plugin after activation."
-    Write-Step "Would write NapCat release marker: $NapCatReleaseMarker"
-    Write-Step "NapCat update dry run finished."
-    exit 0
-}
-
-$updateSucceeded = $false
+$lock = $null
 try {
-    Write-Step "Downloading: $($asset.name)"
+    $lock = [System.IO.File]::Open((Join-Path $DataRoot "napcat-update.lock"), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+}
+catch [System.IO.IOException] {
+    Write-Step "Another NapCat update owns the workspace lock; this check was skipped."
+    exit 0
+}
+
+$state = [ordered]@{ checked_at = [DateTime]::UtcNow.ToString("o"); status = "checking"; installed_release = ""; target_release = ""; qq_version = ""; blocked_release = ""; backup_path = ""; restart_pid = $null; restart_deadline = ""; error = ""; log = $logFile }
+$canSaveState = $false
+$stopped = $false
+$restartAttempted = $false
+$runtimeArchived = $false
+$runtimeActivated = $false
+$newRuntimeRoot = Join-Path $OneKeyRoot "napcat.new-$timestamp"
+$extractRoot = Join-Path $DownloadRoot "extract-$timestamp"
+$archivePath = Join-Path $ArchiveRoot "napcat-$timestamp"
+$version = ""
+try {
+    $previous = $null
+    if (Test-Path -LiteralPath $StatePath) {
+        $previous = Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    $canSaveState = $true
+    $headers = @{ "User-Agent" = "qqbot-update-script" }
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest" -Headers $headers -TimeoutSec 30
+    $version = [string]$release.tag_name
+    if ($release.draft -or $release.prerelease -or $version -notmatch "^v?\d+\.\d+\.\d+$") {
+        throw "The latest NapCat release is not a stable version: $version. Current runtime was left unchanged."
+    }
+    $installed = Get-InstalledNapCatRelease
+    if (-not $installed.Tag) {
+        throw "Current NapCat runtime was not found at $RuntimeRoot. Complete the initial installation before enabling automatic updates."
+    }
+    $state.installed_release = $installed.Tag
+    $state.target_release = $version
+    Write-Step "Latest release: $version; installed release: $($installed.Tag) (source: $($installed.Source))."
+    if ($Automatic -and $null -ne $previous -and (($previous.blocked_release -eq $version) -or ($previous.target_release -eq $version -and $previous.status -in @("activating", "restarting")))) {
+        $state.status = "blocked"
+        $state.blocked_release = $version
+        $state.error = [string]$previous.error
+        $state.backup_path = [string]$previous.backup_path
+        Save-NapCatUpdateState -State $state
+        throw "Automatic update for $version is paused after an interrupted or failed activation. Inspect $StatePath and its log before retrying manually."
+    }
+    if ([version](Get-NormalizedReleaseTag $installed.Tag) -ge [version](Get-NormalizedReleaseTag $version)) {
+        $state.status = "up_to_date"
+        Save-NapCatUpdateState -State $state
+        Write-Step "No newer stable release; no package or running process was changed."
+        exit 0
+    }
+
+    $qqRuntime = Get-InstalledQQRuntime
+    $state.qq_version = $qqRuntime.Key
+    Assert-NapCatQQCompatibility -Tag $version -Runtime $qqRuntime
+    $asset = @($release.assets | Where-Object { $_.name -eq "NapCat.Shell.zip" } | Select-Object -First 1)
+    if ($asset.Count -ne 1) {
+        throw "Release $version has no NapCat.Shell.zip runtime package. Current processes were left unchanged."
+    }
+    $asset = $asset[0]
+    if ([string]$asset.digest -notmatch "^sha256:(?<hash>[a-fA-F0-9]{64})$") {
+        throw "Release asset has no usable SHA-256 digest: $($asset.name). Current processes were left unchanged."
+    }
+    $expectedHash = $Matches.hash.ToLowerInvariant()
+    $zipPath = Join-Path $DownloadRoot ("NapCat-{0}-Shell.zip" -f $version)
+    if (-not (Confirm-NapCatUpdate -InstalledVersion $installed.Tag -TargetVersion $version -Asset $asset -ZipPath $zipPath -ExtractRoot $extractRoot -NewOneKeyRoot $newRuntimeRoot -ArchivePath $archivePath)) {
+        $state.status = "skipped"
+        Save-NapCatUpdateState -State $state
+        exit 0
+    }
+    if ($DryRun) {
+        Write-Step "Would verify the complete runtime, preserve state, archive $RuntimeRoot to $archivePath, and activate $version."
+        Write-Step "Automatic mode restarts active bots through scripts/start-all.ps1 after activation."
+        exit 0
+    }
+
     New-Item -ItemType Directory -Path $DownloadRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $ArchiveRoot -Force | Out-Null
-    Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile $zipPath -TimeoutSec 300
-
-    Write-Step "Extracting: $zipPath"
-    New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
-    Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
-
+    if (Test-Path -LiteralPath $zipPath) {
+        $cached = Get-Item -LiteralPath $zipPath
+        if ($cached.Length -ne [long]$asset.size -or (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+            Move-NapCatUpdateArtifact -Path $zipPath
+        }
+    }
+    if (-not (Test-Path -LiteralPath $zipPath)) {
+        Write-Step "Downloading: $($asset.name)"
+        Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -Headers $headers -OutFile $zipPath -TimeoutSec 300
+    }
+    if ((Get-Item -LiteralPath $zipPath).Length -ne [long]$asset.size -or (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+        Move-NapCatUpdateArtifact -Path $zipPath
+        throw "NapCat runtime archive failed size or SHA-256 verification. Current processes were left unchanged."
+    }
+    Write-Step "Release archive size and SHA-256 verified."
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force
     $sourceRoot = $extractRoot
-    $children = @(Get-ChildItem -Path $extractRoot -Force)
-    if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
-        $sourceRoot = $children[0].FullName
+    if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot "napcat.mjs"))) {
+        $children = @(Get-ChildItem -LiteralPath $extractRoot -Directory)
+        if ($children.Count -eq 1) { $sourceRoot = $children[0].FullName }
+    }
+    foreach ($name in @("napcat.mjs", "NapCatWinBootMain.exe", "NapCatWinBootHook.dll", "launcher-user.bat", "qqnt.json")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot $name))) {
+            throw "NapCat runtime archive is missing $name. Current processes were left unchanged."
+        }
+    }
+    $bundleVersion = Get-NapCatBundleVersion -Root $sourceRoot
+    if ($bundleVersion -ne (Get-NormalizedReleaseTag $version)) {
+        throw "Downloaded runtime version $bundleVersion does not match $version. Current processes were left unchanged."
+    }
+    Move-Item -LiteralPath $sourceRoot -Destination $newRuntimeRoot
+    $state.status = "prepared"
+    Save-NapCatUpdateState -State $state
+
+    $loginMutex = [System.Threading.Mutex]::new($false, "Local\QQBot-NapCat-Login")
+    $ownsLoginMutex = $false
+    try {
+        try { $ownsLoginMutex = $loginMutex.WaitOne(30000) }
+        catch [System.Threading.AbandonedMutexException] { $ownsLoginMutex = $true }
+        if (-not $ownsLoginMutex) {
+            throw "A NapCat account is logging in. Current runtime was left unchanged; the next scheduled check can retry."
+        }
+        $currentQQ = Get-InstalledQQRuntime
+        if ($currentQQ.Key -ne $qqRuntime.Key) {
+            Assert-NapCatQQCompatibility -Tag $version -Runtime $currentQQ
+            $qqRuntime = $currentQQ
+            $state.qq_version = $qqRuntime.Key
+        }
+        $running = @(Get-NapCatProcesses)
+        if ($Automatic) {
+            $manifest = Get-Content -LiteralPath (Join-Path $ProjectRoot "accounts.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($account in @($manifest.accounts | Where-Object { $_.autoStart -ne $true })) {
+                $accountPattern = '-Account\s+[''" ]?' + [regex]::Escape([string]$account.qq) + '(?:[''" ]|$)'
+                if (@($running | Where-Object { $_.CommandLine -match $accountPattern }).Count -gt 0) {
+                    throw "Manually managed NapCat account $($account.target) is running. Automatic activation is deferred until it stops."
+                }
+            }
+        }
+        if ($running.Count -gt 0 -and $NoStopProcesses) {
+            throw "NapCat is running. Close the workspace processes first or omit -NoStopProcesses: $(Format-ProcessSummary $running)"
+        }
+        # Persist the activation boundary before stopping anything, so interruption cannot trigger another automatic restart.
+        $state.status = "activating"
+        $state.blocked_release = $version
+        $state.backup_path = $archivePath
+        Save-NapCatUpdateState -State $state
+        if ($running.Count -gt 0) {
+            $stopped = $true
+            Write-Step "Prepared complete runtime; stopping workspace-owned processes: $(Format-ProcessSummary $running)"
+            Stop-NapCatProcesses -Processes $running
+        }
+        New-Item -ItemType Directory -Path $ArchiveRoot -Force | Out-Null
+        Wait-DirectoryCanMove -Path $RuntimeRoot -TimeoutSeconds 30
+        Move-Item -LiteralPath $RuntimeRoot -Destination $archivePath
+        $runtimeArchived = $true
+        Copy-NapCatRuntimeState -FromRoot $archivePath -ToRoot $newRuntimeRoot
+        Ensure-NapCatBuiltinPlugin -TargetRoot $newRuntimeRoot
+        Move-Item -LiteralPath $newRuntimeRoot -Destination $RuntimeRoot
+        $runtimeActivated = $true
+        Sync-NapCatAccountPolicies
+        Write-NapCatReleaseMarker -Tag $version -Asset $asset
+        $state.installed_release = $version
+        Write-Step "NapCat $version activated. Previous runtime retained at $archivePath."
+    }
+    catch {
+        if ($runtimeArchived) {
+            if ($runtimeActivated) { Move-NapCatUpdateArtifact -Path $RuntimeRoot }
+            Move-Item -LiteralPath $archivePath -Destination $RuntimeRoot
+            $state.installed_release = $installed.Tag
+            Write-Step "Activation failed; restored the previous runtime from $archivePath."
+        }
+        throw
+    }
+    finally {
+        if ($ownsLoginMutex) { $loginMutex.ReleaseMutex() }
+        $loginMutex.Dispose()
     }
 
-    New-Item -ItemType Directory -Path $newOneKeyRoot -Force | Out-Null
-    Move-Item -Path (Join-Path $sourceRoot "*") -Destination $newOneKeyRoot -Force
-
-    $running = @(Get-NapCatProcesses)
-    if ($running.Count -gt 0) {
-        if ($NoStopProcesses) {
-            throw "NapCat/QQ is running. The new package is ready at $newOneKeyRoot. Close these processes first or rerun without -NoStopProcesses: $(Format-ProcessSummary $running)"
-        }
-        Write-Step "Prepared new package; stopping running NapCat/QQ processes before activation: $(Format-ProcessSummary $running)"
-        Stop-NapCatProcesses $running
+    if ($Automatic -and $stopped) {
+        $state.status = "restarting"
+        Save-NapCatUpdateState -State $state
+        $restartAttempted = $true
+        $restartStarted = [DateTime]::UtcNow
+        Restart-NapCatBots -State $state
+        Assert-NapCatHookReady -RestartStarted $restartStarted
     }
-
-    $hadExistingOneKey = Test-Path $OneKeyRoot
-    if ($hadExistingOneKey) {
-        Write-Step "Archiving current onekey: $archivePath"
-        Wait-DirectoryCanMove -Path $OneKeyRoot -TimeoutSeconds 30
-        try {
-            Move-Item -Path $OneKeyRoot -Destination $archivePath
-        }
+    $state.status = "updated"
+    $state.blocked_release = ""
+    Save-NapCatUpdateState -State $state
+    Write-Step "NapCat update finished. Runtime: $RuntimeRoot; state: $StatePath"
+    if (-not $Automatic -and $stopped) {
+        Write-Step "Start bots with the qqbot root scripts/start-all.bat to restore connections."
+    }
+}
+catch {
+    $failure = $_
+    Write-Step "NapCat update failed: $($failure.Exception.Message)"
+    if ($canSaveState) {
+        $state.status = "failed"
+        $state.error = $failure.Exception.Message
+        if ($stopped) { $state.blocked_release = $version }
+        try { Save-NapCatUpdateState -State $state }
+        catch { Write-Step "Could not save failure state: $($_.Exception.Message)" }
+    }
+    if ($Automatic -and $stopped -and -not $restartAttempted) {
+        $restartAttempted = $true
+        try { Restart-NapCatBots -State $state }
         catch {
-            $remaining = @(Get-NapCatProcesses)
-            throw "Failed to archive current onekey. Remaining related processes: $(Format-ProcessSummary $remaining). Error: $($_.Exception.Message)"
+            Write-Step "Previous runtime restart failed: $($_.Exception.Message)"
+            $state.error += " Recovery restart: " + $_.Exception.Message
+            Save-NapCatUpdateState -State $state
         }
     }
-
-    Write-Step "Activating new onekey package."
-    Move-Item -Path $newOneKeyRoot -Destination $OneKeyRoot
-    $configSourceRoot = ""
-    if ($hadExistingOneKey) {
-        $configSourceRoot = Get-NapCatConfigMigrationRoot -PreferredRoots @($archivePath)
-    }
-    if ($configSourceRoot) {
-        if ($configSourceRoot -ne $archivePath) {
-            Write-Step "Using fallback NapCat config source: $configSourceRoot"
-        }
-        Copy-NapCatAccountConfigs -FromRoot $configSourceRoot -ToRoot $OneKeyRoot
-    }
-    else {
-        Write-Step "No previous NapCat account config directory found; skipping config migration."
-    }
-    Ensure-NapCatBuiltinPlugin -TargetRoot $OneKeyRoot
-    Sync-NapCatAccountPolicies
-    Write-NapCatReleaseMarker -Tag $version -Asset $asset
-    $updateSucceeded = $true
+    throw $failure
 }
 finally {
-    if ($updateSucceeded) {
-        Clear-NapCatUpdateCaches -Reason "successful update" -SpecificPaths @($zipPath, $extractRoot, $archivePath)
+    try {
+        foreach ($path in @($extractRoot, $newRuntimeRoot)) { Move-NapCatUpdateArtifact -Path $path }
     }
-    else {
-        Clear-NapCatUpdateCaches -Reason "failed or interrupted update" -SpecificPaths @($zipPath, $extractRoot, $newOneKeyRoot)
-    }
+    finally { $lock.Dispose() }
 }
-
-Write-Step "NapCat update finished. Start bots with the qqbot root scripts\start-all.bat."
