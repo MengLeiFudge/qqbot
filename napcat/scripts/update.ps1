@@ -410,20 +410,28 @@ try {
     if (Test-Path -LiteralPath $StatePath) {
         $previous = Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
     }
-    $canSaveState = $true
-    $headers = @{ "User-Agent" = "qqbot-update-script" }
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest" -Headers $headers -TimeoutSec 30
-    $version = [string]$release.tag_name
-    if ($release.draft -or $release.prerelease -or $version -notmatch "^v?\d+\.\d+\.\d+$") {
-        throw "The latest NapCat release is not a stable version: $version. Current runtime was left unchanged."
+    if ($null -ne $previous) {
+        $state.blocked_release = [string]$previous.blocked_release
+        $state.backup_path = [string]$previous.backup_path
+        if ($previous.status -in @("activating", "restarting")) {
+            $state.blocked_release = [string]$previous.target_release
+        }
     }
+    $canSaveState = $true
     $installed = Get-InstalledNapCatRelease
     if (-not $installed.Tag) {
         throw "Current NapCat runtime was not found at $RuntimeRoot. Complete the initial installation before enabling automatic updates."
     }
     $state.installed_release = $installed.Tag
+    Write-Step "Installed release: $($installed.Tag) (source: $($installed.Source))."
+    $headers = @{ "User-Agent" = "qqbot-update-script" }
+    $release = Invoke-NapCatWebRequest -Uri "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
+    $version = [string]$release.tag_name
+    if ($release.draft -or $release.prerelease -or $version -notmatch "^v?\d+\.\d+\.\d+$") {
+        throw "The latest NapCat release is not a stable version: $version. Current runtime was left unchanged."
+    }
     $state.target_release = $version
-    Write-Step "Latest release: $version; installed release: $($installed.Tag) (source: $($installed.Source))."
+    Write-Step "Latest release: $version."
     if ($Automatic -and $null -ne $previous -and (($previous.blocked_release -eq $version) -or ($previous.target_release -eq $version -and $previous.status -in @("activating", "restarting")))) {
         $state.status = "blocked"
         $state.blocked_release = $version
@@ -432,6 +440,7 @@ try {
         Save-NapCatUpdateState -State $state
         throw "Automatic update for $version is paused after an interrupted or failed activation. Inspect $StatePath and its log before retrying manually."
     }
+    $state.blocked_release = ""
     if ([version](Get-NormalizedReleaseTag $installed.Tag) -ge [version](Get-NormalizedReleaseTag $version)) {
         $state.status = "up_to_date"
         Save-NapCatUpdateState -State $state
@@ -472,7 +481,7 @@ try {
     }
     if (-not (Test-Path -LiteralPath $zipPath)) {
         Write-Step "Downloading: $($asset.name)"
-        Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -Headers $headers -OutFile $zipPath -TimeoutSec 300
+        Invoke-NapCatWebRequest -Uri $asset.browser_download_url -OutFile $zipPath -TimeoutSeconds 300
     }
     if ((Get-Item -LiteralPath $zipPath).Length -ne [long]$asset.size -or (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
         Move-NapCatUpdateArtifact -Path $zipPath

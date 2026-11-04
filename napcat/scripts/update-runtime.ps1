@@ -53,13 +53,71 @@ function Get-InstalledQQRuntime {
     return [pscustomobject]@{ Version = $version; Architecture = $arch; Key = "$version-$arch"; Exe = $exe }
 }
 
+function Invoke-NapCatWebRequest {
+    <#
+    在原有超时预算内执行 GitHub GET，仅对临时连接错误最多尝试三次。
+    当前进程指定 TLS 1.2，沿用 Windows 系统代理和证书验证，结束时恢复协议设置。
+    文件重试从头覆盖下载；完整性仍由更新器后续的大小和 SHA-256 校验确认。
+    #>
+    param([uri]$Uri, [int]$TimeoutSeconds = 30, [string]$OutFile = "")
+
+    $previousTls = [System.Net.ServicePointManager]::SecurityProtocol
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+        Write-Step "GitHub request: host=$($Uri.DnsSafeHost); TLS=1.2; timeout=${TimeoutSeconds}s."
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $remaining = [int][Math]::Floor($TimeoutSeconds - $timer.Elapsed.TotalSeconds)
+            if ($remaining -lt 1) {
+                throw "GitHub request exceeded ${TimeoutSeconds}s: $($Uri.DnsSafeHost)."
+            }
+            $request = @{ Uri = $Uri.AbsoluteUri; Headers = $headers; TimeoutSec = $remaining; ErrorAction = "Stop" }
+            try {
+                if ($OutFile) {
+                    Invoke-WebRequest @request -UseBasicParsing -OutFile $OutFile | Out-Null
+                    return
+                }
+                return (Invoke-RestMethod @request)
+            }
+            catch [System.Net.WebException] {
+                $failure = $_.Exception
+                $transient = $failure.Status -in @(
+                    [System.Net.WebExceptionStatus]::Timeout,
+                    [System.Net.WebExceptionStatus]::ConnectFailure,
+                    [System.Net.WebExceptionStatus]::ConnectionClosed,
+                    [System.Net.WebExceptionStatus]::KeepAliveFailure,
+                    [System.Net.WebExceptionStatus]::NameResolutionFailure,
+                    [System.Net.WebExceptionStatus]::ProxyNameResolutionFailure,
+                    [System.Net.WebExceptionStatus]::ReceiveFailure,
+                    [System.Net.WebExceptionStatus]::SendFailure,
+                    [System.Net.WebExceptionStatus]::SecureChannelFailure
+                )
+                $inner = $failure
+                while ($null -ne $inner.InnerException) { $inner = $inner.InnerException }
+                $reason = [regex]::Replace($inner.Message, 'https?://\S+', '<url>')
+                Write-Step "GitHub request failed: host=$($Uri.DnsSafeHost); attempt=$attempt; status=$($failure.Status); reason=$reason"
+                $delay = 2 * $attempt
+                if (-not $transient -or $attempt -eq 3 -or ($TimeoutSeconds - $timer.Elapsed.TotalSeconds) -le ($delay + 1)) {
+                    throw [System.IO.IOException]::new("GitHub request to $($Uri.DnsSafeHost) failed after $attempt attempt(s): $($failure.Status); $reason", $failure)
+                }
+                # 只有可重试的连接错误才退避；等待与后续请求共用同一截止时间。
+                Write-Step "Retrying GitHub connection in ${delay}s; the original timeout budget is retained."
+                Start-Sleep -Seconds $delay
+            }
+        }
+    }
+    finally {
+        [System.Net.ServicePointManager]::SecurityProtocol = $previousTls
+    }
+}
+
 function Assert-NapCatQQCompatibility {
     <# 使用目标 Release 自己的协议支持表校验完整构建；读取失败时保留当前运行。 #>
     param([string]$Tag, [object]$Runtime)
 
     $ref = [uri]::EscapeDataString($Tag)
     $uri = "https://api.github.com/repos/NapNeko/NapCatQQ/contents/packages/napcat-core/external/napi2native.json?ref=$ref"
-    $file = Invoke-RestMethod -Uri $uri -Headers $headers -TimeoutSec 30
+    $file = Invoke-NapCatWebRequest -Uri $uri
     $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($file.content))
     $matrix = $json | ConvertFrom-Json
     $entry = $matrix.PSObject.Properties[$Runtime.Key]
