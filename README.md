@@ -70,11 +70,13 @@ PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。日常启动与重�
 
 ## MaiBot 聊天插件边界
 
-夜凛和蓝铃分别保留 MaiBot 原生聊天、上下文、记忆、表情和图片理解，并允许 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual` 五个插件启用；其余 `qqbot_*` 插件保留源码但实际配置必须为 `plugin.enabled=false`。各自的 `scripts/enforce_chat_only.py` 在 Core 启动前纠正并复核该策略，失败时阻止启动。
+夜凛保留 MaiBot 原生聊天、上下文、记忆、表情和图片理解，并允许 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search` 启用；其余 `qqbot_*` 插件实际配置必须为 `plugin.enabled=false`。夜凛的 `scripts/enforce_chat_only.py` 在 Core 启动前复核该策略。蓝铃按独立本机配置选择启用插件，由 `scripts/validate_plugin_config.py` 校验配置。
 
 DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持有和增量同步。MaiBot `qqbot_knowledge` 通过 `127.0.0.1:8081` 读取同一组召回、融合与 rerank 结果，再交给各自的聊天模型回答；不会建立第二份 DSP 库。共享服务不可用时，MaiBot 继续普通聊天但不注入 DSP 证据。
 
 云栖是固定功能的唯一运行 owner。AstrBot 仅保留云栖平台，不存在 `both`、`angel`、`demon` profile、双 worker、跨账号 command claim 或忙闲代班。
+
+模型调用的 CPA 路由、官网搜索与嵌入/重排序迁移限制见 [模型 API 路由](docs/model-routing.md)。
 
 ## 更新
 
@@ -119,3 +121,5 @@ Get-Content .\napcat\data\updates\napcat.json -Encoding UTF8
 4. 在根 `qqbot/` 提交 NapCat、账号编排、文档和三个 gitlink。
 
 根仓与三个子仓分别审查和提交。根仓不能提交 submodule 内普通文件，也不能用根 `.gitignore` 代替子项目的敏感数据规则。任何 push 都必须单独明确授权。架构取舍见 `docs/adr/0002-account-superproject.md`。
+
+MaiBot 两个工作目录共享同一 fork，各自保留本地 `deployment` 分支。获准推送后，夜凛使用 `git -C maibot-yelin push origin HEAD:deployment-yelin`，蓝铃使用 `git -C maibot-lanling push origin HEAD:deployment`。推送前核对对应远端分支的祖先关系，不将一边的部署历史覆盖或强行合入另一边。

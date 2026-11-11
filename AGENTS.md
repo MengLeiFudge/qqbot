@@ -34,15 +34,15 @@
 - AstrBot 只绑定云栖，不得恢复 `both/angel/demon` profile、夜凛平台、双 worker、跨账号 command claim、忙闲代班或可选择 command owner。
 - 在棉花糖家族内，云栖是所有现有固定命令、数据写入、群务和副作用功能的唯一运行 owner。
 - 本地插件源码放在 `astrbot/data/plugins/` 的原生位置；真实插件配置、数据库、日志、缓存和 `plugin_data` 不跟踪。
-- 行为调整必须遵守“框架核心边界”，通过现有配置和本地插件 API 实现，禁止直接修改 AstrBot Core。
+- 行为调整必须遵守“框架核心边界”，通过现有配置和本地插件 API 实现，禁止直接修改 AstrBot Core。模型 API 路由维护先读 `docs/model-routing.md`。
 - AstrBot 自己的 `scripts/start.ps1` 和 `scripts/update.ps1` 必须可从项目目录独立使用，不依赖根文件。
 
 ## MaiBot 边界
 
 - MaiBot 分为夜凛与蓝铃两个独立工作目录，WebUI 分别为 `8003/8004`，消息服务分别为 `8020/8021`。两者配置、虚拟环境、`data/` 和记忆独立，不复制其他账号的运行数据。
-- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`。夜凛允许启用 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 与 `qqbot_visual` 四个聊天辅助插件。
+- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`。夜凛允许启用 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual` 与 `qqbot_web_search` 五个聊天辅助插件。
 - `qqbot_knowledge` 只通过 `127.0.0.1:8081` 使用云栖持有的 DSP 向量检索结果，不在 MaiBot 侧建立额外 DSP 索引；云栖不可用时退回无 DSP 证据的普通聊天。
-- 夜凛除上述四个聊天辅助插件外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
+- 夜凛除上述五个聊天辅助插件外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
 - 夜凛每次启动 Core 前必须执行 `scripts/enforce_chat_only.py`。无法解析配置或无法确认禁用时必须失败关闭，不得绕过策略启动。
 - 蓝铃作为独立 bot 维护插件源码与启用配置，不套用家族插件同步或夜凛允许列表。启动前执行本项目 `scripts/validate_plugin_config.py`，配置无效时停止；不得自动改写插件启用选择。
 - 夜凛的 QQ 内插件管理入口保持禁用，不能通过聊天重新启用家族业务插件。
@@ -82,7 +82,7 @@
 ## Git 工作流
 
 - 根仓和三个子仓分别检查状态、提交和维护历史；不要从根仓暂存 submodule 内普通文件。
-- 框架 fork 使用 `deployment` 分支，`origin` 指向 `MengLeiFudge` fork，`upstream` 指向官方仓库。
+- 框架 fork 本地使用 `deployment` 分支，`origin` 指向 `MengLeiFudge` fork，`upstream` 指向官方仓库。MaiBot 两个实例共享 origin，但夜凛推送目标为 `deployment-yelin`、蓝铃为 `deployment`；获准推送时使用明确 refspec，禁止用一个账号的历史覆盖另一个账号。
 - 框架提交完成后，根仓只记录新的 gitlink。
 - 本次任务完成且必要检查通过后，自动提交本次范围内的改动；不要等待用户再次要求提交。子项目提交完成后，同步提交根仓的 gitlink 更新。用户明确要求暂不提交时除外。
 - 未经用户明确批准不得 push，也不得把无关 dirty change 带入提交。
