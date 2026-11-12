@@ -37,6 +37,12 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 Go 要求每段对话携带稳定的 `x-opencode-session`，直接使用框架已有的真实会话 ID；重试和同一对话的工具续轮复用同一个值。框架内部存在 `session_id` 不等于 HTTP 请求已携带该头；静态 provider headers 也不会自动按对话替换。CPA 应转发客户端已有的会话标识与真实 `User-Agent`，不能给所有对话写死同一个会话值，也不能为每次请求重新生成。
 
+维护机器人会话透传插件时，分别核对请求 Hook 和自定义 Provider 的扩展能力：
+
+- AstrBot 在 `astrbot/core/core_lifecycle.py` 的 Provider 初始化前加载插件；`astrbot/core/provider/register.py::register_provider_adapter` 支持注册新的 Provider 类型。Provider 的 `text_chat`、`text_chat_stream` 接口已有 `session_id`，可由插件适配为请求级会话头。使用独立 Provider 类型，避免与内置类型冲突。
+- MaiBot 的 `maisaka.planner.before_request` 与 `maisaka.replyer.before_model_request` 均提供 `session_id` 和 Context Items。Hook 与插件 Provider 的请求快照都保留 `meta.item_id`；原生客户端没有消费 Hook 中的任意 HTTP 头字段。`src/llm_models/request_snapshot.py::serialize_response_request_snapshot` 不导出 `trace_context`，自定义 Provider 不能假定 RPC 请求自带真实会话 ID。
+- MaiBot 的插件 Provider 使用独立 `client_type`，并承担 Context Items 与上游协议之间的转换。维护时检查工具、图像、推理、usage、重试和取消行为，以及按原生 `openai_responses` 类型分支处理的推理续写；仅补头不足以证明兼容。辅助模型调用若没有提供真实会话来源，需单独核对归属与覆盖，不能把主聊天 Hook 的能力当作全部调用的保证。
+
 本项目保留 Go 与 DeepSeek 官网共用 `deepseek-flash` 等模型名称，用于同名模型兜底。渠道优先级、选择与失败回退由 CPA 配置管理；排查时核对实际上游，不因名称相同就判定已选中 Go。Go 的 OpenAI 兼容 Base URL 为 `https://opencode.ai/inference/go/openai/v1`；上游模型 ID 以官网及 CPA 实际配置为准。切换普通生成渠道时，官网联网搜索与嵌入、重排序仍分别遵守本页原有路由约束。
 
 管理页测试缺少会话头时的 400 只证明该测试请求不满足 Go 的要求，不能代替机器人请求链路的判断。接入验收需核对会话头的稳定性、不同对话的隔离、CPA 选中的实际上游，以及工具续轮与读图等直接受影响的行为；调用模型和发送聊天仍遵守项目的测试授权边界。
