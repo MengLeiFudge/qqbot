@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Account = "",
     [switch]$NoQuickLogin
 )

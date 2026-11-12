@@ -90,6 +90,6 @@
 
 ## 验证
 
-遵守会话级验证边界。默认只做精确 diff/配置重读、适用的 Python 编译、PowerShell parser、项目 build 和 LSP；不启动机器人、NapCat、浏览器或网络探针，不运行测试、lint 或 format。环境缺少适用 parser/LSP 时如实记录，不能用运行时启动替代。
+遵守会话级验证边界。默认只做精确 diff/配置重读、适用的 Python 编译、PowerShell parser、项目 build 和 LSP；不启动机器人、NapCat、浏览器或网络探针，不运行测试、lint 或 format。环境缺少适用 parser/LSP 时如实记录，不能用运行时启动替代。供 Windows PowerShell 5.1 执行且包含中文的 `.ps1` 必须保存为带 BOM 的 UTF-8；修改后同时核对 BOM 和 parser，避免无 BOM 文件在本机编码下把注释后的代码吞入注释。
 
 用户已授权上述变更后的自动重启；此类生效操作允许执行既有启动入口的必要就绪检查，以确认服务和 OneBot 连接恢复。该授权不扩展到发送聊天、调用模型、浏览器验证或其它测试。

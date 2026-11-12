@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$DryRun,
     [switch]$NoStopProcesses,
     [switch]$AssumeYes,
