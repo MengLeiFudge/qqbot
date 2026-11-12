@@ -438,9 +438,7 @@ try {
     }
     $napcatChanged = $installed.Tag -ne $normalizedVersion
     $matrix = Get-NapCatQQMatrix -Tag $version
-    $targetQQ = Get-LatestSupportedQQ -Matrix $matrix
-    $state.qq_version = $targetQQ
-    Write-Step "Target pair: NapCat $version / QQ $targetQQ. Installed NapCat: $($installed.Tag)."
+    Write-Step "Target NapCat: $version; installed: $($installed.Tag). QQ will be selected from available supported builds."
     if ($Automatic -and $null -ne $previous -and ($previous.blocked_release -eq $version -or ($previous.target_release -eq $version -and $previous.status -in @('activating', 'restarting')))) {
         $state.blocked_release = $version
         $state.backup_path = [string]$previous.backup_path
@@ -452,32 +450,34 @@ try {
         try { $currentQQ = Get-ManagedQQRuntime -OneKeyRoot $OneKeyRoot }
         catch { Write-Step "Independent QQ needs preparation: $($_.Exception.Message)" }
     }
-    $qqChanged = $null -eq $currentQQ -or $currentQQ.Key -ne $targetQQ
-    if (-not $napcatChanged -and -not $qqChanged -and [string]$oldSelection.napcat_version -eq $normalizedVersion) {
-        Assert-TencentSignature -Path $currentQQ.Exe
-        Assert-TencentSignature -Path $currentQQ.NativeDll
-        $state.status = 'up_to_date'
-        Save-NapCatUpdateState -State $state
-        Write-Step "NapCat and independent QQ already match the latest supported pair; no processes were changed."
-        exit 0
-    }
+
     $asset = @($release.assets | Where-Object { $_.name -eq 'NapCat.Shell.zip' })
     if ($asset.Count -ne 1) { throw "Release $version has no unique NapCat.Shell.zip asset." }
     $asset = $asset[0]
     $zipPath = Join-Path $DownloadRoot ("NapCat-{0}-{1}" -f $version, $asset.name)
-    Write-Step "Selected independent QQ target: $targetQQ. Desktop QQ will not be updated or stopped."
+    Write-Step 'QQ candidates will include independent runtimes, cached installers and known official download sources.'
     if (-not (Confirm-NapCatUpdate -InstalledVersion $installed.Tag -TargetVersion $version -Asset $asset -ZipPath $zipPath -ExtractRoot $extractRoot -NewOneKeyRoot $newRuntimeRoot -ArchivePath $archivePath)) {
         $state.status = 'skipped'
         Save-NapCatUpdateState -State $state
         exit 0
     }
     if ($DryRun) {
-        Write-Step "Would prepare and verify both packages, activate NapCat then independent QQ $targetQQ, and restart active bots once."
+        Write-Step 'Would choose the newest available supported QQ, verify both packages, activate NapCat then QQ, and restart active bots once.'
         exit 0
     }
 
-    # 两个包都准备成功后才能停止机器人；QQ 最新官网包若领先支持表则明确失败。
-    $preparedQQ = Prepare-ManagedQQ -TargetKey $targetQQ -Release $release
+    # 候选不可用时继续较旧兼容构建，两个包都准备成功后才停止机器人。
+    $preparedQQ = Prepare-LatestAvailableQQ -Matrix $matrix -Release $release
+    $targetQQ = $preparedQQ.Key
+    $state.qq_version = $targetQQ
+    $qqChanged = $null -eq $currentQQ -or $currentQQ.Key -ne $targetQQ -or [bool]$preparedQQ.StagingPath
+    Write-Step "Selected pair: NapCat $version / available supported QQ $targetQQ."
+    if (-not $napcatChanged -and -not $qqChanged -and [string]$oldSelection.napcat_version -eq $normalizedVersion) {
+        $state.status = 'up_to_date'
+        Save-NapCatUpdateState -State $state
+        Write-Step 'NapCat and independent QQ already match the newest available supported pair; no processes were changed.'
+        exit 0
+    }
     if ($napcatChanged) {
         $zipPath = Get-VerifiedReleaseArchive -Release $release -AssetName 'NapCat.Shell.zip'
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force
@@ -620,7 +620,11 @@ catch {
 }
 finally {
     try {
-        foreach ($path in @($extractRoot, $newRuntimeRoot, (Join-Path $DownloadRoot "qq-extract-$timestamp"), (Join-Path $DownloadRoot "qq-extractor-$timestamp"))) { Move-NapCatUpdateArtifact -Path $path }
+        $artifacts = @($extractRoot, $newRuntimeRoot, (Join-Path $DownloadRoot "qq-extractor-$timestamp"))
+        if (Test-Path -LiteralPath $DownloadRoot) {
+            $artifacts += @(Get-ChildItem -LiteralPath $DownloadRoot -Directory -Filter "qq-extract-$timestamp-*" | Select-Object -ExpandProperty FullName)
+        }
+        foreach ($path in $artifacts) { Move-NapCatUpdateArtifact -Path $path }
     }
     finally { $lock.Dispose() }
 }

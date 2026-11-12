@@ -11,7 +11,7 @@
 - `scripts/start-account.ps1`：读取项目内选版清单，通过官方 NapCat 引导程序启动独立 QQ。
 - `scripts/ensure-builtin-plugin.ps1`：校验或恢复官方内置插件。
 - `scripts/ensure-social-plugin.ps1`：部署并启用 `plugins/napcat-plugin-qqbot-social/`，从账号清单生成仅使用 NapCat 的账号集合。
-- `scripts/update.ps1`：更新 NapCat 最新稳定 Release，再选择该 Release 支持的最新 Windows x64 QQ 完整构建。
+- `scripts/update.ps1`：更新 NapCat 最新稳定 Release，再选择该 Release 支持且能够取得的尽可能新 Windows x64 QQ 完整构建。
 - `scripts/qq-runtime.ps1`、`scripts/update-qq.ps1`、`scripts/update-runtime.ps1`：共用的选版读取、QQ 安装包准备与更新事务支持。
 - `scripts/register-auto-update.ps1`：维护现有自动更新计划，默认每小时和用户登录两分钟后检查一次。
 
@@ -30,11 +30,13 @@
 
 ## NapCat 与独立 QQ 更新
 
-根 `scripts/update-all.ps1` 和自动计划均调用同一个 `napcat/scripts/update.ps1`。更新器查询 NapCat 最新稳定 Release，读取该 Release 的 `packages/napcat-core/external/napi2native.json`，按完整版本排序选择其中最高的 Windows x64 QQ 构建。NapCat 已是最新时仍检查独立 QQ，不再直接跳过。
+根 `scripts/update-all.ps1` 和自动计划均调用同一个 `napcat/scripts/update.ps1`。更新器查询 NapCat 最新稳定 Release，读取该 Release 的 `packages/napcat-core/external/napi2native.json`，在可取得的候选中按完整版本从新到旧准备，选择首个通过校验的受支持 Windows x64 QQ 构建。NapCat 已是最新时仍检查独立 QQ。
 
-先下载并核验两个安装包，再停止本项目所属账号进程，按 NapCat → 独立 QQ 选择的顺序激活。NapCat 归档校验官方 Release 的大小和 SHA-256；QQ 使用官网元数据与公开下载签名接口，校验腾讯数字签名、安装包完整版本和解包后构建，仅解包，不执行系统安装器或修改桌面 QQ 注册表。解包器取自同一官方 OneKey Release 并核验归档。旧程序包、账号配置、插件和登录数据保留。
+QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官网当前下载地址，以及同一 NapCat Release 的官方 OneKey 包提供的腾讯下载地址。OneKey 安装器只用于读取明确的下载地址，不执行安装器。官网当前包不受支持、较新候选无法取得或准备失败时，继续选择下一候选；已有可用版本可以复用。
 
-官网最新 QQ 可能领先 NapCat 的支持表。此时不能把同一 `9.9.x` 系列当作兼容证据：缓存或官网无法提供目标完整构建时，在停止机器人之前报错，保留当前组合。可以把未修改且带有效腾讯签名的目标 Windows x64 完整安装包放入 `napcat/data/downloads/`（文件名以 `QQ` 开头、扩展名 `.exe`），更新器会核对包内版本后复用；不会降级为另一旧构建或借用桌面 QQ。
+先核验并准备两个程序包，再停止本项目所属账号进程，按 NapCat → 独立 QQ 选择的顺序激活。NapCat 归档校验官方 Release 的大小和 SHA-256；QQ 校验腾讯数字签名、完整版本、解包后构建与架构，仅解包到项目目录。解包器取自同一官方 OneKey Release 并核验归档。旧程序包、账号配置、插件和登录数据保留。
+
+所有兼容候选均无法准备或发布元数据异常时，在停止机器人之前报错，保留当前组合。可以把未修改且带有效腾讯签名的 Windows x64 QQ 完整安装包放入 `napcat/data/downloads/`（文件名以 `QQ` 开头、扩展名 `.exe`），更新器会按实际完整构建参与选版。
 
 手动更新：
 

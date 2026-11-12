@@ -38,7 +38,7 @@ $hourly = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes($IntervalMinu
 $logon = New-ScheduledTaskTrigger -AtLogOn -User $identity.User.Value
 $logon.Delay = "PT2M"
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
-$task = New-ScheduledTask -Action $action -Trigger @($hourly, $logon) -Principal $principal -Settings $settings -Description "定期检查 NapCat 官方稳定版，先更新 NapCat，再切换其支持的最新独立 QQ 构建；需要时恢复机器人连接，不更新桌面 QQ。"
+$task = New-ScheduledTask -Action $action -Trigger @($hourly, $logon) -Principal $principal -Settings $settings -Description "定期检查 NapCat 官方稳定版，先更新 NapCat，再选择能取得且受支持的尽可能新独立 QQ 构建；需要时恢复机器人连接，不更新桌面 QQ。"
 Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
 Write-Host "已启用 $taskName：每 $IntervalMinutes 分钟检查一次，并在用户登录两分钟后检查。首次检查已启动。"

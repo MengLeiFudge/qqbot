@@ -97,7 +97,7 @@ NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命�
 .\napcat\scripts\register-auto-update.ps1
 ```
 
-任务 `QQBot-NapCat-AutoUpdate` 在用户登录期间每小时检查官方最新稳定 Release，并在登录两分钟后检查。可用 `-IntervalMinutes` 调整间隔。每次先选择最新 NapCat，再从该 Release 的支持表选择最新 Windows x64 QQ 完整构建；两个包核验并准备成功后才停止进程，按 NapCat → 独立 QQ 顺序激活。NapCat 已最新时仍检查 QQ，桌面 QQ 保持独立。包缺失或远端版本倒退时明确失败并保留当前组合。选版清单、包准备、首次迁移与恢复方法见 [NapCat 维护说明](napcat/README.md#napcat-与独立-qq-更新)。
+任务 `QQBot-NapCat-AutoUpdate` 在用户登录期间每小时检查官方最新稳定 Release，并在登录两分钟后检查。可用 `-IntervalMinutes` 调整间隔。每次先选择最新 NapCat，再从该 Release 的支持表内选择能取得并通过校验的尽可能新 Windows x64 QQ 完整构建；较新候选不可用时继续下一候选。两个包准备成功后才停止进程，按 NapCat → 独立 QQ 顺序激活。NapCat 已最新时仍检查 QQ，桌面 QQ 保持独立。所有兼容候选均不可用或发布元数据异常时保留当前组合。选版清单、候选来源、包准备与恢复方法见 [NapCat 维护说明](napcat/README.md#napcat-与独立-qq-更新)。
 
 发布查询、兼容支持表和运行包下载使用 TLS 1.2，沿用 Windows 系统代理与证书验证。临时连接错误最多尝试三次，重试共用原有超时预算；持续失败时保存具体原因和已有的更新暂停状态，等待下一轮检查。
 
