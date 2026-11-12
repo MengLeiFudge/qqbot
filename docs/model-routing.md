@@ -37,12 +37,10 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 Go 要求每段对话携带稳定的 `x-opencode-session`，直接使用框架已有的真实会话 ID；重试和同一对话的工具续轮复用同一个值。框架内部存在 `session_id` 不等于 HTTP 请求已携带该头；静态 provider headers 也不会自动按对话替换。CPA 应转发客户端已有的会话标识与真实 `User-Agent`，不能给所有对话写死同一个会话值，也不能为每次请求重新生成。
 
-维护机器人会话透传插件时，分别核对请求 Hook 和自定义 Provider 的扩展能力：
+会话透传使用各框架的本地插件：
 
 - AstrBot 使用本地 [CPA 会话透传插件](../astrbot/data/plugins/astrbot_plugin_cpa_session/README.md) 注册的 `cpa_responses` 类型，保留 source ID、模型 ID 与全部生成参数。插件继承原生 Responses 适配器，在 `text_chat`、`text_chat_stream` 接口取得已有 `session_id` 并设置请求级头；中文平台名称按 UTF-8 百分号编码。变更 Provider 类型后完整重启 AstrBot。
-- MaiBot 的 `maisaka.planner.before_request` 与 `maisaka.replyer.before_model_request` 均提供 `session_id` 和 Context Items。Hook 与插件 Provider 的请求快照都保留 `meta.item_id`；原生客户端没有消费 Hook 中的任意 HTTP 头字段。`src/llm_models/request_snapshot.py::serialize_response_request_snapshot` 不导出 `trace_context`，自定义 Provider 不能假定 RPC 请求自带真实会话 ID。
-- MaiBot 的插件 Provider 使用独立 `client_type`，并承担 Context Items 与上游协议之间的转换。维护时检查工具、图像、推理、usage、重试和取消行为，以及按原生 `openai_responses` 类型分支处理的推理续写。辅助模型调用若没有提供真实会话来源，需单独核对归属与覆盖。
-- MaiBot Provider 的总超时应在实际执行端生效，覆盖排队、HTTP 重试和流读取；宿主超时结束等待不能替代执行端的时限。`src/llm_models/model_client/plugin_client.py::_invoke_provider` 将 `api_provider.timeout` 用作 RPC `timeout_ms`，维护时需与业务总时限对齐。各阶段使用同一截止时间计算剩余时限，避免每次重试或跨进程后重新计时。只有明确要求在截止前主动停止请求时，再评估 RPC 取消通知能力。
+- MaiBot 使用各实例的 [CPA 会话透传插件](../maibot-yelin/plugins/cpa_session/README.md)，将指向 CPA 的生成 provider 的 `client_type` 设为 `cpa_responses`。插件通过 Planner、Replyer 的请求 Hook 关联真实会话 ID，增加请求级头后调用原有 `OpenAIResponsesClient.get_response`；保留 provider 名称、模型名和生成参数。没有聊天会话来源的独立辅助调用使用本次逻辑请求 ID。
 
 本项目保留 Go 与 DeepSeek 官网共用 `deepseek-flash` 等模型名称，用于同名模型兜底。渠道优先级、选择与失败回退由 CPA 配置管理；排查时核对实际上游，不因名称相同就判定已选中 Go。Go 的 OpenAI 兼容 Base URL 为 `https://opencode.ai/inference/go/openai/v1`；上游模型 ID 以官网及 CPA 实际配置为准。切换普通生成渠道时，官网联网搜索与嵌入、重排序仍分别遵守本页原有路由约束。
 
