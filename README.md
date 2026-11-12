@@ -89,7 +89,7 @@ DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持�
 .\scripts\update-all.bat napcat
 ```
 
-框架更新器只在干净的 `deployment` 分支上获取各自官方 upstream 的最新稳定 Release，合入本地部署分支并同步项目依赖；NapCat 更新器只维护 NapCat。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛与蓝铃。完成兼容处理并分别提交各框架工作树后，再在 qqbot 中提交新的 submodule 指针。
+框架更新器只在干净的 `deployment` 分支上获取各自官方 upstream 的最新稳定 Release，合入本地部署分支并同步项目依赖；NapCat 更新器负责 NapCat 与机器人独立 QQ 的配对更新。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛与蓝铃。完成兼容处理并分别提交各框架工作树后，再在 qqbot 中提交新的 submodule 指针。
 
 NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命令启用，并立即开始首次检查：
 
@@ -97,7 +97,7 @@ NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命�
 .\napcat\scripts\register-auto-update.ps1
 ```
 
-任务 `QQBot-NapCat-AutoUpdate` 在用户登录期间每小时检查官方最新稳定 Release，并在登录两分钟后检查。可用 `-IntervalMinutes` 调整间隔。没有新版时保持运行；发现新版后先核对系统 QQ 实际选择的构建与架构，再验证完整 Shell 包的大小、SHA-256 和包内版本。只有这些步骤成功才切换运行包，并保留配置、插件和运行数据。QQ 程序由系统安装管理，更新器只校验兼容性。
+任务 `QQBot-NapCat-AutoUpdate` 在用户登录期间每小时检查官方最新稳定 Release，并在登录两分钟后检查。可用 `-IntervalMinutes` 调整间隔。每次先选择最新 NapCat，再从该 Release 的支持表选择最新 Windows x64 QQ 完整构建；两个包核验并准备成功后才停止进程，按 NapCat → 独立 QQ 顺序激活。NapCat 已最新时仍检查 QQ，桌面 QQ 保持独立。包缺失或远端版本倒退时明确失败并保留当前组合。选版清单、包准备、首次迁移与恢复方法见 [NapCat 维护说明](napcat/README.md#napcat-与独立-qq-更新)。
 
 发布查询、兼容支持表和运行包下载使用 TLS 1.2，沿用 Windows 系统代理与证书验证。临时连接错误最多尝试三次，重试共用原有超时预算；持续失败时保存具体原因和已有的更新暂停状态，等待下一轮检查。
 

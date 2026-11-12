@@ -8,10 +8,12 @@
 - `scripts/configure-account.ps1`：把账号清单落实到本机 OneBot 配置，并部署本地社交请求插件。
 - `scripts/ensure-account.ps1`：按账号确保配置、内置插件、进程和端口 ready。
 - `scripts/hide-account-windows.ps1`：连接完成后只隐藏精确账号进程树拥有的窗口。
-- `scripts/start-account.ps1`：兼容 NapCat OneKey 启动器的底层单账号入口。
+- `scripts/start-account.ps1`：读取项目内选版清单，通过官方 NapCat 引导程序启动独立 QQ。
 - `scripts/ensure-builtin-plugin.ps1`：校验或恢复官方内置插件。
 - `scripts/ensure-social-plugin.ps1`：部署并启用 `plugins/napcat-plugin-qqbot-social/`，从账号清单生成仅使用 NapCat 的账号集合。
-- `scripts/update.ps1`：显式更新 NapCat 最新稳定 Release，并迁移账号配置。
+- `scripts/update.ps1`：更新 NapCat 最新稳定 Release，再选择该 Release 支持的最新 Windows x64 QQ 完整构建。
+- `scripts/qq-runtime.ps1`、`scripts/update-qq.ps1`、`scripts/update-runtime.ps1`：共用的选版读取、QQ 安装包准备与更新事务支持。
+- `scripts/register-auto-update.ps1`：维护现有自动更新计划，默认每小时和用户登录两分钟后检查一次。
 
 ## 本机运行态
 
@@ -22,7 +24,34 @@
 
 这些目录可能包含 token、登录态和日志，不得强制加入 Git。更新器替换 OneKey 包后会迁移已有账号配置，并重新按 `accounts.json` 校正连接方向和端口。
 
-使用 `onekey/napcat/` 的 Shell 部署时，`start-account.ps1` 调用官方 `launcher-user.bat`，由系统注册表解析 QQ 程序位置。账号进程分开运行，不代表 QQ 程序安装独立；桌面 QQ 的热更新也会影响下一次 NapCat 启动。恢复前读取该 QQ 安装的 `versions/config.json` 中 `curVersion`，并核对实际 NapCat Release 的 `packages/napcat-core/external/napi2native.json` 支持表中的完整构建和架构。QQ 数字签名有效只证明文件签名通过，不能证明该构建可被 NapCat 注入或支持协议 Hook。
+机器人使用 `onekey/napcat/` 和 `onekey/qq/<完整构建>-x64/` 中的官方程序包；`onekey/qq-runtime.json` 记录当前配对版本。`start-account.ps1` 只读取该清单，不再通过注册表查找桌面 QQ。桌面 QQ 的安装和自动升级与机器人选版分开。各账号仍使用原有登录态和独立进程，不复制其他账号的聊天数据。
+
+启动前核对 QQ 的 `versions/config.json`、包内 `package.json` 和清单中的完整构建、架构、NapCat 版本；账号运行期间保持 QQ 选版文件的共享只读句柄，阻止内置热更新替换该文件。版本漂移或首次尚未准备独立 QQ 时停止启动，并提示执行配对更新。QQ 数字签名有效只证明文件签名通过，不能证明该构建支持 NapCat 协议 Hook。
+
+## NapCat 与独立 QQ 更新
+
+根 `scripts/update-all.ps1` 和自动计划均调用同一个 `napcat/scripts/update.ps1`。更新器查询 NapCat 最新稳定 Release，读取该 Release 的 `packages/napcat-core/external/napi2native.json`，按完整版本排序选择其中最高的 Windows x64 QQ 构建。NapCat 已是最新时仍检查独立 QQ，不再直接跳过。
+
+先下载并核验两个安装包，再停止本项目所属账号进程，按 NapCat → 独立 QQ 选择的顺序激活。NapCat 归档校验官方 Release 的大小和 SHA-256；QQ 使用官网元数据与公开下载签名接口，校验腾讯数字签名、安装包完整版本和解包后构建，仅解包，不执行系统安装器或修改桌面 QQ 注册表。解包器取自同一官方 OneKey Release 并核验归档。旧程序包、账号配置、插件和登录数据保留。
+
+官网最新 QQ 可能领先 NapCat 的支持表。此时不能把同一 `9.9.x` 系列当作兼容证据：缓存或官网无法提供目标完整构建时，在停止机器人之前报错，保留当前组合。可以把未修改且带有效腾讯签名的目标 Windows x64 完整安装包放入 `napcat/data/downloads/`（文件名以 `QQ` 开头、扩展名 `.exe`），更新器会核对包内版本后复用；不会降级为另一旧构建或借用桌面 QQ。
+
+手动更新：
+
+```powershell
+.\napcat\scripts\update.ps1 -AssumeYes
+```
+
+激活失败时先恢复 NapCat 和 QQ 选择，再按需恢复原有机器人；激活成功且需要生效时复用根入口重启云栖、夜凛和蓝铃，保留健康 NapCat 登录态，并检查 ready、OneBot 连接及本轮原生协议 Hook 日志。一次启动失败后记录状态和日志，不反复重启。自动更新遇到激活中断或失败，会暂停该 Release 的再次自动激活，需先核对 `data/updates/napcat.json` 与 `data/logs/updates/`，修复后手动运行更新入口。
+
+注册或移除计划：
+
+```powershell
+.\napcat\scripts\register-auto-update.ps1
+.\napcat\scripts\register-auto-update.ps1 -Remove
+```
+
+计划沿用 `QQBot-NapCat-AutoUpdate`，以当前登录用户的交互会话运行，不保存密码。首次注册立即检查；常规检查无更新或包准备失败时不重启机器人。
 
 ## 自动同意请求
 

@@ -18,83 +18,48 @@ if (Test-Path $chcp) {
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $OneKeyRoot = Join-Path $ProjectRoot "onekey"
 
-function Resolve-NapCatRoot {
-    $currentRoot = Join-Path $OneKeyRoot "napcat"
-    if (Test-Path (Join-Path $currentRoot "NapCatWinBootMain.exe")) {
-        return @{
-            Root = $currentRoot
-            Mode = "launcher"
-            Launcher = Join-Path $currentRoot "launcher-user.bat"
-            Exe = Join-Path $currentRoot "NapCatWinBootMain.exe"
-        }
-    }
+. (Join-Path $PSScriptRoot "qq-runtime.ps1")
+$NapCatRoot = Join-Path $OneKeyRoot "napcat"
+$NapCatExe = Join-Path $NapCatRoot "NapCatWinBootMain.exe"
+$injectPath = Join-Path $NapCatRoot "NapCatWinBootHook.dll"
+foreach ($path in @($NapCatExe, $injectPath, (Join-Path $NapCatRoot "qqnt.json"), (Join-Path $NapCatRoot "loadNapCat.js"))) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "NapCat runtime file is missing: $path" }
+}
+if ($Account -and $Account -notmatch '^\d+$') { throw "Invalid NapCat account: $Account" }
 
-    $versionedRoots = @(Get-ChildItem -Path $OneKeyRoot -Directory -Filter "NapCat.*.Shell" -ErrorAction SilentlyContinue | Where-Object {
-        Test-Path (Join-Path $_.FullName "NapCatWinBootMain.exe")
-    } | Sort-Object LastWriteTime -Descending)
-    if ($versionedRoots.Count -gt 0) {
-        return @{
-            Root = $versionedRoots[0].FullName
-            Mode = "direct"
-            Launcher = ""
-            Exe = Join-Path $versionedRoots[0].FullName "NapCatWinBootMain.exe"
-        }
-    }
-
-    $bootmain = Join-Path $OneKeyRoot "bootmain"
-    if (Test-Path (Join-Path $bootmain "NapCatWinBootMain.exe")) {
-        return @{
-            Root = $bootmain
-            Mode = "direct"
-            Launcher = ""
-            Exe = Join-Path $bootmain "NapCatWinBootMain.exe"
-        }
-    }
-
-    if (Test-Path (Join-Path $OneKeyRoot "NapCatWinBootMain.exe")) {
-        return @{
-            Root = $OneKeyRoot
-            Mode = "direct"
-            Launcher = ""
-            Exe = Join-Path $OneKeyRoot "NapCatWinBootMain.exe"
-        }
-    }
-
-    throw "NapCat executable not found under: $OneKeyRoot"
+$qqRuntime = Get-ManagedQQRuntime -OneKeyRoot $OneKeyRoot
+$selection = Get-Content -LiteralPath (Join-Path $OneKeyRoot "qq-runtime.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$napcatVersion = Get-NapCatBundleVersion -Root $NapCatRoot
+if ([string]$selection.napcat_version -ne $napcatVersion) {
+    throw "Independent QQ was selected for NapCat $($selection.napcat_version), but the runtime is $napcatVersion. Run the paired updater first."
 }
 
-$resolved = Resolve-NapCatRoot
-$NapCatRoot = $resolved.Root
-$NapCatExe = $resolved.Exe
-
-if (-not (Test-Path $NapCatExe)) {
-    throw "NapCat executable not found: $NapCatExe"
-}
-if ($resolved.Mode -eq "launcher" -and -not (Test-Path $resolved.Launcher)) {
-    throw "NapCat launcher not found: $($resolved.Launcher)"
-}
-
-Set-Location $NapCatRoot
-
-if ($NoQuickLogin -or -not $Account) {
-    if ($resolved.Mode -eq "launcher") {
-        & $resolved.Launcher
+# 各账号可同时读取；持有到启动器退出，阻止 QQ 内置热更新原子替换选版文件。
+$versionLease = [System.IO.File]::Open($qqRuntime.SelectionPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+try {
+    $lockedRuntime = Get-QQRuntimeInfo -Root $qqRuntime.Root
+    if ($lockedRuntime.Key -ne $qqRuntime.Key) { throw "QQ version changed before its startup lease was acquired." }
+    $env:NAPCAT_PATCH_PACKAGE = Join-Path $NapCatRoot "qqnt.json"
+    $env:NAPCAT_LOAD_PATH = Join-Path $NapCatRoot "loadNapCat.js"
+    $env:NAPCAT_INJECT_PATH = $injectPath
+    $env:NAPCAT_LAUNCHER_PATH = $NapCatExe
+    $env:NAPCAT_MAIN_PATH = Join-Path $NapCatRoot "napcat.mjs"
+    $bootArguments = @($qqRuntime.Exe, $injectPath)
+    if ($NoQuickLogin -or -not $Account) {
+        $env:NAPCAT_QUICK_ACCOUNT = $null
     }
     else {
-        & $NapCatExe
+        $env:NAPCAT_QUICK_ACCOUNT = $Account
+        $bootArguments += $Account
     }
-    exit $LASTEXITCODE
+    Write-Host "[NapCat] Using independent QQ $($qqRuntime.Key): $($qqRuntime.Exe)"
+    Push-Location $NapCatRoot
+    try {
+        # 使用官方引导程序的公开路径参数，不执行会 pause 的桌面 QQ 启动批处理。
+        & $NapCatExe @bootArguments
+        $exitCode = $LASTEXITCODE
+    }
+    finally { Pop-Location }
 }
-
-if (-not ($Account -match '^\d+$')) {
-    throw "Invalid NapCat account: $Account"
-}
-
-if ($resolved.Mode -eq "launcher") {
-    $env:NAPCAT_QUICK_ACCOUNT = $Account
-    & $resolved.Launcher
-}
-else {
-    & $NapCatExe $Account
-}
-exit $LASTEXITCODE
+finally { $versionLease.Dispose() }
+exit $exitCode

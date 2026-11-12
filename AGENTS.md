@@ -61,7 +61,8 @@
 - 云栖使用 reverse WebSocket client 连接 AstrBot `ws://127.0.0.1:6200/ws`。
 - 夜凛、星遥、月澄、蓝铃分别提供 forward WebSocket server `6201/6202/6203/6204`。
 - `napcat/onekey/`、`napcat/data/`、QQ 登录态、token、缓存和日志不进 Git。
-- NapCat 启动和更新只由 `napcat/scripts/` 负责；根脚本不得实现包替换或账号进程细节。
+- NapCat 启动和更新只由 `napcat/scripts/` 负责；根脚本不得实现包替换或账号进程细节。维护前读取 `napcat/README.md` 的独立 QQ 与配对更新说明。
+- 机器人使用项目内独立 QQ，禁止回退桌面 QQ。手动和定时更新均先选择 NapCat 最新稳定 Release，再按该 Release 支持表选择最高 Windows x64 完整 QQ 构建；包准备与校验成功后按 NapCat→QQ 顺序激活。未知构建、下载缺失或远端版本倒退时保留原组合并明确报错，不擅自选择另一旧版替代。
 
 ## 启动与更新
 

@@ -12,7 +12,12 @@ $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($null -ne $existing) {
     $ownedAction = @($existing.Actions | Where-Object { $_.Arguments -like ('*"{0}"*' -f $updateScript) })
-    if ($ownedAction.Count -ne 1 -or $existing.Principal.UserId -notin @($identity.Name, $identity.User.Value)) {
+    $ownerSid = [string]$existing.Principal.UserId
+    if ($ownerSid -notmatch '^S-1-') {
+        try { $ownerSid = ([System.Security.Principal.NTAccount]::new($ownerSid).Translate([System.Security.Principal.SecurityIdentifier])).Value }
+        catch { throw "无法确认计划任务 $taskName 的运行用户，未改动任务：$($_.Exception.Message)" }
+    }
+    if ($ownedAction.Count -ne 1 -or $ownerSid -ne $identity.User.Value) {
         throw "计划任务 $taskName 属于其他部署或用户。请先核对任务，避免覆盖。"
     }
 }
@@ -32,8 +37,8 @@ $action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR "System32\Wind
 $hourly = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes($IntervalMinutes) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
 $logon = New-ScheduledTaskTrigger -AtLogOn -User $identity.User.Value
 $logon.Delay = "PT2M"
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
-$task = New-ScheduledTask -Action $action -Trigger @($hourly, $logon) -Principal $principal -Settings $settings -Description "定期检查 NapCat 官方稳定版，校验 QQ 兼容性后自动更新，并在需要时恢复机器人连接。"
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
+$task = New-ScheduledTask -Action $action -Trigger @($hourly, $logon) -Principal $principal -Settings $settings -Description "定期检查 NapCat 官方稳定版，先更新 NapCat，再切换其支持的最新独立 QQ 构建；需要时恢复机器人连接，不更新桌面 QQ。"
 Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
 Write-Host "已启用 $taskName：每 $IntervalMinutes 分钟检查一次，并在用户登录两分钟后检查。首次检查已启动。"

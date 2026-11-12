@@ -1,77 +1,36 @@
-﻿<#
-NapCat 更新器的私有支持函数：解析实际 QQ、校验目标版本、保存恢复数据并调用根重启入口。
-由 update.ps1 点源加载，复用其路径、日志和事务状态。
-#>
-
-function Get-NapCatBundleVersion {
-    <# 从运行包的版本常量读取版本，避免把安装器元数据或历史日志当成实际版本。 #>
-    param([string]$Root)
-
-    $bundle = Join-Path $Root "napcat.mjs"
-    if (-not (Test-Path -LiteralPath $bundle)) {
-        return ""
-    }
-    $source = Get-Content -LiteralPath $bundle -Raw -Encoding UTF8
-    $match = [regex]::Match($source, '["''](?<version>\d+\.\d+\.\d+)["'']\s*\|\|\s*["'']1\.0\.0-dev["'']')
-    if (-not $match.Success) {
-        throw "Cannot read NapCat version from $bundle. Update the version parser before replacing this package."
-    }
-    return $match.Groups["version"].Value
-}
-
-function Get-InstalledQQRuntime {
-    <# 按官方 launcher-user.bat 使用的注册表入口解析 QQ，并读取热更新实际选择的构建。 #>
-    $key = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQ"
-    $entry = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
-    $root = Split-Path -Parent ([string]$entry.UninstallString).Trim('"')
-    $exe = Join-Path $root "QQ.exe"
-    if (-not (Test-Path -LiteralPath $exe)) {
-        throw "QQ executable was not found at $exe. Repair the QQ installation before updating NapCat."
-    }
-
-    $selection = Join-Path $root "versions\config.json"
-    if (Test-Path -LiteralPath $selection) {
-        $config = Get-Content -LiteralPath $selection -Raw -Encoding UTF8 | ConvertFrom-Json
-        $version = [string]$config.curVersion
-        if ($version -notmatch '^\d+\.\d+\.\d+-\d+$') {
-            throw "Invalid QQ curVersion in $selection. NapCat was not stopped."
-        }
-        $packagePath = Join-Path $root "versions\$version\resources\app\package.json"
-    }
-    else {
-        $packagePath = Join-Path $root "resources\app\package.json"
-    }
-    $package = Get-Content -LiteralPath $packagePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($selection -and (Test-Path -LiteralPath $selection) -and [string]$package.version -ne $version) {
-        throw "QQ package version does not match $selection. NapCat was not stopped."
-    }
-    $version = [string]$package.version
-    $arch = [string]$package.eleArch
-    if ($version -notmatch '^\d+\.\d+\.\d+-\d+$' -or $arch -notin @("x64", "arm64", "ia32")) {
-        throw "Cannot determine the QQ build and architecture from $packagePath. NapCat was not stopped."
-    }
-    return [pscustomobject]@{ Version = $version; Architecture = $arch; Key = "$version-$arch"; Exe = $exe }
-}
+﻿# NapCat 更新器的 HTTP、归档、状态和重启支持；仅由 update.ps1 点源加载。
+. (Join-Path $PSScriptRoot "qq-runtime.ps1")
 
 function Invoke-NapCatWebRequest {
     <#
-    在原有超时预算内执行 GitHub GET，仅对临时连接错误最多尝试三次。
+    在原有超时预算内请求官方发布与下载接口，仅对临时连接错误最多尝试三次。
     当前进程指定 TLS 1.2，沿用 Windows 系统代理和证书验证，结束时恢复协议设置。
     文件重试从头覆盖下载；完整性仍由更新器后续的大小和 SHA-256 校验确认。
     #>
-    param([uri]$Uri, [int]$TimeoutSeconds = 30, [string]$OutFile = "")
+    param(
+        [uri]$Uri, [int]$TimeoutSeconds = 30, [string]$OutFile = "",
+        [hashtable]$JsonBody, [hashtable]$RequestHeaders = @{}
+    )
 
     $previousTls = [System.Net.ServicePointManager]::SecurityProtocol
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-        Write-Step "GitHub request: host=$($Uri.DnsSafeHost); TLS=1.2; timeout=${TimeoutSeconds}s."
+        Write-Step "HTTP request: host=$($Uri.DnsSafeHost); TLS=1.2; timeout=${TimeoutSeconds}s."
         for ($attempt = 1; $attempt -le 3; $attempt++) {
             $remaining = [int][Math]::Floor($TimeoutSeconds - $timer.Elapsed.TotalSeconds)
             if ($remaining -lt 1) {
-                throw "GitHub request exceeded ${TimeoutSeconds}s: $($Uri.DnsSafeHost)."
+                throw "HTTP request exceeded ${TimeoutSeconds}s: $($Uri.DnsSafeHost)."
             }
-            $request = @{ Uri = $Uri.AbsoluteUri; Headers = $headers; TimeoutSec = $remaining; ErrorAction = "Stop" }
+            $httpHeaders = @{}
+            foreach ($key in $headers.Keys) { $httpHeaders[$key] = $headers[$key] }
+            foreach ($key in $RequestHeaders.Keys) { $httpHeaders[$key] = $RequestHeaders[$key] }
+            $request = @{ Uri = $Uri.AbsoluteUri; Headers = $httpHeaders; TimeoutSec = $remaining; ErrorAction = "Stop" }
+            if ($null -ne $JsonBody) {
+                $request.Method = "Post"
+                $request.ContentType = "application/json"
+                $request.Body = $JsonBody | ConvertTo-Json -Depth 5 -Compress
+            }
             try {
                 if ($OutFile) {
                     Invoke-WebRequest @request -UseBasicParsing -OutFile $OutFile | Out-Null
@@ -95,13 +54,13 @@ function Invoke-NapCatWebRequest {
                 $inner = $failure
                 while ($null -ne $inner.InnerException) { $inner = $inner.InnerException }
                 $reason = [regex]::Replace($inner.Message, 'https?://\S+', '<url>')
-                Write-Step "GitHub request failed: host=$($Uri.DnsSafeHost); attempt=$attempt; status=$($failure.Status); reason=$reason"
+                Write-Step "HTTP request failed: host=$($Uri.DnsSafeHost); attempt=$attempt; status=$($failure.Status); reason=$reason"
                 $delay = 2 * $attempt
                 if (-not $transient -or $attempt -eq 3 -or ($TimeoutSeconds - $timer.Elapsed.TotalSeconds) -le ($delay + 1)) {
-                    throw [System.IO.IOException]::new("GitHub request to $($Uri.DnsSafeHost) failed after $attempt attempt(s): $($failure.Status); $reason", $failure)
+                    throw [System.IO.IOException]::new("HTTP request to $($Uri.DnsSafeHost) failed after $attempt attempt(s): $($failure.Status); $reason", $failure)
                 }
                 # 只有可重试的连接错误才退避；等待与后续请求共用同一截止时间。
-                Write-Step "Retrying GitHub connection in ${delay}s; the original timeout budget is retained."
+                Write-Step "Retrying HTTP connection in ${delay}s; the original timeout budget is retained."
                 Start-Sleep -Seconds $delay
             }
         }
@@ -111,20 +70,15 @@ function Invoke-NapCatWebRequest {
     }
 }
 
-function Assert-NapCatQQCompatibility {
-    <# 使用目标 Release 自己的协议支持表校验完整构建；读取失败时保留当前运行。 #>
-    param([string]$Tag, [object]$Runtime)
+function Get-NapCatQQMatrix {
+    <# 只读取目标 Release 自己的支持表；未知构建不得由桌面 QQ 或模型名称推断。 #>
+    param([string]$Tag)
 
     $ref = [uri]::EscapeDataString($Tag)
     $uri = "https://api.github.com/repos/NapNeko/NapCatQQ/contents/packages/napcat-core/external/napi2native.json?ref=$ref"
     $file = Invoke-NapCatWebRequest -Uri $uri
     $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($file.content))
-    $matrix = $json | ConvertFrom-Json
-    $entry = $matrix.PSObject.Properties[$Runtime.Key]
-    if ($null -eq $entry -or -not $entry.Value.send -or -not $entry.Value.recv) {
-        throw "NapCat $Tag does not support QQ $($Runtime.Key). Current processes and system QQ were left unchanged."
-    }
-    Write-Step "QQ compatibility confirmed: $($Runtime.Key) is supported by $Tag."
+    return ($json | ConvertFrom-Json)
 }
 
 function Move-NapCatUpdateArtifact {
