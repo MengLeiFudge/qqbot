@@ -22,6 +22,8 @@
 
 这些目录可能包含 token、登录态和日志，不得强制加入 Git。更新器替换 OneKey 包后会迁移已有账号配置，并重新按 `accounts.json` 校正连接方向和端口。
 
+使用 `onekey/napcat/` 的 Shell 部署时，`start-account.ps1` 调用官方 `launcher-user.bat`，由系统注册表解析 QQ 程序位置。账号进程分开运行，不代表 QQ 程序安装独立；桌面 QQ 的热更新也会影响下一次 NapCat 启动。恢复前读取该 QQ 安装的 `versions/config.json` 中 `curVersion`，并核对实际 NapCat Release 的 `packages/napcat-core/external/napi2native.json` 支持表中的完整构建和架构。QQ 数字签名有效只证明文件签名通过，不能证明该构建可被 NapCat 注入或支持协议 Hook。
+
 ## 自动同意请求
 
 所有账号自动同意好友申请、邀请机器人入群和成员加群申请。云栖由 AstrBot 的 `astrbot_plugin_qqbot_features` 处理；夜凛、蓝铃由各自 MaiBot 的 `napcat_adapter` 接入层处理；账号清单中未绑定框架的账号由 `napcat-plugin-qqbot-social` 处理，避免重复执行。
@@ -43,7 +45,7 @@
 .\scripts\ensure-account.ps1 -Target yuecheng
 ```
 
-首次登录可能需要二维码。再次启动时，`ensure-account.ps1` 先读取当前账号运行日志；检测到 QQ 离线会只重启该账号一次，重新进入登录流程，健康账号继续复用。多个账号需要新启动时，共用登录锁逐个等待登录完成，避免覆盖同一个二维码图片；已在线账号的复用仍可并行。OneBot 端口存在不能覆盖日志中明确的离线或待扫码状态。根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口；脚本不会按窗口标题、进程名或 QQ 号扫描其他进程。失败或超时时不收窗。快速登录成功标记位于 `data/quick-login/<QQ>.ready`；标记和实际登录态均只属于本机。
+首次登录可能需要二维码。再次启动时，`ensure-account.ps1` 先读取当前账号运行日志；检测到 QQ 离线或明确的 `Process exited.` 时，只重建该账号一次，重新进入登录流程。官方启动器可能在 QQ 退出后停在 `pause`，因此启动器进程仍存在不能证明 QQ 可用；新实例再次退出或离线时明确报错，不继续重启。健康账号继续复用。多个账号需要新启动时，共用登录锁逐个等待登录完成，避免覆盖同一个二维码图片；已在线账号的复用仍可并行。OneBot 端口存在不能覆盖日志中明确的离线或待扫码状态。根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口；脚本不会按窗口标题、进程名或 QQ 号扫描其他进程。失败或超时时不收窗。快速登录成功标记位于 `data/quick-login/<QQ>.ready`；标记和实际登录态均只属于本机。
 
 需要手动重新打开蓝铃登录窗口时，在 `D:\project\qqbot` 的 PowerShell 中运行：
 

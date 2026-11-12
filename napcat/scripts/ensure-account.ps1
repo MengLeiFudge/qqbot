@@ -166,7 +166,12 @@ function Get-NapCatLoginStatus {
     $qrLines = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $lines) {
         $line = $line -replace '\x1b\[[0-?]*[ -/]*[@-~]', ''
-        if ($line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[info\].*\u8d26\u53f7\u72b6\u6001\u53d8\u66f4\u4e3a\u79bb\u7ebf\s*$') {
+        # The official launcher pauses after QQ exits, so its live process alone is not a usable login.
+        if ($line -match '^Process exited\.\s*$') {
+            $login.State = "ProcessExited"
+            $qrLines.Clear()
+        }
+        elseif ($line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[info\].*\u8d26\u53f7\u72b6\u6001\u53d8\u66f4\u4e3a\u79bb\u7ebf\s*$') {
             $login.State = "Offline"
             $qrLines.Clear()
         }
@@ -212,7 +217,7 @@ function Wait-AccountReady {
     .PARAMETER LogPath
     Current stdout path; when omitted, resolves a log created for the reused launcher.
     .OUTPUTS
-    True when ready; false when QQ reports offline so the caller can replace a stale runtime once.
+    True when ready; false when QQ reports offline or exited so the caller can replace a stale runtime once.
     #>
     param(
         [System.Diagnostics.Process[]]$Processes,
@@ -246,6 +251,10 @@ function Wait-AccountReady {
         }
         $login = Get-NapCatLoginStatus -LogPath $LogPath
         # A live OneBot socket survives QQ logout; inspect account state before accepting the port.
+        if ($login.State -eq "ProcessExited") {
+            Write-Host "[NapCat] $($item.label) ($account) QQ process has exited; the remaining launcher cannot provide OneBot port $port."
+            return $false
+        }
         if ($login.State -eq "Offline") {
             Write-Host "[NapCat] $($item.label) ($account) is logged out; its OneBot port does not indicate a valid QQ login."
             return $false
@@ -298,7 +307,7 @@ if (-not $ForceRestart) {
                 $item.label, $timer.Elapsed.TotalSeconds, ($readyProcessIds -join ','), $LogRoot)
             exit 0
         }
-        Write-Host "[NapCat] Restarting only $($item.label)'s offline runtime once to restore the QQ login prompt."
+        Write-Host "[NapCat] Restarting only $($item.label)'s stale runtime once to restore the QQ login prompt."
     }
 }
 
@@ -377,7 +386,7 @@ try {
     Write-Host "[NapCat] Starting $($item.label) account $account. pid=$($process.Id)"
 
     if (-not (Wait-AccountReady -Processes @($process) -LogPath $stdoutLog)) {
-        throw "NapCat account $account logged out during startup. The runtime was not restarted again. Check its login window and logs: $LogRoot"
+        throw "NapCat account $account stopped or logged out during startup. The runtime was not restarted again. Check its login window and logs: $LogRoot"
     }
     Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
     $logSummary = if ($UseChildWindow) { "child window ; $stdoutLog" } else { "$stdoutLog ; $stderrLog" }
