@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [ValidateSet("yunqi", "yelin", "xingyao", "yuecheng", "lanling")]
     [string]$Target,
@@ -146,18 +146,42 @@ function Stop-AccountProcesses {
     }
 }
 
+function Get-AccountLogPath {
+    <#
+    .SYNOPSIS
+    查找当前账号启动后生成的日志，排除上一次运行留下的登录提示。
+    .PARAMETER Processes
+    当前账号启动器进程，用其启动时间筛选日志。
+    .OUTPUTS
+    最新匹配日志的完整路径；没有匹配日志时返回空字符串。
+    #>
+    param([System.Diagnostics.Process[]]$Processes)
+
+    if ($Processes.Count -eq 0) {
+        return ""
+    }
+    $started = ($Processes | Sort-Object StartTime | Select-Object -First 1).StartTime
+    $log = Get-ChildItem -LiteralPath $LogRoot -Filter "napcat-*.out.log" -File | Where-Object {
+        $_.CreationTime -ge $started.AddSeconds(-2) -and $_.LastWriteTime -ge $started
+    } | Sort-Object CreationTime -Descending | Select-Object -First 1
+    if ($log) {
+        return $log.FullName
+    }
+    return ""
+}
+
 function Get-NapCatLoginStatus {
     <#
     .SYNOPSIS
-    Extracts login progress and a printable QR code without forwarding private log content.
+    只提取登录状态和二维码，避免转发日志中的私人消息。
     .PARAMETER LogPath
-    Stdout from the current account runtime, including UTF-16 output from a visible window.
+    当前账号的标准输出日志；可见子窗口使用 UTF-16 日志。
     .OUTPUTS
-    Login state, local QR image path, refresh identity and QR block characters only.
+    登录状态、二维码图片路径、刷新标记、生成时间和二维码方块字符。
     #>
     param([string]$LogPath)
 
-    $login = [pscustomobject]@{ State = "Unknown"; QrPath = ""; QrStamp = ""; QrCode = "" }
+    $login = [pscustomobject]@{ State = "Unknown"; QrPath = ""; QrStamp = ""; QrCode = ""; QrIssuedAt = [DateTime]::MinValue }
     if (-not $LogPath -or -not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
         return $login
     }
@@ -200,24 +224,39 @@ function Get-NapCatLoginStatus {
         elseif ($line -match '^\[NapCat\] \[WebUi\] .*\u767b\u5f55\u5931\u8d25:') {
             $login.State = "QuickLoginFailed"
         }
+        elseif ($line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[error\] \[Core\] \[Login\] Login Error') {
+            # 过期后 NapCat 会自行取新码；其他错误不会触发这条刷新路径。
+            $login.State = if ($line -match 'ErrType:\s*1\s+ErrCode:\s*3\s*$') { "RefreshingQr" } else { "LoginFailed" }
+            $qrLines.Clear()
+        }
         elseif ($login.State -eq "WaitingForQr" -and $line -match '^[\u2580-\u259f ]+$' -and $line.Trim()) {
             [void]$qrLines.Add($line.TrimEnd())
         }
     }
     $login.QrCode = $qrLines -join [Environment]::NewLine
+    if ($login.QrStamp -match '^(?<time>\d{2}-\d{2} \d{2}:\d{2}:\d{2})') {
+        $issuedAt = [DateTime]::MinValue
+        if ([DateTime]::TryParseExact($Matches.time, "MM-dd HH:mm:ss", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$issuedAt)) {
+            # 日志没有年份；跨年复用旧进程时，十二月的记录属于上一年。
+            if ($issuedAt -gt (Get-Date).AddDays(1)) {
+                $issuedAt = $issuedAt.AddYears(-1)
+            }
+            $login.QrIssuedAt = $issuedAt
+        }
+    }
     return $login
 }
 
 function Wait-AccountReady {
     <#
     .SYNOPSIS
-    Waits for owned OneBot readiness, excluding interactive QR login from the startup timeout.
+    等待账号所属的 OneBot 连接就绪，扫码等待不计入启动超时。
     .PARAMETER Processes
-    Account launcher processes whose lifetime bounds the login wait.
+    当前账号启动器进程；进程全部退出时停止等待并报错。
     .PARAMETER LogPath
-    Current stdout path; when omitted, resolves a log created for the reused launcher.
+    当前标准输出日志；省略时查找复用启动器对应的日志。
     .OUTPUTS
-    True when ready; false when QQ reports offline or exited so the caller can replace a stale runtime once.
+    就绪返回 true；离线、退出、登录失败或二维码停止刷新时返回 false，由调用方恢复旧实例一次。
     #>
     param(
         [System.Diagnostics.Process[]]$Processes,
@@ -231,14 +270,7 @@ function Wait-AccountReady {
         [void]$run.Handle
     }
     if (-not $LogPath) {
-        $started = ($Processes | Sort-Object StartTime | Select-Object -First 1).StartTime
-        # Redirection creates the log just before its launcher. Exclude earlier runs' login prompts.
-        $log = Get-ChildItem -LiteralPath $LogRoot -Filter "napcat-*.out.log" -File | Where-Object {
-            $_.CreationTime -ge $started.AddSeconds(-2) -and $_.LastWriteTime -ge $started
-        } | Sort-Object CreationTime -Descending | Select-Object -First 1
-        if ($log) {
-            $LogPath = $log.FullName
-        }
+        $LogPath = Get-AccountLogPath -Processes $Processes
     }
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -259,7 +291,16 @@ function Wait-AccountReady {
             Write-Host "[NapCat] $($item.label) ($account) is logged out; its OneBot port does not indicate a valid QQ login."
             return $false
         }
-        if ($login.State -notin @("WaitingForQr", "QuickLoginFailed") -and (Test-AccountConnectionReady)) {
+        if ($login.State -eq "LoginFailed") {
+            Write-Host "[NapCat] $($item.label) QQ 登录失败，当前二维码已不可用。日志：$LogPath"
+            return $false
+        }
+        # 正常过期约两分钟就会生成下一张码；额外留一分钟，识别停止刷新的登录。
+        if ($login.State -in @("WaitingForQr", "RefreshingQr") -and $login.QrIssuedAt -ne [DateTime]::MinValue -and (Get-Date) -ge $login.QrIssuedAt.AddMinutes(3)) {
+            Write-Host "[NapCat] $($item.label) 的二维码已超过三分钟没有刷新，需要重新建立登录。日志：$LogPath"
+            return $false
+        }
+        if ($login.State -in @("Unknown", "LoggedIn") -and (Test-AccountConnectionReady)) {
             return $true
         }
         if ($login.State -eq "WaitingForQr") {
@@ -276,9 +317,12 @@ function Wait-AccountReady {
                     Write-Host $login.QrCode
                 }
                 if ($login.QrPath) {
-                    Write-Host "[NapCat] Current QR image for $($item.label) ($account): $($login.QrPath). Reopen this image after each refresh."
+                    Write-Host "[NapCat] 请扫描本窗口最新显示的二维码。图片路径由多个账号共用，已打开的旧图片可能过期：$($login.QrPath)"
                 }
             }
+        }
+        elseif ($login.State -eq "RefreshingQr" -and $lastState -ne $login.State) {
+            Write-Host "[NapCat] $($item.label) 的二维码已过期，正在等待新码；请以接下来显示的二维码为准。"
         }
         elseif ($login.State -eq "LoggedIn" -and $waitingForQr) {
             $waitingForQr = $false
@@ -299,20 +343,20 @@ function Wait-AccountReady {
 if (-not $ForceRestart) {
     $readyProcessIds = @(Get-AccountProcessIds -RootsOnly | Sort-Object -Unique)
     if ($readyProcessIds.Count -gt 0) {
-        Write-Host "[NapCat] Reusing $($item.label) login; waiting for OneBot port $port."
         $runs = @(Get-Process -Id $readyProcessIds -ErrorAction SilentlyContinue)
-        if (Wait-AccountReady -Processes $runs) {
+        $login = Get-NapCatLoginStatus -LogPath (Get-AccountLogPath -Processes $runs)
+        # 只让已经就绪的账号在锁外复用；重新扫码也必须进入登录队列。
+        if ($login.State -in @("Unknown", "LoggedIn") -and (Test-AccountConnectionReady)) {
             Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
             Write-Host ("[NapCat] {0} ready in {1:F2}s; existing PIDs: {2}. Logs: {3}" -f `
                 $item.label, $timer.Elapsed.TotalSeconds, ($readyProcessIds -join ','), $LogRoot)
             exit 0
         }
-        Write-Host "[NapCat] Restarting only $($item.label)'s stale runtime once to restore the QQ login prompt."
+        Write-Host "[NapCat] $($item.label) 的现有连接尚未就绪，将进入登录队列检查当前登录。"
     }
 }
 
-# Accounts share one QR image. Serialize new logins even when stale ready markers
-# made the root launcher start account workers in parallel; healthy reuse stays parallel.
+# 新启动和已有进程的扫码等待共用登录锁，已在线账号仍可并行复用。
 $loginMutex = [System.Threading.Mutex]::new($false, "Local\QQBot-NapCat-Login")
 $ownsLoginMutex = $false
 try {

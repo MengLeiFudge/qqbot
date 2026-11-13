@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Position = 0)]
     [ValidateSet("all", "yunqi", "yelin", "lanling")]
     [string]$Target = "all",
@@ -18,26 +18,7 @@ $AccountsPath = Join-Path $WorkspaceRoot "napcat\accounts.json"
 $NapCatEnsureScript = Join-Path $WorkspaceRoot "napcat\scripts\ensure-account.ps1"
 $NapCatHideScript = Join-Path $WorkspaceRoot "napcat\scripts\hide-account-windows.ps1"
 
-if (-not (Test-Path $AccountsPath)) {
-    throw "Account manifest not found: $AccountsPath"
-}
-if (-not (Test-Path $NapCatEnsureScript)) {
-    throw "NapCat account launcher not found: $NapCatEnsureScript"
-}
-if (-not (Test-Path $NapCatHideScript)) {
-    throw "NapCat window controller not found: $NapCatHideScript"
-}
 
-$manifest = Get-Content -Path $AccountsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($Target -eq "all") {
-    $accounts = @($manifest.accounts | Where-Object { $_.autoStart -eq $true })
-}
-else {
-    $accounts = @($manifest.accounts | Where-Object { $_.target -eq $Target })
-}
-if ($accounts.Count -eq 0) {
-    throw "No account is configured for target '$Target'."
-}
 
 function Invoke-PowerShellScript {
     param(
@@ -195,35 +176,75 @@ function Start-AccountWorker {
 }
 
 function Wait-AccountWorkers {
+    <#
+    .SYNOPSIS
+    等待每个已打开的账号窗口退出，收集失败后统一交给主窗口处理。
+    #>
     param([object[]]$Workers)
 
     $failures = [System.Collections.Generic.List[string]]::new()
-    $pending = @($Workers)
-    # Stage owners enforce timeouts; an account can legitimately wait indefinitely for a QR scan.
+    $pending = [System.Collections.Generic.List[object]]::new()
+    foreach ($worker in $Workers) {
+        $pending.Add($worker)
+    }
+    # 扫码由账号窗口等待；主窗口的生命周期覆盖所有已打开的账号窗口。
     while ($pending.Count -gt 0) {
-        foreach ($worker in $pending) {
-            if ($worker.Process.HasExited) {
-                if ($worker.Process.ExitCode -ne 0) {
-                    [void]$failures.Add("$($worker.Account.label)=$($worker.Process.ExitCode)")
-                }
-                $worker.Process.Dispose()
-                $pending = @($pending | Where-Object { $_ -ne $worker })
+        for ($i = $pending.Count - 1; $i -ge 0; $i--) {
+            $worker = $pending[$i]
+            if (-not $worker.Process.WaitForExit(0)) {
+                continue
             }
+            $exitCode = $worker.Process.ExitCode
+            Write-Host "[qqbot] $($worker.Account.label) startup window exited with code $exitCode."
+            if ($exitCode -ne 0) {
+                [void]$failures.Add("$($worker.Account.label)=$exitCode")
+            }
+            $worker.Process.Dispose()
+            $pending.RemoveAt($i)
         }
-        if ($pending.Count -eq 0) {
-            break
+        if ($pending.Count -gt 0) {
+            Start-Sleep -Milliseconds 100
         }
-        Start-Sleep -Milliseconds 100
     }
     if ($failures.Count -gt 0) {
         throw "Account startup worker failed: $($failures -join ', ')."
     }
 }
 
-if ($AccountWorker) {
-    try {
+$startupLog = ""
+$transcriptStarted = $false
+try {
+    $logRoot = Join-Path $WorkspaceRoot "logs\startup"
+    New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
+    $role = if ($AccountWorker) { $Target } else { "main-$Target" }
+    $startupLog = Join-Path $logRoot ("start-{0}-{1}-{2}.log" -f $role, (Get-Date -Format "yyyyMMdd-HHmmss"), $PID)
+    Start-Transcript -LiteralPath $startupLog | Out-Null
+    $transcriptStarted = $true
+    Write-Host "[qqbot] 启动日志：$startupLog"
+
+    if (-not (Test-Path $AccountsPath)) {
+        throw "Account manifest not found: $AccountsPath"
+    }
+    if (-not (Test-Path $NapCatEnsureScript)) {
+        throw "NapCat account launcher not found: $NapCatEnsureScript"
+    }
+    if (-not (Test-Path $NapCatHideScript)) {
+        throw "NapCat window controller not found: $NapCatHideScript"
+    }
+    $manifest = Get-Content -Path $AccountsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($Target -eq "all") {
+        $accounts = @($manifest.accounts | Where-Object { $_.autoStart -eq $true })
+    }
+    else {
+        $accounts = @($manifest.accounts | Where-Object { $_.target -eq $Target })
+    }
+    if ($accounts.Count -eq 0) {
+        throw "No account is configured for target '$Target'."
+    }
+
+    if ($AccountWorker) {
         if ($Target -eq "all" -or $accounts.Count -ne 1) {
-            throw "Account worker mode requires exactly one yunqi or yelin target."
+            throw "Account worker mode requires exactly one yunqi, yelin or lanling target."
         }
         if ($WindowTitle) {
             try {
@@ -236,24 +257,47 @@ if ($AccountWorker) {
         $summary = Invoke-AccountStart -Account $accounts[0]
         Write-Host "[qqbot] READY $summary"
         Write-Host ("[qqbot] $Target ready in {0:F2}s. Closing this window." -f $timer.Elapsed.TotalSeconds)
-        exit 0
     }
-    catch {
-        Write-Host "[qqbot] Startup failed: $($_.Exception.Message)" -ForegroundColor Red
-        if (-not $NoPauseOnFailure) {
-            [void](Read-Host "Press Enter to close this window")
+    else {
+        Write-Host "[qqbot] Starting target '$Target'."
+        Write-Host "[qqbot] 正在打开账号窗口；主窗口会等待所有账号窗口结束。"
+        $workers = [System.Collections.Generic.List[object]]::new()
+        $launchFailures = [System.Collections.Generic.List[string]]::new()
+        foreach ($account in $accounts) {
+            try {
+                $worker = Start-AccountWorker -Account $account
+                $workers.Add($worker)
+            }
+            catch {
+                [void]$launchFailures.Add("$($account.label): $($_.Exception.Message)")
+                Write-Host "[qqbot] 无法打开 $($account.label) 的启动窗口：$($_.Exception.Message)" -ForegroundColor Red
+            }
         }
-        exit 1
+        # 部分窗口打开失败时，也要先等待已经打开的窗口结束，再汇总错误。
+        Wait-AccountWorkers -Workers $workers.ToArray()
+        if ($launchFailures.Count -gt 0) {
+            throw "Account startup window failed to open: $($launchFailures -join '; ')."
+        }
+
+        Write-Host ("[qqbot] Target '$Target' is ready in {0:F2}s." -f $timer.Elapsed.TotalSeconds)
+        foreach ($account in $accounts) {
+            $summary = "{0}({1}) framework={2} onebot={3}" -f $account.label, $account.qq, $account.framework.name, $account.oneBotPort
+            Write-Host "[qqbot] READY $summary"
+        }
     }
+    exit 0
 }
-
-Write-Host "[qqbot] Starting target '$Target'."
-Write-Host "[qqbot] Opening all account windows. NapCat queues new logins to protect the shared QR image."
-$workers = @($accounts | ForEach-Object { Start-AccountWorker -Account $_ })
-Wait-AccountWorkers -Workers $workers
-
-Write-Host ("[qqbot] Target '$Target' is ready in {0:F2}s." -f $timer.Elapsed.TotalSeconds)
-foreach ($account in $accounts) {
-    $summary = "{0}({1}) framework={2} onebot={3}" -f $account.label, $account.qq, $account.framework.name, $account.oneBotPort
-    Write-Host "[qqbot] READY $summary"
+catch {
+    Write-Host "[qqbot] Startup failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host $_.InvocationInfo.PositionMessage
+    Write-Host "[qqbot] 启动日志：$startupLog"
+    if (-not $NoPauseOnFailure) {
+        [void](Read-Host "按 Enter 关闭此窗口")
+    }
+    exit 1
+}
+finally {
+    if ($transcriptStarted) {
+        Stop-Transcript | Out-Null
+    }
 }

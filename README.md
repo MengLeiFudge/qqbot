@@ -54,7 +54,7 @@ Set-Location D:\project\qqbot
 .\scripts\start-all.bat lanling
 ```
 
-`all` 启动云栖、夜凛和蓝铃。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛和蓝铃先启动各自 NapCat `6201/6204` 服务，再启动对应 MaiBot 并等待 adapter 建立连接。根入口保留主控窗口，并同时为每个账号打开独立启动窗口（`all` 共四个窗口）；首次登录需要扫码时，各账号窗口会保留到自身登录和 OneBot 连接完成，主控窗口等待所有账号完成后关闭。需要新登录的账号由 NapCat 登录锁依次放行，其余账号窗口显示等待提示。成功后账号 owned 的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
+`all` 启动云栖、夜凛和蓝铃。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛和蓝铃先启动各自 NapCat `6201/6204` 服务，再启动对应 MaiBot 并等待 adapter 建立连接。根入口保留主控窗口，并同时为每个账号打开独立启动窗口（`all` 共四个窗口）；账号窗口等待自身登录和 OneBot 连接完成，主控窗口等待所有已打开的账号窗口结束后汇总结果。部分窗口打开失败时，主控仍等待其余窗口结束。成功后账号所属的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。主控和账号启动日志保存在 `logs/startup/`。扫码和失效登录的处理见 [NapCat 登录说明](napcat/README.md#固定端口)。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
 
 PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。日常启动与重启复用各项目已有的 `.venv`，不重复同步或安装依赖；环境缺失时才执行首次安装，`-SkipInstall` 则在环境缺失时直接失败。更新依赖使用对应项目的更新入口或显式 `uv` 安装命令。
 

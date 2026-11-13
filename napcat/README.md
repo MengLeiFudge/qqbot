@@ -76,7 +76,11 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 .\scripts\ensure-account.ps1 -Target yuecheng
 ```
 
-首次登录可能需要二维码。再次启动时，`ensure-account.ps1` 先读取当前账号运行日志；检测到 QQ 离线或明确的 `Process exited.` 时，只重建该账号一次，重新进入登录流程。官方启动器可能在 QQ 退出后停在 `pause`，因此启动器进程仍存在不能证明 QQ 可用；新实例再次退出或离线时明确报错，不继续重启。健康账号继续复用。多个账号需要新启动时，共用登录锁逐个等待登录完成，避免覆盖同一个二维码图片；已在线账号的复用仍可并行。OneBot 端口存在不能覆盖日志中明确的离线或待扫码状态。根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口；脚本不会按窗口标题、进程名或 QQ 号扫描其他进程。失败或超时时不收窗。快速登录成功标记位于 `data/quick-login/<QQ>.ready`；标记和实际登录态均只属于本机。
+首次登录可能需要二维码。`ensure-account.ps1` 先读取当前账号运行日志；已在线且连接就绪的账号直接复用。其他账号进入共用登录队列，等待当前账号完成登录；已有进程需要重新扫码时也会进入队列。检测到 QQ 离线、退出、登录错误，或二维码超过三分钟没有刷新时，只重建该账号一次。新实例再次失败时明确报错，不继续重启。OneBot 端口存在不能覆盖日志中明确的离线、登录失败或待扫码状态。快速登录成功标记位于 `data/quick-login/<QQ>.ready`，只属于本机。
+
+扫码时请使用账号启动窗口里最新显示的二维码。二维码正常过期后，窗口会提示等待刷新并展示新码；`cache/qrcode.png` 由多个账号共用，已打开的图片不会自动更新，其他账号重新登录时也可能覆盖它。等待扫码期间不要重复启动。
+
+根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口。失败或超时时不收窗。主控与账号窗口的启动日志见根目录 `logs/startup/`，NapCat 原始日志见 `data/logs/accounts/<Target>/`。
 
 需要手动重新打开蓝铃登录窗口时，在 `D:\project\qqbot` 的 PowerShell 中运行：
 
