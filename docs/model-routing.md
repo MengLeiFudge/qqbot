@@ -33,11 +33,13 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 ## 回复耗时排查
 
-所有机器人保留各自配置的发送速度。每轮首条公开消息的实际等待为 `max(0, 该段原有等待 - 本轮已耗时)`：原等待 3.6 秒、已思考 1 秒时再等 2.6 秒；已思考 5 秒时直接发送。只有首条使用这份抵扣，发送后的同轮分段和研究补充按原有速度重新计算等待；新的用户表达进入新一轮后重新记录起点。失败或取消不能伪造发送成功，也不能重复发送结果未知的消息。
+回复耗时优化以事实准确、原有人设、上下文理解和证据完整为前提，保持“生成→原有后处理分段→发送”的完整流程。MaiBot 的生成阶段使用 Planner 决策和原生 Replyer 组织正文；后处理分段由框架原有流程负责。涉及生成机制、提示词或思考强度的变化，先说明实际输入、预期收益和质量取舍，再在用户授权范围内实施。模型参数一致、调用更少或简单数字题正确都不足以证明质量等价。
 
-需要研究时，模型可以先发已经确认且有用的公开结论，再继续查询并补充新证据；简单聊天直接回答。保持模型、最高思考、必要上下文、身份和知识证据，内部推理保持隐藏。
+所有机器人保留各自配置的发送速度。分段完成后，每轮首条公开消息的实际补等为 `max(0, 第一段原有等待 - 本轮已耗时)`；原有等待只按第一段文字计算，本轮已耗时从接收本轮消息算到第一段准备发送，不使用全文或全部分段的累计时长。第一段原等待3.6秒、已处理1秒时再等2.6秒；已处理5秒时直接发送。后续分段和研究补充按各段原有速度计算等待，不再抵扣；新表达进入新一轮后重新记录起点。失败或取消不能伪造成功，也不能重复发送结果未知的消息。
 
-云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛使用[公开答复插件](../maibot-yelin/plugins/qqbot_reply_guard/README.md)，身份和知识证据同时进入 Planner 与 Replyer；夜凛与蓝铃分别启用各自的 `qqbot_reply_timing`，继续使用本实例的发送速度。蓝铃直接答复的分段与逐段发送回执见[蓝铃公开答复插件](../maibot-lanling/plugins/qqbot_reply_guard/README.md)；维护快速发送路径时同时核对分段、历史同步和首条/后续等待。新消息打断仅通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
+需要研究时，模型可以先发已经确认且有用的公开结论，再继续查询并补充新证据；简单聊天正常回答。MaiBot 的阶段答复同样通过原生 `reply`，`reply_reference` 只提供已确认事实和本阶段回应范围。保留必要上下文、身份和知识证据，内部推理保持隐藏。
+
+云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛的[原生回复规则](../maibot-yelin/plugins/qqbot_reply_guard/README.md)和蓝铃的[私聊执行检查](../maibot-lanling/plugins/qqbot_reply_guard/README.md)均使用原生 `reply`，身份、知识和引用按各实例原有入口提供；两者分别启用 `qqbot_reply_timing`，仅在发送阶段修正首条等待。新消息打断通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
 
 检查回复速度时，先按同一会话、目标消息和请求对齐接收、排队、模型请求、工具执行与发送时间，同时记录首次有用答复和完整完成时间：
 
