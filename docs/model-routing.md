@@ -33,13 +33,13 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 ## 回复耗时排查
 
-回复耗时优化以事实准确、原有人设、上下文理解和证据完整为前提，保持“生成→原有后处理分段→发送”的完整流程。MaiBot 的生成阶段使用 Planner 决策和原生 Replyer 组织正文；后处理分段由框架原有流程负责。涉及生成机制、提示词或思考强度的变化，先说明实际输入、预期收益和质量取舍，再在用户授权范围内实施。模型参数一致、调用更少或简单数字题正确都不足以证明质量等价。
+回复耗时优化以事实准确、原有人设、上下文理解和证据完整为前提，保持“生成→原有后处理分段→发送”的完整流程。MaiBot 的生成阶段使用 Planner 决策和原生 Replyer 组织正文；后处理分段由框架原有流程负责。日常生成、识图、记忆及文本辅助任务使用 `reasoning.effort = "high"`，保留原模型、上下文和输出余量；官网联网研究使用搜索插件自己的思考配置。涉及生成机制、提示词或思考强度的变化，先说明实际输入、预期收益和质量取舍，再在用户授权范围内实施。模型参数一致、调用更少或简单数字题正确都不足以证明质量等价。
 
 所有机器人保留各自配置的发送速度。分段完成后，每轮首条公开消息的实际补等为 `max(0, 第一段原有等待 - 本轮已耗时)`；原有等待只按第一段文字计算，本轮已耗时从接收本轮消息算到第一段准备发送，不使用全文或全部分段的累计时长。第一段原等待3.6秒、已处理1秒时再等2.6秒；已处理5秒时直接发送。后续分段和研究补充按各段原有速度计算等待，不再抵扣；新表达进入新一轮后重新记录起点。失败或取消不能伪造成功，也不能重复发送结果未知的消息。
 
 需要研究时，模型可以先发已经确认且有用的公开结论，再继续查询并补充新证据；简单聊天正常回答。MaiBot 的阶段答复同样通过原生 `reply`，`reply_reference` 只提供已确认事实和本阶段回应范围。保留必要上下文、身份和知识证据，内部推理保持隐藏。
 
-云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛的[原生回复规则](../maibot-yelin/plugins/qqbot_reply_guard/README.md)和蓝铃的[私聊执行检查](../maibot-lanling/plugins/qqbot_reply_guard/README.md)均使用原生 `reply`，身份、知识和引用按各实例原有入口提供；两者分别启用 `qqbot_reply_timing`，仅在发送阶段修正首条等待。新消息打断通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
+云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛的[原生回复规则](../maibot-yelin/plugins/qqbot_reply_guard/README.md)和蓝铃的[私聊执行检查](../maibot-lanling/plugins/qqbot_reply_guard/README.md)均使用原生 `reply`，身份、知识和引用按各实例原有入口提供；两者分别启用 `qqbot_reply_timing`，在发送阶段补齐本账号缺失的 NapCat 连接标识，并让原生后处理首段进入统一计时。只有首条抵扣已耗时，后续分段与研究补充按原速；已有显式路由和接收目标保持。蓝铃两秒连发收集窗口从接收时起算，准备阶段已耗时计入窗口。新消息打断通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
 
 检查回复速度时，先按同一会话、目标消息和请求对齐接收、排队、模型请求、工具执行与发送时间，同时记录首次有用答复和完整完成时间：
 
@@ -49,7 +49,7 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 - 群聊候选、拍一拍静默、实际可见答复及工具失败分开统计，并注明群聊/私聊的样本数。回复旧群消息可能包含模型选择接话的时间间隔，不能把全部间隔归为模型执行。
 - 输出余量、图片等待和检索超时是上限。只有实际阶段记录、截断原因或工具返回能证明它们造成了当前等待；配置数值和后台调用次数本身不能代替耗时证据。
 - 获准进行隔离模型回放时，保留实际模型参数、上下文及工具调用/结果配对，工具项的 `logical_turn_id` 必须与调用一致；回放输入不合法时先修正输入，不能把失败当作机器人性能结论。
-- 新增或调整聊天插件后，除账号 ready 和 OneBot 连接外，还要核对当前进程、当前版本的插件注册完成和启用日志。MaiBot 本地插件必须覆盖 `on_load`、`on_unload` 和 `on_config_update`，初始化中途失败也须能安全卸载；按框架实际 Hook 规格检查模式和错误策略，禁止在不允许 abort 的 Hook 上声明 `ErrorPolicy.ABORT`。SDK 能收集组件、Runner 能加载源码均不代替 Host 注册成功。只有所需插件完成注册、启用且基础连接恢复，才能判定部署生效。
+- 新增或调整聊天插件后，除账号 ready 和 OneBot 连接外，还要核对当前进程、当前版本的插件注册完成和启用日志。MaiBot 本地插件必须覆盖 `on_load`、`on_unload` 和 `on_config_update`，初始化中途失败也须能安全卸载；按框架实际 Hook 规格检查模式和错误策略，禁止在不允许 abort 的 Hook 上声明 `ErrorPolicy.ABORT`。SDK 能收集组件、Runner 能加载源码均不代替 Host 注册成功。所需插件完成注册、启用且基础连接恢复只证明启动就绪；回复或发送链变更还须验证原生后处理后的消息命中目标网关、首段及后续段正确送出、明确失败不记成功，不能用启动就绪替代完整发送验证。获准隔离检查时截获网关出口并保留原生发送及路由流程；实际聊天送达须有自然新消息或明确授权的发送证据。
 
 ## OpenCode Go
 
