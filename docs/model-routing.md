@@ -37,7 +37,7 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 需要研究时，模型可以先发已经确认且有用的公开结论，再继续查询并补充新证据；简单聊天直接回答。保持模型、最高思考、必要上下文、身份和知识证据，内部推理保持隐藏。
 
-云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛使用[公开答复插件](../maibot-yelin/plugins/qqbot_reply_guard/README.md)，身份和知识证据同时进入 Planner 与 Replyer；夜凛与蓝铃分别启用各自的 `qqbot_reply_timing`，继续使用本实例的发送速度。新消息打断仅通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
+云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛使用[公开答复插件](../maibot-yelin/plugins/qqbot_reply_guard/README.md)，身份和知识证据同时进入 Planner 与 Replyer；夜凛与蓝铃分别启用各自的 `qqbot_reply_timing`，继续使用本实例的发送速度。蓝铃直接答复的分段与逐段发送回执见[蓝铃公开答复插件](../maibot-lanling/plugins/qqbot_reply_guard/README.md)；维护快速发送路径时同时核对分段、历史同步和首条/后续等待。新消息打断仅通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
 
 检查回复速度时，先按同一会话、目标消息和请求对齐接收、排队、模型请求、工具执行与发送时间，同时记录首次有用答复和完整完成时间：
 
