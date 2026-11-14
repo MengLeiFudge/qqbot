@@ -40,13 +40,14 @@
 ## MaiBot 边界
 
 - MaiBot 分为夜凛与蓝铃两个独立工作目录，WebUI 分别为 `8003/8004`，消息服务分别为 `8020/8021`。两者配置、虚拟环境、`data/` 和记忆独立，不复制其他账号的运行数据。
-- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`。夜凛允许启用 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual` 与 `qqbot_web_search` 五个聊天辅助插件。
+- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`。夜凛允许启用 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search`、`qqbot_reply_guard` 与 `qqbot_reply_timing` 七个聊天辅助插件。
 - `qqbot_knowledge` 只通过 `127.0.0.1:8081` 使用云栖持有的 DSP 向量检索结果，不在 MaiBot 侧建立额外 DSP 索引；云栖不可用时退回无 DSP 证据的普通聊天。
-- 夜凛除上述五个聊天辅助插件外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
+- 夜凛除上述七个聊天辅助插件外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
 - 夜凛每次启动 Core 前必须执行 `scripts/enforce_chat_only.py`。无法解析配置或无法确认禁用时必须失败关闭，不得绕过策略启动。
 - 蓝铃作为独立 bot 维护插件源码与启用配置，不套用家族插件同步或夜凛允许列表。启动前执行本项目 `scripts/validate_plugin_config.py`，配置无效时停止；不得自动改写插件启用选择。
 - 夜凛的 QQ 内插件管理入口保持禁用，不能通过聊天重新启用家族业务插件。
 - MaiBot 自己的 `scripts/start.ps1` 和 `scripts/update.ps1` 必须可从项目目录独立使用，不依赖根文件。
+- 所有框架的首条公开答复等待、后续分段速度及阶段研究遵守 `docs/model-routing.md` 的“回复耗时排查”合同；只在本地聊天插件中实现。
 
 ## 跨框架功能维护
 

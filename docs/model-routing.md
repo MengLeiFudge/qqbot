@@ -33,6 +33,12 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 ## 回复耗时排查
 
+所有机器人保留各自配置的发送速度。每轮首条公开消息的实际等待为 `max(0, 该段原有等待 - 本轮已耗时)`：原等待 3.6 秒、已思考 1 秒时再等 2.6 秒；已思考 5 秒时直接发送。只有首条使用这份抵扣，发送后的同轮分段和研究补充按原有速度重新计算等待；新的用户表达进入新一轮后重新记录起点。失败或取消不能伪造发送成功，也不能重复发送结果未知的消息。
+
+需要研究时，模型可以先发已经确认且有用的公开结论，再继续查询并补充新证据；简单聊天直接回答。保持模型、最高思考、必要上下文、身份和知识证据，内部推理保持隐藏。
+
+云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛使用[公开答复插件](../maibot-yelin/plugins/qqbot_reply_guard/README.md)，身份和知识证据同时进入 Planner 与 Replyer；夜凛与蓝铃分别启用各自的 `qqbot_reply_timing`，继续使用本实例的发送速度。新消息打断仅通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
+
 检查回复速度时，先按同一会话、目标消息和请求对齐接收、排队、模型请求、工具执行与发送时间，同时记录首次有用答复和完整完成时间：
 
 - AstrBot 的 `provider_stats.start_time/end_time` 记录 Agent 运行，不覆盖取得会话锁之前的排队，也不覆盖后续分段发送等待。`QQBotFeatures` 的请求/返回日志起点在其请求 Hook，不能直接当作收到消息到送达的总耗时。
@@ -40,6 +46,8 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 - MaiBot 的 `llm_usage.time_cost` 是模型调用耗时；`planner.finalized.planner.duration_ms`、`final_state.time_records` 是阶段计时，回复工具的 `duration_ms` 还包含回复器与发送流程。用回复工具 `detail.metrics` 分离提示组装、模型生成和工具其余开销，不将回复后的 Planner 收尾算入首次答复延迟。
 - 群聊候选、拍一拍静默、实际可见答复及工具失败分开统计，并注明群聊/私聊的样本数。回复旧群消息可能包含模型选择接话的时间间隔，不能把全部间隔归为模型执行。
 - 输出余量、图片等待和检索超时是上限。只有实际阶段记录、截断原因或工具返回能证明它们造成了当前等待；配置数值和后台调用次数本身不能代替耗时证据。
+- 获准进行隔离模型回放时，保留实际模型参数、上下文及工具调用/结果配对，工具项的 `logical_turn_id` 必须与调用一致；回放输入不合法时先修正输入，不能把失败当作机器人性能结论。
+- 新增或调整聊天插件后，除账号 ready 和 OneBot 连接外，还要核对当前进程、当前版本的插件注册完成和启用日志。MaiBot 本地插件必须覆盖 `on_load`、`on_unload` 和 `on_config_update`，初始化中途失败也须能安全卸载；按框架实际 Hook 规格检查模式和错误策略，禁止在不允许 abort 的 Hook 上声明 `ErrorPolicy.ABORT`。SDK 能收集组件、Runner 能加载源码均不代替 Host 注册成功。只有所需插件完成注册、启用且基础连接恢复，才能判定部署生效。
 
 ## OpenCode Go
 
