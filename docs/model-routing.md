@@ -31,6 +31,16 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 - MaiBot 的成功调用统计不等于供应商最终账单。检查 `logs/maisaka_prompt/llm_error/` 中失败和重试的各次尝试；已有返回 usage 的截断结果可能消耗完整输出额度。核对请求与尝试标识后补算未落库用量，缺少 usage 的超时不能估作零，也不能据此声称已完全对账。
 - 调整后只用获准的验证或自然产生的新请求评估命中率，记录样本数和统计时段，同时确认所需状态仍在有效输入中。跨时段聊天内容和上下文长度不同，不能把命中率变化直接换算成固定节省比例。
 
+## 回复耗时排查
+
+检查回复速度时，先按同一会话、目标消息和请求对齐接收、排队、模型请求、工具执行与发送时间，同时记录首次有用答复和完整完成时间：
+
+- AstrBot 的 `provider_stats.start_time/end_time` 记录 Agent 运行，不覆盖取得会话锁之前的排队，也不覆盖后续分段发送等待。`QQBotFeatures` 的请求/返回日志起点在其请求 Hook，不能直接当作收到消息到送达的总耗时。
+- 云栖先核对旧请求是否占用同会话锁，再核对 `platform_settings.segmented_reply` 的逐段等待，以及 `provider_settings.streaming_response`、`buffer_intermediate_messages` 对公开中间答复的影响。内部推理保持隐藏；正文分段等待与模型继续研究分别计时。
+- MaiBot 的 `llm_usage.time_cost` 是模型调用耗时；`planner.finalized.planner.duration_ms`、`final_state.time_records` 是阶段计时，回复工具的 `duration_ms` 还包含回复器与发送流程。用回复工具 `detail.metrics` 分离提示组装、模型生成和工具其余开销，不将回复后的 Planner 收尾算入首次答复延迟。
+- 群聊候选、拍一拍静默、实际可见答复及工具失败分开统计，并注明群聊/私聊的样本数。回复旧群消息可能包含模型选择接话的时间间隔，不能把全部间隔归为模型执行。
+- 输出余量、图片等待和检索超时是上限。只有实际阶段记录、截断原因或工具返回能证明它们造成了当前等待；配置数值和后台调用次数本身不能代替耗时证据。
+
 ## OpenCode Go
 
 接入 Go 前先核对[官方适用客户端说明](https://opencode.ai/docs/console/go/#where-can-i-use-it)。Go 面向 OpenCode 与类似的编码 Agent；普通 QQ 聊天不属于文档说明的流量类型。补齐 HTTP 头只解决协议要求，不能据此认定普通聊天受支持。客户端使用自身真实的 `User-Agent`，不冒用 OpenCode 或其他编码客户端。
