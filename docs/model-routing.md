@@ -39,7 +39,7 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 需要研究时，模型可以先发已经确认且有用的公开结论，再继续查询并补充新证据；简单聊天正常回答。MaiBot 的阶段答复同样通过原生 `reply`，`reply_reference` 只提供已确认事实和本阶段回应范围。保留必要上下文、身份和知识证据，内部推理保持隐藏。
 
-云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛的[原生回复规则](../maibot-yelin/plugins/qqbot_reply_guard/README.md)和蓝铃的[私聊执行检查](../maibot-lanling/plugins/qqbot_reply_guard/README.md)均使用原生 `reply`，身份、知识和引用按各实例原有入口提供；两者分别启用 `qqbot_reply_timing`，在发送阶段补齐本账号缺失的 NapCat 连接标识，并让原生后处理首段进入统一计时。只有首条抵扣已耗时，后续分段与研究补充按原速；已有显式路由和接收目标保持。蓝铃两秒连发收集窗口从接收时起算，准备阶段已耗时计入窗口。新消息打断通过 MaiBot 现有 `planner_interrupt_max_consecutive_count` 配置管理，不取消已进入 Replyer 或发送阶段的任务。
+云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。风格守卫已关闭分段的消息保持直接发送，不额外人为等待。夜凛的[原生回复规则](../maibot-yelin/plugins/qqbot_reply_guard/README.md)和蓝铃的[私聊执行检查](../maibot-lanling/plugins/qqbot_reply_guard/README.md)均使用原生 `reply`，身份、知识和引用按各实例原有入口提供；两者分别启用 `qqbot_reply_timing`，在发送阶段补齐本账号缺失的 NapCat 连接标识，并让原生后处理首段进入统一计时。只有首条抵扣已耗时，后续分段与研究补充按原速；已有显式路由和接收目标保持。蓝铃两秒连发收集窗口从接收时起算，准备阶段已耗时计入窗口。MaiBot 的新消息打断边界是本轮首条公开消息送达：之前允许重新收集输入，覆盖图片/记忆准备、Planner、原生 Replyer 和首条补等，之后保留本轮后续分段及研究补充，新消息进入下一轮。`planner_interrupt_max_consecutive_count` 仅控制框架原生 Planner；两实例的 [CPA 会话插件](../maibot-lanling/plugins/cpa_session/README.md) 补齐插件模型请求的取消及过期输出拦截，发送等待插件在收到新消息时立即结束旧首条补等，并在提交平台前再次核对源消息。已提交平台且结果未知的发送不能假定已撤回，也不能自动重发。
 
 检查回复速度时，先按同一会话、目标消息和请求对齐接收、排队、模型请求、工具执行与发送时间，同时记录首次有用答复和完整完成时间：
 
