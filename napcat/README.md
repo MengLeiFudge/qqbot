@@ -44,7 +44,7 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 .\napcat\scripts\update.ps1 -AssumeYes
 ```
 
-激活失败时先恢复 NapCat 和 QQ 选择，再按需恢复原有机器人；激活成功且需要生效时复用根入口重启云栖、夜凛和蓝铃，保留健康 NapCat 登录态，并检查 ready、OneBot 连接及本轮原生协议 Hook 日志。一次启动失败后记录状态和日志，不反复重启。自动更新遇到激活中断或失败，会暂停该 Release 的再次自动激活，需先核对 `data/updates/napcat.json` 与 `data/logs/updates/`，修复后手动运行更新入口。
+激活失败时先恢复 NapCat 和 QQ 选择，再按需恢复原有机器人；激活成功且需要生效时复用根入口恢复清单中 `autoStart=true` 的账号，保留健康 NapCat 登录态，并检查 ready、OneBot 连接及本轮原生协议 Hook 日志。一次启动失败后记录状态和日志，不反复重启。自动更新遇到激活中断或失败，会暂停该 Release 的再次自动激活，需先核对 `data/updates/napcat.json` 与 `data/logs/updates/`，修复后手动运行更新入口。
 
 注册或移除计划：
 
@@ -57,7 +57,7 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 
 ## 自动同意请求
 
-所有账号自动同意好友申请、邀请机器人入群和成员加群申请。云栖由 AstrBot 的 `astrbot_plugin_qqbot_features` 处理；夜凛、蓝铃由各自 MaiBot 的 `napcat_adapter` 接入层处理；账号清单中未绑定框架的账号由 `napcat-plugin-qqbot-social` 处理，避免重复执行。
+所有账号自动同意好友申请、邀请机器人入群和成员加群申请。云栖由 AstrBot 的 `astrbot_plugin_qqbot_features` 处理；夜凛、蓝铃由各自 MaiBot 的 `napcat_adapter` 接入层处理；账号清单中未绑定框架的账号由 `napcat-plugin-qqbot-social` 处理，星遥、月澄绑定 MaiBot 后由各自适配器处理，避免重复执行。
 
 `configure-account.ps1` 会把本地插件复制到实际 NapCat 插件目录并启用；账号启动和更新入口均调用该配置步骤。仅使用 NapCat 的账号在下一次启动时加载该插件；现有进程需要重新加载插件或重启对应 NapCat。申请处理不发送聊天消息，失败写入各自运行日志。
 
@@ -69,7 +69,7 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 - 月澄 `3109326090`：forward server `127.0.0.1:6203`
 - 蓝铃 `3600812036`：forward server `127.0.0.1:6204`
 
-根 `all/yunqi/yelin/lanling` 入口自动管理云栖、夜凛和蓝铃。单独维护星遥或月澄时可在 Windows PowerShell 中运行：
+根入口支持 `all/yunqi/yelin/xingyao/yuecheng/lanling`；`all` 自动管理清单中 `autoStart=true` 的账号，夜凛暂时关闭。单独维护星遥或月澄的 NapCat 时可在 Windows PowerShell 中运行：
 
 ```powershell
 .\scripts\ensure-account.ps1 -Target xingyao

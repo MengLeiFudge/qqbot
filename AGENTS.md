@@ -12,9 +12,10 @@
 
 ## 仓库职责
 
-- 根 `qqbot`：维护 `astrbot`、`maibot-yelin`、`maibot-lanling` 三个 gitlink，维护 `napcat/`、`napcat/accounts.json`、根 `scripts/` 和跨项目文档。
+- 根 `qqbot`：维护 `astrbot`、`maibot-yelin`、`maibot-lanling`、`maibot-xingyao`、`maibot-yuecheng` 五个 gitlink，维护 `napcat/`、`napcat/accounts.json`、根 `scripts/` 和跨项目文档。
 - `astrbot/`：独立的 `MengLeiFudge/AstrBot` fork 工作树，维护云栖 Core、插件、配置示例、项目脚本和项目内运行态。
-- `maibot-yelin/`：独立的 `MengLeiFudge/MaiBot` fork 工作树，维护夜凛 Core、插件允许策略、配置示例、项目脚本和项目内运行态。
+- `maibot-yelin/`：夜凛独立工作树，暂时停用并保留配置与数据。
+- `maibot-xingyao/`、`maibot-yuecheng/`：星遥、月澄独立 MaiBot 工作树，沿用夜凛的插件与启用策略，分别维护自己的配置、环境和运行态。
 - `maibot-lanling/`：独立的 `MengLeiFudge/MaiBot` fork 工作树，维护蓝铃独立部署、插件启用配置及运行态，不参与棉花糖家族插件同步。
 - `napcat/`：五个 QQ 账号共享的协议端项目；程序包和实际账号配置保留在本机，非敏感账号映射与维护脚本由根仓跟踪。
 
@@ -23,12 +24,12 @@
 ## 固定账号合同
 
 - 云栖 `1443944862`：AstrBot，OneBot `6200`，负责聊天和全部固定功能。
-- 夜凛 `2629227874`：MaiBot，OneBot `6201`，负责聊天、拍一拍和只读知识问答。
-- 星遥 `3056830689`：仅 NapCat，OneBot `6202`，不由根入口启动。
-- 月澄 `3109326090`：仅 NapCat，OneBot `6203`，不由根入口启动。
+- 夜凛 `2629227874`：MaiBot，OneBot `6201`，暂时关闭，`autoStart=false`。
+- 星遥 `3056830689`：MaiBot，OneBot `6202`，负责聊天、拍一拍和只读知识问答。
+- 月澄 `3109326090`：MaiBot，OneBot `6203`，负责聊天、拍一拍和只读知识问答。
 - 蓝铃 `3600812036`：MaiBot，OneBot `6204`，负责聊天、拍一拍和只读知识问答。
 
-根启动 Target 只有 `all`、`yunqi`、`yelin`、`lanling`。框架分配变化时保持 Target 和账号固定端口不变，更新 `napcat/accounts.json` 与对应子项目入口。
+根启动 Target 为 `all`、`yunqi`、`yelin`、`xingyao`、`yuecheng`、`lanling`；`all` 只启动清单中 `autoStart=true` 的账号。框架分配变化时保持 Target 和账号固定端口不变，更新 `napcat/accounts.json` 与对应子项目入口。
 
 ## AstrBot 边界
 
@@ -40,21 +41,21 @@
 
 ## MaiBot 边界
 
-- MaiBot 分为夜凛与蓝铃两个独立工作目录，WebUI 分别为 `8003/8004`，消息服务分别为 `8020/8021`。两者配置、虚拟环境、`data/` 和记忆独立，不复制其他账号的运行数据。
-- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`。夜凛允许启用 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search` 与 `qqbot_reply_timing` 六个聊天辅助插件。
+- MaiBot 的夜凛、蓝铃、星遥、月澄分别使用独立工作目录，WebUI 为 `8003/8004/8005/8006`，消息服务为 `8020/8021/8022/8023`。各自配置、虚拟环境、`data/` 和记忆独立，不复制其他账号的运行数据。星遥、月澄的部署与插件边界见 `docs/chat-instances.md`。
+- 夜凛 `napcat_adapter` 连接 `127.0.0.1:6201`，`connection_id=yelin`；蓝铃连接 `127.0.0.1:6204`，`connection_id=lanling`；星遥和月澄分别连接 `6202/6203`，`connection_id=xingyao/yuecheng`。夜凛、星遥与月澄允许启用 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search` 与 `qqbot_reply_timing` 六个聊天辅助插件。
 - `qqbot_knowledge` 只通过 `127.0.0.1:8081` 使用云栖持有的 DSP 向量检索结果，不在 MaiBot 侧建立额外 DSP 索引；云栖不可用时退回无 DSP 证据的普通聊天。
-- 夜凛除上述六个聊天辅助插件外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
-- 夜凛每次启动 Core 前必须执行 `scripts/enforce_chat_only.py`。无法解析配置或无法确认禁用时必须失败关闭，不得绕过策略启动。
+- 夜凛、星遥与月澄除上述六个聊天辅助插件外，其余 `qqbot_*` 业务插件的实际与示例配置顶层 `plugin.enabled` 必须为 `false`。
+- 夜凛、星遥与月澄每次启动 Core 前必须执行 `scripts/enforce_chat_only.py`。无法解析配置或无法确认禁用时必须失败关闭，不得绕过策略启动。
 - 蓝铃作为独立 bot 维护插件源码与启用配置，不套用家族插件同步或夜凛允许列表。启动前执行本项目 `scripts/validate_plugin_config.py`，配置无效时停止；不得自动改写插件启用选择。
-- 夜凛的 QQ 内插件管理入口保持禁用，不能通过聊天重新启用家族业务插件。
+- 夜凛、星遥与月澄的 QQ 内插件管理入口保持禁用，不能通过聊天重新启用家族业务插件。
 - MaiBot 自己的 `scripts/start.ps1` 和 `scripts/update.ps1` 必须可从项目目录独立使用，不依赖根文件。
 - 所有框架的首条公开答复等待、后续分段速度及阶段研究遵守 `docs/model-routing.md` 的“回复耗时排查”合同；只在本地聊天插件中实现。
 
 ## 跨框架功能维护
 
-本节的插件同步及统一启用合同仅适用于棉花糖家族，目前只在云栖（AstrBot）与夜凛（MaiBot）之间同步。蓝铃是独立 bot，不参与这套同步与启用合同。
+本节的插件同步及统一启用合同仅适用于棉花糖家族，目前在云栖（AstrBot）与夜凛、星遥、月澄（MaiBot）之间维护。蓝铃是独立 bot，不参与这套同步与启用合同。
 
-家族内同一有副作用的固定功能后续需要同时维护云栖与夜凛两套插件源码：云栖侧运行启用，夜凛侧运行禁用。只读辅助能力可以按明确合同例外：拍一拍由两框架各自插件处理；DSP 知识由 AstrBot 维护唯一物理向量库，MaiBot 只调用 localhost 检索接口。本轮迁移不以此规则补齐其他历史功能差异。修改时分别进入对应框架 submodule，在各自项目风格和 API 内完成，不在根目录建立共享源码副本或同步脚本。
+家族内同一有副作用的固定功能后续需要同时维护云栖和家族 MaiBot 实例的插件源码：云栖侧运行启用，MaiBot 侧运行禁用。只读辅助能力可以按明确合同例外：拍一拍由两框架各自插件处理；DSP 知识由 AstrBot 维护唯一物理向量库，MaiBot 只调用 localhost 检索接口。本轮迁移不以此规则补齐其他历史功能差异。修改时分别进入对应框架 submodule，在各自项目风格和 API 内完成，不在根目录建立共享源码副本或同步脚本。
 
 ## NapCat 边界
 
@@ -69,12 +70,12 @@
 ## 启动与更新
 
 - 根启动入口是 `scripts/start-all.bat` 或 `scripts/start-all.ps1`。
-- 修改代码、插件或配置后，若需要重启机器人才能生效，自动执行一轮重启，不再为该生效步骤重复请求确认。默认同时重启云栖、夜凛和蓝铃，即使只修改了其中一个；用户当轮明确指定只重启一个或不要重启时，按用户要求执行。
-- 变更后的重启复用 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 及其子项目入口，保留既有健康 NapCat 登录态，不扩大到星遥/月澄。记录启动截止、PID、日志和 ready/连接结果；失败或超时先确认当前状态并报告，不循环重启。
+- 修改代码、插件或配置后，若需要重启机器人才能生效，自动执行一轮重启，不再为该生效步骤重复请求确认。默认重启 `autoStart=true` 的账号，即使只修改了其中一个；用户当轮明确指定只重启一个或不要重启时，按用户要求执行。
+- 变更后的重启复用 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 及其子项目入口，保留既有健康 NapCat 登录态，保持 `autoStart=false` 的夜凛关闭。记录启动截止、PID、日志和 ready/连接结果；失败或超时先确认当前状态并报告，不循环重启。
 - 云栖顺序：AstrBot WebUI `6185`、OneBot `6200`、artifact API `8080` 和 DSP knowledge API `8081` ready，再启动云栖 NapCat并等待 established。
-- 夜凛与蓝铃顺序：各自 NapCat `6201/6204` ready，再启动对应 MaiBot WebUI `8003/8004` 并等待 adapter established。
+- MaiBot 账号先等待各自 NapCat ready，再启动对应 WebUI 并等待 adapter established；端口映射见固定账号合同。
 - 启动不得自动升级框架。
-- 根更新入口只调用各子项目自己的更新脚本。`maibot` 更新 Target 覆盖夜凛和蓝铃。框架 fork 只合入官方最新稳定 Release，不追踪主分支每个提交，更新器不得 push。
+- 根更新入口只调用各子项目自己的更新脚本。`maibot` 更新 Target 覆盖夜凛、蓝铃、星遥和月澄。框架 fork 只合入官方最新稳定 Release，不追踪主分支每个提交，更新器不得 push。
 
 ## 安全与运行态
 
@@ -84,8 +85,8 @@
 
 ## Git 工作流
 
-- 根仓和三个子仓分别检查状态、提交和维护历史；不要从根仓暂存 submodule 内普通文件。
-- 框架 fork 本地使用 `deployment` 分支，`origin` 指向 `MengLeiFudge` fork，`upstream` 指向官方仓库。MaiBot 两个实例共享 origin，但夜凛推送目标为 `deployment-yelin`、蓝铃为 `deployment`；获准推送时使用明确 refspec，禁止用一个账号的历史覆盖另一个账号。
+- 根仓和五个子仓分别检查状态、提交和维护历史；不要从根仓暂存 submodule 内普通文件。
+- 框架 fork 本地使用 `deployment` 分支，`origin` 指向 `MengLeiFudge` fork，`upstream` 指向官方仓库。MaiBot 实例共享 origin，夜凛、星遥、月澄推送目标分别为 `deployment-yelin`、`deployment-xingyao`、`deployment-yuecheng`，蓝铃为 `deployment`；获准推送时使用明确 refspec，禁止用一个账号的历史覆盖另一个账号。
 - 框架提交完成后，根仓只记录新的 gitlink。
 - 本次任务完成且必要检查通过后，自动提交本次范围内的改动；不要等待用户再次要求提交。子项目提交完成后，同步提交根仓的 gitlink 更新。用户明确要求暂不提交时除外。
 - 未经用户明确批准不得 push，也不得把无关 dirty change 带入提交。

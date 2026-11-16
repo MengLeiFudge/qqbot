@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Position = 0)]
-    [ValidateSet("all", "yunqi", "yelin", "lanling")]
+    [ValidateSet("all", "yunqi", "yelin", "xingyao", "yuecheng", "lanling")]
     [string]$Target = "all",
     [switch]$ForceRestart,
     [switch]$SkipInstall,
@@ -244,7 +244,7 @@ try {
 
     if ($AccountWorker) {
         if ($Target -eq "all" -or $accounts.Count -ne 1) {
-            throw "Account worker mode requires exactly one yunqi, yelin or lanling target."
+            throw "Account worker mode requires exactly one account target."
         }
         if ($WindowTitle) {
             try {

@@ -20,7 +20,7 @@
       "label": "Yelin",
       "qq": "2629227874",
       "oneBotPort": 6201,
-      "autoStart": true,
+      "autoStart": false,
       "connectionMode": "forward-server",
       "connectionName": "yelin-maibot-forward-ws",
       "framework": {
@@ -34,20 +34,28 @@
       "label": "Xingyao",
       "qq": "3056830689",
       "oneBotPort": 6202,
-      "autoStart": false,
+      "autoStart": true,
       "connectionMode": "forward-server",
-      "connectionName": "xingyao-forward-ws",
-      "framework": null
+      "connectionName": "xingyao-maibot-forward-ws",
+      "framework": {
+        "name": "maibot-xingyao",
+        "root": "maibot-xingyao",
+        "startScript": "maibot-xingyao/scripts/start.ps1"
+      }
     },
     {
       "target": "yuecheng",
       "label": "Yuecheng",
       "qq": "3109326090",
       "oneBotPort": 6203,
-      "autoStart": false,
+      "autoStart": true,
       "connectionMode": "forward-server",
-      "connectionName": "yuecheng-forward-ws",
-      "framework": null
+      "connectionName": "yuecheng-maibot-forward-ws",
+      "framework": {
+        "name": "maibot-yuecheng",
+        "root": "maibot-yuecheng",
+        "startScript": "maibot-yuecheng/scripts/start.ps1"
+      }
     },
     {
       "target": "lanling",

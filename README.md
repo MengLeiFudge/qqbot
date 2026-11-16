@@ -7,12 +7,12 @@
 | Target | 账号 | QQ | OneBot | 当前职责 |
 | --- | --- | --- | --- | --- |
 | `yunqi` | 云栖 | `1443944862` | `6200` reverse client | AstrBot，聊天和全部固定功能 |
-| `yelin` | 夜凛 | `2629227874` | `6201` forward server | MaiBot，聊天、拍一拍和只读知识问答 |
-| 无根 Target | 星遥 | `3056830689` | `6202` forward server | 仅保留 NapCat |
-| 无根 Target | 月澄 | `3109326090` | `6203` forward server | 仅保留 NapCat |
+| `yelin` | 夜凛 | `2629227874` | `6201` forward server | MaiBot，暂时停用，保留配置与数据 |
+| `xingyao` | 星遥 | `3056830689` | `6202` forward server | MaiBot，沿用夜凛的聊天插件配置 |
+| `yuecheng` | 月澄 | `3109326090` | `6203` forward server | MaiBot，沿用夜凛的聊天插件配置 |
 | `lanling` | 蓝铃 | `3600812036` | `6204` forward server | MaiBot，聊天、拍一拍和只读知识问答 |
 
-非敏感映射真源是 `napcat/accounts.json`。云栖 AstrBot 还使用 WebUI `6185`、本地 artifact API `8080` 和 DSP knowledge API `8081`；夜凛、蓝铃 MaiBot WebUI 分别为 `8003/8004`，消息服务分别为 `8020/8021`。
+非敏感映射真源是 `napcat/accounts.json`。云栖 AstrBot 还使用 WebUI `6185`、本地 artifact API `8080` 和 DSP knowledge API `8081`；夜凛、蓝铃、星遥、月澄 MaiBot WebUI 分别为 `8003/8004/8005/8006`，消息服务分别为 `8020/8021/8022/8023`。星遥、月澄的部署入口和启用要求见 [聊天实例配置](docs/chat-instances.md)。
 
 ## 目录边界
 
@@ -21,12 +21,14 @@ qqbot/
 ├── astrbot/          # MengLeiFudge/AstrBot fork submodule，deployment 分支
 ├── maibot-yelin/     # MengLeiFudge/MaiBot fork submodule，deployment 分支
 ├── maibot-lanling/   # MengLeiFudge/MaiBot fork submodule，蓝铃独立部署
+├── maibot-xingyao/   # 星遥独立 MaiBot 部署
+├── maibot-yuecheng/  # 月澄独立 MaiBot 部署
 ├── napcat/           # NapCat、账号映射及自身脚本
-├── scripts/          # all/yunqi/yelin/lanling 根编排
+├── scripts/          # 按账号 Target 进行根编排
 └── docs/             # 跨项目部署说明
 ```
 
-`astrbot/`、`maibot-yelin/` 与 `maibot-lanling/` 都从自身源码启动，并分别拥有 `.venv`、配置、数据、日志、插件和 `scripts/start.ps1`、`scripts/update.ps1`。根目录不提供框架级 `config/`、`plugins/` 或 `data/`。
+`astrbot/` 和四个 `maibot-*/` 工作目录都从自身源码启动，并分别拥有 `.venv`、配置、数据、日志、插件和 `scripts/start.ps1`、`scripts/update.ps1`。根目录不提供框架级 `config/`、`plugins/` 或 `data/`。
 
 `napcat/onekey/` 保存本机 NapCat 包、QQ 登录态和实际 OneBot 配置，`napcat/data/` 保存日志、快速登录标记和更新事务数据；两者均不进入 Git。可提交的账号映射和维护脚本位于 `napcat/accounts.json` 与 `napcat/scripts/`。
 
@@ -38,7 +40,7 @@ git clone --recurse-submodules https://github.com/MengLeiFudge/qqbot.git
 git -C qqbot submodule update --init --recursive
 ```
 
-三个 submodule 的 `origin` 指向 MengLeiFudge fork，`upstream` 指向对应的官方 AstrBot 或 MaiBot。日常部署固定在各自 `deployment` 分支采用的稳定 Release，不在启动时自动升级。
+五个 submodule 的 `origin` 指向 MengLeiFudge fork，`upstream` 指向对应的官方 AstrBot 或 MaiBot。日常部署固定在各自 `deployment` 分支采用的稳定 Release，不在启动时自动升级。
 
 真实配置和运行态不会随 Git 克隆。首次部署需要在各子项目内恢复或创建本机配置，并安装 NapCat OneKey 包；不得把 provider key、OneBot token、QQ 登录态、数据库、日志或会话数据加入任何仓库。
 
@@ -50,11 +52,12 @@ Windows 用户入口按账号暴露以下 Target：
 Set-Location D:\project\qqbot
 .\scripts\start-all.bat all
 .\scripts\start-all.bat yunqi
-.\scripts\start-all.bat yelin
+.\scripts\start-all.bat xingyao
+.\scripts\start-all.bat yuecheng
 .\scripts\start-all.bat lanling
 ```
 
-`all` 启动云栖、夜凛和蓝铃。云栖按 AstrBot ready 后启动 NapCat 并等待反连；夜凛和蓝铃先启动各自 NapCat `6201/6204` 服务，再启动对应 MaiBot 并等待 adapter 建立连接。根入口保留主控窗口，并同时为每个账号打开独立启动窗口（`all` 共四个窗口）；账号窗口等待自身登录和 OneBot 连接完成，主控窗口等待所有已打开的账号窗口结束后汇总结果。部分窗口打开失败时，主控仍等待其余窗口结束。成功后账号所属的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。主控和账号启动日志保存在 `logs/startup/`。扫码和失效登录的处理见 [NapCat 登录说明](napcat/README.md#固定端口)。星遥、月澄不会被根入口自动启动，需要维护其 NapCat 时直接使用 `napcat/scripts/ensure-account.ps1`。
+`all` 启动 `napcat/accounts.json` 中 `autoStart=true` 的账号：云栖、星遥、月澄和蓝铃，跳过暂时关闭的夜凛。云栖按 AstrBot ready 后启动 NapCat 并等待反连；MaiBot 账号先启动各自 NapCat，再启动对应 MaiBot 并等待 adapter 建立连接。根入口保留主控窗口，并同时为每个账号打开独立启动窗口；账号窗口等待自身登录和 OneBot 连接完成，主控窗口等待所有已打开的账号窗口结束后汇总结果。部分窗口打开失败时，主控仍等待其余窗口结束。成功后账号所属的 QQ/NapCat 窗口会隐藏，启动窗口自动关闭，后台进程继续写入各项目日志；失败或超时时窗口停留，便于直接查看错误。主控和账号启动日志保存在 `logs/startup/`。扫码和失效登录的处理见 [NapCat 登录说明](napcat/README.md#固定端口)。仅维护某账号 NapCat 时使用 `napcat/scripts/ensure-account.ps1 -Target <账号>`。
 
 PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。日常启动与重启复用各项目已有的 `.venv`，不重复同步或安装依赖；环境缺失时才执行首次安装，`-SkipInstall` 则在环境缺失时直接失败。更新依赖使用对应项目的更新入口或显式 `uv` 安装命令。
 
@@ -70,7 +73,7 @@ PowerShell 入口支持 `-ForceRestart` 和 `-SkipInstall`。日常启动与重�
 
 ## MaiBot 聊天插件边界
 
-夜凛保留 MaiBot 原生聊天、上下文、记忆、表情和图片理解，并允许 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search` 启用；其余 `qqbot_*` 插件实际配置必须为 `plugin.enabled=false`。夜凛的 `scripts/enforce_chat_only.py` 在 Core 启动前复核该策略。蓝铃按独立本机配置选择启用插件，由 `scripts/validate_plugin_config.py` 校验配置。
+夜凛、星遥和月澄保留 MaiBot 原生聊天、上下文、记忆、表情和图片理解，并允许 `napcat_adapter`、`cpa_session`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search`、`qqbot_reply_timing` 启用；其余 `qqbot_*` 插件实际配置必须为 `plugin.enabled=false`。各家族 MaiBot 实例的 `scripts/enforce_chat_only.py` 在 Core 启动前复核该策略。蓝铃按独立本机配置选择启用插件，由 `scripts/validate_plugin_config.py` 校验配置。
 
 DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持有和增量同步。MaiBot `qqbot_knowledge` 通过 `127.0.0.1:8081` 读取同一组召回、融合与 rerank 结果，再交给各自的聊天模型回答；不会建立第二份 DSP 库。共享服务不可用时，MaiBot 继续普通聊天但不注入 DSP 证据。
 
@@ -89,7 +92,7 @@ DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持�
 .\scripts\update-all.bat napcat
 ```
 
-框架更新器只在干净的 `deployment` 分支上获取各自官方 upstream 的最新稳定 Release，合入本地部署分支并同步项目依赖；NapCat 更新器负责 NapCat 与机器人独立 QQ 的配对更新。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛与蓝铃。完成兼容处理并分别提交各框架工作树后，再在 qqbot 中提交新的 submodule 指针。
+框架更新器只在干净的 `deployment` 分支上获取各自官方 upstream 的最新稳定 Release，合入本地部署分支并同步项目依赖；NapCat 更新器负责 NapCat 与机器人独立 QQ 的配对更新。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛、蓝铃、星遥和月澄。完成兼容处理并分别提交各框架工作树后，再在 qqbot 中提交新的 submodule 指针。
 
 NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命令启用，并立即开始首次检查：
 
@@ -101,7 +104,7 @@ NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命�
 
 发布查询、兼容支持表和运行包下载使用 TLS 1.2，沿用 Windows 系统代理与证书验证。临时连接错误最多尝试三次，重试共用原有超时预算；持续失败时保存具体原因和已有的更新暂停状态，等待下一轮检查。
 
-自动更新需要重载正在运行的协议端时，通过根 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 恢复云栖、夜凛与蓝铃。更新前没有机器人运行时保持停用。星遥或月澄正在运行时，自动更新会暂缓切换共享包。旧运行包保存在 `napcat/data/archives/`；临时事务文件移入根 `.codex/trash/`。激活或重启失败会暂停该版本的自动重试，等待人工查看状态和日志。
+自动更新需要重载正在运行的协议端时，通过根 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 恢复 `autoStart=true` 的账号，夜凛继续停用。更新前没有机器人运行时保持停用。旧运行包保存在 `napcat/data/archives/`；临时事务文件移入根 `.codex/trash/`。激活或重启失败会暂停该版本的自动重试，等待人工查看状态和日志。
 
 查看计划任务、最近结果或移除自动更新：
 
@@ -117,9 +120,9 @@ Get-Content .\napcat\data\updates\napcat.json -Encoding UTF8
 
 1. 在 `astrbot/` 提交 AstrBot Core 适配、插件和项目脚本。
 2. 在 `maibot-yelin/` 提交 MaiBot 夜凛适配、插件和项目脚本。
-3. 在 `maibot-lanling/` 维护蓝铃部署，通用代码与夜凛采用相同提交。
-4. 在根 `qqbot/` 提交 NapCat、账号编排、文档和三个 gitlink。
+3. 在 `maibot-lanling/` 维护蓝铃部署；在 `maibot-xingyao/`、`maibot-yuecheng/` 分别维护星遥与月澄部署。
+4. 在根 `qqbot/` 提交 NapCat、账号编排、文档和五个 gitlink。
 
-根仓与三个子仓分别审查和提交。根仓不能提交 submodule 内普通文件，也不能用根 `.gitignore` 代替子项目的敏感数据规则。任何 push 都必须单独明确授权。架构取舍见 `docs/adr/0002-account-superproject.md`。
+根仓与五个子仓分别审查和提交。根仓不能提交 submodule 内普通文件，也不能用根 `.gitignore` 代替子项目的敏感数据规则。任何 push 都必须单独明确授权。架构取舍见 `docs/adr/0002-account-superproject.md`。
 
-MaiBot 两个工作目录共享同一 fork，各自保留本地 `deployment` 分支。获准推送后，夜凛使用 `git -C maibot-yelin push origin HEAD:deployment-yelin`，蓝铃使用 `git -C maibot-lanling push origin HEAD:deployment`。推送前核对对应远端分支的祖先关系，不将一边的部署历史覆盖或强行合入另一边。
+MaiBot 四个工作目录共享同一 fork，各自保留本地 `deployment` 分支。获准推送后，夜凛使用 `git -C maibot-yelin push origin HEAD:deployment-yelin`，蓝铃使用 `git -C maibot-lanling push origin HEAD:deployment`。星遥、月澄分别使用 `HEAD:deployment-xingyao`、`HEAD:deployment-yuecheng`。推送前核对对应远端分支的祖先关系，不将一个实例的部署历史覆盖或强行合入另一个实例。
