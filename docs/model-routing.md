@@ -55,7 +55,7 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 接入 Go 前先核对[官方适用客户端说明](https://opencode.ai/docs/console/go/#where-can-i-use-it)。Go 面向 OpenCode 与类似的编码 Agent；普通 QQ 聊天不属于文档说明的流量类型。补齐 HTTP 头只解决协议要求，不能据此认定普通聊天受支持。客户端使用自身真实的 `User-Agent`，不冒用 OpenCode 或其他编码客户端。
 
-Go 要求每段对话携带稳定的 `x-opencode-session`，直接使用框架已有的真实会话 ID；重试和同一对话的工具续轮复用同一个值。框架内部存在 `session_id` 不等于 HTTP 请求已携带该头；静态 provider headers 也不会自动按对话替换。CPA 应转发客户端已有的会话标识与真实 `User-Agent`，不能给所有对话写死同一个会话值，也不能为每次请求重新生成。
+Go 要求每段对话携带稳定的 `x-opencode-session`，机器人在请求级 HTTP 头中直接发送，使用框架已有的真实会话 ID；重试和同一对话的工具续轮复用同一个值。框架内部存在 `session_id` 不等于 HTTP 请求已携带该头；静态 provider headers 也不会自动按对话替换。CPA 应透传客户端已有的 `x-opencode-session` 与真实 `User-Agent`，不能给所有对话写死同一个会话值，也不能为每次请求重新生成。
 
 会话透传使用各框架的本地插件：
 
