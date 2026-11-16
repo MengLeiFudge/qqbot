@@ -5,7 +5,7 @@
 [submodule "maibot-yelin"]
 	path = maibot-yelin
 	url = https://github.com/MengLeiFudge/MaiBot.git
-	branch = deployment
+	branch = deployment-yelin
 [submodule "maibot-lanling"]
 	path = maibot-lanling
 	url = https://github.com/MengLeiFudge/MaiBot.git
