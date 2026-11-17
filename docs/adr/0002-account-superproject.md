@@ -8,16 +8,16 @@
 
 原工作区把 AstrBot Core 参考源码、根插件、根配置、统一运行数据和双账号启动器混在同一仓库；MaiBot 又以无 Git 历史的源码副本存在。结果是框架不能从自身目录独立启动或更新，根脚本同时承担账号、框架和运行态细节，AstrBot 的云栖/夜凛双平台合同也让固定功能 owner、命令去重和故障边界不清晰。
 
-用户需要四个账号保持稳定身份与端口，但框架分配可以演进：云栖负责聊天和全部固定功能，夜凛以聊天为主并保留拍一拍与只读知识问答，星遥与月澄当前只保留协议端。
+用户需要四个账号保持稳定身份与端口，但框架分配可以演进：云栖负责聊天和全部固定功能，夜凛、蓝铃、风铃使用独立 MaiBot 工作树。
 
 ## 决策
 
-1. `MengLeiFudge/qqbot` 作为账号级 superproject，只维护两个框架 gitlink、NapCat、账号映射、根编排和跨项目文档。
+1. `MengLeiFudge/qqbot` 作为账号级 superproject，只维护四个框架 gitlink（一个 AstrBot、三个 MaiBot）、NapCat、账号映射、根编排和跨项目文档。
 2. AstrBot 与 MaiBot 分别使用 `MengLeiFudge/AstrBot`、`MengLeiFudge/MaiBot` fork 的 `deployment` 分支；各自保存 Core、本地插件、脱敏示例和项目脚本，实际配置、数据、日志与环境物理位于项目内但不进入 Git。
-3. 根用户启动合同固定为 `all/yunqi/yelin`。`napcat/accounts.json` 保存账号、QQ、固定端口、连接方向和当前框架入口；根命令不暴露框架名。
-4. 云栖 `1443944862:6200` 只使用 AstrBot，并成为全部固定功能的唯一运行 owner；AstrBot 不保留双 profile、双 worker 或跨账号 command claim。
-5. 夜凛 `2629227874:6201` 只使用 MaiBot。启动前插件策略仅允许 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 与 `qqbot_visual`；其他 `qqbot_*` 源码保留但强制禁用。DSP 物理向量库只由云栖 AstrBot 维护，夜凛通过 localhost 读取同一检索结果。
-6. 星遥 `3056830689:6202` 与月澄 `3109326090:6203` 当前没有 Bot Core，也不加入默认根启动组。
+3. 根用户启动合同固定为 `all/yunqi/yelin/lanling/fengling`。`napcat/accounts.json` 保存账号、QQ、固定端口、连接方向和当前框架入口；根命令不暴露框架名。
+4. 云栖 `1443944862:6201` 只使用 AstrBot，并成为全部固定功能的唯一运行 owner；AstrBot 不保留双 profile、双 worker 或跨账号 command claim。
+5. 夜凛 `2629227874:6202` 只使用 MaiBot。启动前插件策略仅允许 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 与 `qqbot_visual`；其他 `qqbot_*` 源码保留但强制禁用。DSP 物理向量库只由云栖 AstrBot 维护，夜凛通过 localhost 读取同一检索结果。
+6. 蓝铃 `3600812036:6203` 与风铃 `3056830689:6204` 使用独立 MaiBot 工作树；注销账号 `3109326090` 已移出账号清单并归档工作树。
 7. 框架只在显式更新时合入官方最新稳定 Release；启动不自动升级，不追踪主分支每个提交。更新和提交先发生在 fork，再更新 qqbot gitlink。
 
 ## 结果

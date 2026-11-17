@@ -5,7 +5,8 @@
       "target": "yunqi",
       "label": "Yunqi",
       "qq": "1443944862",
-      "oneBotPort": 6200,
+      "oneBotPort": 6201,
+      "napcatWebuiPort": 6101,
       "autoStart": true,
       "connectionMode": "reverse-client",
       "connectionName": "yunqi-astrbot-reverse-ws",
@@ -19,7 +20,8 @@
       "target": "yelin",
       "label": "Yelin",
       "qq": "2629227874",
-      "oneBotPort": 6201,
+      "oneBotPort": 6202,
+      "napcatWebuiPort": 6102,
       "autoStart": false,
       "connectionMode": "forward-server",
       "connectionName": "yelin-maibot-forward-ws",
@@ -30,24 +32,11 @@
       }
     },
     {
-      "target": "xingyao",
-      "label": "Fengling",
-      "qq": "3056830689",
-      "oneBotPort": 6202,
-      "autoStart": true,
-      "connectionMode": "forward-server",
-      "connectionName": "xingyao-maibot-forward-ws",
-      "framework": {
-        "name": "maibot-xingyao",
-        "root": "maibot-xingyao",
-        "startScript": "maibot-xingyao/scripts/start.ps1"
-      }
-    },
-    {
       "target": "lanling",
       "label": "Lanling",
       "qq": "3600812036",
-      "oneBotPort": 6204,
+      "oneBotPort": 6203,
+      "napcatWebuiPort": 6103,
       "autoStart": true,
       "connectionMode": "forward-server",
       "connectionName": "lanling-maibot-forward-ws",
@@ -55,6 +44,21 @@
         "name": "maibot-lanling",
         "root": "maibot-lanling",
         "startScript": "maibot-lanling/scripts/start.ps1"
+      }
+    },
+    {
+      "target": "fengling",
+      "label": "Fengling",
+      "qq": "3056830689",
+      "oneBotPort": 6204,
+      "napcatWebuiPort": 6104,
+      "autoStart": true,
+      "connectionMode": "forward-server",
+      "connectionName": "fengling-maibot-forward-ws",
+      "framework": {
+        "name": "maibot-fengling",
+        "root": "maibot-fengling",
+        "startScript": "maibot-fengling/scripts/start.ps1"
       }
     }
   ]

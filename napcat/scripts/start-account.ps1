@@ -44,6 +44,18 @@ try {
     $env:NAPCAT_INJECT_PATH = $injectPath
     $env:NAPCAT_LAUNCHER_PATH = $NapCatExe
     $env:NAPCAT_MAIN_PATH = Join-Path $NapCatRoot "napcat.mjs"
+    # NapCat starts its panel at 6099 unless told otherwise; pin it from the account manifest.
+    $env:NAPCAT_WEBUI_PREFERRED_PORT = $null
+    if ($Account) {
+        $accountsPath = Join-Path $ProjectRoot "accounts.json"
+        if (Test-Path -LiteralPath $accountsPath) {
+            $manifest = Get-Content -LiteralPath $accountsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $entry = @($manifest.accounts | Where-Object { $_.qq -eq $Account }) | Select-Object -First 1
+            if ($entry -and [int]$entry.napcatWebuiPort -gt 0) {
+                $env:NAPCAT_WEBUI_PREFERRED_PORT = [string][int]$entry.napcatWebuiPort
+            }
+        }
+    }
     $bootArguments = @($qqRuntime.Exe, $injectPath)
     if ($NoQuickLogin -or -not $Account) {
         $env:NAPCAT_QUICK_ACCOUNT = $null

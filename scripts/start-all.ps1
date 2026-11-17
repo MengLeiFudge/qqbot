@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Position = 0)]
-    [ValidateSet("all", "yunqi", "yelin", "xingyao", "yuecheng", "lanling")]
+    [ValidateSet("all", "yunqi", "yelin", "lanling", "fengling")]
     [string]$Target = "all",
     [switch]$ForceRestart,
     [switch]$SkipInstall,

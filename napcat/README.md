@@ -63,15 +63,17 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 
 ## 固定端口
 
-- 云栖 `1443944862`：reverse client -> `ws://127.0.0.1:6200/ws`
-- 夜凛 `2629227874`：forward server `127.0.0.1:6201`
-- 风铃 `3056830689`：forward server `127.0.0.1:6202`
-- 蓝铃 `3600812036`：forward server `127.0.0.1:6204`
+- 云栖 `1443944862`：reverse client -> `ws://127.0.0.1:6201/ws`，NapCat 面板 6101
+- 夜凛 `2629227874`：forward server `127.0.0.1:6202`，面板 6102（暂不启动）
+- 蓝铃 `3600812036`：forward server `127.0.0.1:6203`，面板 6103
+- 风铃 `3056830689`：forward server `127.0.0.1:6204`，面板 6104
 
-根入口日常使用 `all/yunqi/yelin/xingyao/lanling`；技术 Target `xingyao` 对应风铃。`all` 自动管理清单中 `autoStart=true` 的账号，夜凛暂时关闭。注销账号 `3109326090` 已移出清单，不再启动。单独维护风铃的 NapCat 时可在 Windows PowerShell 中运行：
+四个账号的面板端口由 `accounts.json` 的 `napcatWebuiPort` 维护，`configure-account.ps1` 在启动前写入共享 `webui.json`；不要手工改面板端口。NapCat 面板共用同一 token，按账号端口访问 `http://127.0.0.1:<面板端口>/webui`。
+
+根入口日常使用 `all/yunqi/yelin/lanling/fengling`；`all` 自动管理清单中 `autoStart=true` 的账号，夜凛暂时关闭。注销账号 `3109326090` 已移出清单，不再启动。单独维护风铃的 NapCat 时可在 Windows PowerShell 中运行：
 
 ```powershell
-.\scripts\ensure-account.ps1 -Target xingyao
+.\scripts\ensure-account.ps1 -Target fengling
 ```
 
 首次登录可能需要二维码。`ensure-account.ps1` 先读取当前账号运行日志；已在线且连接就绪的账号直接复用。其他账号进入共用登录队列，等待当前账号完成登录；已有进程需要重新扫码时也会进入队列。检测到 QQ 离线、退出、登录错误，或二维码超过三分钟没有刷新时，只重建该账号一次。新实例再次失败时明确报错，不继续重启。OneBot 端口存在不能覆盖日志中明确的离线、登录失败或待扫码状态。快速登录成功标记位于 `data/quick-login/<QQ>.ready`，只属于本机。

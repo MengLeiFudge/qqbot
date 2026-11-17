@@ -10,11 +10,7 @@
 	path = maibot-lanling
 	url = https://github.com/MengLeiFudge/MaiBot.git
 	branch = deployment
-[submodule "maibot-xingyao"]
-	path = maibot-xingyao
+[submodule "maibot-fengling"]
+	path = maibot-fengling
 	url = https://github.com/MengLeiFudge/MaiBot.git
-	branch = deployment-xingyao
-[submodule "maibot-yuecheng"]
-	path = maibot-yuecheng
-	url = https://github.com/MengLeiFudge/MaiBot.git
-	branch = deployment-yuecheng
+	branch = deployment-fengling

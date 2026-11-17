@@ -4,11 +4,11 @@
 
 | 角色 | 工作树 / 技术 Target | OneBot | WebUI | 消息服务 |
 | --- | --- | --- | --- | --- |
-| 夜凛 | `maibot-yelin/` / `yelin` | 6201 | 8003 | 8020 |
-| 蓝铃 | `maibot-lanling/` / `lanling` | 6204 | 8004 | 8021 |
-| 风铃 | `maibot-xingyao/` / `xingyao` | 6202 | 8005 | 8022 |
+| 夜凛 | `maibot-yelin/` / `yelin` | 6202 | 8002 | 8022 |
+| 蓝铃 | `maibot-lanling/` / `lanling` | 6203 | 8003 | 8023 |
+| 风铃 | `maibot-fengling/` / `fengling` | 6204 | 8004 | 8024 |
 
-风铃沿用原星遥账号的工作树和连接标识，实际昵称与角色为风铃。QQ `3109326090` 已注销，`maibot-yuecheng/` 只保留历史源码与数据，不再进入账号清单、启动或更新。不要继续排查其登录，也不要把它当作风铃。
+NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风铃 6104，由 `accounts.json` 的 `napcatWebuiPort` 在启动前写入共享 `webui.json`。账号 `3109326090` 已注销，工作树已归档到根 `.codex/trash/`，不再进入账号清单、启动或更新。
 
 三台 MaiBot 对齐基础聊天、拍一拍、只读 DSP 检索、身份核验、视频与历史阅读、联网搜索、回复节奏、连发引用、日记、个人工作区和主动联系。夜凛、风铃的通用允许列表在各自 `scripts/enforce_chat_only.py`，蓝铃保留原有独立配置校验。蓝铃的伴侣关系和专属模块不复制给其他角色。
 
@@ -24,6 +24,6 @@
 
 首次部署须由用户阅读并确认本实例 `EULA.md` 与 `PRIVACY.md`，通过框架原生机制保存同意标记；条款更新后重新确认，不复制其他实例的同意标记。后台入口无交互输入，未确认时保持待启动。
 
-本地分支仍为 `deployment`，夜凛、风铃的远端目标分别为 `deployment-yelin`、`deployment-xingyao`，蓝铃为 `deployment`。首次创建远端分支前 Git 可显示 `gone`；不得回退跟踪其他账号。推送需要用户明确授权，并使用对应的明确 refspec，不创建注销账号的远端分支。
+本地分支仍为 `deployment`，夜凛、风铃的远端目标分别为 `deployment-yelin`、`deployment-fengling`，蓝铃为 `deployment`。首次创建远端分支前 Git 可显示 `gone`；不得回退跟踪其他账号。推送需要用户明确授权，并使用对应的明确 refspec。
 
-日常从根 `scripts/start-all.ps1 -Target all -SkipInstall -NoPauseOnFailure` 启动云栖、蓝铃、风铃，夜凛保持 `autoStart=false`。单独维护风铃可使用 `-Target xingyao`。按既有入口等待 NapCat、WebUI 与适配器连接，不重复启动或循环重启；日志位于根 `logs/startup/`、各工作树 `logs/` 和 `napcat/data/logs/accounts/<Target>/`。
+日常从根 `scripts/start-all.ps1 -Target all -SkipInstall -NoPauseOnFailure` 启动云栖、蓝铃、风铃，夜凛保持 `autoStart=false`。单独维护风铃可使用 `-Target fengling`。按既有入口等待 NapCat、WebUI 与适配器连接，不重复启动或循环重启；日志位于根 `logs/startup/`、各工作树 `logs/` 和 `napcat/data/logs/accounts/<Target>/`。

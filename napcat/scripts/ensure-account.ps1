@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("yunqi", "yelin", "xingyao", "yuecheng", "lanling")]
+    [ValidateSet("yunqi", "yelin", "lanling", "fengling")]
     [string]$Target,
     [switch]$ForceRestart,
     [switch]$UseChildWindow,

@@ -6,9 +6,9 @@
 
 ```text
 qqbot superproject
-├── astrbot/          云栖 1443944862，WebUI 6185，OneBot 6200，artifact API 8080，DSP knowledge API 8081
-├── maibot-yelin/     夜凛 2629227874，WebUI 8003，连接 NapCat 6201
-└── napcat/           四账号 QQ/OneBot 接入；星遥和月澄当前没有 Bot Core
+├── astrbot/          云栖 1443944862，WebUI 8001，OneBot 6201，artifact API 8080，DSP knowledge API 8081
+├── maibot-yelin/     夜凛 2629227874，WebUI 8002，连接 NapCat 6202
+└── napcat/           四账号 QQ/OneBot 接入；NapCat 面板 6101/6102/6103/6104
 ```
 
 AstrBot 与 MaiBot 必须使用各自 fork 的 `deployment` 分支和该分支固定的稳定 Release。1Panel 或 Docker 只负责托管具体组件，不能替代 fork 中的本地插件、夜凛插件允许策略或账号配置。
@@ -27,12 +27,12 @@ NapCat 的程序包、QQ 登录态、实际 OneBot 配置和日志位于 `napcat
 
 1. 使用 `git clone --recurse-submodules` 获取 qqbot，并确认两个 submodule 都位于采用版本。
 2. 分别为 AstrBot 和 MaiBot 恢复本机运行配置，只在运行环境填写 provider key、OneBot token 和其他密钥。
-3. 为云栖配置 NapCat reverse WebSocket client `ws://127.0.0.1:6200/ws`。
-4. 为夜凛配置 NapCat forward WebSocket server `127.0.0.1:6201`，MaiBot `napcat_adapter` 使用同一端口和 `connection_id=yelin`。
+3. 为云栖配置 NapCat reverse WebSocket client `ws://127.0.0.1:6201/ws`。
+4. 为夜凛配置 NapCat forward WebSocket server `127.0.0.1:6202`，MaiBot `napcat_adapter` 使用同一端口和 `connection_id=yelin`。
 5. 分别使用项目自己的依赖环境和启动入口建立服务；不要从 qqbot 根目录复制框架插件或配置。
-6. 将 AstrBot `6185/6200/8080/8081`、MaiBot `8003` 和 NapCat `6201` 的监听/连接状态纳入平台健康检查。
+6. 将 AstrBot `8001/6201/8080/8081`、MaiBot `8002` 和 NapCat `6202` 的监听/连接状态纳入平台健康检查。
 
-星遥 `3056830689:6202` 与月澄 `3109326090:6203` 当前只保留 NapCat 配置，不部署 AstrBot 或 MaiBot，也不加入默认服务启动组。
+蓝铃 `3600812036:6203` 与风铃 `3056830689:6204` 同样是独立 MaiBot 工作树。端口按角色顺序连号：OneBot `6200+n`、WebUI `8000+n`、消息服务 `8020+n`、NapCat 面板 `6100+n`。注销账号 `3109326090` 不再部署。
 
 ## 更新与发布
 

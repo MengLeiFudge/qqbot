@@ -77,8 +77,25 @@ else {
 }
 
 $config | ConvertTo-Json -Depth 100 | Set-Content -Path $configPath -Encoding UTF8
+
+# NapCat reads the panel port from a shared webui.json; write this account value without a BOM.
+$webuiPath = Join-Path $ConfigRoot "webui.json"
+if (-not (Test-Path $webuiPath)) {
+    throw "NapCat WebUI config not found: $webuiPath"
+}
+$webuiPort = [int]$item.napcatWebuiPort
+if ($webuiPort -le 0) {
+    throw "NapCat account target '$($item.target)' has no napcatWebuiPort in accounts.json."
+}
+$webui = Get-Content -Path $webuiPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$webui.port -ne $webuiPort) {
+    $webui.port = $webuiPort
+    # A BOM breaks NapCat's JSON.parse for this file, so write UTF-8 without one.
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($webuiPath, ($webui | ConvertTo-Json -Depth 100), $utf8NoBom)
+}
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptRoot "ensure-social-plugin.ps1")
 if ($LASTEXITCODE -ne 0) {
     throw "NapCat social plugin deployment failed for target '$($item.target)'."
 }
-Write-Host ("[NapCat] Configured {0} ({1}) on OneBot port {2} as {3}." -f $item.label, $item.qq, $item.oneBotPort, $item.connectionMode)
+Write-Host ("[NapCat] Configured {0} ({1}) on OneBot port {2} as {3}; panel port {4}." -f $item.label, $item.qq, $item.oneBotPort, $item.connectionMode, $webuiPort)
