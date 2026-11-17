@@ -14,7 +14,7 @@
 
 通用扩展源码各自位于 `plugins/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git；部署时分别填写机器人 QQ、身份插件的主人、独立工作区和日记取材私聊，不复制其他账号凭据、数据库或插件状态。夜凛、风铃的日记空间发布默认关闭，定时生成和本地导出继续启用。
 
-个人工作区分别为 `D:/project/lanling`、`D:/project/yelin`、`D:/project/fengling`。工作区工具只向主人私聊开放。没有既有主人私聊时，工具先不注册；收到真实主人消息后，经身份配置与公开聊天接口核对会话，保存本机绑定并公开重载插件，随后由 Host 限制会话。详见各自 `plugins/qqbot_workspace/README.md`。
+个人工作区分别为 `D:/project/lanling`、`D:/project/yelin`、`D:/project/fengling`。工作区工具只向主人私聊开放。没有既有主人私聊时，工具先不注册；真实主人私聊会话建立后，在首次规划请求前经身份配置与公开聊天接口核对会话，保存本机绑定并公开重载插件，随后由 Host 限制会话。详见各自 `plugins/qqbot_workspace/README.md`。
 
 风铃不继承星遥的旧记忆：停止写入后，将原角色数据移至根 `.codex/trash/<timestamp>/`，建立空白角色数据；保留 WebUI 登录配置及本账号健康 NapCat 登录态。归档路径记在本机迁移记录，不提交聊天或运行数据。
 
