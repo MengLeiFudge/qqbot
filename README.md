@@ -18,7 +18,7 @@
 ```text
 qqbot/
 ├── astrbot/          # MengLeiFudge/AstrBot fork submodule，deployment 分支
-├── maibot-yelin/     # MengLeiFudge/MaiBot fork submodule，deployment 分支
+├── maibot-yelin/     # MengLeiFudge/MaiBot fork submodule，deployment-yelin 分支
 ├── maibot-lanling/   # MengLeiFudge/MaiBot fork submodule，蓝铃独立部署
 ├── maibot-fengling/  # 风铃独立 MaiBot 部署
 ├── napcat/           # NapCat、账号映射及自身脚本
@@ -38,7 +38,7 @@ git clone --recurse-submodules https://github.com/MengLeiFudge/qqbot.git
 git -C qqbot submodule update --init --recursive
 ```
 
-五个 submodule 的 `origin` 指向 MengLeiFudge fork，`upstream` 指向对应的官方 AstrBot 或 MaiBot。日常部署固定在各自 `deployment` 分支采用的稳定 Release，不在启动时自动升级。
+五个 submodule 的 `origin` 指向 MengLeiFudge fork，`upstream` 指向对应的官方 AstrBot 或 MaiBot。日常部署固定在各子仓库当前部署分支采用的稳定 Release，不在启动时自动升级。
 
 真实配置和运行态不会随 Git 克隆。首次部署需要在各子项目内恢复或创建本机配置，并安装 NapCat OneKey 包；不得把 provider key、OneBot token、QQ 登录态、数据库、日志或会话数据加入任何仓库。
 
@@ -89,7 +89,7 @@ DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持�
 .\scripts\update-all.bat napcat
 ```
 
-框架更新器只在干净的 `deployment` 分支上获取官方最新稳定 Release，合入本地部署分支并同步依赖；NapCat 更新器负责 NapCat 与独立 QQ 的配对更新。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛、蓝铃和风铃。完成兼容处理并分别提交各工作树后，再在 qqbot 中提交新的 submodule 指针。
+框架更新器只在子仓库干净的部署分支上获取官方最新稳定 Release，合入本地部署分支并同步依赖；NapCat 更新器负责 NapCat 与独立 QQ 的配对更新。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛、蓝铃和风铃。完成兼容处理并分别提交各工作树后，再在 qqbot 中提交新的 submodule 指针。
 
 NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命令启用，并立即开始首次检查：
 
@@ -122,4 +122,4 @@ Get-Content .\napcat\data\updates\napcat.json -Encoding UTF8
 
 根仓与四个子仓分别审查和提交。根仓不能提交 submodule 内普通文件，也不能用根 `.gitignore` 代替子项目的敏感数据规则。任何 push 都必须单独明确授权。架构取舍见 `docs/adr/0002-account-superproject.md`。
 
-MaiBot 工作目录共享同一 fork，各自保留本地 `deployment` 分支。获准推送后，夜凛使用 `git -C maibot-yelin push origin HEAD:deployment-yelin`，蓝铃使用 `git -C maibot-lanling push origin HEAD:deployment`，风铃使用 `git -C maibot-fengling push origin HEAD:deployment-fengling`。推送前核对对应远端分支的祖先关系，不覆盖其他实例历史。
+MaiBot 工作目录共享同一 fork，本地分支名与 `.gitmodules` 声明一致：夜凛 `deployment-yelin`、蓝铃 `deployment`、风铃 `deployment-fengling`，各自 upstream 已指向同名远端分支。获准推送后用 `git -C maibot-<账号> push` 即可；推送前核对祖先关系，不覆盖其他实例历史。

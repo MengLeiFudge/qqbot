@@ -86,7 +86,7 @@
 ## Git 工作流
 
 - 根仓和五个子仓分别检查状态、提交和维护历史；不要从根仓暂存 submodule 内普通文件。
-- 框架 fork 本地使用 `deployment` 分支，`origin` 指向 `MengLeiFudge` fork，`upstream` 指向官方仓库。夜凛、风铃的远端目标为 `deployment-yelin`、`deployment-fengling`，蓝铃为 `deployment`。获准推送时使用明确 refspec，禁止覆盖其他账号历史。
+- 框架 fork 的 `origin` 指向 `MengLeiFudge` fork，`upstream` 指向官方仓库。各子仓库本地分支名与 `.gitmodules` 声明一致：夜凛 `deployment-yelin`、风铃 `deployment-fengling`、蓝铃与 AstrBot 为 `deployment`，upstream 已指向同名远端分支。获准推送时仍需核对祖先关系，禁止覆盖其他账号历史。
 - 框架提交完成后，根仓只记录新的 gitlink。
 - 本次任务完成且必要检查通过后，自动提交本次范围内的改动；不要等待用户再次要求提交。子项目提交完成后，同步提交根仓的 gitlink 更新。用户明确要求暂不提交时除外。
 - 未经用户明确批准不得 push，也不得把无关 dirty change 带入提交。

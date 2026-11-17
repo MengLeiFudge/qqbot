@@ -11,7 +11,7 @@ qqbot superproject
 └── napcat/           四账号 QQ/OneBot 接入；NapCat 面板 6101/6102/6103/6104
 ```
 
-AstrBot 与 MaiBot 必须使用各自 fork 的 `deployment` 分支和该分支固定的稳定 Release。1Panel 或 Docker 只负责托管具体组件，不能替代 fork 中的本地插件、夜凛插件允许策略或账号配置。
+AstrBot 与 MaiBot 必须使用各自 fork 的部署分支（`deployment`、`deployment-yelin`、`deployment-fengling`）和该分支固定的稳定 Release。1Panel 或 Docker 只负责托管具体组件，不能替代 fork 中的本地插件、夜凛插件允许策略或账号配置。
 
 ## 持久化边界
 
@@ -36,12 +36,12 @@ NapCat 的程序包、QQ 登录态、实际 OneBot 配置和日志位于 `napcat
 
 ## 更新与发布
 
-更新必须显式执行：先在对应 fork 的 `deployment` 分支合入官方最新稳定 Release，处理本地兼容并提交，再更新 qqbot 的 submodule 指针。启动服务时不得自动追踪 upstream 或自动升级。
+更新必须显式执行：先在对应 fork 的部署分支合入官方最新稳定 Release，处理本地兼容并提交，再更新 qqbot 的 submodule 指针。启动服务时不得自动追踪 upstream 或自动升级。
 
 三个仓库分别发布：
 
-1. `MengLeiFudge/AstrBot` 的 deployment 提交。
-2. `MengLeiFudge/MaiBot` 的 deployment 提交。
+1. `MengLeiFudge/AstrBot` 的 `deployment` 提交。
+2. `MengLeiFudge/MaiBot` 的 `deployment`、`deployment-yelin`、`deployment-fengling` 提交。
 3. `MengLeiFudge/qqbot` 的 NapCat/编排变更和两个新 gitlink。
 
 真实 token、QQ 登录态、cookies、数据库、日志、会话记录和运行配置不得进入 Git 或部署日志。服务器热修必须回流到对应 fork；不要让服务器副本形成新的源码事实源。
