@@ -57,7 +57,7 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 
 ## 自动同意请求
 
-所有账号自动同意好友申请、邀请机器人入群和成员加群申请。云栖由 AstrBot 的 `astrbot_plugin_qqbot_features` 处理；夜凛、蓝铃由各自 MaiBot 的 `napcat_adapter` 接入层处理；账号清单中未绑定框架的账号由 `napcat-plugin-qqbot-social` 处理，星遥、月澄绑定 MaiBot 后由各自适配器处理，避免重复执行。
+现行账号自动同意好友申请、邀请机器人入群和成员加群申请。云栖由 AstrBot 的 `astrbot_plugin_qqbot_features` 处理；夜凛、蓝铃和风铃由各自 MaiBot 的 `napcat_adapter` 接入层处理。夜凛保持关闭；已注销的 `3109326090` 不再处理申请。未绑定框架的账号才使用 `napcat-plugin-qqbot-social`，避免重复执行。
 
 `configure-account.ps1` 会把本地插件复制到实际 NapCat 插件目录并启用；账号启动和更新入口均调用该配置步骤。仅使用 NapCat 的账号在下一次启动时加载该插件；现有进程需要重新加载插件或重启对应 NapCat。申请处理不发送聊天消息，失败写入各自运行日志。
 
@@ -65,15 +65,13 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 
 - 云栖 `1443944862`：reverse client -> `ws://127.0.0.1:6200/ws`
 - 夜凛 `2629227874`：forward server `127.0.0.1:6201`
-- 星遥 `3056830689`：forward server `127.0.0.1:6202`
-- 月澄 `3109326090`：forward server `127.0.0.1:6203`
+- 风铃 `3056830689`：forward server `127.0.0.1:6202`
 - 蓝铃 `3600812036`：forward server `127.0.0.1:6204`
 
-根入口支持 `all/yunqi/yelin/xingyao/yuecheng/lanling`；`all` 自动管理清单中 `autoStart=true` 的账号，夜凛暂时关闭。单独维护星遥或月澄的 NapCat 时可在 Windows PowerShell 中运行：
+根入口日常使用 `all/yunqi/yelin/xingyao/lanling`；技术 Target `xingyao` 对应风铃。`all` 自动管理清单中 `autoStart=true` 的账号，夜凛暂时关闭。注销账号 `3109326090` 已移出清单，不再启动。单独维护风铃的 NapCat 时可在 Windows PowerShell 中运行：
 
 ```powershell
 .\scripts\ensure-account.ps1 -Target xingyao
-.\scripts\ensure-account.ps1 -Target yuecheng
 ```
 
 首次登录可能需要二维码。`ensure-account.ps1` 先读取当前账号运行日志；已在线且连接就绪的账号直接复用。其他账号进入共用登录队列，等待当前账号完成登录；已有进程需要重新扫码时也会进入队列。检测到 QQ 离线、退出、登录错误，或二维码超过三分钟没有刷新时，只重建该账号一次。新实例再次失败时明确报错，不继续重启。OneBot 端口存在不能覆盖日志中明确的离线、登录失败或待扫码状态。快速登录成功标记位于 `data/quick-login/<QQ>.ready`，只属于本机。

@@ -31,7 +31,7 @@
     },
     {
       "target": "xingyao",
-      "label": "Xingyao",
+      "label": "Fengling",
       "qq": "3056830689",
       "oneBotPort": 6202,
       "autoStart": true,
@@ -41,20 +41,6 @@
         "name": "maibot-xingyao",
         "root": "maibot-xingyao",
         "startScript": "maibot-xingyao/scripts/start.ps1"
-      }
-    },
-    {
-      "target": "yuecheng",
-      "label": "Yuecheng",
-      "qq": "3109326090",
-      "oneBotPort": 6203,
-      "autoStart": true,
-      "connectionMode": "forward-server",
-      "connectionName": "yuecheng-maibot-forward-ws",
-      "framework": {
-        "name": "maibot-yuecheng",
-        "root": "maibot-yuecheng",
-        "startScript": "maibot-yuecheng/scripts/start.ps1"
       }
     },
     {

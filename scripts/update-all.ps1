@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Position = 0)]
     [ValidateSet("all", "astrbot", "maibot", "napcat")]
     [string]$Target = "all"
@@ -13,11 +13,10 @@ $components = [ordered]@{
     maibot = Join-Path $WorkspaceRoot "maibot-yelin\scripts\update.ps1"
     "maibot-lanling" = Join-Path $WorkspaceRoot "maibot-lanling\scripts\update.ps1"
     "maibot-xingyao" = Join-Path $WorkspaceRoot "maibot-xingyao\scripts\update.ps1"
-    "maibot-yuecheng" = Join-Path $WorkspaceRoot "maibot-yuecheng\scripts\update.ps1"
     napcat = Join-Path $WorkspaceRoot "napcat\scripts\update.ps1"
 }
 
-$selected = if ($Target -eq "all") { @($components.Keys) } elseif ($Target -eq "maibot") { @("maibot", "maibot-lanling", "maibot-xingyao", "maibot-yuecheng") } else { @($Target) }
+$selected = if ($Target -eq "all") { @($components.Keys) } elseif ($Target -eq "maibot") { @("maibot", "maibot-lanling", "maibot-xingyao") } else { @($Target) }
 foreach ($name in $selected) {
     $script = $components[$name]
     if (-not (Test-Path $script)) {

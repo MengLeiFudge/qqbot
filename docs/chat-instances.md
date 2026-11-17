@@ -1,35 +1,29 @@
-# 星遥与月澄的聊天实例
+# MaiBot 聊天实例
 
-星遥、月澄分别使用 `maibot-xingyao/`、`maibot-yuecheng/` 独立 MaiBot 工作树。账号、OneBot 端口和启动选择以 [账号清单](../napcat/accounts.json) 为准；根入口支持 `xingyao`、`yuecheng`，`all` 跳过 `autoStart=false` 的夜凛。
+角色和 QQ 对应以 [机器人角色与框架归属](bot-roles.md) 为准，端口与启动选择由 [账号清单](../napcat/accounts.json) 维护。云栖使用 AstrBot；夜凛、蓝铃、风铃使用各自独立的 MaiBot 工作树。
 
-| 实例 | QQ | OneBot | WebUI | 消息服务 |
+| 角色 | 工作树 / 技术 Target | OneBot | WebUI | 消息服务 |
 | --- | --- | --- | --- | --- |
-| 星遥 | `3056830689` | `6202` | `8005` | `8022` |
-| 月澄 | `3109326090` | `6203` | `8006` | `8023` |
+| 夜凛 | `maibot-yelin/` / `yelin` | 6201 | 8003 | 8020 |
+| 蓝铃 | `maibot-lanling/` / `lanling` | 6204 | 8004 | 8021 |
+| 风铃 | `maibot-xingyao/` / `xingyao` | 6202 | 8005 | 8022 |
 
-两者插件源码、启用选择和模型配置以夜凛部署为初始来源。启用 `napcat_adapter`、`cpa_session`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search`、`qqbot_reply_timing`；其余 `qqbot_*` 与聊天插件管理保持禁用。每次启动执行本实例 `scripts/enforce_chat_only.py`，无法解析或确认禁用时停止启动。
+风铃沿用原星遥账号的工作树和连接标识，实际昵称与角色为风铃。QQ `3109326090` 已注销，`maibot-yuecheng/` 只保留历史源码与数据，不再进入账号清单、启动或更新。不要继续排查其登录，也不要把它当作风铃。
 
-各实例的真实配置位于自己的 `config/`、`plugins/*/config.toml`。模型和插件凭据只在本机保存。建立新实例时只复制所需配置，调整 QQ、显示名、自称、监听端口、NapCat token 和 `connection_id`；适配器的全局禁止发送者名单包含其他机器人账号，避免互相触发。CPA 请求直接携带 `x-opencode-session`，要求见 [模型 API 路由](model-routing.md#opencode-go)。
+三台 MaiBot 对齐基础聊天、拍一拍、只读 DSP 检索、身份核验、视频与历史阅读、联网搜索、回复节奏、连发引用、日记、个人工作区和主动联系。夜凛、风铃的通用允许列表在各自 `scripts/enforce_chat_only.py`，蓝铃保留原有独立配置校验。蓝铃的伴侣关系和专属模块不复制给其他角色。
 
-各实例本地分支均为 `deployment`，星遥、月澄在 `.gitmodules` 的远端分支及本地 `branch.deployment.merge` 分别指向 `deployment-xingyao`、`deployment-yuecheng`。首次创建远端分支前，Git 可能将跟踪目标显示为 `gone`；不要回退跟踪蓝铃使用的 `origin/deployment`。获得推送授权后，分别用明确的 `HEAD:refs/heads/deployment-xingyao`、`HEAD:refs/heads/deployment-yuecheng` 创建或更新各自分支，再核对本地跟踪关系与根 gitlink。
+通用扩展源码各自位于 `plugins/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git；部署时分别填写机器人 QQ、身份插件的主人、独立工作区和日记取材私聊，不复制其他账号凭据、数据库或插件状态。夜凛、风铃的日记空间发布默认关闭，定时生成和本地导出继续启用。
 
-星遥、月澄的 `chat.reply_timing.planner_interrupt_max_consecutive_count` 设为 `0`；首条前的补充取消由各自本地 `cpa_session` 和 `qqbot_reply_timing` 配合处理。群聊只跟踪本轮源消息发送者的补充，其他成员插话保留在原生上下文，不撤销当前答复。取消后由公开主动任务能力重新排队，避免把取消误当成沉默而等待数分钟；行为和必需权限见各实例的 [会话插件说明](../maibot-xingyao/plugins/cpa_session/README.md)。维护时同时核对模型请求、首段等待、重新排队和真实发送记录，不能只核对进程在线。
+个人工作区分别为 `D:/project/lanling`、`D:/project/yelin`、`D:/project/fengling`。工作区工具只向主人私聊开放。没有既有主人私聊时，工具先不注册；收到真实主人消息后，经身份配置与公开聊天接口核对会话，保存本机绑定并公开重载插件，随后由 Host 限制会话。详见各自 `plugins/qqbot_workspace/README.md`。
 
-星遥、月澄通过现有 `[visual]` 配置启用原生入站压缩：`handle_oversized_images = true`、`max_image_size_mb = 1.0`、`oversized_image_handle_method = "compress"`。单张超过 1 MiB 的图片在聊天 Hook 前尝试压缩，较小图片沿用原数据；这不是固定 1080p。压缩失败时框架会记录警告并保留原图，因此该阈值不是无条件的体积保证。已有缓存中的历史图片不会因修改阈值而自动重新压缩。
+风铃不继承星遥的旧记忆：停止写入后，将原角色数据移至根 `.codex/trash/<timestamp>/`，建立空白角色数据；保留 WebUI 登录配置及本账号健康 NapCat 登录态。归档路径记在本机迁移记录，不提交聊天或运行数据。
 
-框架插件通信单帧上限为 16 MiB，多个图片的 Base64 与历史上下文仍可能累计超限；单张压缩阈值不能保证整个请求低于上限。现有 SDK 与运行配置没有完整媒体分帧或共享引用接口，仍需核对实际请求和失败日志；不能通过删除图片、删除上下文或框架私有补丁规避。夜凛停用期间没有同期聊天样本，不能据此判定其不受该限制影响。
+图片沿用原生多模态。三台 MaiBot 的入站单张压缩配置统一为 `[visual] handle_oversized_images=true`、`max_image_size_mb=1.0`、`oversized_image_handle_method="compress"`。压缩在聊天 Hook 前尝试，失败保留原图，旧缓存不自动重新压缩；它不是固定 1080p，也不能保证多个图片及历史上下文累计低于插件 16 MiB 单帧上限。不得删除图片、删上下文或改框架私有常量来绕过限制。
 
-每个实例单独准备 `.venv`，保留独立的 `data/`、数据库、记忆、日志和 PID。不得复制夜凛或其他账号的运行数据、会话、登录态和记忆。DSP 知识仍通过云栖 `127.0.0.1:8081` 只读查询。
+风铃的 `chat.reply_timing.planner_interrupt_max_consecutive_count=0`，首条前的补充取消由本地 `cpa_session` 与 `qqbot_reply_timing` 按源发送者处理，取消后通过公开主动任务重新排队；其他群成员插话保留在完整上下文中。维护时核对模型请求、首段等待、重新排队与真实发送记录，ready 不代替聊天验收。
 
-首次部署还需由用户阅读并明确确认本实例的 `EULA.md` 和 `PRIVACY.md`，按框架原生机制保存 `eula.confirmed`、`privacy.confirmed`。未取得用户确认时保留待启动状态；后台入口没有交互输入，直接启动会在条款询问处以 EOF 退出。条款更新后重新确认，不复制其他实例的同意标记。
+首次部署须由用户阅读并确认本实例 `EULA.md` 与 `PRIVACY.md`，通过框架原生机制保存同意标记；条款更新后重新确认，不复制其他实例的同意标记。后台入口无交互输入，未确认时保持待启动。
 
-在 `D:\project\qqbot` 的 PowerShell 中启动：
+本地分支仍为 `deployment`，夜凛、风铃的远端目标分别为 `deployment-yelin`、`deployment-xingyao`，蓝铃为 `deployment`。首次创建远端分支前 Git 可显示 `gone`；不得回退跟踪其他账号。推送需要用户明确授权，并使用对应的明确 refspec，不创建注销账号的远端分支。
 
-```powershell
-.\scripts\start-all.ps1 -Target xingyao -SkipInstall -NoPauseOnFailure
-.\scripts\start-all.ps1 -Target yuecheng -SkipInstall -NoPauseOnFailure
-```
-
-先等待对应 NapCat 登录和端口 ready，再启动 MaiBot 并等待 OneBot established。登录要求扫码时，在对应账号窗口扫描最新二维码；保留当前等待流程，不重复启动。查看 `logs/startup/`、各实例 `logs/` 和 `napcat/data/logs/accounts/<Target>/`，确认当前进程的插件加载、启用及连接结果。ready 不代替实际聊天验收。
-
-夜凛暂时停用时保留 `maibot-yelin/` 的配置和数据，`autoStart=false`。恢复时先确认 QQ 账号可用，再将账号清单的 `autoStart` 设为 `true`，使用 `-Target yelin` 启动；不得复制星遥或月澄的记忆覆盖夜凛。
+日常从根 `scripts/start-all.ps1 -Target all -SkipInstall -NoPauseOnFailure` 启动云栖、蓝铃、风铃，夜凛保持 `autoStart=false`。单独维护风铃可使用 `-Target xingyao`。按既有入口等待 NapCat、WebUI 与适配器连接，不重复启动或循环重启；日志位于根 `logs/startup/`、各工作树 `logs/` 和 `napcat/data/logs/accounts/<Target>/`。
