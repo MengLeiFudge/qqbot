@@ -11,6 +11,8 @@
 
 各实例的真实配置位于自己的 `config/`、`plugins/*/config.toml`。模型和插件凭据只在本机保存。建立新实例时只复制所需配置，调整 QQ、显示名、自称、监听端口、NapCat token 和 `connection_id`；适配器的全局禁止发送者名单包含其他机器人账号，避免互相触发。CPA 请求直接携带 `x-opencode-session`，要求见 [模型 API 路由](model-routing.md#opencode-go)。
 
+各实例本地分支均为 `deployment`，星遥、月澄在 `.gitmodules` 的远端分支及本地 `branch.deployment.merge` 分别指向 `deployment-xingyao`、`deployment-yuecheng`。首次创建远端分支前，Git 可能将跟踪目标显示为 `gone`；不要回退跟踪蓝铃使用的 `origin/deployment`。获得推送授权后，分别用明确的 `HEAD:refs/heads/deployment-xingyao`、`HEAD:refs/heads/deployment-yuecheng` 创建或更新各自分支，再核对本地跟踪关系与根 gitlink。
+
 星遥、月澄的 `chat.reply_timing.planner_interrupt_max_consecutive_count` 设为 `0`；首条前的补充取消由各自本地 `cpa_session` 和 `qqbot_reply_timing` 配合处理。群聊只跟踪本轮源消息发送者的补充，其他成员插话保留在原生上下文，不撤销当前答复。取消后由公开主动任务能力重新排队，避免把取消误当成沉默而等待数分钟；行为和必需权限见各实例的 [会话插件说明](../maibot-xingyao/plugins/cpa_session/README.md)。维护时同时核对模型请求、首段等待、重新排队和真实发送记录，不能只核对进程在线。
 
 星遥、月澄通过现有 `[visual]` 配置启用原生入站压缩：`handle_oversized_images = true`、`max_image_size_mb = 1.0`、`oversized_image_handle_method = "compress"`。单张超过 1 MiB 的图片在聊天 Hook 前尝试压缩，较小图片沿用原数据；这不是固定 1080p。压缩失败时框架会记录警告并保留原图，因此该阈值不是无条件的体积保证。已有缓存中的历史图片不会因修改阈值而自动重新压缩。
