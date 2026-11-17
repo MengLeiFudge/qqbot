@@ -13,7 +13,7 @@
 ## 决策
 
 1. `MengLeiFudge/qqbot` 作为账号级 superproject，只维护四个框架 gitlink（一个 AstrBot、三个 MaiBot）、NapCat、账号映射、根编排和跨项目文档。
-2. AstrBot 与 MaiBot 分别使用 `MengLeiFudge/AstrBot`、`MengLeiFudge/MaiBot` fork 的 `deployment` 分支；各自保存 Core、本地插件、脱敏示例和项目脚本，实际配置、数据、日志与环境物理位于项目内但不进入 Git。
+2. AstrBot 与 MaiBot 分别使用 `MengLeiFudge/AstrBot`、`MengLeiFudge/MaiBot` fork 的部署分支（`deployment`、`deployment-yelin`、`deployment-fengling`）；各自保存 Core、本地插件、脱敏示例和项目脚本，实际配置、数据、日志与环境物理位于项目内但不进入 Git。
 3. 根用户启动合同固定为 `all/yunqi/yelin/lanling/fengling`。`napcat/accounts.json` 保存账号、QQ、固定端口、连接方向和当前框架入口；根命令不暴露框架名。
 4. 云栖 `1443944862:6201` 只使用 AstrBot，并成为全部固定功能的唯一运行 owner；AstrBot 不保留双 profile、双 worker 或跨账号 command claim。
 5. 夜凛 `2629227874:6202` 只使用 MaiBot。启动前插件策略仅允许 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 与 `qqbot_visual`；其他 `qqbot_*` 源码保留但强制禁用。DSP 物理向量库只由云栖 AstrBot 维护，夜凛通过 localhost 读取同一检索结果。
