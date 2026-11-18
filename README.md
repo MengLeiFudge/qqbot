@@ -97,7 +97,7 @@ NapCat 与独立 QQ 只做人工更新，不再注册任何定时计划：换包
 
 更新需要重载正在运行的协议端时，通过根 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 恢复 `autoStart=true` 的账号，夜凛继续停用。旧运行包保存在 `napcat/data/archives/`；临时事务文件移入根 `.codex/trash/`。更新日志位于 `napcat/data/logs/updates/`；人工运行 `napcat/scripts/update.ps1 -AssumeYes` 重试失败版本，完成后使用根启动入口恢复连接。
 
-扫码登录最多连续尝试 2 次；仍未登录时启动器会停掉该账号并写入 `napcat/data/login-pause/`，15 分钟内不再自动重试，避免 QQ 把连续登录请求判为异常。确认可以扫码时加 `-IgnoreLoginPause` 重试。
+扫码登录最多连续显示 3 张二维码；仍未登录时启动器会停掉该账号并写入 `napcat/data/login-pause/`，15 分钟内不再自动重试，避免 QQ 把连续登录请求判为异常。确认可以扫码时加 `-IgnoreLoginPause` 重试。
 
 ## Git 提交顺序
 

@@ -351,7 +351,7 @@ function Wait-AccountReady {
             if ($login.QrStamp -ne $qrStamp) {
                 $qrStamp = $login.QrStamp
                 $qrAttempts++
-                if ($qrAttempts -gt $MaxQrAttempts) {
+                if ($qrAttempts -ge $MaxQrAttempts) {
                     # 未登录时 NapCat 每两分钟自动换码；连续失败必须停进程，否则 QQ 会把上百次登录尝试判为异常。
                     Write-Host "[NapCat] $($item.label) 已连续 $qrAttempts 次扫码未完成登录，停止该账号以避免 QQ 判定异常登录。请稍后手动启动并扫码。日志：$LogPath"
                     Set-Content -Path $pausePath -Value (Get-Date).ToString("o") -Encoding ASCII

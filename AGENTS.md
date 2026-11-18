@@ -65,15 +65,15 @@
 - 各账号 NapCat 面板端口为 `6101/6102/6103/6104`，由 `accounts.json` 的 `napcatWebuiPort` 在启动前写入共享 `webui.json`，不再手工改面板端口。
 - `napcat/onekey/`、`napcat/data/`、QQ 登录态、token、缓存和日志不进 Git。
 - NapCat 启动和更新只由 `napcat/scripts/` 负责；根脚本不得实现包替换或账号进程细节。维护前读取 `napcat/README.md` 的独立 QQ 与配对更新说明。
-- 机器人使用项目内独立 QQ，禁止回退桌面 QQ。更新只由人工触发，先选择 NapCat 最新稳定 Release，再在其支持表内按版本从新到旧选择能够取得、校验并准备成功的 Windows x64 完整 QQ 构建；来源包括已有独立运行包、本地缓存、QQ 官网和官方 OneKey 包提供的下载地址。较新候选不可用时继续选择下一项，包准备成功后按 NapCat→QQ 顺序激活。所有兼容候选均不可用或发布元数据异常时保留原组合并报告原因。
+- 机器人使用项目内独立 QQ，禁止回退桌面 QQ。桌面 QQ 是主人自用账号，与机器人账号无关，不得据此推断顶号，也不要求主人退出。更新只由人工触发，先选择 NapCat 最新稳定 Release，再在其支持表内按版本从新到旧选择能够取得、校验并准备成功的 Windows x64 完整 QQ 构建；来源包括已有独立运行包、本地缓存、QQ 官网和官方 OneKey 包提供的下载地址。较新候选不可用时继续选择下一项，包准备成功后按 NapCat→QQ 顺序激活。所有兼容候选均不可用或发布元数据异常时保留原组合并报告原因。
 
 ## 启动与更新
 
 - 根启动入口是 `scripts/start-all.bat` 或 `scripts/start-all.ps1`。
-- 插件或配置改动优先热重载：AstrBot 启动脚本已设 `ASTRBOT_RELOAD=1`，插件 `.py` 改动自动重载；配置与提示词文件改动在 WebUI 插件页重载该插件，MaiBot 同样在 WebUI 重载。只重载插件，不重启框架进程，不碰 NapCat。只有框架核心、依赖或进程级配置变化才重启框架。
+- 插件或配置改动优先热重载：云栖的 AstrBot 启动脚本已设 `ASTRBOT_RELOAD=1`，`data/plugins/` 下 `.py` 改动自动重载，提示词和配置文件改动在 WebUI 插件页手动重载；MaiBot 没有文件监听，在各自 WebUI 插件页把目标插件禁用再启用一次，runner 会重新加载该插件。QQ 内 `/pm` 插件管理入口保持禁用。只重载插件，不重启框架进程，不碰 NapCat；只有框架核心、依赖或进程级配置变化才重启框架。
 - 任何重启都不重启正在运行的 NapCat：`-ForceRestart` 只停对应框架进程，NapCat 由 `napcat/scripts/ensure-account.ps1` 复用；只有用户明确要求或协议端本身异常时才重启 NapCat。
 - 确认必须重启框架时复用 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 及其子项目入口，保留既有健康 NapCat 登录态，保持 `autoStart=false` 的夜凛关闭。记录启动截止、PID、日志和 ready/连接结果；失败或超时先确认当前状态并报告，不循环重启。
-- NapCat 掉线后不得反复重试扫码：启动器连续 2 次扫码未完成登录就停掉该账号并写入 `napcat/data/login-pause/`，15 分钟内不自动重试。QQ 把连续登录请求判为异常会连带同机其他账号，遇到登录失败先停手、报告，等人到齐再扫码。
+- NapCat 掉线后不得反复重试扫码：启动器连续 3 张二维码都未完成登录就停掉该账号并写入 `napcat/data/login-pause/`，15 分钟内不自动重试。QQ 把连续登录请求判为异常会连带同机其他账号，遇到登录失败先停手、报告，等人到齐再扫码。
 - NapCat 与独立 QQ 只做人工更新，不注册定时更新计划。换包会让所有账号重新登录，不得后台自动重试。
 - 云栖顺序：AstrBot WebUI `8001`、OneBot `6201`、artifact API `8080` 和 DSP knowledge API `8081` ready，再启动云栖 NapCat并等待 established。
 - MaiBot 账号先等待各自 NapCat ready，再启动对应 WebUI 并等待 adapter established；端口映射见固定账号合同。

@@ -24,6 +24,14 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 
 首次部署须由用户阅读并确认本实例 `EULA.md` 与 `PRIVACY.md`，通过框架原生机制保存同意标记；条款更新后重新确认，不复制其他实例的同意标记。后台入口无交互输入，未确认时保持待启动。
 
+## 插件改动与热重载
+
+改插件不需要重启框架进程，也不需要动 NapCat：
+
+- 云栖（AstrBot）：`astrbot/scripts/start.ps1` 设置 `ASTRBOT_RELOAD=1`，`data/plugins/` 下的 `.py` 改动由框架自己检测并只重载受影响插件；提示词、配置和 `README.md` 改动不会触发，需在 WebUI 插件页手动重载。
+- MaiBot：插件运行在各自的 runner 子进程，没有文件监听。在 WebUI 插件页把目标插件“禁用”再“启用”一次，运行时会卸载并重新加载该插件，代码重新导入。QQ 内的 `/pm` 插件管理入口按规则保持禁用，不走聊天命令。
+- 只有框架核心、依赖或进程级配置变化才重启框架。重启只停框架进程，NapCat 由 `napcat/scripts/ensure-account.ps1` 复用，不会重新登录。
+
 本地分支名与 `.gitmodules` 声明一致：夜凛 `deployment-yelin`、风铃 `deployment-fengling`、蓝铃 `deployment`，upstream 均指向同名远端分支；不得回退跟踪其他账号。推送需要用户明确授权，推送前核对祖先关系。
 
 日常从根 `scripts/start-all.ps1 -Target all -SkipInstall -NoPauseOnFailure` 启动云栖、蓝铃、风铃，夜凛保持 `autoStart=false`。单独维护风铃可使用 `-Target fengling`。按既有入口等待 NapCat、WebUI 与适配器连接，不重复启动或循环重启；日志位于根 `logs/startup/`、各工作树 `logs/` 和 `napcat/data/logs/accounts/<Target>/`。
