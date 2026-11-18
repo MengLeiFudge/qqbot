@@ -4,7 +4,9 @@
     [string]$Target,
     [switch]$ForceRestart,
     [switch]$UseChildWindow,
-    [int]$TimeoutSeconds = 180
+    [int]$TimeoutSeconds = 180,
+    [int]$MaxQrAttempts = 3,
+    [switch]$IgnoreLoginPause
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,9 +30,12 @@ $item = $items[0]
 $account = [string]$item.qq
 $port = [int]$item.oneBotPort
 $markerPath = Join-Path $MarkerRoot ("{0}.ready" -f $account)
+$PauseRoot = Join-Path $DataRoot "login-pause"
+$pausePath = Join-Path $PauseRoot ("{0}.txt" -f $account)
 
 New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $MarkerRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $PauseRoot -Force | Out-Null
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $logName = if ($UseChildWindow) { "napcat-{0}.window.out.log" } else { "napcat-{0}.out.log" }
 $stdoutLog = Join-Path $LogRoot ($logName -f $timestamp)
@@ -126,6 +131,35 @@ function Test-AccountConnectionReady {
         }
     }
     return $false
+}
+
+function Start-LoginWatch {
+    <#
+    .SYNOPSIS
+    启动后台扫码监视器，拦住已在线账号掉线后的无限换码。
+    .PARAMETER WatchLogPath
+    当前账号的标准输出日志；后台只看二维码请求频率。
+    #>
+    param([string]$WatchLogPath)
+
+    if (-not $WatchLogPath -or -not (Test-Path -LiteralPath $WatchLogPath -PathType Leaf)) {
+        return
+    }
+    $pattern = 'watch-account-login\.ps1.*-Account\s+' + [regex]::Escape($account)
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue)) {
+        if ([string]$process.CommandLine -match $pattern) {
+            return
+        }
+    }
+    $watchScript = Join-Path $ScriptRoot "watch-account-login.ps1"
+    $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", ('"{0}"' -f $watchScript),
+        "-Account", $account,
+        "-LogPath", ('"{0}"' -f $WatchLogPath)
+    )
+    Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WindowStyle Hidden | Out-Null
 }
 
 function Stop-AccountProcesses {
@@ -276,6 +310,7 @@ function Wait-AccountReady {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $waitingForQr = $false
     $qrStamp = ""
+    $qrAttempts = 0
     $lastState = "Unknown"
     while ($true) {
         if (@($Processes | Where-Object { -not $_.HasExited }).Count -eq 0) {
@@ -297,7 +332,9 @@ function Wait-AccountReady {
         }
         # 正常过期约两分钟就会生成下一张码；额外留一分钟，识别停止刷新的登录。
         if ($login.State -in @("WaitingForQr", "RefreshingQr") -and $login.QrIssuedAt -ne [DateTime]::MinValue -and (Get-Date) -ge $login.QrIssuedAt.AddMinutes(3)) {
-            Write-Host "[NapCat] $($item.label) 的二维码已超过三分钟没有刷新，需要重新建立登录。日志：$LogPath"
+            Write-Host "[NapCat] $($item.label) 的二维码已超过三分钟没有刷新，停止该账号并等待人工重新扫码。日志：$LogPath"
+            Set-Content -Path $pausePath -Value (Get-Date).ToString("o") -Encoding ASCII
+            Stop-AccountProcesses
             return $false
         }
         if ($login.State -in @("Unknown", "LoggedIn") -and (Test-AccountConnectionReady)) {
@@ -309,10 +346,18 @@ function Wait-AccountReady {
                 if (Test-Path -LiteralPath $markerPath) {
                     Remove-Item -LiteralPath $markerPath -Force
                 }
-                Write-Host "[NapCat] $($item.label) ($account) requires QQ login. Scan with this account's mobile QQ and approve login. Waiting without a time limit."
+                Write-Host "[NapCat] $($item.label) ($account) requires QQ login. Scan with this account's mobile QQ and approve login. Gives up after $MaxQrAttempts refreshes to avoid repeated login attempts."
             }
             if ($login.QrStamp -ne $qrStamp) {
                 $qrStamp = $login.QrStamp
+                $qrAttempts++
+                if ($qrAttempts -gt $MaxQrAttempts) {
+                    # 未登录时 NapCat 每两分钟自动换码；连续失败必须停进程，否则 QQ 会把上百次登录尝试判为异常。
+                    Write-Host "[NapCat] $($item.label) 已连续 $qrAttempts 次扫码未完成登录，停止该账号以避免 QQ 判定异常登录。请稍后手动启动并扫码。日志：$LogPath"
+                    Set-Content -Path $pausePath -Value (Get-Date).ToString("o") -Encoding ASCII
+                    Stop-AccountProcesses
+                    return $false
+                }
                 if ($login.QrCode) {
                     Write-Host $login.QrCode
                 }
@@ -340,6 +385,18 @@ function Wait-AccountReady {
     }
 }
 
+# 扫码失败后短时间内不自动重试，避免 QQ 把连续登录请求判为异常。
+if (-not $IgnoreLoginPause -and (Test-Path -LiteralPath $pausePath)) {
+    $pausedAt = [DateTime]::MinValue
+    $pausedText = (Get-Content -LiteralPath $pausePath -Raw -ErrorAction SilentlyContinue)
+    if (-not $pausedText -or -not [DateTime]::TryParse($pausedText.Trim(), [ref]$pausedAt)) {
+        $pausedAt = (Get-Item -LiteralPath $pausePath).LastWriteTime
+    }
+    if ((Get-Date) -lt $pausedAt.AddMinutes(15)) {
+        throw ("{0} 上次启动连续扫码未完成登录，{1:HH:mm} 前不自动重试；确认现在能扫码时加 -IgnoreLoginPause。记录：{2}" -f $item.label, $pausedAt.AddMinutes(15), $pausePath)
+    }
+}
+
 if (-not $ForceRestart) {
     $readyProcessIds = @(Get-AccountProcessIds -RootsOnly | Sort-Object -Unique)
     if ($readyProcessIds.Count -gt 0) {
@@ -348,6 +405,8 @@ if (-not $ForceRestart) {
         # 只让已经就绪的账号在锁外复用；重新扫码也必须进入登录队列。
         if ($login.State -in @("Unknown", "LoggedIn") -and (Test-AccountConnectionReady)) {
             Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
+            if (Test-Path -LiteralPath $pausePath) { Remove-Item -LiteralPath $pausePath -Force }
+            Start-LoginWatch -WatchLogPath (Get-AccountLogPath -Processes $runs)
             Write-Host ("[NapCat] {0} ready in {1:F2}s; existing PIDs: {2}. Logs: {3}" -f `
                 $item.label, $timer.Elapsed.TotalSeconds, ($readyProcessIds -join ','), $LogRoot)
             exit 0
@@ -376,6 +435,8 @@ try {
             $runs = @(Get-Process -Id $readyProcessIds -ErrorAction SilentlyContinue)
             if (Wait-AccountReady -Processes $runs) {
                 Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
+                if (Test-Path -LiteralPath $pausePath) { Remove-Item -LiteralPath $pausePath -Force }
+                Start-LoginWatch -WatchLogPath (Get-AccountLogPath -Processes $runs)
                 Write-Host "[NapCat] $($item.label) is ready; reused the login completed by another startup request."
                 exit 0
             }
@@ -433,7 +494,9 @@ try {
         throw "NapCat account $account stopped or logged out during startup. The runtime was not restarted again. Check its login window and logs: $LogRoot"
     }
     Set-Content -Path $markerPath -Value (Get-Date).ToString("o") -Encoding ASCII
+    if (Test-Path -LiteralPath $pausePath) { Remove-Item -LiteralPath $pausePath -Force }
     $logSummary = if ($UseChildWindow) { "child window ; $stdoutLog" } else { "$stdoutLog ; $stderrLog" }
+    Start-LoginWatch -WatchLogPath $stdoutLog
     Write-Host "[NapCat] $($item.label) is ready on OneBot port $port. PID: $($process.Id). Logs: $logSummary"
     exit 0
 }

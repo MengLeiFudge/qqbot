@@ -13,7 +13,6 @@
 - `scripts/ensure-social-plugin.ps1`：部署并启用 `plugins/napcat-plugin-qqbot-social/`，从账号清单生成仅使用 NapCat 的账号集合。
 - `scripts/update.ps1`：更新 NapCat 最新稳定 Release，再选择该 Release 支持且能够取得的尽可能新 Windows x64 QQ 完整构建。
 - `scripts/qq-runtime.ps1`、`scripts/update-qq.ps1`、`scripts/update-runtime.ps1`：共用的选版读取、QQ 安装包准备与更新事务支持。
-- `scripts/register-auto-update.ps1`：维护现有自动更新计划，默认每小时和用户登录两分钟后检查一次。
 
 ## 本机运行态
 
@@ -44,16 +43,9 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 .\napcat\scripts\update.ps1 -AssumeYes
 ```
 
-激活失败时先恢复 NapCat 和 QQ 选择，再按需恢复原有机器人；激活成功且需要生效时复用根入口恢复清单中 `autoStart=true` 的账号，保留健康 NapCat 登录态，并检查 ready、OneBot 连接及本轮原生协议 Hook 日志。一次启动失败后记录状态和日志，不反复重启。自动更新遇到激活中断或失败，会暂停该 Release 的再次自动激活，需先核对 `data/updates/napcat.json` 与 `data/logs/updates/`，修复后手动运行更新入口。
+激活失败时先恢复 NapCat 和 QQ 选择，再按需恢复原有机器人；激活成功且需要生效时复用根入口恢复清单中 `autoStart=true` 的账号，保留健康 NapCat 登录态，并检查 ready、OneBot 连接及本轮原生协议 Hook 日志。一次启动失败后记录状态和日志，不反复重启。激活中断或失败时先核对 `data/updates/napcat.json` 与 `data/logs/updates/`，再手动重跑更新入口。
 
-注册或移除计划：
-
-```powershell
-.\napcat\scripts\register-auto-update.ps1
-.\napcat\scripts\register-auto-update.ps1 -Remove
-```
-
-计划沿用 `QQBot-NapCat-AutoUpdate`，以当前登录用户的交互会话运行，不保存密码。首次注册立即检查；常规检查无更新或包准备失败时不重启机器人。
+更新只在人工确认后执行，没有定时计划。替换 NapCat 或独立 QQ 会让所有账号重新登录，属于最容易触发 QQ 异常登录判定的操作，不做后台自动重试。
 
 ## 自动同意请求
 

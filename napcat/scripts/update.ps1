@@ -1,8 +1,7 @@
 ﻿param(
     [switch]$DryRun,
     [switch]$NoStopProcesses,
-    [switch]$AssumeYes,
-    [switch]$Automatic
+    [switch]$AssumeYes
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,8 +105,8 @@ function Confirm-NapCatUpdate {
     }
     Write-Step "  Account OneBot configs will be migrated after activation."
 
-    if ($AssumeYes -or $Automatic) {
-        Write-Step "Automatic update confirmation accepted."
+    if ($AssumeYes) {
+        Write-Step "Update confirmation accepted."
         return $true
     }
     if ($DryRun) {
@@ -384,7 +383,7 @@ function Sync-NapCatAccountPolicies {
     }
 }
 
-Write-Step "NapCat / independent QQ update started. Automatic=$Automatic"
+Write-Step "NapCat / independent QQ update started."
 Write-Step "Project: $ProjectRoot"
 Write-Step "Log: $logFile"
 New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
@@ -439,10 +438,10 @@ try {
     $napcatChanged = $installed.Tag -ne $normalizedVersion
     $matrix = Get-NapCatQQMatrix -Tag $version
     Write-Step "Target NapCat: $version; installed: $($installed.Tag). QQ will be selected from available supported builds."
-    if ($Automatic -and $null -ne $previous -and ($previous.blocked_release -eq $version -or ($previous.target_release -eq $version -and $previous.status -in @('activating', 'restarting')))) {
+    if ($null -ne $previous -and ($previous.blocked_release -eq $version -or ($previous.target_release -eq $version -and $previous.status -in @('activating', 'restarting')))) {
         $state.blocked_release = $version
         $state.backup_path = [string]$previous.backup_path
-        throw "Automatic activation of $version is paused after an interrupted or failed activation. Inspect $StatePath before retrying manually."
+        throw "Activation of $version was interrupted or failed before; inspect $StatePath and rerun with -AssumeYes only after reviewing it."
     }
     $currentQQ = $null
     if (Test-Path -LiteralPath $selectionPath) {
@@ -506,13 +505,11 @@ try {
         catch [System.Threading.AbandonedMutexException] { $ownsLoginMutex = $true }
         if (-not $ownsLoginMutex) { throw 'A NapCat account is logging in. Activation was deferred without changing the current pair.' }
         $running = @(Get-NapCatProcesses)
-        if ($Automatic) {
-            $manifest = Get-Content -LiteralPath (Join-Path $ProjectRoot 'accounts.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-            foreach ($account in @($manifest.accounts | Where-Object { $_.autoStart -ne $true })) {
-                $accountPattern = '-Account\s+[''" ]?' + [regex]::Escape([string]$account.qq) + '(?:[''" ]|$)'
-                if (@($running | Where-Object { $_.CommandLine -match $accountPattern }).Count -gt 0) {
-                    throw "Manually managed account $($account.target) is running; automatic activation is deferred."
-                }
+        $manifest = Get-Content -LiteralPath (Join-Path $ProjectRoot 'accounts.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($account in @($manifest.accounts | Where-Object { $_.autoStart -ne $true })) {
+            $accountPattern = '-Account\s+[''" ]?' + [regex]::Escape([string]$account.qq) + '(?:[''" ]|$)'
+            if (@($running | Where-Object { $_.CommandLine -match $accountPattern }).Count -gt 0) {
+                throw "Manually managed account $($account.target) is running; stop it before activating a new NapCat / QQ pair."
             }
         }
         if ($running.Count -gt 0 -and $NoStopProcesses) {
@@ -585,7 +582,7 @@ try {
         $loginMutex.Dispose()
     }
 
-    if ($stopped -or -not $Automatic) {
+    if ($stopped) {
         $state.status = 'restarting'
         Save-NapCatUpdateState -State $state
         $restartAttempted = $true

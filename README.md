@@ -91,27 +91,13 @@ DSP 物理向量库只由云栖 AstrBot 的 `astrbot_plugin_dsp_knowledge` 持�
 
 框架更新器只在子仓库干净的部署分支上获取官方最新稳定 Release，合入本地部署分支并同步依赖；NapCat 更新器负责 NapCat 与独立 QQ 的配对更新。更新脚本不会 push。`maibot` 更新 Target 覆盖夜凛、蓝铃和风铃。完成兼容处理并分别提交各工作树后，再在 qqbot 中提交新的 submodule 指针。
 
-NapCat 自动更新使用当前 Windows 用户的计划任务。执行以下命令启用，并立即开始首次检查：
+NapCat 与独立 QQ 只做人工更新，不再注册任何定时计划：换包会让所有账号重新登录，是触发 QQ 异常登录判定最直接的来源。选版规则仍是先选最新 NapCat，再从该 Release 的支持表内选择能取得并通过校验的尽可能新 Windows x64 QQ 完整构建；两个包准备成功后才停止进程，按 NapCat → 独立 QQ 顺序激活，桌面 QQ 保持独立。选版清单、候选来源、包准备与恢复方法见 [NapCat 维护说明](napcat/README.md#napcat-与独立-qq-更新)。
 
-```powershell
-.\napcat\scripts\register-auto-update.ps1
-```
+发布查询、兼容支持表和运行包下载使用 TLS 1.2，沿用 Windows 系统代理与证书验证。临时连接错误最多尝试三次，重试共用原有超时预算；持续失败时保存具体原因和更新暂停状态。
 
-任务 `QQBot-NapCat-AutoUpdate` 在用户登录期间每小时检查官方最新稳定 Release，并在登录两分钟后检查。可用 `-IntervalMinutes` 调整间隔。每次先选择最新 NapCat，再从该 Release 的支持表内选择能取得并通过校验的尽可能新 Windows x64 QQ 完整构建；较新候选不可用时继续下一候选。两个包准备成功后才停止进程，按 NapCat → 独立 QQ 顺序激活。NapCat 已最新时仍检查 QQ，桌面 QQ 保持独立。所有兼容候选均不可用或发布元数据异常时保留当前组合。选版清单、候选来源、包准备与恢复方法见 [NapCat 维护说明](napcat/README.md#napcat-与独立-qq-更新)。
+更新需要重载正在运行的协议端时，通过根 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 恢复 `autoStart=true` 的账号，夜凛继续停用。旧运行包保存在 `napcat/data/archives/`；临时事务文件移入根 `.codex/trash/`。更新日志位于 `napcat/data/logs/updates/`；人工运行 `napcat/scripts/update.ps1 -AssumeYes` 重试失败版本，完成后使用根启动入口恢复连接。
 
-发布查询、兼容支持表和运行包下载使用 TLS 1.2，沿用 Windows 系统代理与证书验证。临时连接错误最多尝试三次，重试共用原有超时预算；持续失败时保存具体原因和已有的更新暂停状态，等待下一轮检查。
-
-自动更新需要重载正在运行的协议端时，通过根 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 恢复 `autoStart=true` 的账号，夜凛继续停用。更新前没有机器人运行时保持停用。旧运行包保存在 `napcat/data/archives/`；临时事务文件移入根 `.codex/trash/`。激活或重启失败会暂停该版本的自动重试，等待人工查看状态和日志。
-
-查看计划任务、最近结果或移除自动更新：
-
-```powershell
-Get-ScheduledTaskInfo -TaskName QQBot-NapCat-AutoUpdate
-Get-Content .\napcat\data\updates\napcat.json -Encoding UTF8
-.\napcat\scripts\register-auto-update.ps1 -Remove
-```
-
-更新日志位于 `napcat/data/logs/updates/`，其中记录重启 PID、截止时间和独立的启动日志。人工运行 `napcat/scripts/update.ps1 -AssumeYes` 可以重试失败版本，完成后使用根启动入口恢复连接。
+扫码登录最多连续尝试 2 次；仍未登录时启动器会停掉该账号并写入 `napcat/data/login-pause/`，15 分钟内不再自动重试，避免 QQ 把连续登录请求判为异常。确认可以扫码时加 `-IgnoreLoginPause` 重试。
 
 ## Git 提交顺序
 
