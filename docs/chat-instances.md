@@ -13,6 +13,7 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 三台 MaiBot 对齐基础聊天、拍一拍、只读 DSP 检索、身份核验、视频与历史阅读、联网搜索、回复节奏、连发引用、日记、个人工作区和主动联系。夜凛、风铃的通用允许列表在各自 `scripts/enforce_chat_only.py`，蓝铃保留原有独立配置校验。蓝铃的伴侣关系和专属模块不复制给其他角色。
 
 通用扩展源码各自位于 `plugins/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git；部署时分别填写机器人 QQ、身份插件的主人、独立工作区和日记取材私聊，不复制其他账号凭据、数据库或插件状态。夜凛、风铃的日记空间发布默认关闭，定时生成和本地导出继续启用。
+蓝铃另有 qqbot_scene：私聊决定回复前注入当前场景，后发生的动作叠加在还没停的事上。
 
 个人工作区分别为 `D:/project/lanling`、`D:/project/yelin`、`D:/project/fengling`。工作区工具只向主人私聊开放。没有既有主人私聊时，工具先不注册；真实主人私聊会话建立后，在首次规划请求前经身份配置与公开聊天接口核对会话，保存本机绑定并公开重载插件，随后由 Host 限制会话。详见各自 `plugins/qqbot_workspace/README.md`。
 
