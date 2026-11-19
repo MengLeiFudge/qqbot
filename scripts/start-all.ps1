@@ -25,7 +25,8 @@ function Invoke-PowerShellScript {
         [string]$Path,
         [string[]]$Arguments,
         [string]$Label,
-        [switch]$WaitForLogin
+        [switch]$WaitForLogin,
+        [switch]$CaptureOutput
     )
 
     if (-not (Test-Path $Path)) {
@@ -36,11 +37,28 @@ function Invoke-PowerShellScript {
         "-ExecutionPolicy", "Bypass",
         "-File", ('"{0}"' -f $Path)
     ) + $Arguments
-    $process = Start-Process `
-        -FilePath "powershell.exe" `
-        -ArgumentList $invokeArguments `
-        -NoNewWindow `
-        -PassThru
+    $start = @{
+        FilePath = "powershell.exe"
+        ArgumentList = $invokeArguments
+        PassThru = $true
+    }
+    # 框架启动的输出落盘，失败时能拿到真实报错；NapCat 启动保持实时输出以便扫码。
+    $stdoutLog = ""
+    $stderrLog = ""
+    if ($CaptureOutput) {
+        $safeLabel = $Label -replace '[\\/:*?"<>|]', '-'
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $stdoutLog = Join-Path $WorkspaceRoot ("logs\startup\{0}-{1}.out.log" -f $safeLabel, $stamp)
+        $stderrLog = Join-Path $WorkspaceRoot ("logs\startup\{0}-{1}.err.log" -f $safeLabel, $stamp)
+        New-Item -ItemType Directory -Path (Split-Path -Parent $stdoutLog) -Force | Out-Null
+        $start.WindowStyle = "Hidden"
+        $start.RedirectStandardOutput = $stdoutLog
+        $start.RedirectStandardError = $stderrLog
+    }
+    else {
+        $start.NoNewWindow = $true
+    }
+    $process = Start-Process @start
     # Windows PowerShell 5.1 loses ExitCode for fast children unless their handle is opened before exit.
     [void]$process.Handle
     if ($WaitForLogin) {
@@ -53,6 +71,14 @@ function Invoke-PowerShellScript {
     $exitCode = $process.ExitCode
     $process.Dispose()
     if ($exitCode -ne 0) {
+        if ($CaptureOutput) {
+            Write-Host "[qqbot] $Label 输出日志：$stdoutLog ; $stderrLog" -ForegroundColor Yellow
+            foreach ($logPath in @($stdoutLog, $stderrLog)) {
+                if ($logPath -and (Test-Path -LiteralPath $logPath)) {
+                    Get-Content -LiteralPath $logPath -Tail 40 | ForEach-Object { Write-Host "  $_" }
+                }
+            }
+        }
         throw "$Label failed with exit code $exitCode."
     }
 }
@@ -71,7 +97,7 @@ function Invoke-FrameworkStart {
     if ($SkipInstall) {
         $arguments += "-SkipInstall"
     }
-    Invoke-PowerShellScript -Path $startPath -Arguments $arguments -Label ([string]$Account.framework.name)
+    Invoke-PowerShellScript -Path $startPath -Arguments $arguments -Label ([string]$Account.framework.name) -CaptureOutput
 }
 
 function Invoke-NapCatStart {
