@@ -5,7 +5,7 @@
     [switch]$ForceRestart,
     [switch]$UseChildWindow,
     [int]$TimeoutSeconds = 180,
-    [int]$MaxQrAttempts = 3,
+    [int]$MaxQrAttempts = 1,
     [switch]$IgnoreLoginPause
 )
 
@@ -246,8 +246,8 @@ function Get-NapCatLoginStatus {
             $qrLines.Clear()
         }
         elseif ($line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[warn\] \u8bf7\u626b\u63cf') {
+            # 同一张码会先出“请扫描”再出“已保存到”，只以保存事件作为一张新码。
             $login.State = "WaitingForQr"
-            $login.QrStamp = $line
             $qrLines.Clear()
         }
         elseif ($line -match '^\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[warn\] \u4e8c\u7ef4\u7801\u5df2\u4fdd\u5b58\u5230\s+(?<path>.+?\.png)\s*$') {
@@ -346,14 +346,14 @@ function Wait-AccountReady {
                 if (Test-Path -LiteralPath $markerPath) {
                     Remove-Item -LiteralPath $markerPath -Force
                 }
-                Write-Host "[NapCat] $($item.label) ($account) requires QQ login. Scan with this account's mobile QQ and approve login. Gives up after $MaxQrAttempts refreshes to avoid repeated login attempts."
+                Write-Host "[NapCat] $($item.label) ($account) requires QQ login. Scan with this account's mobile QQ and approve login. Shows $MaxQrAttempts QR code only; a second code stops the account to avoid repeated login attempts."
             }
             if ($login.QrStamp -ne $qrStamp) {
                 $qrStamp = $login.QrStamp
                 $qrAttempts++
-                if ($qrAttempts -ge $MaxQrAttempts) {
+                if ($qrAttempts -gt $MaxQrAttempts) {
                     # 未登录时 NapCat 每两分钟自动换码；连续失败必须停进程，否则 QQ 会把上百次登录尝试判为异常。
-                    Write-Host "[NapCat] $($item.label) 已连续 $qrAttempts 次扫码未完成登录，停止该账号以避免 QQ 判定异常登录。请稍后手动启动并扫码。日志：$LogPath"
+                    Write-Host "[NapCat] $($item.label) 需要第 $qrAttempts 张二维码，超过允许的 $MaxQrAttempts 张，停止该账号以避免 QQ 判定异常登录。请稍后手动启动并扫码。日志：$LogPath"
                     Set-Content -Path $pausePath -Value (Get-Date).ToString("o") -Encoding ASCII
                     Stop-AccountProcesses
                     return $false

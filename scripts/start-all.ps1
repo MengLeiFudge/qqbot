@@ -260,21 +260,20 @@ try {
     }
     else {
         Write-Host "[qqbot] Starting target '$Target'."
-        Write-Host "[qqbot] 正在打开账号窗口；主窗口会等待所有账号窗口结束。"
-        $workers = [System.Collections.Generic.List[object]]::new()
+        Write-Host "[qqbot] 正在按顺序打开账号窗口；每个账号登录就绪后才打开下一个。"
         $launchFailures = [System.Collections.Generic.List[string]]::new()
         foreach ($account in $accounts) {
             try {
                 $worker = Start-AccountWorker -Account $account
-                $workers.Add($worker)
             }
             catch {
                 [void]$launchFailures.Add("$($account.label): $($_.Exception.Message)")
                 Write-Host "[qqbot] 无法打开 $($account.label) 的启动窗口：$($_.Exception.Message)" -ForegroundColor Red
+                break
             }
+            # 串行登录：前一个账号扫码完成、OneBot 就绪后，才打开下一个账号窗口。
+            Wait-AccountWorkers -Workers @($worker)
         }
-        # 部分窗口打开失败时，也要先等待已经打开的窗口结束，再汇总错误。
-        Wait-AccountWorkers -Workers $workers.ToArray()
         if ($launchFailures.Count -gt 0) {
             throw "Account startup window failed to open: $($launchFailures -join '; ')."
         }

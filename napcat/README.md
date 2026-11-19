@@ -70,9 +70,9 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 
 首次登录可能需要二维码。`ensure-account.ps1` 先读取当前账号运行日志；已在线且连接就绪的账号直接复用。其他账号进入共用登录队列，等待当前账号完成登录；已有进程需要重新扫码时也会进入队列。检测到 QQ 离线、退出、登录错误，或二维码超过三分钟没有刷新时，只重建该账号一次。新实例再次失败时明确报错，不继续重启。OneBot 端口存在不能覆盖日志中明确的离线、登录失败或待扫码状态。快速登录成功标记位于 `data/quick-login/<QQ>.ready`，只属于本机。
 
-扫码时请使用账号启动窗口里最新显示的二维码。二维码正常过期后，窗口会提示等待刷新并展示新码；`cache/qrcode.png` 由多个账号共用，已打开的图片不会自动更新，其他账号重新登录时也可能覆盖它。等待扫码期间不要重复启动。
+扫码时请使用账号启动窗口里显示的二维码。每个账号只显示 1 张码：需要第二张码时，启动器立即停掉该账号并持续压住 NapCat 的自愈重启（连续 30 秒无进程才退出），同时写入 `data/login-pause/`，等人到齐后手动重新启动。`cache/qrcode.png` 由多个账号共用，已打开的图片不会自动更新，其他账号重新登录时也可能覆盖它。等待扫码期间不要重复启动。
 
-根账号启动窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口。失败或超时时不收窗。主控与账号窗口的启动日志见根目录 `logs/startup/`，NapCat 原始日志见 `data/logs/accounts/<Target>/`。
+根 `scripts\start-all.ps1` 按账号清单顺序逐个打开账号窗口：前一个账号扫码完成、OneBot 连接就绪后，才打开下一个，不并行启动。每个账号窗口会等待扫码、登录和 OneBot 连接完成，再调用 `hide-account-windows.ps1` 隐藏该账号 `start-account.ps1` 进程树拥有的 QQ/NapCat 窗口。失败或超时时不收窗。主控与账号窗口的启动日志见根目录 `logs/startup/`，NapCat 原始日志见 `data/logs/accounts/<Target>/`。
 
 需要手动重新打开蓝铃登录窗口时，在 `D:\project\qqbot` 的 PowerShell 中运行：
 
@@ -80,4 +80,4 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 .\napcat\scripts\ensure-account.ps1 -Target lanling -ForceRestart -UseChildWindow
 ```
 
-使用蓝铃账号的手机 QQ 扫描窗口里的二维码并确认登录。窗口也会打印当前二维码图片路径，二维码刷新后需重新打开图片。这个命令只重启蓝铃的 NapCat，不清除登录数据。正常使用仍运行根 `scripts\start-all.bat`，等待扫码期间不要重复启动。
+使用蓝铃账号的手机 QQ 扫描窗口里的二维码并确认登录。窗口也会打印当前二维码图片路径；只显示一张码，需要第二张时命令会停掉账号并写入 `data/login-pause/`。这个命令只重启蓝铃的 NapCat，不清除登录数据。正常使用仍运行根 `scripts\start-all.bat`，等待扫码期间不要重复启动。

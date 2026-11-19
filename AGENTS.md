@@ -74,7 +74,7 @@
 - `data/cmd_config.json` 属于进程级配置：AstrBot 只在启动时读它并常驻内存，没有文件监听，手改文件后必须重启框架才生效；从 WebUI 配置页保存会同时写文件和内存并立即生效，不必重启。手改之后不要再去 WebUI 点保存，否则内存里的旧值会覆盖手改。要么“手改 + 重启”，要么全程在 WebUI 改。
 - 任何重启都不重启正在运行的 NapCat：`-ForceRestart` 只停对应框架进程，NapCat 由 `napcat/scripts/ensure-account.ps1` 复用；只有用户明确要求或协议端本身异常时才重启 NapCat。
 - 确认必须重启框架时复用 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 及其子项目入口，保留既有健康 NapCat 登录态，保持 `autoStart=false` 的夜凛关闭。记录启动截止、PID、日志和 ready/连接结果；失败或超时先确认当前状态并报告，不循环重启。
-- NapCat 掉线后不得反复重试扫码：启动器连续 3 张二维码都未完成登录就停掉该账号并写入 `napcat/data/login-pause/`，15 分钟内不自动重试。QQ 把连续登录请求判为异常会连带同机其他账号，遇到登录失败先停手、报告，等人到齐再扫码。
+- NapCat 掉线后不得反复重试扫码：启动器只显示 1 张二维码，需要第二张就停掉该账号，并持续压住 NapCat 的自愈重启（连续 30 秒没有进程才退出），同时写入 `napcat/data/login-pause/`，15 分钟内不自动重试。账号登录必须串行：主窗口按账号清单顺序逐个打开登录窗口，前一个账号扫码完成、OneBot 就绪后才打开下一个。QQ 把连续登录请求判为异常会连带同机其他账号，遇到登录失败先停手、报告，等人到齐再扫码。
 - NapCat 与独立 QQ 只做人工更新，不注册定时更新计划。换包会让所有账号重新登录，不得后台自动重试。
 - 云栖顺序：AstrBot WebUI `8001`、OneBot `6201`、artifact API `8080` 和 DSP knowledge API `8081` ready，再启动云栖 NapCat并等待 established。
 - MaiBot 账号先等待各自 NapCat ready，再启动对应 WebUI 并等待 adapter established；端口映射见固定账号合同。

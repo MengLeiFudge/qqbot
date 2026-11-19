@@ -4,7 +4,9 @@
     [Parameter(Mandatory = $true)]
     [string]$LogPath,
     [int]$WindowMinutes = 10,
-    [int]$MaxQrRefreshes = 3
+    [int]$MaxQrRefreshes = 1,
+    [int]$HoldMinutes = 5,
+    [int]$QuietSeconds = 30
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,15 +44,33 @@ function Stop-AccountLogin {
 
     New-Item -ItemType Directory -Path $PauseRoot -Force | Out-Null
     Set-Content -Path $pausePath -Value (Get-Date).ToString("o") -Encoding ASCII
-    foreach ($processId in @(Get-AccountProcessIds | Sort-Object -Descending -Unique)) {
-        if ($processId -ne $PID) {
-            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-        }
-    }
     Add-Content -Path (Join-Path $PauseRoot ("{0}.log" -f $Account)) -Value ("{0:o} {1}" -f (Get-Date), $Reason) -Encoding UTF8
+    # 账号离线后 NapCat Core 会自行重启 Worker，只杀一次会被立刻拉起，必须持续压住到不再复活。
+    $holdUntil = (Get-Date).AddMinutes($HoldMinutes)
+    $quietSince = $null
+    while ((Get-Date) -lt $holdUntil) {
+        $processIds = @(Get-AccountProcessIds | Sort-Object -Descending -Unique)
+        if ($processIds.Count -eq 0) {
+            if ($null -eq $quietSince) {
+                $quietSince = Get-Date
+            }
+            elseif (((Get-Date) - $quietSince).TotalSeconds -ge $QuietSeconds) {
+                break
+            }
+        }
+        else {
+            $quietSince = $null
+            foreach ($processId in $processIds) {
+                if ($processId -ne $PID) {
+                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+        Start-Sleep -Seconds 5
+    }
 }
 
-# 后台只看二维码请求频率：正常在线时不会有二维码，连续换码说明登录卡住，必须停进程。
+# 后台只看二维码请求频率：正常在线时不会有二维码，出现第二张码说明登录卡住，必须停进程。
 while ($true) {
     Start-Sleep -Seconds 30
     if (@(Get-AccountProcessIds).Count -eq 0) {
@@ -78,8 +98,8 @@ while ($true) {
             }
         }
     }
-    if ($recent -ge $MaxQrRefreshes) {
-        Stop-AccountLogin -Reason ("{0} 分钟内出现 {1} 次二维码请求，已停止该账号以避免 QQ 判定异常登录。" -f $WindowMinutes, $recent)
+    if ($recent -gt $MaxQrRefreshes) {
+        Stop-AccountLogin -Reason ("{0} 分钟内出现 {1} 张二维码，超过允许的 {2} 张，已停止该账号并持续压住重启，避免 QQ 判定异常登录。" -f $WindowMinutes, $recent, $MaxQrRefreshes)
         exit 0
     }
 }
