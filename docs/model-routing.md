@@ -4,7 +4,7 @@
 
 | 调用 | 路由与凭据 | 配置入口 |
 | --- | --- | --- |
-| 聊天、规划、读图、记忆整理等文本生成 | `http://127.0.0.1:8317/v1`，CPA 客户端密钥 | AstrBot `data/cmd_config.json` 的 `provider_sources`；MaiBot `config/model_config.toml` 的生成 provider |
+| 聊天、规划、读图、记忆整理等文本生成 | `http://127.0.0.1:8317/v1`，模型 `qqbot-deepseek-flash`，CPA 客户端密钥 | AstrBot `data/cmd_config.json` 的 `provider_sources`；MaiBot `config/model_config.toml` 的生成 provider |
 | 图像生成 | 同一 CPA 地址及客户端密钥 | AstrBot `astrbot_plugin_qqbot_features`；MaiBot `qqbot_draw` 本机配置，启用状态沿用账号策略 |
 | MaiBot 联网搜索 | DeepSeek 官网 Responses，原有官网密钥 | 各实例 `qqbot_web_search/config.toml`；使用说明见插件 README |
 | `qwen3.7-text-embedding` | 原百炼嵌入地址与凭据 | 各实例原嵌入 provider |
@@ -62,10 +62,10 @@ Go 要求每段对话携带稳定的 `x-opencode-session`，机器人在请求�
 
 会话透传使用各框架的本地插件：
 
-- AstrBot 使用本地 [CPA 会话透传插件](../astrbot/data/plugins/astrbot_plugin_cpa_session/README.md) 注册的 `cpa_responses` 类型，保留 source ID、模型 ID 与全部生成参数。插件继承原生 Responses 适配器，在 `text_chat`、`text_chat_stream` 接口取得已有 `session_id` 并设置请求级头；中文平台名称按 UTF-8 百分号编码。变更 Provider 类型后完整重启 AstrBot。
-- MaiBot 使用各实例的 [CPA 会话透传插件](../maibot-yelin/plugins/cpa_session/README.md)，将指向 CPA 的生成 provider 的 `client_type` 设为 `cpa_responses`。插件通过 Planner、Replyer 的请求 Hook 关联真实会话 ID，增加请求级头后调用原有 `OpenAIResponsesClient.get_response`；保留 provider 名称、模型名和生成参数。没有聊天会话来源的独立辅助调用使用本次逻辑请求 ID。
+- AstrBot 使用本地 [CPA 会话透传插件](../astrbot/data/plugins/astrbot_plugin_cpa_session/README.md) 注册的 `cpa_responses` 类型，保留 source ID、provider ID 与全部生成参数，请求模型使用 `qqbot-deepseek-flash`。插件继承原生 Responses 适配器，在 `text_chat`、`text_chat_stream` 接口取得已有 `session_id` 并设置请求级头；中文平台名称按 UTF-8 百分号编码。变更 Provider 类型后完整重启 AstrBot。
+- MaiBot 使用各实例的 [CPA 会话透传插件](../maibot-yelin/plugins/cpa_session/README.md)，将指向 CPA 的生成 provider 的 `client_type` 设为 `cpa_responses`。插件通过 Planner、Replyer 的请求 Hook 关联真实会话 ID，增加请求级头后调用原有 `OpenAIResponsesClient.get_response`；保留 provider 名称和生成参数，请求模型使用 `qqbot-deepseek-flash`。没有聊天会话来源的独立辅助调用使用本次逻辑请求 ID。
 
-本项目保留 Go 与 DeepSeek 官网共用 `deepseek-flash` 等模型名称，用于同名模型兜底。渠道优先级、选择与失败回退由 CPA 配置管理；排查时核对实际上游，不因名称相同就判定已选中 Go。Go 的 OpenAI 兼容 Base URL 为 `https://opencode.ai/inference/go/openai/v1`；上游模型 ID 以官网及 CPA 实际配置为准。切换普通生成渠道时，官网联网搜索与嵌入、重排序仍分别遵守本页原有路由约束。
+机器人的普通生成请求使用只登记在 OpenCode Go 上的 `qqbot-deepseek-flash`（上游 `deepseek-v4.1-flash`）。`deepseek-flash` 仍是共用别名：wb 反代优先级 9，Go 也保留该别名且优先级 5，DeepSeek 官网为默认优先级；Pi 等其他客户端继续使用它。wb 对内容过滤返回 HTTP 200，CPA 不会因此改走 Go，所以机器人不能再请求 `deepseek-flash`。官网联网搜索仍直接使用官网的 `deepseek-flash`，不走这条别名。Go 的 OpenAI 兼容 Base URL 为 `https://opencode.ai/inference/go/openai/v1`。嵌入与重排序仍分别遵守本页原有路由约束。
 
 管理页测试缺少会话头时的 400 只证明该测试请求不满足 Go 的要求，不能代替机器人请求链路的判断。接入验收需核对会话头的稳定性、不同对话的隔离、CPA 选中的实际上游，以及工具续轮与读图等直接受影响的行为；调用模型和发送聊天仍遵守项目的测试授权边界。
 
