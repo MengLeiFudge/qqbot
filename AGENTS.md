@@ -71,6 +71,7 @@
 
 - 根启动入口是 `scripts/start-all.bat` 或 `scripts/start-all.ps1`。
 - 插件或配置改动优先热重载：云栖的 AstrBot 启动脚本已设 `ASTRBOT_RELOAD=1`，`data/plugins/` 下 `.py` 改动自动重载，提示词和配置文件改动在 WebUI 插件页手动重载；MaiBot 没有文件监听，在各自 WebUI 插件页把目标插件禁用再启用一次，runner 会重新加载该插件。QQ 内 `/pm` 插件管理入口保持禁用。只重载插件，不重启框架进程，不碰 NapCat；只有框架核心、依赖或进程级配置变化才重启框架。
+- 热重载只对已激活插件生效：改插件时如果磁盘上出现过语法错误的中间状态，该插件会加载失败并保持未激活，之后的文件改动不再触发重载，必须用启动入口重启框架恢复；改完先跑编译检查，再确认日志里没有插件加载失败。
 - `data/cmd_config.json` 属于进程级配置：AstrBot 只在启动时读它并常驻内存，没有文件监听，手改文件后必须重启框架才生效；从 WebUI 配置页保存会同时写文件和内存并立即生效，不必重启。手改之后不要再去 WebUI 点保存，否则内存里的旧值会覆盖手改。要么“手改 + 重启”，要么全程在 WebUI 改。
 - 任何重启都不重启正在运行的 NapCat：`-ForceRestart` 只停对应框架进程，NapCat 由 `napcat/scripts/ensure-account.ps1` 复用；只有用户明确要求或协议端本身异常时才重启 NapCat。
 - 确认必须重启框架时复用 `scripts/start-all.ps1 -Target all -ForceRestart -SkipInstall -NoPauseOnFailure` 及其子项目入口，保留既有健康 NapCat 登录态，保持 `autoStart=false` 的夜凛关闭。记录启动截止、PID、日志和 ready/连接结果；失败或超时先确认当前状态并报告，不循环重启。
