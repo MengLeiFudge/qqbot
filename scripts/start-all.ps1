@@ -90,7 +90,7 @@ function Invoke-FrameworkStart {
         throw "Target '$($Account.target)' has no framework start contract."
     }
     $startPath = Join-Path $WorkspaceRoot ([string]$Account.framework.startScript)
-    $arguments = @()
+    $arguments = @('-ProjectRoot', ('"{0}"' -f (Join-Path $WorkspaceRoot ([string]$Account.framework.root))))
     if ($ForceRestart) {
         $arguments += "-ForceRestart"
     }

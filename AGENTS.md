@@ -1,27 +1,19 @@
-# AGENTS.md - QQBot Superproject
+# AGENTS.md - QQBot
 
-本仓库是账号级总工作区，不是 AstrBot 或 MaiBot 的源码 monorepo。默认使用简体中文。
+本仓库管理 QQ 账号、官方框架部署和自研插件。默认使用简体中文。
 
 现行机器人名单、角色关系、框架归属与停用要求以 [机器人角色与框架归属](docs/bot-roles.md) 为准；维护前必须先读。下文旧角色名和历史工作树用于定位既有部署，不能覆盖新名单，也不能作为恢复旧账号自动启动或复制旧角色关系的依据。
 
-## 框架核心边界（必须遵守）
+## 框架与插件边界
 
-- 本规则适用于 AstrBot、MaiBot 以及以后接入的任何框架：禁止为本项目功能、修复或优化直接修改框架核心源码、内置模块或已安装的框架包。
-- 行为实现只能放在本地插件中，通过框架公开的插件 API、Hook 和现有配置项间接影响框架；不得把业务逻辑写入 Core，也不得通过修改安装目录绕过此限制。
-- 现有扩展能力不足时，先说明限制并在插件边界内调整方案；不得以修复缺陷、兼容或性能需要为由自行改 Core。官方版本更新仍按既有更新流程执行，不借更新加入私有 Core 补丁。
-- 此边界同时约束所有框架子项目的实现方式；子项目文档中较宽松的 Core 修改说明不能覆盖本规则。
+- 框架目录由官方发布包生成，业务改动通过插件和公开配置实现。维护前读 [框架与插件部署](docs/framework-deployment.md)。
 - 任何机器人都不得为节约 AI token、模型费用或提速而克扣读消息能力，包括将可读图片改成空占位再交给模型。相关性只影响何时触发；暂缓消息应完整保留，触发时携带近期上下文，并允许 AI 主动查阅更早历史。维护消息入口、上下文和速度前先读 [消息完整性与按需触发](docs/message-context.md)。
 
 ## 仓库职责
 
-- 根 `qqbot`：维护 `astrbot`、`maibot-yelin`、`maibot-lanling`、`maibot-fengling` 四个 gitlink，维护 `napcat/`、`napcat/accounts.json`、根 `scripts/` 和跨项目文档。
-- `astrbot/`：独立的 `MengLeiFudge/AstrBot` fork 工作树，维护云栖本地插件、配置示例、项目脚本和项目内运行态。
-- `maibot-yelin/`：夜凛独立工作树，暂时停用并保留配置与数据。
-- `maibot-fengling/`：风铃（QQ `3056830689`）的 MaiBot 工作树，技术 Target 为 `fengling`，角色数据从空白开始。
-- `maibot-lanling/`：蓝铃独立 MaiBot 工作树；与风铃、夜凛对齐通用插件，伴侣关系和专属模块独立维护。
-- `napcat/`：现行四个 QQ 账号共享的协议端项目；程序包和实际账号配置保留在本机，非敏感账号映射与维护脚本由根仓跟踪。
-
-根目录不得重新建立框架级 `config/`、`plugins/`、`data/`、虚拟环境或框架内部启动逻辑。根脚本只能读取账号清单、调用子项目入口和汇总 ready 状态。
+- `plugins/` 维护自研插件源码，`deployment/` 保存版本清单和脱敏配置示例，`scripts/frameworks/` 负责安装、启动和部署。
+- `astrbot/`、`maibot-yelin/`、`maibot-lanling/` 和 `maibot-fengling/` 是各账号本地运行目录，整目录由 Git 忽略。
+- `napcat/` 负责现行四个 QQ 账号的协议接入，程序包和真实配置保留在本机。
 
 ## 固定账号合同
 
@@ -37,9 +29,7 @@
 
 - AstrBot 只绑定云栖，不得恢复 `both/angel/demon` profile、夜凛平台、双 worker、跨账号 command claim、忙闲代班或可选择 command owner。
 - 在棉花糖家族内，云栖是所有现有固定命令、数据写入、群务和副作用功能的唯一运行 owner。
-- 本地插件源码放在 `astrbot/data/plugins/` 的原生位置；真实插件配置、数据库、日志、缓存和 `plugin_data` 不跟踪。
-- 行为调整必须遵守“框架核心边界”，通过现有配置和本地插件 API 实现，禁止直接修改 AstrBot Core。模型 API 路由维护先读 `docs/model-routing.md`。
-- AstrBot 自己的 `scripts/start.ps1` 和 `scripts/update.ps1` 必须可从项目目录独立使用，不依赖根文件。
+- 云栖插件源码维护在 `plugins/astrbot/`，部署到 `astrbot/data/plugins/`。模型 API 路由维护先读 [模型路由](docs/model-routing.md)。
 
 ## MaiBot 边界
 
@@ -47,14 +37,13 @@
 - 夜凛、蓝铃、风铃的适配器分别连接 `6202/6203/6204`，技术 connection_id 为 `yelin/lanling/fengling`。基础插件为 `napcat_adapter`、`cpa_session`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual`、`qqbot_web_search`、`qqbot_reply_timing`；共同扩展为 `org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。
 - `qqbot_knowledge` 只通过 `127.0.0.1:8081` 使用云栖持有的 DSP 向量检索结果，不在 MaiBot 侧建立额外 DSP 索引；云栖不可用时退回无 DSP 证据的普通聊天。
 - 夜凛和风铃仅启用上述通用插件，其余业务插件禁用；蓝铃原有伴侣专属模块独立保留，不复制给夜凛或风铃。
-- 夜凛、风铃启动前执行 `scripts/enforce_chat_only.py`，允许列表必须包含共同扩展；解析失败或无法确认禁用时停止启动。蓝铃沿用 `scripts/validate_plugin_config.py`，不得自动改写其专属插件启用选择。
-- 三台 MaiBot 的 QQ 内插件管理入口保持禁用。工作区只向身份核验后的主人私聊开放；首次没有既有私聊时，等待真实主人消息绑定，再由公开重载接口注册 Host 会话限制。
-- MaiBot 自己的 `scripts/start.ps1` 和 `scripts/update.ps1` 必须可从项目目录独立使用，不依赖根文件。
+- 夜凛、风铃启动前执行 `scripts/frameworks/enforce_chat_only.py`，解析失败或无法确认禁用时停止启动。蓝铃由 `scripts/frameworks/validate_plugin_config.py` 校验，专属插件保留本机启用选择。
+- 三台 MaiBot 的 QQ 内插件管理入口保持禁用。工作区只向身份核验后的主人私聊开放。首次没有既有私聊时，等待真实主人消息绑定，再由公开重载接口注册 Host 会话限制。
 - 所有框架的首条公开答复等待、后续分段速度及阶段研究遵守 `docs/model-routing.md` 的“回复耗时排查”合同；只在本地聊天插件中实现。
 
 ## 跨框架功能维护
 
-现行角色以 `docs/bot-roles.md` 为准。MaiBot 通用插件在各自原生 `plugins/` 维护，不建立根共享源码副本或同步脚本；相似功能分别保留角色身份、会话绑定、工作区和数据边界。云栖继续持有固定业务命令及其共享数据；个人日记、笔记和主动联系归各 MaiBot 自己维护，不复制其他账号运行数据。跨框架只读知识继续由云栖唯一 DSP 物理库提供，MaiBot 调用 localhost 检索接口。
+现行角色以 [机器人角色与框架归属](docs/bot-roles.md) 为准。从 `plugins/` 修改自研插件，按 [部署清单](deployment/frameworks.json) 同步到实例。云栖持有固定业务命令与共享 DSP 向量库。各 MaiBot 各自维护个人日记、笔记、主动联系及运行数据，通过 localhost 访问云栖的只读检索服务。
 
 ## NapCat 边界
 
@@ -80,7 +69,7 @@
 - 云栖顺序：AstrBot WebUI `8001`、OneBot `6201`、artifact API `8080` 和 DSP knowledge API `8081` ready，再启动云栖 NapCat并等待 established。
 - MaiBot 账号先等待各自 NapCat ready，再启动对应 WebUI 并等待 adapter established；端口映射见固定账号合同。
 - 启动不得自动升级框架。
-- 根更新入口只调用各子项目自己的更新脚本。日常 `maibot` 更新覆盖清单中的夜凛、蓝铃、风铃；注销实例不参与。框架 fork 只合入官方最新稳定 Release，不追踪主分支每个提交，更新器不得 push。
+- `scripts/update-all.ps1` 安装清单固定的官方框架版本。`maibot` 覆盖夜凛、蓝铃、风铃。启动账号和更新 NapCat 各有独立入口。
 
 ## 安全与运行态
 
@@ -90,11 +79,8 @@
 
 ## Git 工作流
 
-- 根仓和五个子仓分别检查状态、提交和维护历史；不要从根仓暂存 submodule 内普通文件。
-- 框架 fork 的 `origin` 指向 `MengLeiFudge` fork，`upstream` 指向官方仓库。各子仓库本地分支名与 `.gitmodules` 声明一致：夜凛 `deployment-yelin`、风铃 `deployment-fengling`、蓝铃与 AstrBot 为 `deployment`，upstream 已指向同名远端分支。获准推送时仍需核对祖先关系，禁止覆盖其他账号历史。
-- 框架提交完成后，根仓只记录新的 gitlink。
-- 本次任务完成且必要检查通过后，自动提交本次范围内的改动；不要等待用户再次要求提交。子项目提交完成后，同步提交根仓的 gitlink 更新。用户明确要求暂不提交时除外。
-- 未经用户明确批准不得 push，也不得把无关 dirty change 带入提交。
+- 自研插件、部署配置、脚本和文档统一在 `qqbot` 提交。完成必要检查后，仅提交本次任务范围内的文件。
+- 推送需要用户明确授权。
 
 ## 验证
 

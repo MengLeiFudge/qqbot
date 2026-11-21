@@ -1,0 +1,4 @@
+aiohttp>=3.8
+curl_cffi>=0.13,<0.17
+yt-dlp>=2026.10.26
+ffmpeg-binaries==1.1.0

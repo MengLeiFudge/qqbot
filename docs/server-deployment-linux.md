@@ -1,47 +1,11 @@
-# Linux / 1Panel 部署边界
+# Linux / 1Panel 部署
 
-本工作区的事实拓扑是两个独立框架项目加一个共享 NapCat 接入层，不再是单个 AstrBot Core 承载两个账号。
+1. 克隆 `qqbot`，按 [部署清单](../deployment/frameworks.json) 获取官方框架归档。为每个启用账号准备独立目录与依赖环境。
+2. 恢复各实例配置和运行数据。云栖挂载 `astrbot/data/`，MaiBot 分别挂载各自的 `config/`、`data/`、`logs/` 和本机插件配置。
+3. 在运行目录就位后，用 `python3 scripts/frameworks/deploy_plugins.py <Target>` 安装自研插件。启动 MaiBot 前在相应运行目录运行蓝铃配置校验或风铃、夜凛的聊天插件策略。[框架与插件部署](framework-deployment.md)
+4. 按 [账号清单](../napcat/accounts.json) 配置 NapCat。云栖使用反向 WebSocket，MaiBot 实例使用各自对应的正向 WebSocket。夜凛保持停用。
+5. 使用服务管理器启动框架和协议端，按 [聊天实例](chat-instances.md) 验证 WebUI、OneBot 和各本机服务的监听与连接。选择部署平台支持的 NapCat/QQ 运行方式。
 
-## 组件拓扑
+DSP 向量库随 AstrBot 的数据目录持久化。为 AstrBot 插件配置本机实际的 `source_root`，MaiBot 使用同机 `127.0.0.1:8081` 做只读检索。NapCat 登录态和实际 OneBot 配置独立备份。
 
-```text
-qqbot superproject
-├── astrbot/          云栖 1443944862，WebUI 8001，OneBot 6201，artifact API 8080，DSP knowledge API 8081
-├── maibot-yelin/     夜凛 2629227874，WebUI 8002，连接 NapCat 6202
-└── napcat/           四账号 QQ/OneBot 接入；NapCat 面板 6101/6102/6103/6104
-```
-
-AstrBot 与 MaiBot 必须使用各自 fork 的部署分支（`deployment`、`deployment-yelin`、`deployment-fengling`）和该分支固定的稳定 Release。1Panel 或 Docker 只负责托管具体组件，不能替代 fork 中的本地插件、夜凛插件允许策略或账号配置。
-
-## 持久化边界
-
-云栖 AstrBot 需要持久化 `astrbot/data/`，其中包括实际 Core 配置、本地插件配置、数据库、插件数据和日志。插件源码由 AstrBot fork 自身的 `data/plugins/` 提供，不从 qqbot 根目录同步。
-
-夜凛 MaiBot 需要持久化 `maibot-yelin/config/`、`data/`、`logs/` 和插件实际 `config.toml`。不得恢复已归档的云栖 MaiBot 数据；夜凛使用自己的全新记忆。启动 Core 前必须执行 `scripts/enforce_chat_only.py`，确保只有 `napcat_adapter`、`qqbot_poke`、`qqbot_knowledge`、`qqbot_identity` 和 `qqbot_visual` 可启用。
-
-共享 DSP 向量库及同步清单随 AstrBot 数据持久化，六个只读模组源码根只挂载给 AstrBot。Linux 部署必须把 `astrbot_plugin_dsp_knowledge` 的 `source_root` 改为实际挂载路径；MaiBot 只访问同主机 `127.0.0.1:8081`，不挂载源码也不复制索引。
-
-NapCat 的程序包、QQ 登录态、实际 OneBot 配置和日志位于 `napcat/onekey/`、`napcat/data/`。这些内容不随 Git 分发，应通过受控备份恢复或在目标主机重新登录。部署平台必须确认所选 NapCat/QQ 运行方式受该系统支持；Windows 根 PowerShell 启动器不能直接作为 Linux service 入口。
-
-## 部署步骤
-
-1. 使用 `git clone --recurse-submodules` 获取 qqbot，并确认两个 submodule 都位于采用版本。
-2. 分别为 AstrBot 和 MaiBot 恢复本机运行配置，只在运行环境填写 provider key、OneBot token 和其他密钥。
-3. 为云栖配置 NapCat reverse WebSocket client `ws://127.0.0.1:6201/ws`。
-4. 为夜凛配置 NapCat forward WebSocket server `127.0.0.1:6202`，MaiBot `napcat_adapter` 使用同一端口和 `connection_id=yelin`。
-5. 分别使用项目自己的依赖环境和启动入口建立服务；不要从 qqbot 根目录复制框架插件或配置。
-6. 将 AstrBot `8001/6201/8080/8081`、MaiBot `8002` 和 NapCat `6202` 的监听/连接状态纳入平台健康检查。
-
-蓝铃 `3600812036:6203` 与风铃 `3056830689:6204` 同样是独立 MaiBot 工作树。端口按角色顺序连号：OneBot `6200+n`、WebUI `8000+n`、消息服务 `8020+n`、NapCat 面板 `6100+n`。注销账号 `3109326090` 不再部署。
-
-## 更新与发布
-
-更新必须显式执行：先在对应 fork 的部署分支合入官方最新稳定 Release，处理本地兼容并提交，再更新 qqbot 的 submodule 指针。启动服务时不得自动追踪 upstream 或自动升级。
-
-三个仓库分别发布：
-
-1. `MengLeiFudge/AstrBot` 的 `deployment` 提交。
-2. `MengLeiFudge/MaiBot` 的 `deployment`、`deployment-yelin`、`deployment-fengling` 提交。
-3. `MengLeiFudge/qqbot` 的 NapCat/编排变更和两个新 gitlink。
-
-真实 token、QQ 登录态、cookies、数据库、日志、会话记录和运行配置不得进入 Git 或部署日志。服务器热修必须回流到对应 fork；不要让服务器副本形成新的源码事实源。
+更新从部署清单读取固定版本，准备完官方包后显式更换。保留每个实例的配置和数据，并单独部署自研插件。服务端插件改动回流到 `qqbot/plugins/`。

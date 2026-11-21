@@ -1,0 +1,101 @@
+# 部署参考版本：2。将此 CPA Responses 配置合并到 MaiBot 生成的 config/model_config.toml。
+# 嵌入 provider 与任务映射保持原样；CPA 需支持 /embeddings 后才能迁移。
+# 启用 plugins/cpa_session；api_key 填 CPA 客户端凭据；官网搜索另见 qqbot_web_search/config.example.toml。
+
+[[api_providers]]
+name = "DeepSeek"
+client_type = "cpa_responses"
+base_url = "http://127.0.0.1:8317/v1"
+api_key = "<CPA-client-key-set-only-in-config/model_config.toml>"
+max_retry = 2 # 当前框架含首次调用，单模型最多尝试两次
+timeout = 120
+retry_interval = 1
+auth_type = "bearer"
+auth_header_name = "Authorization"
+auth_header_prefix = "Bearer"
+auth_query_name = "api_key"
+model_list_endpoint = "/models"
+tool_argument_parse_mode = "auto"
+reasoning_parse_mode = "auto"
+default_headers = {}
+default_query = {}
+
+[[models]]
+name = "deepseek-flash"
+model_identifier = "qqbot-deepseek-flash"
+api_provider = "DeepSeek"
+price_in = 3
+price_out = 9
+cache = true
+cache_price_in = 0.1
+visual = true
+force_stream_mode = false
+
+# 规划、回复、识图与其他文本辅助任务统一使用 high 思考。
+[models.extra_params.reasoning]
+effort = "high"
+
+# 联网搜索使用 qqbot_web_search 函数工具，不向 CPA 附加原生 web_search。
+
+# Replyer 可使用独立模型名，复用同一支持视觉的 Flash 与 provider。
+[[models]]
+name = "deepseek-flash-reply"
+model_identifier = "qqbot-deepseek-flash"
+api_provider = "DeepSeek"
+price_in = 3
+price_out = 9
+cache = true
+cache_price_in = 0.1
+visual = true
+force_stream_mode = false
+
+[models.extra_params.reasoning]
+# 原生 Responses 客户端将 extra_params.reasoning 传入请求体。
+effort = "high"
+
+# 推理和正文共享输出上限，任务硬超时覆盖完整生成过程。
+# 蓝铃本机可以保留原有任务模型分配。
+[model_task_config.replyer]
+model_list = ["deepseek-flash-reply"]
+max_tokens = 8192
+hard_timeout = 60
+
+[model_task_config.planner]
+model_list = ["deepseek-flash"]
+max_tokens = 16384 # 规划及共用 Planner 的情景分析保留完整推理与结果的余量
+hard_timeout = 120
+
+[model_task_config.memory]
+model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
+
+[model_task_config.mid_memory]
+model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
+
+[model_task_config.utils]
+model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 120 # 人物事实提取与文本整理可在此期限内完成
+
+[model_task_config.learner]
+model_list = ["deepseek-flash"]
+max_tokens = 16384 # 学习的推理与结果共享上限，减少输出截断后重跑
+hard_timeout = 120
+
+[model_task_config.expression_use]
+model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
+
+[model_task_config.emoji]
+model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
+
+[model_task_config.vlm]
+model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60

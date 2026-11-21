@@ -40,6 +40,16 @@ ENV/
 *.7z
 *.rar
 
+# Instance config belongs in the runtime copy, including when editing plugins.
+/plugins/**/config.toml
+/plugins/**/.env
+
+# Official framework runtimes and their local state
+/astrbot/
+/maibot-lanling/
+/maibot-fengling/
+/maibot-yelin/
+
 # Root-local runtime directories
 /data/
 /logs/

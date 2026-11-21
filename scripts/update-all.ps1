@@ -1,32 +1,23 @@
-﻿param(
+param(
     [Parameter(Position = 0)]
     [ValidateSet("all", "astrbot", "maibot", "napcat")]
     [string]$Target = "all"
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$WorkspaceRoot = Split-Path -Parent $ScriptRoot
+$WorkspaceRoot = Split-Path -Parent $PSScriptRoot
 
-$components = [ordered]@{
-    astrbot = Join-Path $WorkspaceRoot "astrbot\scripts\update.ps1"
-    maibot = Join-Path $WorkspaceRoot "maibot-yelin\scripts\update.ps1"
-    "maibot-lanling" = Join-Path $WorkspaceRoot "maibot-lanling\scripts\update.ps1"
-    "maibot-fengling" = Join-Path $WorkspaceRoot "maibot-fengling\scripts\update.ps1"
-    napcat = Join-Path $WorkspaceRoot "napcat\scripts\update.ps1"
+if ($Target -ne 'napcat') {
+    & py -3 (Join-Path $PSScriptRoot 'frameworks\install_release.py') $Target
+    if ($LASTEXITCODE -ne 0) {
+        throw "Framework installation failed with exit code $LASTEXITCODE."
+    }
 }
 
-$selected = if ($Target -eq "all") { @($components.Keys) } elseif ($Target -eq "maibot") { @("maibot", "maibot-lanling", "maibot-fengling") } else { @($Target) }
-foreach ($name in $selected) {
-    $script = $components[$name]
-    if (-not (Test-Path $script)) {
-        throw "$name update script not found: $script"
-    }
-    Write-Host "[qqbot] Updating $name to its latest stable release."
+if ($Target -in @('all', 'napcat')) {
+    $script = Join-Path $WorkspaceRoot 'napcat\scripts\update.ps1'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
     if ($LASTEXITCODE -ne 0) {
-        throw "$name update failed with exit code $LASTEXITCODE."
+        throw "NapCat update failed with exit code $LASTEXITCODE."
     }
 }
-
-Write-Host "[qqbot] Update target '$Target' finished. Review and commit each repository separately; nothing was pushed."

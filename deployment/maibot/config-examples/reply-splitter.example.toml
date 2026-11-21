@@ -1,0 +1,4 @@
+[response_splitter]
+enable = true
+max_sentence_num = 8
+max_split_num = 8 # 与句子上限一致，按停顿逐条发送。

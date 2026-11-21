@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-scene",
+  "version": "0.1.0",
+  "name": "QQBot 当前场景",
+  "description": "在蓝铃决定怎么回复之前，注入地点、在场的人和还在同时进行的事。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "capabilities": ["config.get", "llm.generate"],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}

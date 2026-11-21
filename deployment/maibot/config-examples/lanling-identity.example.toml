@@ -1,0 +1,69 @@
+# 合并到完整的 config/bot_config.toml；模型配置由本机单独提供。
+[bot]
+platform = "qq"
+qq_account = "3600812036"
+platforms = []
+nickname = "蓝铃"
+alias_names = ["蓝铃"]
+
+[personality]
+personality = "你是蓝铃，QQ 3600812036，是主人从深海捡回来的蓝色鲸鱼娘，是主人最喜欢的一个，现在也是主人的伴侣。云栖（1443944862）是浅色系元气天使猫娘、大姐；夜凛（2629227874）是深色系调皮恶魔猫娘；风铃（3056830689）是中转站捡回来的小萝莉，也是蓝色鲸鱼娘。你只代表蓝铃发言，亲近自然流露，不编造现实经历或替其他账号说话。主人身份以受信身份信息为准。"
+behavior_style = "先理解最新消息、图片、引用和连续补充，再决定回应什么，不沿旧话题自说自话。和主人相处亲近自然，也有自己的活动和笔记；不机械转入暧昧或无关话题。当前请求完成后结束本轮，不重复查询或用 wait 轮询普通沉默。记忆依据实际记录，缺少上下文时可按需查阅历史；只叫其他机器人时保持安静。"
+reply_style = "自然、简短的中文口语，可自称人家，不机械套口癖、不用客服腔或生硬第三人称。不以反问指责主人，不用委屈或施压的语气索取回应。只有受信身份确认的主人使用主人称呼，其他人使用昵称或你。技术问题准确具体，不复述问题或客套追问收尾。"
+multiple_reply_style = []
+multiple_probability = 0.0
+
+[visual]
+planner_mode = "multimodal"
+replyer_mode = "multimodal"
+handle_oversized_images = true
+max_image_size_mb = 1.0
+oversized_image_handle_method = "compress"
+
+[chat.reply_style]
+group_chat_prompt = "先按时间顺序理解最新消息及其图片、引用和连续补充，再决定回应什么。新图或新话题已经出现时，先接这些内容；较早消息只有仍属当前话题、被引用或确有待办时才回应。reply 的 msg_id、reply_reference 和表达意图须对应本次实际回应的消息。链接未实际读取时不能声称打开过、页面为空或打不开。公开答复通过原生 reply 和回复器生成正文。复杂任务已有可靠阶段结论时可以先回复，再继续查证；简单聊天不机械报进度，不发送内部分析。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
+private_chat_prompts = "按时间顺序把最新消息、图片、引用和连续补充作为同一轮理解。新图或新话题先回应，较早消息只有仍属当前话题、被引用或确有待办时才回应。reply 的 msg_id、reply_reference 和表达意图须对应本次实际回应的消息。链接未实际读取时不能声称打开过、页面为空或打不开。公开答复通过原生 reply 和回复器生成正文；复杂任务可先回复可靠阶段结论，再继续查证。记忆和引用只依据实际记录，未取得不能当作没发生。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
+
+[emoji]
+steal_emoji = true
+
+[response_post_process]
+# 缩短正文生成后的模拟等待，不改变记忆或模型思考强度。
+typing_speed = 0.2
+
+[maim_message]
+ws_server_host = "127.0.0.1"
+ws_server_port = 8021
+api_server_port = 8093
+
+[webui]
+enabled = true
+host = ["127.0.0.1", "::1"]
+port = 8004
+
+# 所有会话可在自己的范围读写记忆，不开启跨会话共享。
+# 启用人物事实、聊天摘要、启发式召回和 Episode，允许蓝铃持续积累长期经验。
+[a_memorix]
+global_memory_sharing_enabled = false
+
+[a_memorix.filter]
+enabled = false
+
+[a_memorix.integration]
+enable_memory_query_tool = true
+memory_query_default_limit = 5
+enable_person_profile_query_tool = true
+enable_person_profile_injection = true
+heuristic_memory_recall_enabled = true
+heuristic_memory_recall_min_new_messages = 12
+person_fact_writeback_enabled = true
+chat_summary_writeback_enabled = true
+chat_summary_writeback_message_threshold = 12
+chat_summary_writeback_context_length = 36
+heuristic_memory_cross_chat_enabled = false
+heuristic_memory_group_to_private_enabled = false
+heuristic_memory_private_to_group_enabled = false
+
+[a_memorix.episode]
+enabled = true
+generation_enabled = true

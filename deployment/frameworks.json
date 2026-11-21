@@ -1,0 +1,74 @@
+{
+  "astrbot": {
+    "repository": "AstrBotDevs/AstrBot",
+    "tag": "v4.27.4",
+    "commit": "4fe29759758255a35ad01ea6177a91c2293bfcd3",
+    "entrypoint": "main.py",
+    "pluginDirectory": "data/plugins"
+  },
+  "maibot": {
+    "repository": "Mai-with-u/MaiBot",
+    "tag": "1.2.3",
+    "commit": "762348103fd086471f72ed2997b730f7b865b674",
+    "entrypoint": "bot.py",
+    "pluginDirectory": "plugins"
+  },
+  "pluginSets": {
+    "astrbot": [
+      "astrbot_plugin_collab_bridge",
+      "astrbot_plugin_cpa_session",
+      "astrbot_plugin_dsp_knowledge",
+      "astrbot_plugin_local_artifact_api",
+      "astrbot_plugin_qqbot_features",
+      "astrbot_plugin_topic_concentration",
+      "astrbot_plugin_video_understanding"
+    ],
+    "maibot": [
+      "cpa_session",
+      "napcat_adapter",
+      "org_orge-8_better-diary",
+      "qqbot_arc",
+      "qqbot_artifact",
+      "qqbot_collab_bridge",
+      "qqbot_comic",
+      "qqbot_common",
+      "qqbot_desire",
+      "qqbot_diary",
+      "qqbot_draw",
+      "qqbot_dynamic_quote",
+      "qqbot_factorio",
+      "qqbot_group",
+      "qqbot_identity",
+      "qqbot_knowledge",
+      "qqbot_kun",
+      "qqbot_lolicon",
+      "qqbot_meme",
+      "qqbot_menu",
+      "qqbot_poke",
+      "qqbot_proactive",
+      "qqbot_reply_guard",
+      "qqbot_reply_timing",
+      "qqbot_reread",
+      "qqbot_sakura",
+      "qqbot_scene",
+      "qqbot_shapez",
+      "qqbot_usage",
+      "qqbot_visual",
+      "qqbot_web_search",
+      "qqbot_workspace"
+    ],
+    "chatOnly": {
+      "excludePlugins": [
+        "qqbot_desire",
+        "qqbot_scene"
+      ],
+      "excludeFiles": [
+        "qqbot_visual/bilibili_search.py",
+        "qqbot_visual/video_overview.py"
+      ]
+    },
+    "yelin": {
+      "excludeFiles": []
+    }
+  }
+}
