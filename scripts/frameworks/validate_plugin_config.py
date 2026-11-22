@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""启动前校验蓝铃本机插件配置，不改写独立实例的启用选择。"""
+"""启动前校验本机插件配置，保留独立实例的启用选择。"""
 
 from pathlib import Path
 
@@ -26,7 +26,7 @@ def main() -> int:
             raise RuntimeError(f"插件配置 {path} 必须明确设置布尔值 plugin.enabled")
         if path == management and plugin["enabled"] is not False:
             raise RuntimeError(f"{path} 必须设置 plugin.enabled = false")
-    print(f"蓝铃独立插件配置校验通过，共 {len(targets)} 份；启用状态按本机配置保留。")
+    print(f"独立插件配置校验通过，共 {len(targets)} 份。")
     return 0
 
 
@@ -34,5 +34,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except RuntimeError as exc:
-        print(f"蓝铃插件配置校验失败：{exc}", file=sys.stderr)
+        print(f"插件配置校验失败：{exc}", file=sys.stderr)
         sys.exit(1)

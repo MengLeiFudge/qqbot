@@ -21,7 +21,8 @@ $StderrLog = Join-Path $LogDirectory "$InstanceName-launcher.err.log"
 $VenvDirectory = Join-Path $ProjectRoot ".venv"
 $VenvScripts = Join-Path $VenvDirectory "Scripts"
 $PythonExe = Join-Path $VenvScripts "python.exe"
-$PolicyPath = Join-Path $PSScriptRoot $(if ($InstanceName -eq 'lanling') { 'validate_plugin_config.py' } else { 'enforce_chat_only.py' })
+$Policy = if ($InstanceName -in @('lanling', 'yunqi')) { 'validate_plugin_config.py' } else { 'enforce_chat_only.py' }
+$PolicyPath = Join-Path $PSScriptRoot $Policy
 $BotPath = Join-Path $ProjectRoot "bot.py"
 
 # 独立实例从自己的配置读取端口；缺少环境时只在允许安装时准备依赖。

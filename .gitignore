@@ -49,6 +49,7 @@ ENV/
 /maibot-lanling/
 /maibot-fengling/
 /maibot-yelin/
+/maibot-yunqi/
 
 # Root-local runtime directories
 /data/
