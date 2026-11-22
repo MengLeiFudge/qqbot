@@ -5,7 +5,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 - 当前四角色关系见根 [机器人角色](../../../docs/bot-roles.md)；蓝铃是深海捡回来的蓝色鲸鱼娘和主人的伴侣。
 - `lanling-identity.example.toml`：蓝铃身份及独立监听端口；应用到独立 `maibot-lanling/` 工作目录。
 - `provider.example.toml`：只展示 provider 字段形状；`api_key` 必须在本机实际配置中填写。
-- `napcat-adapter.example.toml`：合并到 `plugins/napcat_adapter/config.toml`，在适配器入口阻止已知机器人互相触发。
+- `napcat-adapter.example.toml`：合并到 `plugins/napcat_adapter/config.toml`，在适配器入口阻止已知机器人互相触发。迁移时还须显式配置 `[chat].enable_chat_list_filter`，按原账号接收范围决定是否启用。适配器默认启用白名单，空名单会拦截全部群聊和私聊。原账号未使用聊天名单时设为 `false`，全局 `ban_user_id` 仍生效。连接恢复后，确认至少一条新 QQ 消息进入 MaiBot。
 
 这些文件是覆盖参考，不是可直接替代上游完整配置的最小配置。实际配置还必须保留当前 MaiBot 版本生成的全部必需 section。
 
