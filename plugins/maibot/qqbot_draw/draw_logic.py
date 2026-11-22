@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, ROUND_CEILING
 import hashlib
 import json
@@ -19,22 +19,28 @@ import httpx
 from PIL import Image
 
 from .draw_output import load_generated_image
+from .model_catalog import MODEL_NAME, fetch_models, model_unavailable
 from .storage import RuntimeJsonStore
 from .storage import read_json_file
 
 
 RIGHTCODES_DRAW_BASE_URL = "http://127.0.0.1:8317/v1"
 RIGHTCODES_DRAW_USER_AGENT = "QQBot-CPA-Draw/1.0"
-RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2.5"
+RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2.6"
 RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 1000
-RIGHTCODES_DRAW_MODEL_ORDER = (RIGHTCODES_DRAW_DEFAULT_MODEL,)
-RIGHTCODES_DRAW_MODELS = set(RIGHTCODES_DRAW_MODEL_ORDER)
 RIGHTCODES_DRAW_MODEL_PRICES = {
-    RIGHTCODES_DRAW_DEFAULT_MODEL: Decimal("0.04"),
+    RIGHTCODES_DRAW_DEFAULT_MODEL: Decimal("0.06"),
+    "gpt-image-2.6-flare": Decimal("0.15"),
+    "gpt-image-2.6-sunburst": Decimal("0.15"),
 }
-RIGHTCODES_DRAW_MODEL_DESCRIPTIONS = {
-    RIGHTCODES_DRAW_DEFAULT_MODEL: "支持文字生图和参考图生图",
+_DRAW_SIZES = {
+    "1k": {"": "1024x1024", "横": "1536x1024", "竖": "1024x1536"},
+    "2k": {"": "2048x2048", "横": "2048x1152", "竖": "1152x2048"},
+    "4k": {"": "4096x4096", "横": "4096x2304", "竖": "2304x4096"},
 }
+STANDARD_DRAW_PREFIX = re.compile(r"^\s*(文生|图生|头像生)([横竖动]?)图")
+_LEVEL = re.compile(r"(1k|2k|4k)", re.IGNORECASE)
+_POINTS_KEY = "draw.points"
 _DRAW_POINTS_LOCK = threading.Lock()
 _DRAW_POINTS_QUERY_RE = re.compile(
     r"^(?:(?:查|查询|查看|看)(?:一下)?)?(?:我(?:的)?|当前)?(?:生图)?积分(?:余额|情况|多少)?$"
@@ -53,6 +59,8 @@ class RightCodesDrawRequest:
     prompt: str
     model: str = RIGHTCODES_DRAW_DEFAULT_MODEL
     image_urls: tuple[str, ...] = ()
+    size: str = "4096x4096"
+    gif: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +70,8 @@ class RightCodesDrawResult:
     image_url: str
     total_seconds: float
     image_bytes: bytes = b""
+    model: str = RIGHTCODES_DRAW_DEFAULT_MODEL
+    gif: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,12 +130,40 @@ class RightCodesDrawClient:
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def draw(self, request: RightCodesDrawRequest) -> RightCodesDrawResult:
-        """生成一张图片；参考图通过 Images edits 上传，返回图片来源和总耗时。"""
+    async def models(self, preferred: str = "", *, refresh: bool = False) -> tuple[str, ...]:
         if not self.api_key:
             raise ValueError("缺少 CPA 生图 API Key")
-        if request.model not in RIGHTCODES_DRAW_MODELS:
-            raise ValueError(f"不支持的生图模型: {request.model}")
+        return await fetch_models(self.api_key, self.base_url, preferred=preferred, refresh=refresh)
+
+    async def draw(self, request: RightCodesDrawRequest) -> RightCodesDrawResult:
+        """Send one image call, refreshing CPA registration after a rejected model."""
+
+        if not self.api_key:
+            raise ValueError("缺少 CPA 生图 API Key")
+        candidates = [request.model]
+        try:
+            available = await self.models(request.model)
+            candidates = list(available) or candidates
+        except (httpx.HTTPError, ValueError):
+            pass
+        tried: set[str] = set()
+        refreshed = False
+        for model in candidates:
+            if model in tried or len(tried) >= 4:
+                continue
+            tried.add(model)
+            try:
+                return await self._draw_once(replace(request, model=model))
+            except _ModelUnavailable:
+                if not refreshed:
+                    refreshed = True
+                    try:
+                        candidates.extend(await self.models(request.model, refresh=True))
+                    except (httpx.HTTPError, ValueError):
+                        pass
+        raise RuntimeError("CPA 没有可用的生图模型，请检查渠道模型的 image 配置")
+
+    async def _draw_once(self, request: RightCodesDrawRequest) -> RightCodesDrawResult:
         started = time.perf_counter()
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -136,9 +174,9 @@ class RightCodesDrawClient:
             "model": request.model,
             "prompt": request.prompt,
             "n": 1,
-            "size": "1024x1024",
+            "size": request.size,
             "response_format": "b64_json",
-            "output_format": "png",
+            "output_format": "gif" if request.gif else "png",
         }
         try:
             async with asyncio.timeout(self.timeout_seconds):
@@ -167,7 +205,7 @@ class RightCodesDrawClient:
                     image_url = extract_image_url_from_object(data)
                     if not image_url:
                         raise RuntimeError(extract_rightcodes_task_error(data) or "生图服务没有返回图片")
-                    image_bytes = await load_generated_image(image_url, client)
+                    image_bytes = await load_generated_image(image_url, client, gif=request.gif)
         except (TimeoutError, httpx.TimeoutException) as exc:
             raise RightCodesDrawTimeoutError(self.timeout_seconds) from exc
         except httpx.HTTPStatusError as exc:
@@ -177,16 +215,20 @@ class RightCodesDrawClient:
                 detail = ""
             detail = re.sub(r"\s+", " ", detail).replace(self.api_key, "[redacted]")
             detail = re.sub(r"\b(?:sk-|Bearer\s+)[A-Za-z0-9._-]+", "[redacted]", detail, flags=re.IGNORECASE)[:300]
-            if "is not supported on /v1/images/" in detail:
-                detail = f"CPA 尚未将 {request.model} 注册为图片模型，请检查渠道模型的 image 配置"
+            if model_unavailable(exc.response.status_code, detail):
+                raise _ModelUnavailable from exc
             message = f"生图服务返回 HTTP {exc.response.status_code}"
             if detail:
                 message += f"：{detail}"
             raise RuntimeError(message) from exc
         return RightCodesDrawResult(
             image_url=image_url, image_bytes=image_bytes, total_seconds=time.perf_counter() - started,
+            model=request.model, gif=request.gif,
         )
 
+
+class _ModelUnavailable(RuntimeError):
+    pass
 
 async def load_draw_reference_image(source: str, client: httpx.AsyncClient) -> tuple[bytes, str]:
     """加载最多 20 MiB 的参考图并识别 MIME；远程下载不携带 CPA 凭据。"""
@@ -281,7 +323,7 @@ class RightCodesDrawQuotaStore:
         model_key = str(model or "").strip().lower()
         if not user_key:
             raise ValueError("缺少 QQ 用户 ID")
-        if model_key not in RIGHTCODES_DRAW_MODELS:
+        if not MODEL_NAME.fullmatch(model_key):
             raise ValueError(f"不支持的生图模型: {model}")
         with _DRAW_POINTS_LOCK:
             payload = self._read()
@@ -365,47 +407,66 @@ class RightCodesDrawQuotaStore:
             self._write(payload)
 
     def _read(self) -> dict[str, object]:
-        raw = self.store.read("rightcodes.draw_points", {"schema_version": 2, "users": {}})
+        raw = self.store.read(_POINTS_KEY, {"schema_version": 2, "users": {}})
         if not isinstance(raw, dict):
             raw = {"schema_version": 2, "users": {}}
         normalized = normalize_draw_points_payload(raw)
         if normalized != raw:
-            self.store.write("rightcodes.draw_points", normalized)
+            self.store.write(_POINTS_KEY, normalized)
         raw = normalized
         if not self.path.exists():
             return raw
         fingerprint = fingerprint_file(self.path)
-        imports = self.store.read("rightcodes.draw_points_legacy_imports", {"files": {}})
+        imports = self.store.read(f"{_POINTS_KEY}_legacy_imports", {"files": {}})
         imported_files = imports.get("files") if isinstance(imports, dict) else {}
         if isinstance(imported_files, dict) and imported_files.get(str(self.path)) == fingerprint:
             return raw
         legacy_raw = read_json_file(self.path, {"schema_version": 1, "users": {}})
         merged = merge_draw_points_payload(raw, legacy_raw)
         if merged != raw:
-            self.store.write("rightcodes.draw_points", merged)
+            self.store.write(_POINTS_KEY, merged)
         if not isinstance(imported_files, dict):
             imported_files = {}
         imported_files[str(self.path)] = fingerprint
-        self.store.write("rightcodes.draw_points_legacy_imports", {"files": imported_files})
+        self.store.write(f"{_POINTS_KEY}_legacy_imports", {"files": imported_files})
         return merged
 
     def _write(self, payload: dict[str, object]) -> None:
         payload = normalize_draw_points_payload(payload)
-        self.store.write("rightcodes.draw_points", payload)
+        self.store.write(_POINTS_KEY, payload)
+
+
+def parse_draw_prefix(text: str) -> tuple[str, str, bool, int] | None:
+    match = STANDARD_DRAW_PREFIX.match(text)
+    if match is None:
+        return None
+    base, mode = match.groups()
+    end = match.end()
+    tail = text[end:].lstrip()
+    level = _LEVEL.match(tail)
+    size = "4k"
+    if level:
+        rest = tail[level.end():]
+        if not rest or rest[0].isspace():
+            size = level.group(1).lower()
+            end = len(text) - len(rest)
+        elif text[end:] == tail:
+            raise ValueError(f"“{level.group(1)}”后面要空一格再写提示词")
+    return base + "图", _DRAW_SIZES[size][mode if mode in ("横", "竖") else ""], mode == "动", end
 
 
 def parse_rightcodes_draw_command(text: str) -> RightCodesDrawRequest | None:
-    normalized = text.strip()
-    rest = extract_rightcodes_draw_prompt(normalized)
-    if rest is None or not rest:
-        return None
-    if extract_removed_rightcodes_draw_temporary_model(normalized) is not None:
-        return None
-    return RightCodesDrawRequest(prompt=rest)
+    if text.strip() == "生成豆豆眼头像":
+        return RightCodesDrawRequest(prompt="豆豆眼")
+    if parsed := parse_draw_prefix(text):
+        _, size, gif, end = parsed
+        if prompt := text[end:].strip():
+            return RightCodesDrawRequest(prompt=prompt, size=size, gif=gif)
+    return None
 
 
 def looks_like_rightcodes_draw_invocation(text: str) -> bool:
-    return extract_rightcodes_draw_prompt(text.strip()) is not None
+    return text.strip() == "生成豆豆眼头像" or STANDARD_DRAW_PREFIX.match(text) is not None
 
 
 def looks_like_rightcodes_draw_feature_request(text: str) -> bool:
@@ -422,18 +483,14 @@ def looks_like_rightcodes_draw_feature_request(text: str) -> bool:
     )
 
 
-def extract_rightcodes_draw_prompt(text: str) -> str | None:
-    """提取生图前缀之后的完整提示词，不要求图片后缀；仅有前缀时返回空字符串。"""
-    command_match = re.match(r"^(?:文生图|图生图|头像生图|(?:棉花糖|棉花)\s*生图|生成)([\s\S]*)$", text)
-    if command_match is not None:
-        return command_match.group(1).strip()
-    return None
-
-
 def extract_removed_rightcodes_draw_temporary_model(text: str) -> str | None:
     if text.lstrip().startswith(("文生图", "图生图", "头像生图")):
         return None
-    rest = extract_rightcodes_draw_prompt(text.strip())
+    try:
+        parsed = parse_draw_prefix(text)
+    except ValueError:
+        return None
+    rest = text[parsed[3]:].strip() if parsed else ""
     if not rest:
         return None
     bracket_match = re.match(r"^\[([^\]]+)\](?:\s+|$)", rest)
@@ -456,7 +513,7 @@ def format_rightcodes_draw_missing_prompt_message() -> str:
 def format_rightcodes_draw_temporary_model_removed(model: str) -> str:
     return (
         f"生图命令不再支持临时指定模型 {model}，本次没有扣积分。"
-        f"当前仅支持 {RIGHTCODES_DRAW_DEFAULT_MODEL}，请直接发送“文生图 提示词”。"
+        "请使用“切换生图模型 模型名”设置常用模型。"
     )
 
 
@@ -520,18 +577,21 @@ def parse_rightcodes_draw_model_switch(text: str) -> str | None:
     if candidate is None:
         return None
     model = candidate.lower()
-    return model if model in RIGHTCODES_DRAW_MODELS else None
+    return model if MODEL_NAME.fullmatch(model) else None
 
 
 def format_rightcodes_draw_model_help(
     current_model: str = RIGHTCODES_DRAW_DEFAULT_MODEL,
     *,
     multiplier: int = RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER,
+    models: tuple[str, ...] = (),
 ) -> str:
     current_model = normalize_rightcodes_draw_model(current_model)
     lines = [f"当前生图模型：{current_model}", "可用模型："]
-    for model in RIGHTCODES_DRAW_MODEL_ORDER:
-        description = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[model]
+    if not models:
+        lines.append("暂时无法读取 CPA 的图片模型列表。")
+    for model in models:
+        description = "支持文字生图和参考图生图"
         price = format_rightcodes_draw_model_price(model)
         current_mark = "（当前）" if model == current_model else ""
         lines.append(
@@ -541,7 +601,7 @@ def format_rightcodes_draw_model_help(
     lines.extend(
         [
             "",
-            "生图指令：文生图 提示词；图生图 提示词（附图或引用）；头像生图 [@某人] 提示词",
+            "生图指令：文生图、图生图或头像生图。可写成“文生竖图2k 提示词”或“图生动图 提示词”。",
         ]
     )
     return "\n".join(lines)
@@ -577,7 +637,7 @@ def format_rightcodes_draw_points_ranking(
 
 def format_rightcodes_draw_model_switch_success(balance: RightCodesDrawPointBalance) -> str:
     cost_points = calculate_rightcodes_draw_model_points(balance.model, multiplier=balance.multiplier)
-    description = RIGHTCODES_DRAW_MODEL_DESCRIPTIONS[balance.model]
+    description = "支持文字生图和参考图生图"
     return "\n".join(
         [
             f"已切换生图模型：{balance.model}",
@@ -590,14 +650,9 @@ def format_rightcodes_draw_model_switch_success(balance: RightCodesDrawPointBala
 
 def format_rightcodes_draw_model_switch_invalid(candidate: str) -> str:
     candidate = str(candidate or "").strip()
-    first_line = f"不支持这个生图模型：{candidate}" if candidate else "当前只有一个生图模型，无需切换。"
-    return "\n".join(
-        [
-            first_line,
-            f"唯一可用模型：{RIGHTCODES_DRAW_DEFAULT_MODEL}",
-            "生图用法：文生图 提示词；图生图 提示词（附图或引用）",
-        ]
-    )
+    first_line = f"不支持这个生图模型：{candidate}" if candidate else "请输入要切换的生图模型。"
+    return first_line + "\n发送“生图模型”查询可用模型。"
+
 
 
 def format_rightcodes_draw_points_mutation_denied() -> str:
@@ -671,7 +726,7 @@ def calculate_rightcodes_draw_model_points(
 
 
 def get_rightcodes_draw_model_price(model: str) -> Decimal:
-    return RIGHTCODES_DRAW_MODEL_PRICES[normalize_rightcodes_draw_model(model)]
+    return RIGHTCODES_DRAW_MODEL_PRICES.get(normalize_rightcodes_draw_model(model), Decimal("0.06"))
 
 
 def format_rightcodes_draw_model_price(model: str) -> str:
@@ -812,7 +867,7 @@ def safe_int(value: object, default: int) -> int:
 
 def normalize_rightcodes_draw_model(model: object) -> str:
     candidate = str(model or "").strip().lower()
-    return candidate if candidate in RIGHTCODES_DRAW_MODELS else RIGHTCODES_DRAW_DEFAULT_MODEL
+    return candidate if MODEL_NAME.fullmatch(candidate) else RIGHTCODES_DRAW_DEFAULT_MODEL
 
 
 def mask_qq_user_id(user_id: object) -> str:

@@ -1,0 +1,23 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[index]
+source_root = "D:/project/dsp"
+sync_interval_seconds = 600
+max_results = 4
+max_evidence_chars = 6000
+
+[embedding]
+url = ""
+model = ""
+api_key = ""
+timeout_seconds = 10
+send_dimensions = false
+
+[rerank]
+url = ""
+model = ""
+api_key = ""
+timeout_seconds = 30
+instruct = ""

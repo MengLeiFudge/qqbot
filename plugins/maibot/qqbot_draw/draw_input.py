@@ -12,10 +12,9 @@ import re
 
 import httpx
 
-from .draw_logic import RightCodesDrawRequest, load_draw_reference_image
+from .draw_logic import RightCodesDrawRequest, STANDARD_DRAW_PREFIX, load_draw_reference_image, parse_draw_prefix
 
 
-STANDARD_DRAW_PREFIX = re.compile(r"^\s*(文生图|图生图|头像生图)")
 DOUDOUYAN_AVATAR_COMMAND = "生成豆豆眼头像"
 OWN_AVATAR = re.compile(r"(?:我(?:的)?|本人(?:的)?|自己(?:的)?)\s*头像")
 REFERENCE_DEADLINE = 30.0
@@ -42,7 +41,7 @@ async def doudouyan_command_parts(segments: Sequence[Mapping], *, call_action: O
         return None
     match = STANDARD_DRAW_PREFIX.match(text)
     if match:
-        return None if match.group(1) == "文生图" else list(segments)
+        return None if match.group(1) == "文生" else list(segments)
     if OWN_AVATAR.search(text):
         return [{"type": "text", "data": {"text": "头像生图 豆豆眼"}}]
     images = [part for part in segments if part.get("type") == "image"]
@@ -83,11 +82,11 @@ async def prepare_explicit_draw_request(
 ) -> RightCodesDrawRequest:
     """从有序 OneBot/SDK 组件取得原文提示词和单张图，目标及来源歧义直接报错。"""
     text = explicit_command_text(segments)
-    match = STANDARD_DRAW_PREFIX.match(text)
-    if match is None:
+    parsed = parse_draw_prefix(text)
+    if parsed is None:
         raise ValueError("没有找到文生图或图生图指令")
-    mode = match.group(1)
-    prompt = text[match.end():].strip()
+    mode, size, gif, end = parsed
+    prompt = text[end:].strip()
     mentions = []
     offset = 0
     for segment in segments:
@@ -95,20 +94,20 @@ async def prepare_explicit_draw_request(
         data = segment.get("data")
         if kind == "text":
             offset += len(explicit_command_text([segment]))
-        elif kind == "at" and offset >= match.end():
+        elif kind == "at" and offset >= end:
             qq = str(data.get("qq") or data.get("target_user_id") or "") if isinstance(data, Mapping) else str(data or "")
             mentions.append((offset, qq))
     target = sender_id
     if mentions:
         if mode != "头像生图":
             raise ValueError("提示词中请用文字描述对象；指定头像请使用“头像生图 @某人 提示词”")
-        if len(mentions) != 1 or text[match.end():mentions[0][0]].strip():
+        if len(mentions) != 1 or text[end:mentions[0][0]].strip():
             raise ValueError("头像目标不唯一或位置不明确，请将唯一的 @ 紧跟在“头像生图”后")
         target = mentions[0][1]
     if not prompt:
         raise ValueError("请在生图指令后填写提示词")
     if mode == "文生图":
-        return RightCodesDrawRequest(prompt=prompt, model=model)
+        return RightCodesDrawRequest(prompt=prompt, model=model, size=size, gif=gif)
 
     if "豆豆眼" in prompt:
         try:
@@ -166,7 +165,8 @@ async def prepare_explicit_draw_request(
                 source = str(detail.get("url") or detail.get("file") or detail.get("path") or "")
                 if not re.match(r"^(?:https?://|file://|/|[A-Za-z]:[\\/])", source):
                     raise ValueError("图片地址已失效，请重新发送")
-        return await preload_draw_references(RightCodesDrawRequest(prompt=prompt, model=model, image_urls=(source,)))
+        request = RightCodesDrawRequest(prompt=prompt, model=model, image_urls=(source,), size=size, gif=gif)
+        return await preload_draw_references(request)
 
 
 def prepare_doudouyan_requests(request: RightCodesDrawRequest) -> tuple[RightCodesDrawRequest, ...]:

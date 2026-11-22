@@ -1,0 +1,30 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-dsp-index",
+  "version": "0.1.0",
+  "name": "QQBot 共享 DSP 索引",
+  "description": "由云栖维护共享 DSP 向量索引，并通过本机接口提供检索。",
+  "author": {
+    "name": "MLJ",
+    "url": "https://github.com/MengLeiFudge"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot"
+  },
+  "host_application": {
+    "min_version": "1.2.3",
+    "max_version": "1.2.3"
+  },
+  "sdk": {
+    "min_version": "2.7.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": ["config.get"],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": ["zh-CN"]
+  },
+  "plugin_type": "extension"
+}

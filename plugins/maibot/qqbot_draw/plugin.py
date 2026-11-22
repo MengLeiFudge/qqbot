@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar, Mapping
 from urllib.request import Request, build_opener
@@ -16,6 +17,7 @@ from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 from qqbot_common.api_results import require_api_result
 
 from .draw_input import DOUDOUYAN_AVATAR_COMMAND, STANDARD_DRAW_PREFIX, doudouyan_command_parts, prepare_doudouyan_requests, prepare_explicit_draw_request, preload_draw_references
+from .draw_logic import looks_like_rightcodes_draw_model_switch
 from .draw_output import save_generated_image
 from .draw_intent import DRAW_INTENT_SYSTEM, DrawIntent, DrawIntentRouter
 from .draw_logic import RightCodesDrawClient
@@ -60,7 +62,7 @@ from .rightcodes_rewrite import should_rewrite_draw_prompt
 
 DRAW_COMMAND_PATTERN = (
     r"^(?:@\S+\s*)?(?:"
-    r"(?:文生图|图生图|头像生图|(?:棉花糖|棉花)\s*生图|生成)[\s\S]*|"
+    r"(?:(?:文生|图生|头像生)[横竖动]?图)[\s\S]*|生成豆豆眼头像|"
     r"(?:查|查询|查看|看)?(?:一下)?(?:我(?:的)?|当前)?(?:生图)?积分(?:余额|情况|多少)?|"
     r"(?:balance|points?)|积分排行(?:榜)?|"
     r"(?:生图|画图|棉花糖生图|棉花生图)(?:模型说明|模型|价格)|"
@@ -93,7 +95,7 @@ class CutoverSection(PluginConfigBase):
     __ui_label__ = "迁移接管"
     __ui_order__ = 1
 
-    write_enabled: bool = Field(default=True, description="AstrBot 已停用，默认由 MaiBot 接管生图和积分写入")
+    write_enabled: bool = Field(default=True, description="允许当前实例执行生图和积分写入")
 
 
 class StorageSection(PluginConfigBase):
@@ -367,16 +369,17 @@ class QQBotDrawPlugin(MaiBotPlugin):
 
         if looks_like_rightcodes_draw_help_command(command_text):
             balance = await asyncio.to_thread(self._get_balance_locked, runtime_root, user_id)
+            models = await self._available_models(balance.model)
             response = format_rightcodes_draw_model_help(
-                balance.model,
-                multiplier=self.config.rightcodes.point_multiplier,
+                balance.model, multiplier=self.config.rightcodes.point_multiplier, models=models,
             )
             await self.ctx.send.text(response, stream_id)
             return response
 
-        if re.match(r"^(?:切换\s*生图\s*模型|生图\s*模型\s+)", command_text):
+        if looks_like_rightcodes_draw_model_switch(command_text):
             model = parse_rightcodes_draw_model_switch(command_text)
-            if model is None:
+            available = await self._available_models(model or "") if model else ()
+            if model is None or (available and model not in available):
                 candidate = re.sub(r"^(?:切换\s*生图\s*模型|生图\s*模型)\s*", "", command_text).strip()
                 response = format_rightcodes_draw_model_switch_invalid(candidate)
             else:
@@ -392,7 +395,11 @@ class QQBotDrawPlugin(MaiBotPlugin):
             response = format_rightcodes_draw_temporary_model_removed(removed_model)
             await self.ctx.send.text(response, stream_id)
             return response
-        request = parse_rightcodes_draw_command(command_text)
+        try:
+            request = parse_rightcodes_draw_command(command_text)
+        except ValueError as exc:
+            await self.ctx.send.text(str(exc), stream_id)
+            return str(exc)
         if request is None:
             response = format_rightcodes_draw_missing_prompt_message()
             await self.ctx.send.text(response, stream_id)
@@ -428,7 +435,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
                 )
             else:
                 prepared_request, preparation_error = await self._prepare_draw_request(
-                    request=RightCodesDrawRequest(prompt=request.prompt, model=balance.model),
+                    request=replace(request, model=balance.model),
                     message=message,
                 )
                 if not preparation_error:
@@ -449,7 +456,10 @@ class QQBotDrawPlugin(MaiBotPlugin):
             )
             return preparation_error
 
-        quota = await asyncio.to_thread(self._reserve_locked, runtime_root, user_id, balance.model)
+        models = await self._available_models(balance.model)
+        model = models[0] if models else balance.model
+        draw_requests = tuple(replace(draw_request, model=model) for draw_request in draw_requests)
+        quota = await asyncio.to_thread(self._reserve_locked, runtime_root, user_id, model)
         if not quota.allowed:
             response = format_draw_quota_exceeded_message(quota)
             await self.ctx.send.text(response, stream_id)
@@ -458,6 +468,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
         try:
             async with asyncio.timeout(30):
                 start_message = format_draw_start_message(quota)
+                start_message += f"\n本次尺寸：{draw_requests[0].size}"
                 start_message += ("\n提示词来源：豆豆眼预设（完整固定原文）" if preset_parts is not None
                                   else "\n提示词来源：用户话语（无预设）")
                 if preset_parts is not None:
@@ -472,15 +483,17 @@ class QQBotDrawPlugin(MaiBotPlugin):
                 elif intent is not None:
                     start_message += intent.start_detail()
                 await self.ctx.send.text(start_message, stream_id)
-            client = RightCodesDrawClient(
-                api_key=self.config.rightcodes.api_key,
-                base_url=self.config.rightcodes.base_url,
-                timeout_seconds=float(self.config.rightcodes.draw_timeout_seconds),
-            )
-            outcomes = await client.draw_batch(draw_requests)
+            timeout = float(self.config.rightcodes.draw_timeout_seconds)
+            try:
+                async with asyncio.timeout(timeout):
+                    outcomes = await self._draw_client().draw_batch(draw_requests)
+            except TimeoutError as exc:
+                raise RightCodesDrawTimeoutError(timeout) from exc
             results = tuple(item for item in outcomes if isinstance(item, RightCodesDrawResult))
             if not results:
                 raise next(item for item in outcomes if isinstance(item, BaseException))
+            actual_model = results[0].model
+
             for item in outcomes:
                 if isinstance(item, BaseException):
                     self.ctx.logger.warning("生图批次单张失败: error_type=%s", type(item).__name__)
@@ -502,12 +515,17 @@ class QQBotDrawPlugin(MaiBotPlugin):
             )
             return response
 
+        if actual_model != balance.model:
+            try:
+                await asyncio.to_thread(self._replace_model_locked, runtime_root, user_id, balance.model, actual_model)
+            except Exception as exc:
+                self.ctx.logger.warning("保存可用生图模型失败: %s", type(exc).__name__)
         saved_paths = []
         sources = []
         for result in results:
             saved = None
             try:
-                saved = await asyncio.to_thread(save_generated_image, result.image_bytes, runtime_root)
+                saved = await asyncio.to_thread(save_generated_image, result.image_bytes, runtime_root, gif=result.gif)
             except Exception as exc:
                 self.ctx.logger.error("生图结果保存失败: error_type=%s", type(exc).__name__)
             if saved is not None:
@@ -516,7 +534,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
             else:
                 sources.append(f"base64://{base64.b64encode(result.image_bytes).decode('ascii')}")
         response = format_rightcodes_draw_success(
-            max(results, key=lambda item: item.total_seconds), model=quota.model, image_count=len(results),
+            max(results, key=lambda item: item.total_seconds), model=actual_model, image_count=len(results),
         )
         if len(results) < len(draw_requests):
             response += f"\n本次{len(draw_requests)}张中有{len(draw_requests) - len(results)}张生成失败，以下为全部成功结果，未重复生成。"
@@ -546,7 +564,22 @@ class QQBotDrawPlugin(MaiBotPlugin):
             )
         except Exception as exc:
             self.ctx.logger.warning("生图失败提示发送失败: error_type=%s", type(exc).__name__)
+
         return response
+
+    def _draw_client(self) -> RightCodesDrawClient:
+        return RightCodesDrawClient(
+            api_key=self.config.rightcodes.api_key,
+            base_url=self.config.rightcodes.base_url,
+            timeout_seconds=float(self.config.rightcodes.draw_timeout_seconds),
+        )
+
+    async def _available_models(self, preferred: str) -> tuple[str, ...]:
+        try:
+            return await self._draw_client().models(preferred)
+        except Exception as exc:
+            self.ctx.logger.warning("CPA 生图模型列表读取失败: %s", type(exc).__name__)
+            return ()
 
     async def _call_image_action(self, action: str, **params: object) -> object:
         """通过 NapCat 公开插件 API 读取图片来源，并解开 OneBot 响应。"""
@@ -607,11 +640,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
             if normalized and normalized not in reference_images:
                 reference_images.append(normalized)
 
-        prepared = RightCodesDrawRequest(
-            prompt=request.prompt,
-            model=request.model,
-            image_urls=tuple(reference_images),
-        )
+        prepared = replace(request, image_urls=tuple(reference_images))
         normalized_reply_texts = tuple(text for text in reply_texts if text and not _is_only_media_placeholder(text))
         if unresolved_media_context and not reference_images and not normalized_reply_texts:
             return prepared, format_draw_rewrite_missing_context()
@@ -662,11 +691,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
             len(reference_images),
             len(rewritten_prompt),
         )
-        return RightCodesDrawRequest(
-            prompt=rewritten_prompt,
-            model=prepared.model,
-            image_urls=prepared.image_urls,
-        ), ""
+        return replace(prepared, prompt=rewritten_prompt), ""
 
     async def _send_quoted_result(
         self,
@@ -751,6 +776,12 @@ class QQBotDrawPlugin(MaiBotPlugin):
     def _set_model_locked(self, runtime_root: Path, user_id: str, model: str):
         with InterProcessLock(runtime_root / ".maibot_locks" / "draw.lock"):
             return self._quota_store(runtime_root).set_model(user_id, model)
+
+    def _replace_model_locked(self, runtime_root: Path, user_id: str, previous: str, model: str) -> None:
+        with InterProcessLock(runtime_root / ".maibot_locks" / "draw.lock"):
+            store = self._quota_store(runtime_root)
+            if store.get_balance(user_id).model == previous:
+                store.set_model(user_id, model)
 
     def _reserve_locked(self, runtime_root: Path, user_id: str, model: str) -> RightCodesDrawQuotaResult:
         with InterProcessLock(runtime_root / ".maibot_locks" / "draw.lock"):
