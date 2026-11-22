@@ -74,6 +74,9 @@ class NapCatInboundCodec(NapCatInboundCardMixin, NapCatInboundTextMixin):
                 additional_config["napcat_segment_types"] = source_segment_types
         if group_id:
             additional_config["platform_io_target_group_id"] = group_id
+            real_seq = str(payload.get("real_seq") or "").strip()
+            if real_seq.isascii() and real_seq.isdecimal() and int(real_seq) > 0:
+                additional_config["napcat_group_real_seq"] = str(int(real_seq))
         else:
             additional_config["platform_io_target_user_id"] = sender_user_id
         if platform_card_payloads:

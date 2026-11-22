@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-command-router",
+  "version": "0.1.0",
+  "name": "QQBot 固定指令认领",
+  "description": "群固定指令在执行前由一个账号认领。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {"repository": "https://github.com/MengLeiFudge/qqbot"},
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [],
+  "capabilities": [],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}

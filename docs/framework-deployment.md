@@ -18,7 +18,7 @@ MaiBot 内置插件管理使用其原生 `config.toml`，首次安装写入 `plu
 
 ## 修改和同步自研插件
 
-1. 修改 `plugins/astrbot/` 或 `plugins/maibot/` 中的源码。风铃和夜凛共同覆盖的文件在 `plugins/overrides/chat-only/`，夜凛专用覆盖在 `plugins/overrides/yelin/`。修改有覆盖的文件时同时检查相应实例。
+1. 修改 `plugins/astrbot/` 或 `plugins/maibot/` 中的源码。风铃和夜凛共同覆盖的文件在 `plugins/overrides/chat-only/`，夜凛专用覆盖在 `plugins/overrides/yelin/`。只向指定实例同步的插件在部署清单的对应 Target 下列出。修改有覆盖的文件时同时检查相应实例。
 2. 编译检查后执行 `.\scripts\deploy-plugins.ps1 <Target>`。同步只写清单里的自研插件源码和资源，保留 `config.toml`、已有图床配置、市场插件和运行数据。删除或改名时要显式归档运行目录中的旧文件。
 3. 按框架的重载方式生效，再查看插件加载日志。[插件热重载](chat-instances.md#插件改动与热重载)
 

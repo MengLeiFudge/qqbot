@@ -29,6 +29,7 @@ def plugin_sources(account, manifest):
     kind = framework_kind(account)
     sets = manifest["pluginSets"]
     names = set(sets[kind])
+    names.update(sets.get(account["target"], {}).get("includePlugins", ()))
     layers = [(kind, set())]
     if account["target"] in {"fengling", "yelin"}:
         names.difference_update(sets["chatOnly"]["excludePlugins"])

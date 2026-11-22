@@ -1,0 +1,7 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[routing]
+account_ids = []
+database_path = ""
