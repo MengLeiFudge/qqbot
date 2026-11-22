@@ -8,12 +8,12 @@
       "oneBotPort": 6201,
       "napcatWebuiPort": 6101,
       "autoStart": true,
-      "connectionMode": "reverse-client",
-      "connectionName": "yunqi-astrbot-reverse-ws",
+      "connectionMode": "forward-server",
+      "connectionName": "yunqi-maibot-forward-ws",
       "framework": {
-        "name": "astrbot",
-        "root": "astrbot",
-        "startScript": "scripts/frameworks/start-astrbot.ps1"
+        "name": "maibot-yunqi",
+        "root": "maibot-yunqi",
+        "startScript": "scripts/frameworks/start-maibot.ps1"
       }
     },
     {

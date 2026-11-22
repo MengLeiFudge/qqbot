@@ -49,13 +49,13 @@ QQ 候选来自已有独立运行包、`data/downloads/QQ*.exe` 缓存、QQ 官�
 
 ## 自动同意请求
 
-现行账号自动同意好友申请、邀请机器人入群和成员加群申请。云栖由 AstrBot 的 `astrbot_plugin_qqbot_features` 处理；夜凛、蓝铃和风铃由各自 MaiBot 的 `napcat_adapter` 接入层处理。夜凛保持关闭；已注销的 `3109326090` 不再处理申请。未绑定框架的账号才使用 `napcat-plugin-qqbot-social`，避免重复执行。
+现行账号的好友申请、机器人入群邀请和成员加群申请由各自 MaiBot 的 `napcat_adapter` 接入层处理。未绑定框架的账号才使用 `napcat-plugin-qqbot-social`。
 
 `configure-account.ps1` 会把本地插件复制到实际 NapCat 插件目录并启用；账号启动和更新入口均调用该配置步骤。仅使用 NapCat 的账号在下一次启动时加载该插件；现有进程需要重新加载插件或重启对应 NapCat。申请处理不发送聊天消息，失败写入各自运行日志。
 
 ## 固定端口
 
-- 云栖 `1443944862`：reverse client -> `ws://127.0.0.1:6201/ws`，NapCat 面板 6101
+- 云栖 `1443944862`：forward server `127.0.0.1:6201`，面板 6101
 - 夜凛 `2629227874`：forward server `127.0.0.1:6202`，面板 6102（暂不启动）
 - 蓝铃 `3600812036`：forward server `127.0.0.1:6203`，面板 6103
 - 风铃 `3056830689`：forward server `127.0.0.1:6204`，面板 6104

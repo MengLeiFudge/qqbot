@@ -76,7 +76,7 @@ def install_release(account, manifest, local_source=None):
         if existing.is_file():
             shutil.copy2(existing, config)
         else:
-            config.write_text("[plugin]\nenabled = false\n", encoding="utf-8")
+            config.write_text('[plugin]\nconfig_version = "1.2.0"\nenabled = false\n', encoding="utf-8")
     if local_source is not None:
         dependency_file = "pyproject.toml" if kind == "astrbot" else "uv.lock"
         old_dep, new_dep = root / dependency_file, stage / dependency_file

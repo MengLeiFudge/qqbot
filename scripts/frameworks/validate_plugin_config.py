@@ -3,6 +3,7 @@
 
 from pathlib import Path
 
+import re
 import sys
 import tomllib
 
@@ -11,7 +12,7 @@ PROJECT_ROOT = Path.cwd()
 
 
 def main() -> int:
-    """校验所有现有插件配置的 TOML 及启用字段；无效时阻止启动。"""
+    """校验 TOML、启用字段和 MaiBot 要求的插件配置版本。"""
     targets = sorted((PROJECT_ROOT / "plugins").glob("*/config.toml"))
     management = PROJECT_ROOT / "src/plugins/built_in/plugin_management/config.toml"
     targets.append(management)
@@ -24,6 +25,11 @@ def main() -> int:
         plugin = data.get("plugin")
         if not isinstance(plugin, dict) or type(plugin.get("enabled")) is not bool:
             raise RuntimeError(f"插件配置 {path} 必须明确设置布尔值 plugin.enabled")
+        version = plugin.get("config_version")
+        if (path == management or plugin["enabled"]) and (
+            not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None
+        ):
+            raise RuntimeError(f"插件配置 {path} 必须填写插件声明的 plugin.config_version")
         if path == management and plugin["enabled"] is not False:
             raise RuntimeError(f"{path} 必须设置 plugin.enabled = false")
     print(f"独立插件配置校验通过，共 {len(targets)} 份。")

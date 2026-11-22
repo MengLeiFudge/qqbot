@@ -4,7 +4,7 @@
 
 | Target | 账号 | QQ | OneBot | 框架与职责 |
 | --- | --- | --- | --- | --- |
-| `yunqi` | 云栖 | `1443944862` | `6201` reverse client | AstrBot，聊天和固定功能 |
+| `yunqi` | 云栖 | `1443944862` | `6201` forward server | MaiBot，聊天和固定功能 |
 | `yelin` | 夜凛 | `2629227874` | `6202` forward server | MaiBot，暂停启动 |
 | `lanling` | 蓝铃 | `3600812036` | `6203` forward server | MaiBot，独立聊天、日记与工作区 |
 | `fengling` | 风铃 | `3056830689` | `6204` forward server | MaiBot，独立聊天、日记与工作区 |
@@ -17,7 +17,6 @@
 Set-Location D:\project
 git clone https://github.com/MengLeiFudge/qqbot.git
 Set-Location qqbot
-.\scripts\update-all.bat astrbot
 .\scripts\update-all.bat maibot
 ```
 
@@ -39,7 +38,7 @@ Set-Location qqbot
 | 工作 | 入口 |
 | --- | --- |
 | 修改与部署自研插件 | 在 `plugins/` 修改，执行 `.\scripts\deploy-plugins.ps1 <Target>` |
-| 应用清单中的官方框架版本 | `.\scripts\update-all.bat astrbot`、`.\scripts\update-all.bat maibot` |
+| 应用清单中的 MaiBot 版本 | `.\scripts\update-all.bat maibot` |
 | 人工更新 NapCat 与独立 QQ | `.\scripts\update-all.bat napcat` |
 | 提交自有源码和部署描述 | 在 `qqbot` 提交，推送需明确授权 |
 

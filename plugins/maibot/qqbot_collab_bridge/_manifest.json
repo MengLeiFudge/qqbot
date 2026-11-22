@@ -7,7 +7,7 @@
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {"repository": "https://github.com/MengLeiFudge/qqbot"},
-  "host_application": {"min_version": "1.1.0", "max_version": "1.1.99"},
+  "host_application": {"min_version": "1.1.0", "max_version": "1.2.3"},
   "sdk": {"min_version": "2.7.0", "max_version": "2.99.99"},
   "dependencies": [
     {"type": "plugin", "id": "mlj.qqbot-common", "version_spec": ">=0.1.2,<1.0.0"},

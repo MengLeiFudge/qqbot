@@ -4,11 +4,11 @@
 
 | 调用 | 路由与凭据 | 配置入口 |
 | --- | --- | --- |
-| 聊天、规划、读图、记忆整理等文本生成 | `http://127.0.0.1:8317/v1`，模型 `qqbot-deepseek-flash`，CPA 客户端密钥 | AstrBot `data/cmd_config.json` 的 `provider_sources`；MaiBot `config/model_config.toml` 的生成 provider |
-| 图像生成 | 同一 CPA 地址及客户端密钥 | AstrBot `astrbot_plugin_qqbot_features`；MaiBot `qqbot_draw` 本机配置，启用状态沿用账号策略 |
+| 聊天、规划、读图、记忆整理等文本生成 | `http://127.0.0.1:8317/v1`，模型 `qqbot-deepseek-flash`，CPA 客户端密钥 | MaiBot `config/model_config.toml` 的生成 provider |
+| 图像生成 | 同一 CPA 地址及客户端密钥 | 云栖的 `qqbot_draw/config.toml` |
 | MaiBot 联网搜索 | DeepSeek 官网 Responses，原有官网密钥 | 各实例 `qqbot_web_search/config.toml`；使用说明见插件 README |
 | `qwen3.7-text-embedding` | 原百炼嵌入地址与凭据 | 各实例原嵌入 provider |
-| `qwen3-rerank` | 原百炼重排序地址与凭据 | AstrBot 原 `bailian_rerank` provider |
+| `qwen3-rerank` | 原百炼重排序地址与凭据 | 云栖的 `qqbot_dsp_index/config.toml` |
 
 嵌入与重排序仍待 CPA 支持，尚未纳入统一入口。不要仅因模型出现在 CPA 配置或 `/models` 列表，就替换这两类地址。迁移前需确认 `/embeddings`、重排序请求体与返回格式均兼容，保持向量维度和模型名称，避免损坏既有索引与记忆召回。
 
@@ -43,12 +43,12 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 需要研究时，模型可以先发已经确认且有用的公开结论，再继续查询并补充新证据；简单聊天正常回答。MaiBot 的阶段答复同样通过原生 `reply`，`reply_reference` 只提供已确认事实和本阶段回应范围。保留必要上下文、身份和知识证据，内部推理保持隐藏。
 
-云栖由[群聊路由插件](../astrbot/data/plugins/astrbot_plugin_topic_concentration/README.md)处理直接呼叫优先和阶段答复，由[功能合集](../astrbot/data/plugins/astrbot_plugin_qqbot_features/README.md)处理首条等待；其部署配置关闭 `buffer_intermediate_messages`。云栖沿用原生分段配置，关闭插件的长输入拒读和分段覆盖，保留内部控制标记与错误拦截。夜凛和蓝铃的阶段答复指导均放在原生 `[chat.reply_style]` 配置，统一使用原生 `reply` 和回复器；夜凛不再保留只注入静态规则的插件，蓝铃的[连发、引用与断句插件](../maibot-lanling/plugins/qqbot_reply_guard/README.md)不再额外调用模型核对规划。身份、知识和引用按各实例原有入口提供；两者分别启用 `qqbot_reply_timing`，在发送阶段补齐本账号缺失的 NapCat 连接标识，并让原生后处理首段进入统一计时。只有首条抵扣已耗时，后续分段与研究补充按原速；已有显式路由和接收目标保持。蓝铃两秒连发收集窗口从接收时起算，准备阶段已耗时计入窗口。MaiBot 的新消息打断边界是本轮首条公开消息送达：之前允许重新收集输入，覆盖图片/记忆准备、Planner、原生 Replyer 和首条补等，之后保留本轮后续分段及研究补充，新消息进入下一轮。`planner_interrupt_max_consecutive_count` 仅控制框架原生 Planner；两实例的 [CPA 会话插件](../maibot-lanling/plugins/cpa_session/README.md) 补齐插件模型请求的取消及过期输出拦截，发送等待插件在收到新消息时立即结束旧首条补等，并在提交平台前再次核对源消息。已提交平台且结果未知的发送不能假定已撤回，也不能自动重发。
+夜凛和蓝铃的阶段答复指引放在原生 `[chat.reply_style]`，统一使用原生 `reply` 和回复器。蓝铃的连发插件省去额外的模型核对，两秒收集窗口从接收时起算。两者的 `qqbot_reply_timing` 在发送阶段补齐本账号缺失的 NapCat 连接标识，并让原生后处理首段进入统一计时。身份、知识、引用及发送目标继续按各实例配置处理。
+
+MaiBot 的新消息打断边界是本轮首条公开消息送达。送达前可重新收集输入，覆盖图片、记忆准备、Planner、Replyer 和首条补等，送达后保留本轮后续分段及研究补充。`planner_interrupt_max_consecutive_count` 只控制原生 Planner。夜凛和蓝铃的 `cpa_session` 补齐插件模型请求的取消及过期输出拦截，`qqbot_reply_timing` 在收到新消息时结束旧首条补等，在提交平台前核对源消息。已提交平台且结果未知的发送禁止自动重发。
 
 检查回复速度时，先按同一会话、目标消息和请求对齐接收、排队、模型请求、工具执行与发送时间，同时记录首次有用答复和完整完成时间：
 
-- AstrBot 的 `provider_stats.start_time/end_time` 记录 Agent 运行，不覆盖取得会话锁之前的排队，也不覆盖后续分段发送等待。`QQBotFeatures` 的请求/返回日志起点在其请求 Hook，不能直接当作收到消息到送达的总耗时。
-- 云栖先核对旧请求是否占用同会话锁，再核对 `platform_settings.segmented_reply` 的逐段等待，以及 `provider_settings.streaming_response`、`buffer_intermediate_messages` 对公开中间答复的影响。内部推理保持隐藏；正文分段等待与模型继续研究分别计时。
 - MaiBot 的 `llm_usage.time_cost` 是模型调用耗时；`planner.finalized.planner.duration_ms`、`final_state.time_records` 是阶段计时，回复工具的 `duration_ms` 还包含回复器与发送流程。用回复工具 `detail.metrics` 分离提示组装、模型生成和工具其余开销，不将回复后的 Planner 收尾算入首次答复延迟。
 - 群聊候选、拍一拍静默、实际可见答复及工具失败分开统计，并注明群聊/私聊的样本数。回复旧群消息可能包含模型选择接话的时间间隔，不能把全部间隔归为模型执行。
 - MaiBot 群消息久候时，先核对 `mai_messages.is_at/is_mentioned` 和原始引用/图片，再按消息 ID 对齐 `maisaka_turn_scheduler` 的判定、Planner 开始和送达时间。普通 `frequency` 调度在未达到消息数阈值时，会按历史平均接收间隔计算延迟，稀疏群聊可能因此等待很久；真正的 @/提及应核对强制触发日志，不用调整打字速度掩盖调度等待。验收须分别记录触发前等待与触发后的生成/发送耗时，不能将两者合成一个模型耗时。
@@ -62,10 +62,7 @@ QQ、B站、GitHub、账单管理、图片托管和 localhost DSP 共享检索�
 
 Go 要求每段对话携带稳定的 `x-opencode-session`，机器人在请求级 HTTP 头中直接发送，使用框架已有的真实会话 ID；重试和同一对话的工具续轮复用同一个值。框架内部存在 `session_id` 不等于 HTTP 请求已携带该头；静态 provider headers 也不会自动按对话替换。CPA 应透传客户端已有的 `x-opencode-session` 与真实 `User-Agent`，不能给所有对话写死同一个会话值，也不能为每次请求重新生成。
 
-会话透传使用各框架的本地插件：
-
-- AstrBot 使用本地 [CPA 会话透传插件](../astrbot/data/plugins/astrbot_plugin_cpa_session/README.md) 注册的 `cpa_responses` 类型，保留 source ID、provider ID 与全部生成参数，请求模型使用 `qqbot-deepseek-flash`。插件继承原生 Responses 适配器，在 `text_chat`、`text_chat_stream` 接口取得已有 `session_id` 并设置请求级头；中文平台名称按 UTF-8 百分号编码。变更 Provider 类型后完整重启 AstrBot。
-- MaiBot 使用各实例的 [CPA 会话透传插件](../maibot-yelin/plugins/cpa_session/README.md)，将指向 CPA 的生成 provider 的 `client_type` 设为 `cpa_responses`。插件通过 Planner、Replyer 的请求 Hook 关联真实会话 ID，增加请求级头后调用原有 `OpenAIResponsesClient.get_response`；保留 provider 名称和生成参数，请求模型使用 `qqbot-deepseek-flash`。没有聊天会话来源的独立辅助调用使用本次逻辑请求 ID。
+MaiBot 通过 `cpa_session` 将指向 CPA 的生成 provider 的 `client_type` 设为 `cpa_responses`。插件通过 Planner、Replyer 的请求 Hook 关联会话 ID，在原有 `OpenAIResponsesClient.get_response` 调用中增加请求级头。没有聊天会话的独立辅助调用使用本次请求 ID。[CPA 会话插件](../plugins/maibot/cpa_session/README.md)
 
 机器人的普通生成请求使用只登记在 OpenCode Go 上的 `qqbot-deepseek-flash`（上游 `deepseek-v4.1-flash`）。`deepseek-flash` 仍是共用别名：wb 反代优先级 9，Go 也保留该别名且优先级 5，DeepSeek 官网为默认优先级；Pi 等其他客户端继续使用它。wb 对内容过滤返回 HTTP 200，CPA 不会因此改走 Go，所以机器人不能再请求 `deepseek-flash`。官网联网搜索仍直接使用官网的 `deepseek-flash`，不走这条别名。Go 的 OpenAI 兼容 Base URL 为 `https://opencode.ai/inference/go/openai/v1`。嵌入与重排序仍分别遵守本页原有路由约束。
 

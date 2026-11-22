@@ -9,7 +9,7 @@ from time import monotonic
 from typing import ClassVar
 
 from aiohttp import web
-from maibot_sdk import Field, MaiBotPlugin, PluginConfigBase
+from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, MaiBotPlugin, PluginConfigBase
 
 from .catalog import CATALOG_VERSION, build_catalog_snapshot, query_targets_dsp_knowledge
 from .providers import Providers
@@ -109,6 +109,12 @@ class QQBotDspIndexPlugin(MaiBotPlugin):
             await self._providers.close()
             self._providers = None
         self._cache.clear()
+
+    async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
+        del config_data, version
+        if scope == CONFIG_RELOAD_SCOPE_SELF:
+            await self.on_unload()
+            await self.on_load()
 
     def _status(self) -> dict:
         return {

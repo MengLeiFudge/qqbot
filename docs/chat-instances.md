@@ -1,16 +1,19 @@
 # MaiBot 聊天实例
 
-角色和 QQ 对应以 [机器人角色与框架归属](bot-roles.md) 为准，端口与启动选择由 [账号清单](../napcat/accounts.json) 维护。云栖使用 AstrBot；夜凛、蓝铃、风铃使用各自独立的 MaiBot 运行目录。
+四个账号分别使用独立的 MaiBot 运行目录。角色和 QQ 见 [机器人角色与框架归属](bot-roles.md)，端口与启动选择见 [账号清单](../napcat/accounts.json)。
 
 | 角色 | 运行目录 / 技术 Target | OneBot | WebUI | 消息服务 |
 | --- | --- | --- | --- | --- |
+| 云栖 | `maibot-yunqi/` / `yunqi` | 6201 | 8001 | 8021 |
 | 夜凛 | `maibot-yelin/` / `yelin` | 6202 | 8002 | 8022 |
 | 蓝铃 | `maibot-lanling/` / `lanling` | 6203 | 8003 | 8023 |
 | 风铃 | `maibot-fengling/` / `fengling` | 6204 | 8004 | 8024 |
 
 NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风铃 6104，由 `accounts.json` 的 `napcatWebuiPort` 在启动前写入共享 `webui.json`。账号 `3109326090` 已注销，工作树已归档到根 `.codex/trash/`，不再进入账号清单、启动或更新。
 
-三台 MaiBot 对齐基础聊天、拍一拍、只读 DSP 检索、身份核验、视频与历史阅读、联网搜索、回复节奏、连发引用、日记、个人工作区和主动联系。夜凛、风铃的通用允许列表在`scripts/frameworks/enforce_chat_only.py`，蓝铃保留原有独立配置校验。蓝铃的伴侣关系和专属模块不复制给其他角色。
+夜凛、蓝铃和风铃对齐基础聊天、拍一拍、只读 DSP 检索、身份核验、视频与历史阅读、联网搜索、回复节奏、连发引用、日记、个人工作区和主动联系。夜凛、风铃的通用允许列表在 `scripts/frameworks/enforce_chat_only.py`，云栖、蓝铃沿用本机插件启用选择。
+
+云栖维护固定指令和 `8080` 产物发布、`8081` 共享 DSP 检索。人工表情审核继续使用 `http://127.0.0.1:8799/`，当前由独立的 `.codex/drafts/review_server.py` 提供。云栖的 `qqbot_meme` 共用 `astrbot/data/plugin_data/meme_manager`。归档 AstrBot 前需先迁走审核服务的运行依赖和同一份表情库。
 
 通用扩展源码集中维护，源目录见 `plugins/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git；部署时分别填写机器人 QQ、身份插件的主人、独立工作区和日记取材私聊，不复制其他账号凭据、数据库或插件状态。夜凛、风铃的日记空间发布默认关闭，定时生成和本地导出继续启用。
 蓝铃另有 qqbot_scene：私聊决定回复前注入当前场景，后发生的动作叠加在还没停的事上。
@@ -19,7 +22,7 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 
 风铃不继承星遥的旧记忆：停止写入后，将原角色数据移至根 `.codex/trash/<timestamp>/`，建立空白角色数据；保留 WebUI 登录配置及本账号健康 NapCat 登录态。归档路径记在本机迁移记录，不提交聊天或运行数据。
 
-图片沿用原生多模态。三台 MaiBot 的入站单张压缩配置统一为 `[visual] handle_oversized_images=true`、`max_image_size_mb=1.0`、`oversized_image_handle_method="compress"`。压缩在聊天 Hook 前尝试，失败保留原图，旧缓存不自动重新压缩；它不是固定 1080p，也不能保证多个图片及历史上下文累计低于插件 16 MiB 单帧上限。不得删除图片、删上下文或改框架私有常量来绕过限制。
+图片沿用原生多模态。MaiBot 实例的入站单张压缩配置为 `[visual] handle_oversized_images=true`、`max_image_size_mb=1.0`、`oversized_image_handle_method="compress"`。压缩在聊天 Hook 前尝试，失败保留原图，旧缓存不自动重新压缩。多张图片与历史上下文仍可能触及插件单帧上限。不得删除图片、删上下文或改框架私有常量来绕过限制。
 
 风铃的 `chat.reply_timing.planner_interrupt_max_consecutive_count=0`，首条前的补充取消由本地 `cpa_session` 与 `qqbot_reply_timing` 按源发送者处理，取消后通过公开主动任务重新排队；其他群成员插话保留在完整上下文中。维护时核对模型请求、首段等待、重新排队与真实发送记录，ready 不代替聊天验收。
 
@@ -27,11 +30,9 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 
 ## 插件改动与热重载
 
-改插件不需要重启框架进程，也不需要动 NapCat：
+MaiBot 插件运行在各自的 runner 子进程。在 WebUI 插件页将插件禁用再启用一次，运行时会卸载并重新加载插件，代码会重新导入。QQ 内的 `/pm` 插件管理入口保持禁用。
 
-- 云栖（AstrBot）：`scripts/frameworks/start-astrbot.ps1` 设置 `ASTRBOT_RELOAD=1`，`data/plugins/` 下的 `.py` 改动由框架自己检测并只重载受影响插件；提示词、配置和 `README.md` 改动不会触发，需在 WebUI 插件页手动重载。
-- MaiBot：插件运行在各自的 runner 子进程，没有文件监听。在 WebUI 插件页把目标插件“禁用”再“启用”一次，运行时会卸载并重新加载该插件，代码重新导入。QQ 内的 `/pm` 插件管理入口按规则保持禁用，不走聊天命令。
-- 只有框架核心、依赖或进程级配置变化才重启框架。重启只停框架进程，NapCat 由 `napcat/scripts/ensure-account.ps1` 复用，不会重新登录。
+只有框架核心、依赖或进程级配置变化才重启框架。重启只停框架进程，NapCat 由 `napcat/scripts/ensure-account.ps1` 复用。
 
 框架版本和插件部署命令见 [框架与插件部署](framework-deployment.md)。
 
