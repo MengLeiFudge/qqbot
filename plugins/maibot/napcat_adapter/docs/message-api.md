@@ -20,6 +20,12 @@ response = await self.ctx.api.call(
 - `无参`：官方页面当前无请求字段。
 - `Schema`：直接来自官方“请求参数”结构。
 
+## 跨账号群消息标识
+
+同一群消息在不同 NapCat 账号下可产生不同的 `message_id`，引用的消息 ID 也有同样的限制。当前 NapCat 原始消息将 `msgSeq` 放入 `real_seq`，而 `message_seq` 使用与 `message_id` 相同的短 ID。
+
+开发跨账号的群消息去重时，先核对目标版本的原始事件，再用同群多账号收到的同一条消息验证 `group_id` 与 `real_seq` 的组合。MaiBot 适配器的普通消息归一化当前传递 `message_id`，跨账号功能需要保留并验证原始的 `real_seq`。按文本和时间窗口匹配可能合并短时间内重复发送的两条消息。
+
 ## API 列表
 
 | API | 底层 action | 官方请求字段 | 来源 | 官方文档 | 说明 |
