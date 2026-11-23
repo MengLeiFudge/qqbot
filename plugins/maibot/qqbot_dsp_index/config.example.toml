@@ -4,6 +4,7 @@ config_version = "0.1.0"
 
 [index]
 source_root = "D:/project/dsp"
+storage_dir = "D:/project/qqbot/data/shared/dsp-index"
 sync_interval_seconds = 600
 max_results = 4
 max_evidence_chars = 6000

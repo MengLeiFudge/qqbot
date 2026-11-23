@@ -226,7 +226,7 @@ class QQBotWorkspacePlugin(MaiBotPlugin):
         }}
 
     @Tool(
-        "yelin_list_directory", description="浏览本机目录，每页最多 100 项；相对路径从夜凛工作区 D:/project/yelin 开始。",
+        "yelin_list_directory", description="浏览本机目录，每页最多 100 项；相对路径从夜凛工作区 D:/project/qqbot/data/yelin/workspace 开始。",
         parameters={
             "path": {"type": "string", "description": "本地绝对路径或工作区内相对路径，默认工作区根目录"},
             "offset": {"type": "integer", "minimum": 0, "maximum": 100000, "description": "分页偏移，首项为 0"},
@@ -251,7 +251,7 @@ class QQBotWorkspacePlugin(MaiBotPlugin):
     @Tool(
         "yelin_write_file", description="在个人工作区或夜凛项目目录内保存完整 UTF-8 文本，自动创建父目录；单次最多 256 KiB，覆盖前必须先读原文件。",
         parameters={
-            "path": {"type": "string", "required": True, "description": "个人工作区或夜凛项目内的文件路径；支持 Windows 和 /mnt/盘符/...，相对路径默认 D:/project/yelin"},
+            "path": {"type": "string", "required": True, "description": "个人工作区或夜凛项目内的文件路径；支持 Windows 和 /mnt/盘符/...，相对路径默认 D:/project/qqbot/data/yelin/workspace"},
             "content": {"type": "string", "required": True, "maxLength": 262144, "description": "保存后的完整文件内容"},
             "expected_sha256": {"type": "string", "description": "覆盖时提供 read_file 返回的 sha256；创建新文件时留空"},
         }, timeout_ms=60000,

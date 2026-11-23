@@ -15,4 +15,4 @@ max_retry_seconds = 3600.0
 quiet_start_hour = 0
 quiet_end_hour = 8
 # 日程由已有工作区文件工具维护，不额外调用模型生成。
-day_plan_file = "D:/project/lanling/计划/日程.json"
+day_plan_file = "D:/project/qqbot/data/lanling/workspace/计划/日程.json"

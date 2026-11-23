@@ -28,6 +28,7 @@ class PluginSection(PluginConfigBase):
 
 class IndexSection(PluginConfigBase):
     source_root: str = Field(default="D:/project/dsp", description="DSP 模组源码目录")
+    storage_dir: str = Field(default="", description="索引存储目录，留空使用插件数据目录")
     sync_interval_seconds: int = Field(default=600, ge=60)
     max_results: int = Field(default=4, ge=1, le=20)
     max_evidence_chars: int = Field(default=6000, ge=800, le=12000)
@@ -81,7 +82,10 @@ class QQBotDspIndexPlugin(MaiBotPlugin):
             qq = qq.get("value", "")
         if str(qq) != _OWNER_QQ:
             raise ValueError("共享 DSP 检索只由云栖实例提供")
-        directory = self.ctx.paths.data_dir
+        storage_dir = self.config.index.storage_dir.strip()
+        directory = Path(storage_dir).expanduser() if storage_dir else self.ctx.paths.data_dir
+        if storage_dir and not directory.is_absolute():
+            raise ValueError("DSP 索引存储目录必须是绝对路径")
         self._index = await asyncio.to_thread(DspIndex, directory / "dsp.sqlite3", directory / "stopwords.txt")
         self._providers = Providers(self.config.embedding, self.config.rerank)
         app = web.Application(client_max_size=32 * 1024)

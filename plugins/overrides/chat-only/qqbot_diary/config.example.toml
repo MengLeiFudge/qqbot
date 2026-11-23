@@ -3,5 +3,5 @@ enabled = false
 config_version = "0.1.0"
 
 [export]
-directory = "D:/project/fengling/日记/better-diary"
+directory = "D:/project/qqbot/data/fengling/workspace/日记/better-diary"
 interval_seconds = 60

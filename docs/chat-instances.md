@@ -15,14 +15,16 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 
 云栖接收 QQ 已送达的所有私聊和所在群的消息。本机 `plugins/napcat_adapter/config.toml` 的 `[chat].enable_chat_list_filter` 显式设为 `false`。普通聊天沿用 MaiBot 的接话规则，指令沿用各自的权限检查。
 
-云栖维护固定指令和 `8080` 产物发布、`8081` 共享 DSP 检索。人工表情审核继续使用 `http://127.0.0.1:8799/`，当前由独立的 `.codex/drafts/review_server.py` 提供。云栖的 `qqbot_meme` 共用 `astrbot/data/plugin_data/meme_manager`。归档 AstrBot 前需先迁走审核服务的运行依赖和同一份表情库。
+云栖维护固定指令和 `8080` 产物发布、`8081` 共享 DSP 检索。人工表情审核继续使用 `http://127.0.0.1:8799/`，当前由独立的 `.codex/drafts/review_server.py` 提供。云栖的 `qqbot_meme` 与审核网页共用 `data/shared/meme_manager/`。旧 AstrBot 图库路径通过目录联接指向这份图库，审核工具仍使用 AstrBot 的 Python 环境。
 
 表情包必须由主人逐张批准后才能用于自动发送：新图只落 `inbox/<分类>/` 待批准区，不写索引、不参与选图；审核页 `只看待批准` 里点「批准入库」才进入分类并恢复描述与分数。任何自动收藏不得直接写库。
 
 通用扩展源码集中维护，源目录见 `plugins/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git；部署时分别填写机器人 QQ、身份插件的主人、独立工作区和日记取材私聊，不复制其他账号凭据、数据库或插件状态。夜凛、风铃的日记空间发布默认关闭，定时生成和本地导出继续启用。
 蓝铃另有 qqbot_scene：私聊决定回复前注入当前场景，后发生的动作叠加在还没停的事上。
 
-个人工作区分别为 `D:/project/lanling`、`D:/project/yelin`、`D:/project/fengling`。工作区工具只向主人私聊开放。没有既有主人私聊时，工具先不注册；真实主人私聊会话建立后，在首次规划请求前经身份配置与公开聊天接口核对会话，保存本机绑定并公开重载插件，随后由 Host 限制会话。详见[`qqbot_workspace` 插件说明](../plugins/maibot/qqbot_workspace/README.md)。
+各账号的个人工作区在 `data/<Target>/workspace/`，包含笔记、日程和导出的日记文件。聊天数据库、记忆和插件原始存档可从 `data/<Target>/maibot/` 查看，实际由相应实例保存。详见[本机数据布局](framework-deployment.md#本机数据)。
+
+工作区工具只向主人私聊开放。没有既有主人私聊时，工具先不注册；真实主人私聊会话建立后，在首次规划请求前经身份配置与公开聊天接口核对会话，保存本机绑定并公开重载插件，随后由 Host 限制会话。详见 [`qqbot_workspace` 插件说明](../plugins/maibot/qqbot_workspace/README.md)。
 
 风铃不继承星遥的旧记忆：停止写入后，将原角色数据移至根 `.codex/trash/<timestamp>/`，建立空白角色数据；保留 WebUI 登录配置及本账号健康 NapCat 登录态。归档路径记在本机迁移记录，不提交聊天或运行数据。
 

@@ -13,6 +13,7 @@
 
 - `plugins/` 维护自研插件源码，`deployment/` 保存版本清单和脱敏配置示例，`scripts/frameworks/` 负责安装、启动和部署。
 - `maibot-yunqi/`、`maibot-yelin/`、`maibot-lanling/` 和 `maibot-fengling/` 是各账号本地运行目录，整目录由 Git 忽略。`astrbot/` 保留迁移回退和旧表情审核工具所需的运行文件。
+- `data/` 保存账号存档、个人工作区和共用业务数据。[本机数据布局](docs/framework-deployment.md#本机数据)
 - `napcat/` 负责现行四个 QQ 账号的协议接入，程序包和真实配置保留在本机。
 
 ## 固定账号合同

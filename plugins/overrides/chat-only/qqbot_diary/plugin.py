@@ -20,7 +20,7 @@ class PluginSection(PluginConfigBase):
 class ExportSection(PluginConfigBase):
     """日记副本的位置和后台同步间隔。"""
 
-    directory: str = Field(default="D:/project/fengling/日记/better-diary", description="日记 Markdown 导出目录")
+    directory: str = Field(default="D:/project/qqbot/data/fengling/workspace/日记/better-diary", description="日记 Markdown 导出目录")
     interval_seconds: int = Field(default=60, ge=30, le=3600, description="后台检查成品的间隔秒数")
 
 

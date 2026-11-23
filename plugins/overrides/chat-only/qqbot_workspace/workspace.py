@@ -14,7 +14,7 @@ import tempfile
 import uuid
 
 
-WORKSPACE_ROOT = Path("D:/project/fengling")
+WORKSPACE_ROOT = Path("D:/project/qqbot/data/fengling/workspace")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MAX_TEXT_BYTES = 4 * 1024 * 1024
 MAX_WRITE_BYTES = 256 * 1024

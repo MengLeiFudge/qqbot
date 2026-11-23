@@ -28,7 +28,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 蓝铃的性欲状态见 [qqbot_desire](../../plugins/qqbot_desire/README.md)。全账号共用一份数值，默认约 12 小时随时间涨满；色情对话和主人私聊里的身体刺激会再加快，普通聊天不加，也不能直接指定数值。这个数值只负责记账，不替换人设和说话方式。很难受时可以自己解决，或在主人私聊记录实际亲密，成功后降到余韵。记录留在插件数据目录，不进入后续群聊提示。00:00–08:00 不主动发起这次决定。
 
-蓝铃的个人工作区和文件工具配置见 [qqbot_workspace](../../../plugins/maibot/qqbot_workspace/README.md)。`D:\project\lanling` 与整个 `D:\project\qqbot\maibot-lanling` 项目目录均可读写，项目内不按文件或配置字段另设授权；其他本机位置只读。文件工具绑定已有主人私聊的真实会话，项目文件的具体使用由提示词和主人后续指引约束。
+蓝铃的个人工作区和文件工具配置见 [qqbot_workspace](../../../plugins/maibot/qqbot_workspace/README.md)。`D:\project\qqbot\data\lanling\workspace` 与整个 `D:\project\qqbot\maibot-lanling` 项目目录均可读写，项目内不按文件或配置字段另设授权；其他本机位置只读。文件工具绑定已有主人私聊的真实会话，项目文件的具体使用由提示词和主人后续指引约束。
 
 每日成品由 better-diary 负责，取材绑定主人私聊，23:30 自动生成，当日成品按配置公开发布空间；本机配置参考 [better-diary.example.toml](better-diary.example.toml)。[qqbot_diary](../../plugins/qqbot_diary/README.md) 只读上游成品存档并同步到个人工作区，保留手写历史与人工修改。空间使用独立的公开日记写作说明，不把完整聊天口吻带入公开日记。
 

@@ -6,7 +6,7 @@
 
 1. 使用本 fork 跟踪的 better-diary 1.9.0 本地维护版本。上游来源、两处 SDK 模型参数修复及更新要求见 [UPSTREAM.md](../org_orge-8_better-diary/UPSTREAM.md)。
 2. 将 [better-diary.example.toml](../../deployment/config-examples/better-diary.example.toml) 的部署值合并进上游生成的完整配置。`target_chats` 与 `admin_ids` 都填写身份插件所配置的主人；只取材该私聊，不开启全库取材。
-3. 将本目录 `config.example.toml` 复制为 `config.toml`，设置 `plugin.enabled = true`。默认每 60 秒把成品保存到 `D:/project/fengling/日记/better-diary/YYYY-MM-DD.md`。
+3. 将本目录 `config.example.toml` 复制为 `config.toml`，设置 `plugin.enabled = true`。默认每 60 秒把成品保存到 `D:/project/qqbot/data/fengling/workspace/日记/better-diary/YYYY-MM-DD.md`。
 
 better-diary 每天 23:30 自动生成；消息不足时按其原有规则跳过。新角色默认关闭缺档补写，不为角色建立前的日期补造日记；公开空间发布默认关闭。管理员可使用 `/日记`、`/日记查看 日期`、`/日记 日期 重写`；手动重写当天已发布的日记可能再次发布空间，按插件命令提示操作。
 
