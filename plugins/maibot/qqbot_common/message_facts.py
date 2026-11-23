@@ -55,6 +55,29 @@ class MessageFacts:
         )
 
 
+def leading_mention_targets(message: Mapping[str, object]) -> list[str]:
+    """读取正文前的 QQ @。引用和空白不影响收件人，正文之后的 @ 属于业务参数。"""
+    segments = message.get("raw_message")
+    targets: list[str] = []
+    if not isinstance(segments, list):
+        return targets
+    for segment in segments:
+        if not isinstance(segment, Mapping):
+            break
+        kind = segment.get("type")
+        data = segment.get("data")
+        if kind == "reply":
+            continue
+        if kind == "text" and isinstance(data, str) and not data.strip():
+            continue
+        if kind != "at" or not isinstance(data, Mapping):
+            break
+        target = str(data.get("target_user_id") or "").strip()
+        if target:
+            targets.append(target)
+    return targets
+
+
 def message_user_names(message: object) -> tuple[str, str]:
     """返回标准消息里的昵称和群名片。"""
 

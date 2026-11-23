@@ -10,6 +10,7 @@ import sqlite3
 
 from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
+from qqbot_common.message_facts import leading_mention_targets
 
 
 class PluginSection(PluginConfigBase):
@@ -86,6 +87,9 @@ class QQBotCommandRouterPlugin(MaiBotPlugin):
         database = self._database
         if account_id not in accounts or database is None:
             self.ctx.logger.warning("跳过群固定指令，当前账号或认领库未就绪")
+            return blocked
+        targets = leading_mention_targets(message)
+        if targets and account_id not in targets:
             return blocked
 
         seq = str(extra.get("napcat_group_real_seq") or "")

@@ -15,6 +15,7 @@ import time
 from maibot_sdk import Command, CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 from qqbot_common.api_results import require_api_result
+from qqbot_common.message_facts import leading_mention_targets
 
 from .draw_input import DOUDOUYAN_AVATAR_COMMAND, STANDARD_DRAW_PREFIX, doudouyan_command_parts, prepare_doudouyan_requests, prepare_explicit_draw_request, preload_draw_references
 from .draw_logic import looks_like_rightcodes_draw_model_switch
@@ -239,8 +240,12 @@ class QQBotDrawPlugin(MaiBotPlugin):
         stream_id = str(message.get("session_id") or "")
         if not self_id or not user_id or not stream_id or user_id == self_id or user_id in self.config.points.bot_account_ids:
             return {"action": "continue"}
-        if group_id and not (message.get("is_at") or message.get("is_mentioned") or self_id in facts["at_target_ids"]):
-            return {"action": "continue"}
+        if group_id:
+            targets = leading_mention_targets(message)
+            if targets and self_id not in targets:
+                return {"action": "continue"}
+            if not (message.get("is_at") or message.get("is_mentioned") or self_id in facts["at_target_ids"]):
+                return {"action": "continue"}
 
         async def classify_intent(prompt: str) -> str:
             """通过公开LLM接口选用当前replyer任务，不带聊天历史。"""
