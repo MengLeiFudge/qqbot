@@ -20,18 +20,6 @@ def resolve_runtime_db_path(runtime_root: Path) -> Path:
     return Path(runtime_root) / RUNTIME_DB_DIR / RUNTIME_DB_FILE_NAME
 
 
-def infer_runtime_root_from_path(path: Path) -> Path:
-    candidate = Path(path)
-    for parent in (candidate, *candidate.parents):
-        if parent.name == "qqbot_features_runtime":
-            return parent
-    if candidate.parent.parent.name == "data":
-        return candidate.parent.parent.parent
-    if candidate.parent.name in {"ai", "settings", "cache", "assets", "db"}:
-        return candidate.parent.parent
-    return candidate.parent
-
-
 def read_json_file(path: Path, default: T) -> T:
     if not path.exists():
         return deepcopy(default)

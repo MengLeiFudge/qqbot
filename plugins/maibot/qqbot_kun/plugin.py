@@ -211,7 +211,7 @@ class QQBotKunPlugin(MaiBotPlugin):
         group_id: int,
     ) -> tuple[str | None, list[int]]:
         with InterProcessLock(runtime_root / ".maibot_locks" / "kun.lock"):
-            service = KunService(runtime_root / "db" / "kun" / "users.json")
+            service = KunService(runtime_root)
             ranked_user_ids: list[int] = []
 
             def capture_ranked_user(_group_id: int, qq: int) -> str:

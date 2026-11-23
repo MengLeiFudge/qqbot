@@ -9,7 +9,6 @@ import random
 import re
 
 from .storage import RuntimeJsonStore
-from .storage import infer_runtime_root_from_path
 from .storage import read_json_file
 
 
@@ -88,12 +87,12 @@ class KunBoss:
 
 
 class KunService:
-    def __init__(self, file_path: Path) -> None:
-        self.file_path = Path(file_path)
-        self.kun_root = self.file_path.parent
+    def __init__(self, runtime_root: Path) -> None:
+        self.runtime_root = Path(runtime_root)
+        self.kun_root = self.runtime_root / "db" / "kun"
+        self.file_path = self.kun_root / "users.json"
         self.boss_file_path = self.kun_root / "boss.json"
         self.now_season_path = self.kun_root / "nowSeason.txt"
-        self.runtime_root = infer_runtime_root_from_path(self.file_path)
         self.legacy_kun_root = self.runtime_root / "data" / "kun"
         self.store = RuntimeJsonStore(self.runtime_root)
         self.now_season = self._load_now_season()
