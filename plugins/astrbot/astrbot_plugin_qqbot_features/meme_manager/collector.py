@@ -14,14 +14,12 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from PIL import Image as PILImage
-from werkzeug.datastructures import FileStorage
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.message_components import Image
 from astrbot.api.star import Context
 
-from .backend.models import DuplicateEmojiError, add_emoji_to_category
 from .curator import MemeCurator
 from .library_plan import (
     MIN_ENTRY_TOTAL,
@@ -29,19 +27,15 @@ from .library_plan import (
     PRIVATE_CATEGORY,
     PRIVATE_RULE_CATEGORY,
     PRIVATE_RULES,
-    SCORE_VERSION,
-    TIE_MARGIN,
-    archive_image,
+    add_to_inbox,
     delete_image,
-    ensure_private_category,
     find_similar_caption,
     image_phash,
     phash_distance,
     quota_of,
-    rank_of,
     total_of,
 )
-from .local_index import find_image_entry, load_meme_index, record_image_score, upsert_image_metadata
+from .local_index import load_meme_index
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
@@ -298,65 +292,31 @@ class MemeAutoCollector:
         scores: dict[str, int],
         phash: str,
     ) -> str | None:
-        """Write one accepted image into a category and record its score."""
-        try:
-            with io.BytesIO(content) as stream:
-                upload = FileStorage(stream=stream, filename=f"{hashlib.sha256(content).hexdigest()}{extension}")
-                saved = add_emoji_to_category(category, upload)
-        except DuplicateEmojiError:
-            return None
-        upsert_image_metadata(category, saved["filename"], {
+        """Stage one accepted image in the inbox; it only enters the library after a human approves."""
+        record = {
             "title": caption.strip()[:80],
             "content_caption": caption.strip()[:300],
-            "emotion_tags": [category],
-        })
-        record_image_score(
-            category,
-            saved["filename"],
-            cute=scores["cute"],
-            expressive=scores["expressive"],
-            quality=scores["quality"],
-            usable=scores["usable"],
-            version=SCORE_VERSION,
-            phash=phash,
-        )
-        logger.info("[MemeCollector] collected local meme: category=%s", category)
-        return str(saved["filename"])
+            "score": {
+                "cute": scores["cute"],
+                "expressive": scores["expressive"],
+                "quality": scores["quality"],
+                "usable": scores["usable"],
+                "total": sum(scores.values()),
+            },
+            "phash": phash,
+        }
+        return add_to_inbox(category, content, extension, record)
 
     def _store_private(self, content: bytes, extension: str, caption: str, rule: str, phash: str) -> str | None:
-        """Store one suggestive image into the matching private category that is never auto-sent."""
+        """Stage one suggestive image in the matching private inbox for manual approval."""
         category = PRIVATE_RULE_CATEGORY.get(rule) or PRIVATE_CATEGORY
-        try:
-            with io.BytesIO(content) as stream:
-                upload = FileStorage(stream=stream, filename=f"{hashlib.sha256(content).hexdigest()}{extension}")
-                saved = add_emoji_to_category(category, upload)
-        except DuplicateEmojiError:
-            return None
-        upsert_image_metadata(category, saved["filename"], {
+        record = {
             "title": caption.strip()[:80],
             "content_caption": caption.strip()[:300],
-            "emotion_tags": [category],
-            "auto_send_enabled": False,
-        })
-        ensure_private_category()
-        logger.info("[MemeCollector] collected private meme: rule=%s category=%s", rule, category)
-        return str(saved["filename"])
-        """Store one suggestive image into the private category that is never auto-sent."""
-        try:
-            with io.BytesIO(content) as stream:
-                upload = FileStorage(stream=stream, filename=f"{hashlib.sha256(content).hexdigest()}{extension}")
-                saved = add_emoji_to_category(PRIVATE_CATEGORY, upload)
-        except DuplicateEmojiError:
-            return None
-        upsert_image_metadata(PRIVATE_CATEGORY, saved["filename"], {
-            "title": caption.strip()[:80],
-            "content_caption": caption.strip()[:300],
-            "emotion_tags": [PRIVATE_CATEGORY],
-            "auto_send_enabled": False,
-        })
-        ensure_private_category()
-        logger.info("[MemeCollector] collected private meme: rule=%s", rule)
-        return str(saved["filename"])
+            "private_rule": rule,
+            "phash": phash,
+        }
+        return add_to_inbox(category, content, extension, record)
 
     def _looks_identical(self, phash: str, images: list) -> bool:
         """Return True when a stored image is the same picture after re-encoding."""
@@ -399,36 +359,8 @@ class MemeAutoCollector:
         filename = self._store(category, content, extension, caption, scores, phash)
         if filename is None:
             return False
-        quota = quota_of(category)
-        if len(members) < quota:
-            return True
-        scored = [entry for entry in members if isinstance(entry.get("score"), dict)]
-        if len(scored) < len(members):
-            # 分类里还有没打完分的图，先收下，等打分批次统一裁
-            return True
-        newcomer = find_image_entry(category, filename)
-        if newcomer is None:
-            return False
-        scored.sort(key=rank_of)
-        boundary = len(scored) - quota
-        weakest = scored[boundary]
-        difference = rank_of(newcomer) - rank_of(weakest)
-        if difference > TIE_MARGIN:
-            archive_image(category, str(weakest.get("filename") or ""), reason="over_quota")
-            logger.info("[MemeCollector] replaced weaker meme: category=%s digest=%s", category, digest)
-            return True
-        if difference >= -TIE_MARGIN and self._curator is not None:
-            candidates = [str(entry.get("filename") or "") for entry in scored[boundary:boundary + 2]]
-            candidates.append(filename)
-            asyncio.create_task(
-                self._curator.resolve_tie(category, candidates, len(candidates) - 1),
-                name="qqbot.meme_resolve_tie",
-            )
-            # 结果由 resolve_tie 自己落定，这里不当作已保留
-            return False
-        archive_image(category, filename, reason="over_quota")
-        logger.info("[MemeCollector] newcomer dropped: category=%s digest=%s", category, digest)
-        return False
+        logger.info("[MemeCollector] staged for approval: category=%s digest=%s", category, digest)
+        return True
 
     def _request_curation(self, reason: str) -> None:
         """Ask the library scoring pass to run one extra batch."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -38,6 +39,8 @@ ARCHIVE_MANIFEST_NAME = "archive.json"
 # 风控不合格的图不归档，单独进审核队列等人工定夺
 REVIEW_DIR = Path(PLUGIN_DATA_DIR) / "review_queue"
 REVIEW_MANIFEST_NAME = "review.json"
+INBOX_DIR = Path(PLUGIN_DATA_DIR) / "inbox"
+INBOX_MANIFEST_NAME = "pending.json"
 REVIEW_RULES = (
     "gore",
     "real_person",
@@ -859,6 +862,120 @@ def _read_manifest(category: str) -> list[dict]:
 def _pop_manifest_record(category: str, filename: str) -> dict:
     """Remove and return one record from a category archive manifest."""
     manifest = ARCHIVE_DIR / category / ARCHIVE_MANIFEST_NAME
+    if not manifest.is_file():
+        return {}
+    try:
+        records = json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(records, list):
+        return {}
+    found: dict = {}
+    kept: list = []
+    for record in records:
+        if isinstance(record, dict) and record.get("filename") == filename and not found:
+            found = record
+            continue
+        kept.append(record)
+    if found:
+        manifest.write_text(json.dumps(kept, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return found
+
+
+def add_to_inbox(category: str, content: bytes, extension: str, record: dict) -> str | None:
+    """Stage one candidate image in the inbox; nothing enters the library before approval.
+
+    Args:
+        category: Target category name suggested by the model.
+        content: Raw image bytes.
+        extension: File extension including the dot.
+        record: Details kept for the approval page.
+
+    Returns:
+        Stored file name, or None when the same image is already waiting.
+    """
+    target_dir = INBOX_DIR / category
+    target_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{hashlib.sha256(content).hexdigest()[:16]}{extension}"
+    path = target_dir / name
+    if path.exists():
+        return None
+    try:
+        path.write_bytes(content)
+    except Exception as exc:
+        logger.warning("[MemeInbox] write failed: error_type=%s", type(exc).__name__)
+        return None
+    entry = dict(record)
+    entry["filename"] = name
+    entry["category"] = category
+    entry["added_at"] = int(time.time())
+    _append_manifest(target_dir, entry, manifest=INBOX_MANIFEST_NAME)
+    logger.info("[MemeInbox] staged candidate: category=%s", category)
+    return name
+
+
+def approve_image(category: str, filename: str, *, target_category: str = "") -> bool:
+    """Move one inbox image into the library after a human approves it."""
+    name = Path(filename).name
+    source = INBOX_DIR / category / name
+    if not source.is_file():
+        logger.warning("[MemeInbox] pending file missing: category=%s filename=%s", category, name)
+        return False
+    record = _pop_inbox_record(category, name)
+    target = target_category or canonical_category(category)
+    target_dir = Path(MEMES_DIR) / target
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        destination = _unique_target(target_dir, name)
+        shutil.move(str(source), str(destination))
+    except Exception as exc:
+        logger.warning("[MemeInbox] approve failed: error_type=%s", type(exc).__name__)
+        return False
+    title = str(record.get("title") or Path(name).stem)[:80]
+    scene = {
+        "title": title,
+        "content_caption": str(record.get("content_caption") or title)[:300],
+        "emotion_tags": [target],
+        "auto_send_enabled": target not in PRIVATE_CATEGORIES,
+    }
+    if target in PRIVATE_CATEGORIES:
+        scene["audience"] = "owner_only"
+    upsert_image_metadata(target, destination.name, scene)
+    score = record.get("score") if isinstance(record.get("score"), dict) else {}
+    if score:
+        record_image_score(
+            target,
+            destination.name,
+            cute=int(score.get("cute") or 0),
+            expressive=int(score.get("expressive") or 0),
+            quality=int(score.get("quality") or 0),
+            usable=int(score.get("usable") or 0),
+            version=SCORE_VERSION,
+            caption=str(record.get("content_caption") or title)[:300],
+            phash=str(record.get("phash") or ""),
+        )
+    logger.info("[MemeInbox] approved: category=%s", target)
+    return True
+
+
+def drop_inbox_image(category: str, filename: str) -> bool:
+    """Delete one pending candidate that failed the manual review."""
+    name = Path(filename).name
+    path = INBOX_DIR / category / name
+    _pop_inbox_record(category, name)
+    if not path.is_file():
+        return False
+    try:
+        path.unlink()
+    except Exception as exc:
+        logger.warning("[MemeInbox] delete failed: error_type=%s", type(exc).__name__)
+        return False
+    return True
+
+
+def _pop_inbox_record(category: str, filename: str) -> dict:
+    """Remove and return one record from a category inbox manifest."""
+    manifest = INBOX_DIR / category / INBOX_MANIFEST_NAME
     if not manifest.is_file():
         return {}
     try:
