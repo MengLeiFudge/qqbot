@@ -86,19 +86,22 @@ class CPASessionPlugin(MaiBotPlugin):
         return {"action": "continue"}
 
     @HookHandler("send_service.before_send", mode=HookMode.BLOCKING, order=HookOrder.EARLY, error_policy=ErrorPolicy.ABORT)
-    async def check_before_send(self, message: Any = None, **_kwargs: Any) -> dict:
-        """只拦截尚未公开答复的旧轮次，已经发出首段的回复继续发送。"""
-        session_id = message.get("session_id") if isinstance(message, dict) else None
-        turn = self._interruption.reply_turns.get(session_id)
+    async def check_before_send(self, message: Any = None, reply_message_id: str = "", **_kwargs: Any) -> dict:
+        """只拦截带原生回复锚点的旧轮次，指令答复独立发送。"""
+        if not reply_message_id or not isinstance(message, dict):
+            return {"action": "continue"}
+        turn = self._interruption.reply_turns.get(message.get("session_id"))
         return {"action": "abort" if turn is not None and turn.stale else "continue"}
 
     @HookHandler("send_service.after_send", mode=HookMode.BLOCKING, order=HookOrder.EARLY)
-    async def mark_first_sent(self, message: Any = None, sent: bool = False, **_kwargs: Any) -> dict:
-        """只有明确成功回执才关闭本轮取消资格，失败不冒充已发。"""
-        session_id = message.get("session_id") if isinstance(message, dict) else None
-        turn = self._interruption.reply_turns.get(session_id)
-        if sent and turn is not None:
-            turn.first_sent = True
+    async def mark_first_sent(
+        self, message: Any = None, sent: bool = False, reply_message_id: str = "", **_kwargs: Any,
+    ) -> dict:
+        """只有本轮原生回复的成功回执才关闭取消资格。"""
+        if sent and reply_message_id and isinstance(message, dict):
+            turn = self._interruption.reply_turns.get(message.get("session_id"))
+            if turn is not None:
+                turn.first_sent = True
         return {"action": "continue"}
 
     @HookHandler("maisaka.planner.before_request", mode=HookMode.BLOCKING, order=HookOrder.LATE)
