@@ -13,6 +13,8 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 
 夜凛、蓝铃和风铃对齐基础聊天、拍一拍、只读 DSP 检索、身份核验、视频与历史阅读、联网搜索、回复节奏、连发引用、日记、个人工作区和主动联系。夜凛、风铃的通用允许列表在 `scripts/frameworks/enforce_chat_only.py`，云栖、蓝铃沿用本机插件启用选择。
 
+云栖接收 QQ 已送达的所有私聊和所在群的消息。本机 `plugins/napcat_adapter/config.toml` 的 `[chat].enable_chat_list_filter` 显式设为 `false`。普通聊天沿用 MaiBot 的接话规则，指令沿用各自的权限检查。
+
 云栖维护固定指令和 `8080` 产物发布、`8081` 共享 DSP 检索。人工表情审核继续使用 `http://127.0.0.1:8799/`，当前由独立的 `.codex/drafts/review_server.py` 提供。云栖的 `qqbot_meme` 共用 `astrbot/data/plugin_data/meme_manager`。归档 AstrBot 前需先迁走审核服务的运行依赖和同一份表情库。
 
 通用扩展源码集中维护，源目录见 `plugins/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git；部署时分别填写机器人 QQ、身份插件的主人、独立工作区和日记取材私聊，不复制其他账号凭据、数据库或插件状态。夜凛、风铃的日记空间发布默认关闭，定时生成和本地导出继续启用。
