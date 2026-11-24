@@ -9,6 +9,8 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 这些文件是覆盖参考，不是可直接替代上游完整配置的最小配置。实际配置还必须保留当前 MaiBot 版本生成的全部必需 section。
 
+四个账号的 `[chat.reply_timing]` 共用 `reply_trigger_mode = "reply_necessity"` 和群聊活跃度 `talk_value = 0.6`。这套原生规则先评估接话必要性，达到条件才调用 Planner，并保留完整的聊天上下文。
+
 启动前还要确认：
 
 - 蓝铃适配器使用 `127.0.0.1:6204` 和 `connection_id = "lanling"`。按 `napcat-adapter.example.toml` 配置另外三个现行机器人账号的禁止发送者名单，先于私聊和群聊名单开关执行。
