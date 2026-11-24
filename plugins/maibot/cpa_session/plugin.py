@@ -6,7 +6,9 @@ from typing import Any, ClassVar, cast
 from urllib.parse import quote
 from uuid import uuid4
 
-from maibot_sdk import Field, HookHandler, LLMProvider, MaiBotPlugin, PluginConfigBase
+import asyncio
+
+from maibot_sdk import API, Field, HookHandler, LLMProvider, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 from src.config.model_configs import APIProvider
@@ -22,7 +24,9 @@ from src.llm_models.request_snapshot import (
     serialize_context_items_snapshot,
 )
 
-from .interruption import ReplyInterruption
+from .interruption import ReplyInterruption, ReplyTurn
+
+FOLLOWUP_WINDOW_SECONDS = 0.4
 
 
 class PluginSection(PluginConfigBase):
@@ -72,7 +76,8 @@ class CPASessionPlugin(MaiBotPlugin):
         """模型返回与新消息交错时，不执行旧快照产生的工具调用。"""
         turn = self._interruption.turns.get(session_id)
         if turn is not None and turn.stale:
-            self.ctx.logger.info("新消息已取代尚未公开答复的规划，交由原生循环重新收集")
+            await self._resume_cancelled(session_id, turn)
+            self.ctx.logger.info("新补充已取代旧规划，已请求原生循环重新处理")
             return {"action": "continue", "modified_kwargs": {**kwargs, "session_id": session_id, "output_items": []}}
         return {"action": "continue"}
 
@@ -81,28 +86,66 @@ class CPASessionPlugin(MaiBotPlugin):
         """尚未发出首条时，过期正文不进入分段和发送。"""
         turn = self._interruption.reply_turns.get(session_id)
         if turn is not None and turn.stale:
-            self.ctx.logger.info("新消息已取代尚未发送的正文，等待原生回复器重写")
+            await self._resume_cancelled(session_id, turn)
+            self.ctx.logger.info("新补充已取代旧正文，已请求原生回复器重写")
             return {"action": "continue", "modified_kwargs": {**kwargs, "session_id": session_id, "response": ""}}
         return {"action": "continue"}
 
     @HookHandler("send_service.before_send", mode=HookMode.BLOCKING, order=HookOrder.EARLY, error_policy=ErrorPolicy.ABORT)
     async def check_before_send(self, message: Any = None, reply_message_id: str = "", **_kwargs: Any) -> dict:
-        """只拦截带原生回复锚点的旧轮次，指令答复独立发送。"""
-        if not reply_message_id or not isinstance(message, dict):
-            return {"action": "continue"}
-        turn = self._interruption.reply_turns.get(message.get("session_id"))
-        return {"action": "abort" if turn is not None and turn.stale else "continue"}
+        """只拦截带实际回复锚点的过期首段。"""
+        session_id = message.get("session_id") if isinstance(message, dict) else None
+        turn = self._interruption.reply_turns.get(session_id)
+        if turn is not None and reply_message_id == turn.target_id and turn.stale:
+            await self._resume_cancelled(session_id, turn)
+            return {"action": "abort"}
+        return {"action": "continue"}
 
     @HookHandler("send_service.after_send", mode=HookMode.BLOCKING, order=HookOrder.EARLY)
     async def mark_first_sent(
         self, message: Any = None, sent: bool = False, reply_message_id: str = "", **_kwargs: Any,
     ) -> dict:
-        """只有本轮原生回复的成功回执才关闭取消资格。"""
-        if sent and reply_message_id and isinstance(message, dict):
-            turn = self._interruption.reply_turns.get(message.get("session_id"))
-            if turn is not None:
-                turn.first_sent = True
+        """只用原生回复的成功回执关闭本轮取消资格。"""
+        session_id = message.get("session_id") if isinstance(message, dict) else None
+        turn = self._interruption.reply_turns.get(session_id)
+        if sent and turn is not None and reply_message_id == turn.target_id:
+            turn.first_sent = True
+            planner = self._interruption.turns.get(session_id)
+            if planner is not None:
+                planner.first_sent = True
         return {"action": "continue"}
+
+    @API("resume_cancelled_reply", description="重新排队被同发送者补充取消的待发送回复", version="1", public=True)
+    async def resume_cancelled_reply(self, session_id: str, reply_message_id: str, **_kwargs: Any) -> dict:
+        """首条发送前核对真实回复目标，复用同一个轮次的排队资格。"""
+        turn = self._interruption.reply_turns.get(session_id)
+        if turn is None or turn.target_id != reply_message_id or not turn.stale:
+            return {"stale": False, "queued": False}
+        await self._resume_cancelled(session_id, turn)
+        return {"stale": True, "queued": turn.resume_queued}
+
+    async def _resume_cancelled(self, session_id: str | None, turn: ReplyTurn) -> None:
+        """每个被补充取代的轮次只排队一次，绕过空响应引起的空闲等待。"""
+        if not isinstance(session_id, str) or not session_id or turn.resume_queued or self._interruption.closing:
+            return
+        turn.resume_queued = True
+        try:
+            await asyncio.sleep(FOLLOWUP_WINDOW_SECONDS)
+            if self._interruption.closing or not turn.stale:
+                turn.resume_queued = False
+                return
+            async with asyncio.timeout(5):
+                result = await self.ctx.maisaka.trigger_proactive(
+                    session_id,
+                    "上一轮答复因同一发送者补充消息而取消，请结合原会话完整上下文重新处理尚未回答的呼叫和补充。",
+                    reason="新补充取代尚未发送的回复",
+                    metadata={"source_message_id": turn.target_id or turn.source_id, "latest_message_id": turn.latest_source_id},
+                )
+            if not isinstance(result, dict) or result.get("queued") is not True:
+                raise RuntimeError("框架未确认重新排队")
+        except Exception as exc:
+            turn.resume_queued = False
+            self.ctx.logger.error("取消后重新排队失败: session_id=%s error=%s", session_id, exc)
 
     @HookHandler("maisaka.planner.before_request", mode=HookMode.BLOCKING, order=HookOrder.LATE)
     async def planner_session(
@@ -114,14 +157,17 @@ class CPASessionPlugin(MaiBotPlugin):
             isinstance(tool, dict) and isinstance(tool.get("function"), dict)
             and tool["function"].get("name") == "reply" for tool in tool_definitions
         ):
-            self._interruption.bind(session_id, items, False)
+            self._interruption.bind(session_id, items)
         return {"action": "continue"}
 
     @HookHandler("maisaka.replyer.before_model_request", mode=HookMode.BLOCKING, order=HookOrder.LATE)
-    async def replyer_session(self, session_id: str = "", items: Any = None, **_kwargs: Any) -> dict:
-        """登记 Replyer 已构造请求的真实会话。"""
+    async def replyer_session(
+        self, session_id: str = "", items: Any = None, reply_message_id: str = "", **_kwargs: Any,
+    ) -> dict:
+        """把回复器请求绑定到 Planner 实际选中的消息。"""
         self._remember_session(session_id, items, True)
-        self._interruption.bind(session_id, items, True)
+        if reply_message_id:
+            self._interruption.bind(session_id, items, reply_message_id)
         return {"action": "continue"}
 
     def _remember_session(self, session_id: str, items: Any, replyer: bool) -> None:
@@ -187,7 +233,8 @@ class CPASessionPlugin(MaiBotPlugin):
             for attempt in range(2):
                 response = await self._interruption.request(client, native_request, turn)
                 if response is None:
-                    self.ctx.logger.info("首条发送前收到新消息，已取消或跳过旧模型请求")
+                    await self._resume_cancelled(session_id, cast(ReplyTurn, turn))
+                    self.ctx.logger.info("同发送者的新补充已取消旧模型请求，已请求重新处理")
                     return {"item_schema_version": 1, "output_items": [], "status": "cancelled",
                             "usage": None, "raw_data": {"cancelled_by_new_message": True}}
                 if response.usage is not None:

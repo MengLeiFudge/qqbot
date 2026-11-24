@@ -34,7 +34,7 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 
 图片沿用原生多模态。MaiBot 实例的入站单张压缩配置为 `[visual] handle_oversized_images=true`、`max_image_size_mb=1.0`、`oversized_image_handle_method="compress"`。压缩在聊天 Hook 前尝试，失败保留原图，旧缓存不自动重新压缩。多张图片与历史上下文仍可能触及插件单帧上限。不得删除图片、删上下文或改框架私有常量来绕过限制。
 
-风铃的 `chat.reply_timing.planner_interrupt_max_consecutive_count=0`，首条前的补充取消由本地 `cpa_session` 与 `qqbot_reply_timing` 按源发送者处理，取消后通过公开主动任务重新排队；其他群成员插话保留在完整上下文中。维护时核对模型请求、首段等待、重新排队与真实发送记录，ready 不代替聊天验收。
+四个账号的 `chat.reply_timing.planner_interrupt_max_consecutive_count` 均设为 `0`。聊天补充由本地 [`cpa_session`](../plugins/maibot/cpa_session/README.md) 和 [`qqbot_reply_timing`](../plugins/maibot/qqbot_reply_timing/README.md) 按本轮源消息或实际回复目标的发送者处理。维护时用同人连发、其他群友插话和首段已发三种情况核对实际重排队与发送记录。
 
 首次部署须由用户阅读并确认本实例 `EULA.md` 与 `PRIVACY.md`，通过框架原生机制保存同意标记；条款更新后重新确认，不复制其他实例的同意标记。后台入口无交互输入，未确认时保持待启动。
 
