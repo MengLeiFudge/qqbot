@@ -19,8 +19,12 @@ NapCat 面板端口为 `6100+n`：云栖 6101、夜凛 6102、蓝铃 6103、风�
 
 表情包必须由主人逐张批准后才能用于自动发送：新图只落 `inbox/<分类>/` 待批准区，不写索引、不参与选图；审核页 `只看待批准` 里点「批准入库」才进入分类并恢复描述与分数。任何自动收藏不得直接写库。
 
-通用扩展源码集中维护，源目录见 `plugins/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git；部署时分别填写机器人 QQ、身份插件的主人、独立工作区和日记取材私聊，不复制其他账号凭据、数据库或插件状态。夜凛、风铃的日记空间发布默认关闭，定时生成和本地导出继续启用。
+通用扩展源码集中维护，源目录见 `plugins/maibot/org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive`、`qqbot_reply_guard`。真实配置不入 Git。部署时分别填写机器人 QQ、身份插件的主人和独立工作区，各账号使用自己的凭据、数据库和插件状态。
 蓝铃另有 qqbot_scene：私聊决定回复前注入当前场景，后发生的动作叠加在还没停的事上。
+
+### 日记与工作区
+
+四个账号均启用 better-diary 和 `qqbot_diary`。better-diary 在本机时间 23:30 从各自与主人的私聊取材，素材达到最低要求时生成日记，将当日成品发到自己的 QQ 空间。公开日记使用专门的写作规则，省略私聊原话、个人身份、亲密和健康隐私。历史补写只存档。`qqbot_diary` 将已生成正文导出到对应的 `data/<Target>/workspace/日记/better-diary/`。配置见[日记示例](../deployment/maibot/config-examples/better-diary.example.toml)。生效后核对两插件加载日志、工作区文件和定时发布结果。
 
 各账号的个人工作区在 `data/<Target>/workspace/`，包含笔记、日程和导出的日记文件。聊天数据库、记忆和插件原始存档可从 `data/<Target>/maibot/` 查看，实际由相应实例保存。详见[本机数据布局](framework-deployment.md#本机数据)。
 
