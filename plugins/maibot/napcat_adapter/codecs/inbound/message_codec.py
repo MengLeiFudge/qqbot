@@ -252,7 +252,7 @@ class NapCatInboundCodec(NapCatInboundCardMixin, NapCatInboundTextMixin):
                             },
                         }
                     )
-                    if self_id and target_user_id == self_id:
+                    if self_id and (target_user_id == self_id or (group_id and target_user_id == "all")):
                         is_at = True
                 continue
 

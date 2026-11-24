@@ -242,7 +242,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
             return {"action": "continue"}
         if group_id:
             targets = leading_mention_targets(message)
-            if targets and self_id not in targets:
+            if targets and self_id not in targets and "all" not in targets:
                 return {"action": "continue"}
             if not (message.get("is_at") or message.get("is_mentioned") or self_id in facts["at_target_ids"]):
                 return {"action": "continue"}

@@ -89,7 +89,7 @@ class QQBotCommandRouterPlugin(MaiBotPlugin):
             self.ctx.logger.warning("跳过群固定指令，当前账号或认领库未就绪")
             return blocked
         targets = leading_mention_targets(message)
-        if targets and account_id not in targets:
+        if targets and account_id not in targets and "all" not in targets:
             return blocked
 
         seq = str(extra.get("napcat_group_real_seq") or "")
