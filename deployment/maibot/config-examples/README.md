@@ -34,7 +34,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 日程意图由工作区 `计划/日程.json` 保存，`qqbot_proactive` 的既有调度读取当天安排，并在 00:00–08:00 暂停主动联系；日程不等于已执行活动，静默窗口不替代共享休息状态。麦麦恋人与主动私聊 Plus 已退出蓝铃部署，其源码、配置和数据可恢复归档，不再安装第二套好感度或主动调度。
 
-蓝铃通过 [qqbot_reply_guard](../../../plugins/maibot/qqbot_reply_guard/README.md) 处理主人私聊连发、同会话引用和普通文本的自然分段。阶段答复与历史查阅指导写入原生 `[chat.reply_style]` 配置。公开可靠结论后可继续研究。
+蓝铃通过 [qqbot_reply_guard](../../../plugins/maibot/qqbot_reply_guard/README.md) 处理主人私聊连发和同会话引用。四个账号的分段规则见 [QQBot 回复分段](../../../plugins/maibot/qqbot_reply_timing/README.md#分段)。阶段答复与历史查阅指导写入原生 `[chat.reply_style]` 配置。公开可靠结论后可继续研究。
 
 `qqbot_identity` 从同会话消息 API 读取真实发送者，为 Planner 中已经出现的消息补充身份表，Replyer 则按实际目标消息 ID 查询并注入 `platform/user_id/is_owner`。只有已核验的主人使用“主人”称呼，其他人和未知身份使用昵称或“你”；本机回复风格不得把所有第二人称替换成“主人”。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见 [qqbot_identity](../../plugins/qqbot_identity/README.md)。
 
@@ -46,4 +46,4 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 人物事实写回由原生 `MemoryAutomationService.on_message_sent` 按每条已发送消息触发，`person_fact_writeback_enabled` 仅控制启停。调整聊天摘要窗口或重试次数，不会改变这项按发送消息触发的行为。维护此行为前须核对公开 Hook 与记忆写入能力；当前接口没有人物事实队列 Hook 或对应写入 API，因此保留原生提取，不用关闭记忆、改框架核心或数据库直写替代合并。
 
-回复延迟先区分 `llm_usage` 的模型时间、`maisaka_monitor_events` 的 Planner/工具时间和回复工具内 `detail.metrics`。蓝铃的 `response_post_process.typing_speed = 0.2` 控制后续消息的模拟打字速度；[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 首条等待仅按后处理后的第一段文字计算，再扣除本轮已耗时，后续分段及研究补充按原速度发送。质量、研究续轮与测量规则见根工作区 [模型路由](../../../docs/model-routing.md)。Planner 阶段还包含记忆印象整理，不能把它等同于主模型耗时。
+回复延迟先区分 `llm_usage` 的模型时间、`maisaka_monitor_events` 的 Planner/工具时间和回复工具内 `detail.metrics`。蓝铃的 `response_post_process.typing_speed = 0.2` 控制后续消息的模拟打字速度；[qqbot_reply_timing](../../../plugins/maibot/qqbot_reply_timing/README.md) 首条等待仅按后处理后的第一段文字计算，再扣除本轮已耗时，后续分段及研究补充按原速度发送。质量、研究续轮与测量规则见根工作区 [模型路由](../../../docs/model-routing.md)。Planner 阶段还包含记忆印象整理，不能把它等同于主模型耗时。

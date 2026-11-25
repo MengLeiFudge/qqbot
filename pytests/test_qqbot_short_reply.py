@@ -1,4 +1,4 @@
-"""用隔离 QQ 发送出口核对蓝铃的原生首段和后续自然段。"""
+"""用隔离 QQ 发送出口核对普通回复和后续自然段。"""
 from asyncio import timeout
 from contextlib import ExitStack
 from datetime import datetime
@@ -15,9 +15,8 @@ if (Path(src.__file__).resolve().parents[1] / '.qqbot-release.json').exists():
 
 from maibot_sdk.context import PluginContext
 
-from qqbot_reply_guard.plugin import QQBotReplyGuardPlugin
-from qqbot_reply_guard.reply_split import split_reply
 from qqbot_reply_timing import plugin as timing
+from qqbot_reply_timing.reply_split import split_reply
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils import utils as chat_utils
 from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
@@ -35,8 +34,8 @@ from src.services import send_service
 
 class ShortReplyTests(IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.account = '3600812036'
-        self.scope = 'lanling'
+        self.account = '1443944862'
+        self.scope = 'yunqi'
         self.session_id = 'isolated-session'
         self.clock = 100.0
         self.wall_clock = 1_800_000_000.0
@@ -47,14 +46,15 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.fail_at = 0
         self.stored = {}
         self.history = []
-        self.text = '先确认文件能打开，中文 API Key 中文照常保留。\n\n接下来补上核对结果和操作步骤。'
-        self.guard = QQBotReplyGuardPlugin()
+        self.text = (
+            '先确认文件能打开，中文 API Key 中文照常保留。也核对一下不同设备的显示结果，看看文件大小和数字是否一致。'
+            '\n\n接下来补上核对结果和操作步骤，把需要改的文件列出来。最后再按原来的顺序逐项检查，确保需要保留的内容都在。'
+        )
         self.timer = timing.QQBotReplyTimingPlugin()
-        for plugin, name in ((self.guard, 'mlj.qqbot-reply-guard'), (self.timer, 'mlj.qqbot-reply-timing')):
-            plugin.set_plugin_config({'plugin': {'enabled': True, 'config_version': '0.1.0'}})
-            plugin._set_context(PluginContext(name, self.rpc))
-            await plugin.on_load()
-            self.addAsyncCleanup(plugin.on_unload)
+        self.timer.set_plugin_config({'plugin': {'enabled': True, 'config_version': '0.1.0'}})
+        self.timer._set_context(PluginContext('mlj.qqbot-reply-timing', self.rpc))
+        await self.timer.on_load()
+        self.addAsyncCleanup(self.timer.on_unload)
         self.source = SessionMessage(message_id='source-1', platform='qq', timestamp=datetime.fromtimestamp(self.wall_clock))
         self.source.session_id = self.session_id
         self.source.raw_message = MessageSequence([TextComponent('隔离消息')])
@@ -159,10 +159,10 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
 
     async def invoke_hook(self, name, **kwargs):
         handlers = {
-            'maisaka.reply.before_post_process': [self.guard.prepare_reply_breaks],
-            'send_service.after_build_message': [self.guard.bind_first_segment, self.timer.prepare_segment],
+            'maisaka.reply.before_post_process': [self.timer.prepare_reply_breaks],
+            'send_service.after_build_message': [self.timer.prepare_segment],
             'send_service.before_send': [self.timer.prepare_route, self.timer.before_send],
-            'send_service.after_send': [self.timer.after_send, self.guard.send_reply_tails],
+            'send_service.after_send': [self.timer.after_send],
         }.get(name, [])
         for handler in handlers:
             result = await handler(**kwargs)
@@ -179,7 +179,7 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
     async def send_reply(self, **arguments):
         result = await reply.handle_tool(self.context, ToolInvocation(tool_name='reply', call_id='isolated-call',
             arguments={'msg_id': 'source-1', 'set_quote': False, **arguments}))
-        task = self.guard._segment_tasks.get(self.session_id)
+        task = self.timer._segment_tasks.get(self.session_id)
         if task is not None:
             await task
         return result
@@ -235,13 +235,25 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertTrue(any(isinstance(part, ReplyComponent) for part in self.deliveries[0][0].raw_message.components))
         self.assertEqual(self.count_queries, [(self.session_id, self.source.timestamp.timestamp())])
 
+    async def test_short_sentence_with_commas_is_sent_as_one_message(self):
+        self.text = '刚记清楚氢氖碳氩，结果又多了几个新名字，背元素周期表都没这么累。'
+        result = await self.send_reply()
+        self.assertTrue(result.success)
+        self.assertEqual([msg.processed_plain_text for msg, _ in self.deliveries], [self.text])
+
+    async def test_short_paragraphs_are_sent_in_the_same_message(self):
+        self.text = '文件已经核对。\n\n我晚点再发操作步骤。'
+        result = await self.send_reply()
+        self.assertTrue(result.success)
+        self.assertEqual([msg.processed_plain_text for msg, _ in self.deliveries], [self.text])
+
     async def test_short_and_attachment_reply_keep_their_whole_content(self):
         self.text = '中文 API Key 中文，数值 3.5 kg。'
         result = await self.send_reply()
         self.assertTrue(result.success)
         self.assertEqual([msg.processed_plain_text for msg, _ in self.deliveries], [self.text])
         self.deliveries.clear()
-        self.text = '这是一段包含必要说明的文字。\n\n下面是完整的下一段和附件说明。'
+        self.text = '这是一段包含附件完整说明的文字，先把需要核对的内容和实际会发生的变化集中说明。\n\n下面补上完整的处理步骤和使用范围，接着再标明哪些日期与数字需要回到原始文件核对。'
         with patch.object(reply.config_module.global_config.experimental, 'enable_rich_reply', True):
             result = await self.send_reply(attach_at=[{'user_id': '123456789'}])
         self.assertTrue(result.success)
@@ -256,7 +268,10 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.stored, {})
 
     async def test_later_failure_stops_remaining_segments(self):
-        self.text = '\n\n'.join(['第一段完整说明足够长，先把事情说清楚。', '第二段提供一份足够具体的补充材料。', '第三段接着说剩下需要处理的细节。'])
+        self.text = '\n\n'.join(
+            f'第{i}段包含需要检查的步骤和具体注意事项，可以逐项确认结果并回到原始文件核对其中的日期和数字。'
+            for i in range(3)
+        )
         self.fail_at = 2
         result = await self.send_reply()
         self.assertTrue(result.success)
@@ -264,12 +279,17 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertEqual(list(self.stored), ['qq-1'])
 
     def test_natural_segments_preserve_punctuation_and_structure(self):
-        first = '请先检查中文 API Key 中文和 3.5 kg 的显示格式。'
-        second = '排除问题以后，再照原顺序检查后面的步骤。'
+        first, second = self.text.split('\n\n')
         self.assertEqual(split_reply(first + second), (first, second))
-        document = '先按这个命令查看结果。\n\n```text\nfoo bar\n```\n\n接下来核对完整的输出。'
+        document = first + '\n\n```text\nfoo bar\n```\n\n' + second
         self.assertEqual(split_reply(document), (document,))
-        text = '\n\n'.join(f'第{i}段内容包含足够的信息和清晰的句末标点。' for i in range(5))
+        text = '\n\n'.join(f'第{i}段要核对内容。' + first for i in range(5))
         segments = split_reply(text)
         self.assertEqual(len(segments), 3)
         self.assertEqual('\n\n'.join(segments), text)
+
+    def test_long_sentence_and_short_tail_stay_together(self):
+        first, second = self.text.split('\n\n')
+        text = first.replace('。', '，') + second.replace('。', '，') + '就这些。'
+        self.assertEqual(split_reply(text), (text,))
+        self.assertEqual(split_reply(first + second + '好。'), (first, second + '好。'))

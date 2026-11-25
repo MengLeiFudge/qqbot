@@ -12,11 +12,16 @@ import time
 from maibot_sdk import Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
+from .reply_split import split_reply
+
+MAX_PENDING_REPLIES = 128
+FIRST_SEGMENT_STORE_TIMEOUT = 3.0
+
 
 class PluginSection(PluginConfigBase):
-    """首条消息等待修正的启用状态。"""
+    """回复分段、等待与引用的启用状态。"""
 
-    enabled: bool = Field(default=False, description="首条回复的打字等待扣除已经花掉的处理时间")
+    enabled: bool = Field(default=False, description="处理回复分段、首条等待和引用")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -38,6 +43,13 @@ class ReplyTurn:
     wait_task: asyncio.Task[None] | None = None
 
 
+@dataclass
+class PendingReply:
+    target_id: str
+    segments: tuple[str, ...]
+    first_timestamp: str = ""
+
+
 def normal_delay(text: str, speed: float, is_emoji: bool = False) -> float:
     """沿用原生发送器的字符计时，包括单汉字和表情的特殊规则。"""
     chinese = sum("\u4e00" <= char <= "\u9fff" for char in text)
@@ -49,7 +61,7 @@ def normal_delay(text: str, speed: float, is_emoji: bool = False) -> float:
 
 
 class QQBotReplyTimingPlugin(MaiBotPlugin):
-    """在公开发送 Hook 中处理首条等待和引用。"""
+    """统一 QQ 回复分段、首条引用和发送等待。"""
 
     config_model: ClassVar[type[PluginConfigBase] | None] = TimingConfig
 
@@ -61,12 +73,14 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         self._sources: OrderedDict[tuple[str, str], tuple[str, float, str]] = OrderedDict()
         self._turns: OrderedDict[str, ReplyTurn] = OrderedDict()
         self._reply_quotes: OrderedDict[str, tuple[str, str]] = OrderedDict()
+        self._pending_segments: dict[str, PendingReply] = {}
+        self._segment_tasks: dict[str, asyncio.Task[None]] = {}
         self._active = False
 
     async def on_load(self) -> None:
-        """启用首条等待修正，不执行外部请求。"""
+        """启用回复发送规则，不执行外部请求。"""
         self._active = True
-        self.ctx.logger.info("首条回复等待与引用规则已加载，启用=%s", cast(TimingConfig, self.config).plugin.enabled)
+        self.ctx.logger.info("回复分段、等待与引用规则已加载，启用=%s", cast(TimingConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
         """停止接纳新修正并释放瞬时状态。"""
@@ -76,6 +90,13 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         self._sources.clear()
         self._turns.clear()
         self._reply_quotes.clear()
+        self._pending_segments.clear()
+        tasks = tuple(self._segment_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._segment_tasks.clear()
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
         """配置更新后放弃旧轮次，下一条真实消息重新建立时钟。"""
@@ -85,6 +106,7 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         self._sources.clear()
         self._turns.clear()
         self._reply_quotes.clear()
+        self._pending_segments.clear()
 
     def _enabled(self) -> bool:
         return self._active and cast(TimingConfig, self.config).plugin.enabled
@@ -170,6 +192,43 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         return {"action": "continue"}
 
     @HookHandler(
+        "maisaka.reply.before_post_process", name="qqbot_reply_timing_breaks",
+        description="短回复整条发送，长回复在自然停顿处分段",
+        mode=HookMode.BLOCKING, order=HookOrder.NORMAL, timeout_ms=180000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def prepare_reply_breaks(
+        self, session_id: str = "", reply_message_id: str = "", response: str = "",
+        skip_post_process: bool = False, enable_splitter: bool = True, **kwargs: Any,
+    ) -> dict[str, object]:
+        if (not self._enabled() or not session_id or not reply_message_id or not response.strip()
+                or skip_post_process or not enable_splitter):
+            return {"action": "continue"}
+        if (session_id, reply_message_id) not in self._sources:
+            async with asyncio.timeout(1):
+                source = await self.ctx.message.get_by_id(reply_message_id, chat_id=session_id, include_binary_data=False)
+            if (not isinstance(source, Mapping) or source.get("platform") != "qq"
+                    or source.get("session_id") != session_id or source.get("message_id") != reply_message_id):
+                return {"action": "continue"}
+        task = self._segment_tasks.get(session_id)
+        if task is not None:
+            await asyncio.shield(task)
+        if not self._enabled():
+            return {"action": "continue"}
+        self._pending_segments.pop(session_id, None)
+        args = kwargs.get("reply_tool_args")
+        has_attachments = isinstance(args, Mapping) and any(args.get(key) for key in ("attach_at", "attach_pic", "attach_emoji"))
+        first = response
+        if not has_attachments and len(self._pending_segments) + len(self._segment_tasks) < MAX_PENDING_REPLIES:
+            segments = split_reply(response)
+            if len(segments) > 1:
+                self._pending_segments[session_id] = PendingReply(reply_message_id, segments)
+                first = segments[0]
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "session_id": session_id, "reply_message_id": reply_message_id, "response": first,
+            "skip_post_process": True, "enable_splitter": False,
+        }}
+
+    @HookHandler(
         "send_service.after_build_message", name="qqbot_reply_timing_native",
         description="识别原生回复首段并接入统一发送计时",
         mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
@@ -187,6 +246,12 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         if (isinstance(target_id, str) and isinstance(delivery_id, str) and delivery_id
                 and self._reply_quotes.get(session_id) == (target_id, "")):
             self._reply_quotes[session_id] = (target_id, delivery_id)
+        pending = self._pending_segments.get(session_id)
+        if (pending is not None and pending.target_id == target_id
+                and pending.segments[0] == processed_plain_text):
+            timestamp = message.get("timestamp")
+            if isinstance(timestamp, str):
+                pending.first_timestamp = timestamp
         turn = self._turns.get(session_id)
         if processed_plain_text and turn is not None and target_id == turn.target_id:
             return {"action": "continue", "modified_kwargs": {
@@ -337,18 +402,47 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
 
     @HookHandler(
         "send_service.after_send", name="qqbot_reply_timing_receipt",
-        description="明确发送失败时释放首条资格，成功和未知结果均保留",
+        description="失败时释放首条资格，成功后发送剩余段落",
         mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
     )
-    async def after_send(self, message: object = None, sent: bool = False, **kwargs: Any) -> dict[str, object]:
-        """只消费平台明确返回的失败；不猜测被取消的网络请求是否已经送达。"""
+    async def after_send(
+        self, message: object = None, sent: bool = False, reply_message_id: str = "", **kwargs: Any,
+    ) -> dict[str, object]:
         del kwargs
-        session_id = message.get("session_id") if isinstance(message, Mapping) else None
-        if isinstance(message, Mapping) and isinstance(session_id, str):
-            turn = self._turns.get(session_id)
-            if turn is not None and not sent and turn.first_delivery_id == message.get("message_id"):
-                turn.first_delivery_id = ""
+        if not isinstance(message, Mapping):
+            return {"action": "continue"}
+        session_id = message.get("session_id")
+        if not isinstance(session_id, str):
+            return {"action": "continue"}
+        message_id = message.get("message_id")
+        turn = self._turns.get(session_id)
+        if turn is not None and not sent and turn.first_delivery_id == message_id:
+            turn.first_delivery_id = ""
+        pending = self._pending_segments.get(session_id)
+        if (pending is not None and pending.target_id == reply_message_id and pending.first_timestamp
+                and pending.first_timestamp == message.get("timestamp") and message.get("platform") == "qq"):
+            self._pending_segments.pop(session_id)
+            if sent and self._enabled() and isinstance(message_id, str) and message_id:
+                self._segment_tasks[session_id] = create_task(self._send_segments(session_id, message_id, pending.segments[1:]))
         return {"action": "continue"}
+
+    async def _send_segments(self, session_id: str, first_id: str, segments: tuple[str, ...]) -> None:
+        try:
+            # 回执 Hook 早于入库，先等首段可查，保持会话历史顺序。
+            async with asyncio.timeout(FIRST_SEGMENT_STORE_TIMEOUT):
+                while not await self.ctx.message.get_by_id(first_id, chat_id=session_id, include_binary_data=False):
+                    await asyncio.sleep(0.05)
+            for segment in segments:
+                result = await self.ctx.send.text(
+                    segment, session_id, typing=True, return_details=True,
+                    sync_to_maisaka_history=True, maisaka_source_kind="guided_reply",
+                )
+                if not isinstance(result, dict) or result.get("sent") is not True:
+                    raise RuntimeError("后续段未收到成功回执")
+        except Exception as exc:
+            self.ctx.logger.warning("分段发送提前结束: session=%s first_id=%s error=%s", session_id, first_id, exc)
+        finally:
+            self._segment_tasks.pop(session_id, None)
 
 
 def create_plugin() -> QQBotReplyTimingPlugin:
