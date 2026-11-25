@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-reply-timing",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "name": "QQBot 回复发送",
-  "description": "按自然停顿分段、处理首条引用与等待，并补齐本账号 NapCat 出站路由。",
+  "description": "按回复篇幅选择聊天气泡或 QQ 合并转发，处理首条等待、引用和出站路由。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {"repository": "https://github.com/MengLeiFudge/qqbot"},

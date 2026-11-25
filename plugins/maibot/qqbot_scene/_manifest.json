@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-scene",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "name": "QQBot 当前场景",
   "description": "在蓝铃决定怎么回复之前，注入地点、在场的人和还在同时进行的事。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},

@@ -46,11 +46,11 @@ def empty_scene() -> dict[str, object]:
 def render_scene(scene: Mapping[str, object]) -> str:
     """把场景写成模型在决定回复前能直接读的一段话。"""
     place = str(scene.get("place") or "未说明")
-    people = scene.get("people") if isinstance(scene.get("people"), list) else []
-    ongoing = scene.get("ongoing") if isinstance(scene.get("ongoing"), list) else []
-    people_text = "、".join(str(person) for person in people if str(person).strip()) or "未说明"
-    lines = ["[当前场景]", f"地点：{place}", f"在场：{people_text}", "正在同时进行："]
-    actions = [str(action).strip() for action in ongoing if str(action).strip()]
+    people = scene.get("people")
+    ongoing = scene.get("ongoing")
+    people_text = "、".join(str(person) for person in people if str(person).strip()) if isinstance(people, list) else ""
+    lines = ["[当前场景]", f"地点：{place}", f"在场：{people_text or '未说明'}", "正在同时进行："]
+    actions = [str(action).strip() for action in ongoing if str(action).strip()] if isinstance(ongoing, list) else []
     lines.extend(f"- {action}" for action in actions)
     if not actions:
         lines.append("- 没有还在进行的身体接触")
@@ -168,11 +168,12 @@ class SceneBook:
 
     def save(self, session_id: str, scene: Mapping[str, object], seen: list[str]) -> None:
         """写入这一会话的场景，并只保留最近的消息编号。"""
-        self._sessions[session_id] = {"scene": dict(scene), "seen": seen[-200:]}
+        sessions = {**self._sessions, session_id: {"scene": dict(scene), "seen": seen[-200:]}}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(dumps(self._sessions, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.write_text(dumps(sessions, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(self.path)
+        self._sessions = sessions
 
 
 
@@ -187,7 +188,7 @@ def request_scene_update(session_id: str, scene: Mapping[str, object], fresh: li
             {"role": "system", "content": scene_update_prompt()},
             {"role": "user", "content": dumps({"current": dict(scene), "new_lines": fresh}, ensure_ascii=False)},
         ],
-        "max_output_tokens": 500,
+        "max_output_tokens": 1400,
         "reasoning": {"effort": "low"},
     }
     request = urllib.request.Request(
@@ -201,10 +202,15 @@ def request_scene_update(session_id: str, scene: Mapping[str, object], fresh: li
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
+    with urllib.request.urlopen(request, timeout=25) as response:
         payload = loads(response.read().decode())
-    if payload.get("status") != "completed":
-        raise RuntimeError("场景更新没有完成")
+    status = payload.get("status")
+    if status != "completed":
+        detail = payload.get("incomplete_details")
+        reason = detail.get("reason") if isinstance(detail, Mapping) else None
+        status = status if status in ("incomplete", "failed", "cancelled", "queued", "in_progress") else "unknown"
+        reason = reason if reason in ("max_output_tokens", "content_filter") else "unknown"
+        raise RuntimeError(f"场景模型未完成 status={status} reason={reason}")
     texts: list[str] = []
     for item in payload.get("output") or []:
         if not isinstance(item, dict):
@@ -278,7 +284,10 @@ class QQBotScenePlugin(MaiBotPlugin):
         book = self._book
         if book is None or not session_id:
             return render_scene(empty_scene())
-        return render_scene(book.get(session_id))
+        text = render_scene(book.get(session_id))
+        if pending_lines(self._pending_lines.get(session_id, []), book.seen(session_id)):
+            text += "\n这份场景只记录了已合并的消息。后续叙述可能已经改变地点、动作或在场的人，以这轮聊天里的最新叙述为准。"
+        return text
 
     def _schedule_update(self, session_id: str) -> None:
         """同一会话同时只跑一次合并，新内容留给这一次结束后再看。"""
@@ -298,13 +307,19 @@ class QQBotScenePlugin(MaiBotPlugin):
             fresh = pending_lines(lines, book.seen(session_id))
             if not fresh:
                 return
+            stage = "模型返回"
             try:
                 raw = await asyncio.to_thread(request_scene_update, session_id, book.get(session_id), fresh)
+                if self._book is not book:
+                    return
+                stage = "解析场景"
                 scene = parse_scene(raw, book.get(session_id))
+                stage = "保存场景"
                 book.save(session_id, scene, [line["id"] for line in lines])
-                self.ctx.logger.info("当前场景已更新: session=%s ongoing=%s", session_id, len(scene["ongoing"]))
+                self.ctx.logger.info("当前场景已更新: session=%s", session_id)
             except Exception as exc:
-                self.ctx.logger.warning("当前场景更新失败，沿用上一份: error_type=%s", type(exc).__name__)
+                detail = str(exc) if type(exc) is RuntimeError and stage == "模型返回" else type(exc).__name__
+                self.ctx.logger.warning("当前场景更新失败，沿用上一份: stage=%s detail=%s", stage, detail)
                 return
             if tuple(line["id"] for line in self._pending_lines.get(session_id) or []) == signature:
                 return

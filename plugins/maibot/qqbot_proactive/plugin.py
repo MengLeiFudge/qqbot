@@ -346,12 +346,17 @@ class QQBotProactivePlugin(MaiBotPlugin):
         self.ctx.logger.info("主动私聊话题判断完成，动作=%s，待跟进=%s", decision.action, len(state.topics))
         if decision.action != "continue":
             return
+        anchor = (
+            f"上次聊天已由你收尾。如果确实有新的内容，用你自己最后一条发言 {latest_id} 作回复工具的定位，直接发新话题。"
+            if latest_sender == bot_qq else "如果对方最后一条还没有得到回答，可以自然回应那条消息。"
+        )
         result = await self.ctx.maisaka.proactive.trigger(
             stream_id,
             "这是已有私聊的一次自然续聊机会，请依照现有人设和聊天风格表达。"
             "以下是话题建议，不是对方的新消息；结合最新上下文核对后再决定是否发言：\n"
             + decision.intent
-            + "\n只延续一个话题，不要复读上条、催回复、要求汇报或暴露定时任务说明。"
+            + "\n" + anchor
+            + "\n只延续一个话题。之前已经回答的问题应留在历史里，不催回复、要求汇报或暴露定时任务说明。"
             "不要虚构线下经历；对方明确要求不要打扰时保持安静。临时忙碌或睡觉要结合时间判断是否结束。"
             "若已有对方的新消息，优先回答新消息，不再执行过时的续聊方向。",
             reason="私聊话题跟进与日常关心",
@@ -359,6 +364,39 @@ class QQBotProactivePlugin(MaiBotPlugin):
         if not isinstance(result, Mapping) or result.get("queued") is not True:
             raise RuntimeError("主动私聊任务没有确认入队")
         self.ctx.logger.info("主动私聊任务已入队，等待实际发言后计数")
+
+    @HookHandler(
+        "send_service.before_send", name="qqbot_proactive_skip_answered",
+        description="主动续聊不再回复已经答过的旧消息",
+        mode=HookMode.BLOCKING, order=HookOrder.NORMAL, timeout_ms=3000, error_policy=ErrorPolicy.ABORT,
+    )
+    async def skip_answered_followup(
+        self, message: object = None, reply_message_id: str = "", **kwargs: Any,
+    ) -> dict[str, object]:
+        del kwargs
+        config = cast(ProactiveConfig, self.config)
+        state = self._schedule
+        if (not config.plugin.enabled or not state.pending_since or not reply_message_id
+                or not isinstance(message, Mapping) or message.get("platform") != "qq"
+                or message.get("session_id") != state.stream_id):
+            return {"action": "continue"}
+        target = await self.ctx.message.get_by_id(reply_message_id, chat_id=state.stream_id, include_binary_data=False)
+        if not isinstance(target, Mapping):
+            return {"action": "continue"}
+        _, target_sender, target_at = _message_fact(target, state.stream_id)
+        bot_qq = config.proactive.bot_qq
+        if target_at >= state.pending_since or target_sender == bot_qq:
+            return {"action": "continue"}
+        recent = await self._messages(state.stream_id, limit=24)
+        if self._schedule is not state or not state.pending_since:
+            return {"action": "continue"}
+        for sent in recent:
+            _, sender, sent_at = _message_fact(sent, state.stream_id)
+            if (sender == bot_qq and sent_at > target_at and isinstance(sent, Mapping)
+                    and sent.get("reply_to") == reply_message_id):
+                self.ctx.logger.info("主动续聊已跳过答过的旧消息: message_id=%s", reply_message_id)
+                return {"action": "abort"}
+        return {"action": "continue"}
 
     async def _consider(self, state: Schedule, owner: str, bot_qq: str) -> Decision:
         """空闲时整理少量话题；只读取文本和真实发送者，不传输图片或身份账号。"""

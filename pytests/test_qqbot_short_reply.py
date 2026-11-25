@@ -9,18 +9,22 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import src
 
-if (Path(src.__file__).resolve().parents[1] / '.qqbot-release.json').exists():
+if src.__file__ is None or (Path(src.__file__).resolve().parents[1] / '.qqbot-release.json').exists():
     raise RuntimeError('请在独立临时目录运行分段检查，使用新配置和空数据库。')
 
 
 from maibot_sdk.context import PluginContext
+from napcat_adapter.codecs.outbound.message_codec import NapCatOutboundCodec
 
+from qqbot_proactive.plugin import QQBotProactivePlugin, Schedule
 from qqbot_reply_timing import plugin as timing
 from qqbot_reply_timing.reply_split import split_reply
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils import utils as chat_utils
 from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
-from src.common.data_models.message_component_data_model import AtComponent, MessageSequence, ReplyComponent, TextComponent
+from src.common.data_models.message_component_data_model import (
+    AtComponent, ForwardNodeComponent, MessageSequence, ReplyComponent, TextComponent,
+)
 from src.common.data_models.reply_generation_data_models import ReplyGenerationResult
 from src.core.tooling import ToolInvocation
 from src.maisaka.builtin_tool import reply
@@ -241,11 +245,74 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertTrue(result.success)
         self.assertEqual([msg.processed_plain_text for msg, _ in self.deliveries], [self.text])
 
-    async def test_short_paragraphs_are_sent_in_the_same_message(self):
-        self.text = '文件已经核对。\n\n我晚点再发操作步骤。'
+    async def test_short_paragraphs_can_be_sent_as_separate_messages(self):
+        first, second = '文件已经核对。', '我晚点再发操作步骤。'
+        self.text = f'{first}\n\n{second}'
+        result = await self.send_reply()
+        self.assertTrue(result.success)
+        self.assertEqual([msg.processed_plain_text for msg, _ in self.deliveries], [first, second])
+
+    async def test_dense_reply_is_one_message(self):
+        self.text = '先下载文件。接着检查版本。运行安装程序。最后确认日志。'
         result = await self.send_reply()
         self.assertTrue(result.success)
         self.assertEqual([msg.processed_plain_text for msg, _ in self.deliveries], [self.text])
+
+    async def test_long_reply_is_one_forward_and_retains_full_text(self):
+        self.source.timestamp = datetime.fromtimestamp(self.wall_clock - 90)
+        self.new_messages = 20
+        self.text = '\n\n'.join(f'{i}. {self.text}' for i in range(8))
+        result = await self.send_reply(set_quote=True)
+        self.assertTrue(result.success)
+        self.assertEqual(len(self.deliveries), 1)
+        message, route = self.deliveries[0]
+        self.assertEqual(route, RouteKey('qq', self.account, self.scope))
+        self.assertEqual(len(message.raw_message.components), 1)
+        card = message.raw_message.components[0]
+        self.assertIsInstance(card, ForwardNodeComponent)
+        self.assertEqual(card.forward_components[0].user_id, self.account)
+        self.assertEqual(card.forward_components[0].content[0].text, self.text)
+        codec = NapCatOutboundCodec()
+        wire_message = send_service.serialize_session_message(message)
+        action, params = codec.build_outbound_action(wire_message, {'target_user_id': self.account})
+        self.assertEqual(action, 'send_private_forward_msg')
+        self.assertEqual(params['message'][0]['data']['content'], [{'type': 'text', 'data': {'text': self.text}}])
+        wire_message['message_info']['group_info'] = {'group_id': '12345'}
+        action, params = codec.build_outbound_action(wire_message, {})
+        self.assertEqual(action, 'send_group_forward_msg')
+        self.assertEqual(params['group_id'], '12345')
+        self.assertEqual(params['message'][0]['data']['content'], [{'type': 'text', 'data': {'text': self.text}}])
+        self.assertEqual(self.history, [self.text])
+        self.assertEqual(list(self.stored), ['qq-1'])
+        self.assertLessEqual(self.waits[0], timing.FOLDED_TYPING_LIMIT)
+
+    async def test_proactive_send_skips_answered_target_but_allows_new_message(self):
+        plugin = QQBotProactivePlugin()
+        plugin.set_plugin_config({
+            'plugin': {'enabled': True, 'config_version': '0.1.0'},
+            'proactive': {'bot_qq': self.account},
+        })
+        plugin._schedule = Schedule(stream_id=self.session_id, pending_since=self.wall_clock)
+        def fact(mid, qq, sent_at, **extra):
+            return {
+                'message_id': mid, 'session_id': self.session_id, 'platform': 'qq',
+                'timestamp': sent_at, 'message_info': {'user_info': {'user_id': qq}}, **extra,
+            }
+        old = fact('old', '123456789', self.wall_clock - 90)
+        sent = fact('sent', self.account, self.wall_clock - 80, reply_to='old')
+        new = fact('new', '123456789', self.wall_clock + 2)
+        async def rpc(method, plugin_id, payload, **kwargs):
+            if payload['capability'] == 'message.get_by_id':
+                target = {m['message_id']: m for m in (old, sent, new)}[payload['args']['message_id']]
+                return {'success': True, 'message': target}
+            if payload['capability'] == 'message.get_recent':
+                return {'success': True, 'messages': [old, sent, new]}
+            raise AssertionError(payload['capability'])
+        plugin._set_context(PluginContext('mlj.qqbot-proactive', rpc))
+        outbound = {'platform': 'qq', 'session_id': self.session_id}
+        self.assertEqual((await plugin.skip_answered_followup(outbound, 'old'))['action'], 'abort')
+        self.assertEqual((await plugin.skip_answered_followup(outbound, 'sent'))['action'], 'continue')
+        self.assertEqual((await plugin.skip_answered_followup(outbound, 'new'))['action'], 'continue')
 
     async def test_short_and_attachment_reply_keep_their_whole_content(self):
         self.text = '中文 API Key 中文，数值 3.5 kg。'
@@ -269,7 +336,7 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
 
     async def test_later_failure_stops_remaining_segments(self):
         self.text = '\n\n'.join(
-            f'第{i}段包含需要检查的步骤和具体注意事项，可以逐项确认结果并回到原始文件核对其中的日期和数字。'
+            f'第{i}段包含需要检查的步骤和注意事项。'
             for i in range(3)
         )
         self.fail_at = 2
@@ -279,17 +346,13 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertEqual(list(self.stored), ['qq-1'])
 
     def test_natural_segments_preserve_punctuation_and_structure(self):
-        first, second = self.text.split('\n\n')
+        first, second = '先检查中文 API Key 中文和 3.5 kg 的显示格式。', '显示正常就继续。'
         self.assertEqual(split_reply(first + second), (first, second))
         document = first + '\n\n```text\nfoo bar\n```\n\n' + second
         self.assertEqual(split_reply(document), (document,))
-        text = '\n\n'.join(f'第{i}段要核对内容。' + first for i in range(5))
-        segments = split_reply(text)
-        self.assertEqual(len(segments), 3)
-        self.assertEqual('\n\n'.join(segments), text)
 
-    def test_long_sentence_and_short_tail_stay_together(self):
-        first, second = self.text.split('\n\n')
-        text = first.replace('。', '，') + second.replace('。', '，') + '就这些。'
-        self.assertEqual(split_reply(text), (text,))
-        self.assertEqual(split_reply(first + second + '好。'), (first, second + '好。'))
+    def test_continuations_stay_in_the_same_bubble(self):
+        text = '刚认清那几个名字。结果又出新版本了。学元素周期表都没这么累。'
+        self.assertEqual(split_reply(text), ('刚认清那几个名字。结果又出新版本了。', '学元素周期表都没这么累。'))
+        long_sentence = '这句话内有逗号，也有空格 API Key 中文，' * 10 + '最后再说。'
+        self.assertEqual(split_reply(long_sentence), (long_sentence,))

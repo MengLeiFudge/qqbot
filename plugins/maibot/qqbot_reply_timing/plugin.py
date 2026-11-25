@@ -12,10 +12,16 @@ import time
 from maibot_sdk import Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
-from .reply_split import split_reply
+from .reply_split import should_fold, split_reply
 
 MAX_PENDING_REPLIES = 128
 FIRST_SEGMENT_STORE_TIMEOUT = 3.0
+FOLDED_TYPING_LIMIT = 12.0
+REPLY_STYLE = (
+    "普通接话、问候和玩笑用一句或两句自然的短回复。语意连着的话用逗号连在同一句。"
+    "确实有两个独立的聊天停顿时，用完整的句末标点或空行区分。"
+    "问题需要解释时先给结论，再按需写完整的理由、步骤和例子。长说明保留段落，QQ 会按篇幅折叠。"
+)
 
 
 class PluginSection(PluginConfigBase):
@@ -47,6 +53,7 @@ class ReplyTurn:
 class PendingReply:
     target_id: str
     segments: tuple[str, ...]
+    folded: bool = False
     first_timestamp: str = ""
 
 
@@ -58,6 +65,13 @@ def normal_delay(text: str, speed: float, is_emoji: bool = False) -> float:
     if speed <= 0:
         return 0.0
     return (1.0 if is_emoji else chinese * 0.3 + (len(text) - chinese) * 0.15) * speed
+
+
+def _is_forward(message: Mapping[str, Any]) -> bool:
+    components = message.get("raw_message")
+    return isinstance(components, list) and any(
+        isinstance(part, Mapping) and part.get("type") == "forward" for part in components
+    )
 
 
 class QQBotReplyTimingPlugin(MaiBotPlugin):
@@ -80,7 +94,7 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
     async def on_load(self) -> None:
         """启用回复发送规则，不执行外部请求。"""
         self._active = True
-        self.ctx.logger.info("回复分段、等待与引用规则已加载，启用=%s", cast(TimingConfig, self.config).plugin.enabled)
+        self.ctx.logger.info("QQ 回复气泡、合并转发与首条规则已加载，启用=%s", cast(TimingConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
         """停止接纳新修正并释放瞬时状态。"""
@@ -192,8 +206,23 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         return {"action": "continue"}
 
     @HookHandler(
+        "maisaka.replyer.before_request", name="qqbot_reply_timing_style",
+        description="按聊天场景组织回复篇幅和停顿",
+        mode=HookMode.BLOCKING, order=HookOrder.NORMAL, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def guide_reply_style(
+        self, request_type: str = "", extra_prompt: str = "", **kwargs: Any,
+    ) -> dict[str, object]:
+        if not self._enabled() or request_type != "maisaka.replyer":
+            return {"action": "continue"}
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "request_type": request_type,
+            "extra_prompt": "\n\n".join(part for part in (extra_prompt, REPLY_STYLE) if part),
+        }}
+
+    @HookHandler(
         "maisaka.reply.before_post_process", name="qqbot_reply_timing_breaks",
-        description="短回复整条发送，长回复在自然停顿处分段",
+        description="按篇幅选择短句气泡、整段或合并转发",
         mode=HookMode.BLOCKING, order=HookOrder.NORMAL, timeout_ms=180000, error_policy=ErrorPolicy.SKIP,
     )
     async def prepare_reply_breaks(
@@ -219,9 +248,11 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         has_attachments = isinstance(args, Mapping) and any(args.get(key) for key in ("attach_at", "attach_pic", "attach_emoji"))
         first = response
         if not has_attachments and len(self._pending_segments) + len(self._segment_tasks) < MAX_PENDING_REPLIES:
-            segments = split_reply(response)
-            if len(segments) > 1:
-                self._pending_segments[session_id] = PendingReply(reply_message_id, segments)
+            text = response.strip()
+            folded = should_fold(text)
+            segments = (text,) if folded else split_reply(text)
+            if folded or len(segments) > 1:
+                self._pending_segments[session_id] = PendingReply(reply_message_id, segments, folded=folded)
                 first = segments[0]
         return {"action": "continue", "modified_kwargs": {
             **kwargs, "session_id": session_id, "reply_message_id": reply_message_id, "response": first,
@@ -246,16 +277,35 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         if (isinstance(target_id, str) and isinstance(delivery_id, str) and delivery_id
                 and self._reply_quotes.get(session_id) == (target_id, "")):
             self._reply_quotes[session_id] = (target_id, delivery_id)
+        folded = False
         pending = self._pending_segments.get(session_id)
         if (pending is not None and pending.target_id == target_id
                 and pending.segments[0] == processed_plain_text):
-            timestamp = message.get("timestamp")
-            if isinstance(timestamp, str):
-                pending.first_timestamp = timestamp
+            if pending.folded:
+                self._pending_segments.pop(session_id)
+                components = message.get("raw_message")
+                info = message.get("message_info")
+                sender = info.get("user_info") if isinstance(info, Mapping) else None
+                if (isinstance(components, list) and components
+                        and all(isinstance(part, Mapping) and part.get("type") == "text" for part in components)
+                        and isinstance(sender, Mapping) and sender.get("user_id")):
+                    message = {**message, "raw_message": [{"type": "forward", "data": [{
+                        "user_id": str(sender["user_id"]),
+                        "user_nickname": str(sender.get("user_nickname") or "MaiBot"),
+                        "message_id": delivery_id,
+                        "content": components,
+                    }]}]}
+                    kwargs["set_reply"] = False
+                    folded = True
+            else:
+                timestamp = message.get("timestamp")
+                if isinstance(timestamp, str):
+                    pending.first_timestamp = timestamp
         turn = self._turns.get(session_id)
-        if processed_plain_text and turn is not None and target_id == turn.target_id:
+        typing = bool(processed_plain_text and turn is not None and target_id == turn.target_id)
+        if folded or typing:
             return {"action": "continue", "modified_kwargs": {
-                **kwargs, "message": message, "processed_plain_text": processed_plain_text, "typing": True,
+                **kwargs, "message": message, "processed_plain_text": processed_plain_text, "typing": typing,
             }}
         return {"action": "continue"}
 
@@ -322,9 +372,10 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         if modified["typing"]:
             speed = float(await self.ctx.config.get("response_post_process.typing_speed", 1.0))
             text = message.get("processed_plain_text")
-            await asyncio.sleep(normal_delay(text if isinstance(text, str) else "", speed, message.get("is_emoji") is True))
+            delay = normal_delay(text if isinstance(text, str) else "", speed, message.get("is_emoji") is True)
+            await asyncio.sleep(min(delay, FOLDED_TYPING_LIMIT) if _is_forward(message) else delay)
             modified["typing"] = False
-        modified["set_reply"] = await self._should_quote(session_id, reply_message_id)
+        modified["set_reply"] = not _is_forward(message) and await self._should_quote(session_id, reply_message_id)
         return {"action": "continue", "modified_kwargs": modified}
 
     async def _should_quote(self, session_id: str, target_id: str) -> bool:
@@ -352,7 +403,9 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         if not self._enabled() or not typing or not isinstance(message, Mapping) or message.get("platform") != "qq":
             return {"action": "continue"}
         session_id, delivery_id = message.get("session_id"), message.get("message_id")
-        turn = self._turns.get(session_id) if isinstance(session_id, str) else None
+        if not isinstance(session_id, str):
+            return {"action": "continue"}
+        turn = self._turns.get(session_id)
         if (turn is None or turn.first_delivery_id or turn.target_id != reply_message_id
                 or not isinstance(delivery_id, str) or not delivery_id):
             return {"action": "continue"}
@@ -363,6 +416,8 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         turn.first_delivery_id = delivery_id
         text = message.get("processed_plain_text")
         delay = normal_delay(text if isinstance(text, str) else "", speed, message.get("is_emoji") is True)
+        if _is_forward(message):
+            delay = min(delay, FOLDED_TYPING_LIMIT)
         elapsed = max(0.0, time.monotonic() - turn.started_at)
         wait = max(0.0, delay - elapsed)
         received = self._latest_source(cast(str, session_id), turn)

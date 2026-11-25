@@ -1,12 +1,14 @@
-"""只在长回复的自然停顿处分段。"""
+"""按完整表达决定 QQ 回复的气泡。"""
 import re
 
 
-SHORT_REPLY_LENGTH = 80
-MIN_SEGMENT_LENGTH = 36
+CHAT_BUBBLES_MAX_CHARS = 120
+FORWARD_AFTER_CHARS = 600
+FORWARD_AFTER_LINES = 12
 MAX_SEGMENTS = 3
 STRUCTURED_TEXT = re.compile(r"```|~~~|(?m:^\s*(?:[-*+]\s|\d+[.)、]\s|[>#|]))")
 PARAGRAPH_BREAK = re.compile(r"\r?\n(?:[ \t]*\r?\n)+")
+CONTINUATION = re.compile(r"^(?:然后|结果|不过|所以|但是|而且|因为|也就是说)")
 SENTENCE_BOUNDARY = re.compile(
     r'“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"\n]*"|`[^`\n]+`'
     r'|\b(?:Mr|Mrs|Ms|Dr|Prof|etc|e\.g|i\.e|vs)\.'
@@ -14,9 +16,13 @@ SENTENCE_BOUNDARY = re.compile(
 )
 
 
+def should_fold(text: str) -> bool:
+    return len(text) > FORWARD_AFTER_CHARS or len(text.splitlines()) > FORWARD_AFTER_LINES
+
+
 def split_reply(text: str) -> tuple[str, ...]:
     text = text.strip()
-    if len(text) <= SHORT_REPLY_LENGTH or STRUCTURED_TEXT.search(text):
+    if len(text) > CHAT_BUBBLES_MAX_CHARS or STRUCTURED_TEXT.search(text):
         return (text,)
 
     boundaries = [match.span() for match in PARAGRAPH_BREAK.finditer(text)]
@@ -26,14 +32,14 @@ def split_reply(text: str) -> tuple[str, ...]:
     segments: list[str] = []
     start = 0
     for end, next_start in boundaries:
-        if len(text[next_start:].lstrip()) < MIN_SEGMENT_LENGTH:
-            break
-        segment = text[start:end].strip()
-        if len(segment) < MIN_SEGMENT_LENGTH:
+        following = text[next_start:].lstrip()
+        if not following or CONTINUATION.match(following):
             continue
-        segments.append(segment)
+        segment = text[start:end].strip()
+        if segment:
+            segments.append(segment)
+        if len(segments) == MAX_SEGMENTS:
+            return (text,)
         start = next_start
-        if len(segments) == MAX_SEGMENTS - 1:
-            break
     segments.append(text[start:].strip())
     return tuple(segments)
