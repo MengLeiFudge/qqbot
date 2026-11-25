@@ -34,9 +34,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 日程意图由工作区 `计划/日程.json` 保存，`qqbot_proactive` 的既有调度读取当天安排，并在 00:00–08:00 暂停主动联系；日程不等于已执行活动，静默窗口不替代共享休息状态。麦麦恋人与主动私聊 Plus 已退出蓝铃部署，其源码、配置和数据可恢复归档，不再安装第二套好感度或主动调度。
 
-[qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md) 提供从接收时起两秒的主人私聊连发收集、同会话引用展开，以及本账号群聊和私聊的中文句间停顿处理，分段后每段作为一条独立消息发送。断句行为和配置见插件说明。阶段答复与历史查阅指导写入原生 `[chat.reply_style]` 配置，普通和阶段答复均通过原生 `reply`、回复器、后处理分段及原有发送流程执行；公开可靠结论后可以继续研究。
-
-蓝铃的原生分段配置见 [reply-splitter.example.toml](reply-splitter.example.toml)：在本机 `config/bot_config.toml` 的 `[response_splitter]` 保持分段启用，`max_split_num` 至少与 `max_sentence_num` 一致，使已断好的片段逐条发送。变更后按插件说明检查实际发送出口。
+蓝铃通过 [qqbot_reply_guard](../../../plugins/maibot/qqbot_reply_guard/README.md) 处理主人私聊连发、同会话引用和普通文本的自然分段。阶段答复与历史查阅指导写入原生 `[chat.reply_style]` 配置。公开可靠结论后可继续研究。
 
 `qqbot_identity` 从同会话消息 API 读取真实发送者，为 Planner 中已经出现的消息补充身份表，Replyer 则按实际目标消息 ID 查询并注入 `platform/user_id/is_owner`。只有已核验的主人使用“主人”称呼，其他人和未知身份使用昵称或“你”；本机回复风格不得把所有第二人称替换成“主人”。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见 [qqbot_identity](../../plugins/qqbot_identity/README.md)。
 

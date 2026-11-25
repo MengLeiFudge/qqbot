@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 from typing import Any, ClassVar, cast
@@ -15,18 +16,18 @@ import uuid
 from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
+from .reply_split import split_reply
+
 PRIVATE_MESSAGE_SETTLE_SECONDS = 2.0
-REPLY_SPACING = re.compile(
-    r'“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"]*"|\'[^\']*\'|`[^`]*`'
-    r'|(?P<break>(?<=[\u3400-\u9fff。！？!?…~～”’」』])[ \t]+(?=[\u3400-\u9fff“‘「『]))'
-)
+MAX_PENDING_REPLIES = 128
+FIRST_SEGMENT_STORE_TIMEOUT = 3.0
 QQ_MESSAGE_PREFIX = re.compile(r'^<message msg_id="(-?[0-9]+)" [^\n]*>\n')
 
 
 class PluginSection(PluginConfigBase):
     """连发收集、普通引用展开和聊天断句的启用状态。"""
 
-    enabled: bool = Field(default=False, description="收集主人连发和引用，将本账号中文句间停顿交给原生分段")
+    enabled: bool = Field(default=False, description="收集主人连发和引用，按自然段发送本账号回复")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -41,6 +42,13 @@ class GuardConfig(PluginConfigBase):
 
     plugin: PluginSection = Field(default_factory=PluginSection)
     guard: GuardSection = Field(default_factory=GuardSection)
+
+
+@dataclass
+class PendingReply:
+    target_id: str
+    segments: tuple[str, ...]
+    first_timestamp: str = ""
 
 
 def _meta(turn_id: str | None = None) -> dict[str, object]:
@@ -123,6 +131,8 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         self._received: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._reply_nudged: set[str] = set()
         self._replied: set[str] = set()
+        self._pending_segments: OrderedDict[str, PendingReply] = OrderedDict()
+        self._segment_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def on_load(self) -> None:
         """启用连发收集、引用展开、消息时间与聊天断句。"""
@@ -131,12 +141,19 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
                              cast(GuardConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
-        """丢弃未完成快照；插件没有后台任务或持久化状态。"""
+        """停止接收新的分段任务，清理瞬时状态。"""
         self._active = False
         self._settled_message_id = ""
         self._received.clear()
         self._reply_nudged.clear()
         self._replied.clear()
+        self._pending_segments.clear()
+        tasks = tuple(self._segment_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._segment_tasks.clear()
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
         """配置变化后清空旧的连发收集标识。"""
@@ -387,26 +404,99 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
 
     @HookHandler(
         "maisaka.reply.before_post_process", name="qqbot_reply_guard_breaks",
-        description="将中文句间停顿交给原生分段，逐条发送",
-        mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=3000, error_policy=ErrorPolicy.SKIP,
+        description="保留原生首段发送，按自然段准备后续气泡",
+        mode=HookMode.BLOCKING, order=HookOrder.NORMAL, timeout_ms=180000, error_policy=ErrorPolicy.SKIP,
     )
     async def prepare_reply_breaks(
-        self, session_id: str = "", response: str = "", skip_post_process: bool = False,
-        enable_splitter: bool = True, **kwargs: Any,
+        self, session_id: str = "", reply_message_id: str = "", response: str = "",
+        skip_post_process: bool = False, enable_splitter: bool = True, **kwargs: Any,
     ) -> dict[str, object]:
-        """中文句间空格作为原生分段边界，发送策略由调用方保持。"""
+        """让原生 reply 只发送第一段，尾段等待平台回执。"""
         config = cast(GuardConfig, self.config)
-        if not self._active or not config.plugin.enabled or not response.strip() or skip_post_process or not enable_splitter:
+        if (not self._active or not config.plugin.enabled or not session_id or not reply_message_id
+                or not response.strip() or skip_post_process or not enable_splitter):
             return {"action": "continue"}
         if await self.ctx.config.get("bot.qq_account", "") != config.guard.bot_qq:
             return {"action": "continue"}
-        formatted = REPLY_SPACING.sub(
-            lambda match: "\n" if match.lastgroup == "break" else match.group(), response,
-        )
+        async with asyncio.timeout(3):
+            source = await self.ctx.message.get_by_id(reply_message_id, chat_id=session_id, include_binary_data=False)
+        if (not isinstance(source, Mapping) or source.get("platform") != "qq"
+                or source.get("session_id") != session_id or source.get("message_id") != reply_message_id):
+            return {"action": "continue"}
+        task = self._segment_tasks.get(session_id)
+        if task is not None:
+            await asyncio.shield(task)
+        if not self._active:
+            return {"action": "continue"}
+        self._pending_segments.pop(session_id, None)
+        args = kwargs.get("reply_tool_args")
+        has_attachments = isinstance(args, Mapping) and any(args.get(key) for key in ("attach_at", "attach_pic", "attach_emoji"))
+        segments = (response,) if has_attachments else split_reply(response)
+        if len(segments) > 1 and len(self._pending_segments) + len(self._segment_tasks) < MAX_PENDING_REPLIES:
+            self._pending_segments[session_id] = PendingReply(reply_message_id, segments)
+        else:
+            segments = (response,)
         return {"action": "continue", "modified_kwargs": {
-            **kwargs, "session_id": session_id, "response": formatted,
-            "skip_post_process": skip_post_process, "enable_splitter": enable_splitter,
+            **kwargs, "session_id": session_id, "reply_message_id": reply_message_id, "response": segments[0],
+            "skip_post_process": True, "enable_splitter": False,
         }}
+
+    @HookHandler(
+        "send_service.after_build_message", name="qqbot_reply_guard_bind_first",
+        description="关联原生首段发送与分段回执",
+        mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def bind_first_segment(self, message: object = None, **kwargs: Any) -> dict[str, object]:
+        if isinstance(message, Mapping) and message.get("platform") == "qq":
+            session_id = message.get("session_id")
+            pending = self._pending_segments.get(session_id) if isinstance(session_id, str) else None
+            if (pending is not None and pending.target_id == message.get("reply_to")
+                    and pending.segments[0] == message.get("processed_plain_text")):
+                timestamp = message.get("timestamp")
+                if isinstance(timestamp, str):
+                    pending.first_timestamp = timestamp
+        return {"action": "continue"}
+
+    @HookHandler(
+        "send_service.after_send", name="qqbot_reply_guard_send_tails",
+        description="收到原生首段回执后按顺序发送后续段",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def send_reply_tails(
+        self, message: object = None, sent: bool = False, reply_message_id: str = "", **kwargs: Any,
+    ) -> dict[str, object]:
+        if not self._active or not reply_message_id or not isinstance(message, Mapping) or message.get("platform") != "qq":
+            return {"action": "continue"}
+        session_id = message.get("session_id")
+        if not isinstance(session_id, str):
+            return {"action": "continue"}
+        pending = self._pending_segments.get(session_id)
+        if (pending is None or pending.target_id != reply_message_id or not pending.first_timestamp
+                or pending.first_timestamp != message.get("timestamp")):
+            return {"action": "continue"}
+        self._pending_segments.pop(session_id)
+        message_id = message.get("message_id")
+        if sent and isinstance(message_id, str) and message_id:
+            self._segment_tasks[session_id] = asyncio.create_task(self._send_segments(session_id, message_id, pending.segments[1:]))
+        return {"action": "continue"}
+
+    async def _send_segments(self, session_id: str, first_id: str, segments: tuple[str, ...]) -> None:
+        try:
+            # 原生回执 Hook 在首段的入库之前，先等首段可查，再让后续段进入发送链。
+            async with asyncio.timeout(FIRST_SEGMENT_STORE_TIMEOUT):
+                while not await self.ctx.message.get_by_id(first_id, chat_id=session_id, include_binary_data=False):
+                    await asyncio.sleep(0.05)
+            for segment in segments:
+                result = await self.ctx.send.text(
+                    segment, session_id, typing=True, return_details=True,
+                    sync_to_maisaka_history=True, maisaka_source_kind="guided_reply",
+                )
+                if not isinstance(result, dict) or result.get("sent") is not True:
+                    raise RuntimeError("后续段未收到成功回执")
+        except Exception as exc:
+            self.ctx.logger.warning("分段发送提前结束: session=%s first_id=%s error=%s", session_id, first_id, exc)
+        finally:
+            self._segment_tasks.pop(session_id, None)
 
     @HookHandler(
         "maisaka.replyer.before_request",
