@@ -21,6 +21,16 @@ from .day_plan import DayPlan
 from .followup import FOLLOWUP_PROMPT, TOPIC_LIFETIME, Decision, Topic
 from .self_state import SelfState
 
+ACTIVITY_TOOLS = {"bilibili_watch", "lanling_write_file"}
+ACTIVITY_INTENT = (
+    "这是你安排给自己的空闲活动。做一件你感兴趣的事，完成后可以安静结束。"
+    "查找公开视频用 bilibili_search，选定后实际调用 bilibili_watch。想写点东西就调用 lanling_write_file，"
+    "只在自己的工作区用相对路径创建笔记，项目和配置请留给已有的明确任务。"
+    "以成功的工具结果为准。视频搜索结果只是候选，阅读用实际取得的分镜和字幕。"
+    "写成的笔记可以留给自己。有真的值得分享的发现，再在这个私聊发一条自然消息，说明具体发现，视频附可打开的来源。"
+    "这次活动独立于旧聊天。若已有新消息，先交给正常聊天处理。"
+)
+
 
 class PluginSection(PluginConfigBase):
     """自身状态与主动私聊插件的启用状态。"""
@@ -135,6 +145,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
         self._task: asyncio.Task[None] | None = None
         self._state_path = Path(self.ctx.paths.data_dir) / "schedule.json"
         self._schedule = Schedule.load(self._state_path)
+        self._share_ready_since = 0.0
         self._self_state_path = Path(self.ctx.paths.data_dir) / "self_state.json"
         self._self_state = SelfState.load(self._self_state_path)
         self._day_plan: DayPlan | None = None
@@ -259,7 +270,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
         return self._day_plan.hint(datetime.now()) if self._day_plan is not None else ""
 
     async def _check_private(self) -> None:
-        """只计已观察到的发言；空闲到期再判断话题，不占用普通回复链路。"""
+        """空闲到期安排自己的活动，普通回复继续由入站消息触发。"""
         if self._current_self_state().resting or self._in_quiet_hours():
             return
         target = await self._private_stream()
@@ -304,7 +315,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
             self._schedule = state
         if state.quiet or now < state.next_due or self._current_self_state().resting:
             return
-        # 先给普通回复链路十分钟；它选择不回或漏回时，不永久封死主动联系。
+        # 最近一条是对方的话时，先给普通回复留出时间。
         if latest_sender != bot_qq and now - last_activity < 600:
             return
 
@@ -342,35 +353,30 @@ class QQBotProactivePlugin(MaiBotPlugin):
         state.quiet = decision.action == "quiet"
         if decision.action == "continue":
             state.pending_since = time.time()
+            self._share_ready_since = 0.0
         state.save(self._state_path)
-        self.ctx.logger.info("主动私聊话题判断完成，动作=%s，待跟进=%s", decision.action, len(state.topics))
+        self.ctx.logger.info("空闲活动判断完成，动作=%s", decision.action)
         if decision.action != "continue":
             return
-        anchor = (
-            f"上次聊天已由你收尾。如果确实有新的内容，用你自己最后一条发言 {latest_id} 作回复工具的定位，直接发新话题。"
-            if latest_sender == bot_qq else "如果对方最后一条还没有得到回答，可以自然回应那条消息。"
+        share_anchor = (
+            f"\n分享时用你自己上一条发言 {latest_id} 作为 reply 的定位，直接发新内容。"
+            if latest_sender == bot_qq else "\n如果无法用自己的上一条发言定位，就把活动成果留给自己。"
         )
         result = await self.ctx.maisaka.proactive.trigger(
             stream_id,
-            "这是已有私聊的一次自然续聊机会，请依照现有人设和聊天风格表达。"
-            "以下是话题建议，不是对方的新消息；结合最新上下文核对后再决定是否发言：\n"
-            + decision.intent
-            + "\n" + anchor
-            + "\n只延续一个话题。之前已经回答的问题应留在历史里，不催回复、要求汇报或暴露定时任务说明。"
-            "不要虚构线下经历；对方明确要求不要打扰时保持安静。临时忙碌或睡觉要结合时间判断是否结束。"
-            "若已有对方的新消息，优先回答新消息，不再执行过时的续聊方向。",
-            reason="私聊话题跟进与日常关心",
+            ACTIVITY_INTENT + "\n你给自己安排的事：" + decision.intent + share_anchor,
+            reason="蓝铃自己的空闲活动",
         )
         if not isinstance(result, Mapping) or result.get("queued") is not True:
-            raise RuntimeError("主动私聊任务没有确认入队")
-        self.ctx.logger.info("主动私聊任务已入队，等待实际发言后计数")
+            raise RuntimeError("空闲活动任务没有确认入队")
+        self.ctx.logger.info("空闲活动任务已入队")
 
     @HookHandler(
-        "send_service.before_send", name="qqbot_proactive_skip_answered",
-        description="主动续聊不再回复已经答过的旧消息",
+        "send_service.before_send", name="qqbot_proactive_activity_share",
+        description="只在真实活动完成后允许空闲分享，新的私聊消息照常回复",
         mode=HookMode.BLOCKING, order=HookOrder.NORMAL, timeout_ms=3000, error_policy=ErrorPolicy.ABORT,
     )
-    async def skip_answered_followup(
+    async def guard_activity_share(
         self, message: object = None, reply_message_id: str = "", **kwargs: Any,
     ) -> dict[str, object]:
         del kwargs
@@ -380,23 +386,18 @@ class QQBotProactivePlugin(MaiBotPlugin):
                 or not isinstance(message, Mapping) or message.get("platform") != "qq"
                 or message.get("session_id") != state.stream_id):
             return {"action": "continue"}
+        pending_since = state.pending_since
         target = await self.ctx.message.get_by_id(reply_message_id, chat_id=state.stream_id, include_binary_data=False)
-        if not isinstance(target, Mapping):
+        if self._schedule is not state or state.pending_since != pending_since:
             return {"action": "continue"}
-        _, target_sender, target_at = _message_fact(target, state.stream_id)
-        bot_qq = config.proactive.bot_qq
-        if target_at >= state.pending_since or target_sender == bot_qq:
-            return {"action": "continue"}
-        recent = await self._messages(state.stream_id, limit=24)
-        if self._schedule is not state or not state.pending_since:
-            return {"action": "continue"}
-        for sent in recent:
-            _, sender, sent_at = _message_fact(sent, state.stream_id)
-            if (sender == bot_qq and sent_at > target_at and isinstance(sent, Mapping)
-                    and sent.get("reply_to") == reply_message_id):
-                self.ctx.logger.info("主动续聊已跳过答过的旧消息: message_id=%s", reply_message_id)
-                return {"action": "abort"}
-        return {"action": "continue"}
+        if isinstance(target, Mapping):
+            _, target_sender, target_at = _message_fact(target, state.stream_id)
+            if target_at >= pending_since:
+                return {"action": "continue"}
+            if target_sender == config.proactive.bot_qq and self._share_ready_since == pending_since:
+                return {"action": "continue"}
+        self.ctx.logger.info("空闲活动未满足分享条件，保留静默")
+        return {"action": "abort"}
 
     async def _consider(self, state: Schedule, owner: str, bot_qq: str) -> Decision:
         """空闲时整理少量话题；只读取文本和真实发送者，不传输图片或身份账号。"""
@@ -425,7 +426,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
         payload = {
             "now": datetime.now().astimezone().isoformat(),
             "unanswered_turns": state.sent_turns,
-            "latest_owner_unanswered": bool(recent) and _message_fact(recent[-1], state.stream_id)[1] == owner,
+            "latest_sender": "bot" if recent and _message_fact(recent[-1], state.stream_id)[1] == bot_qq else "owner",
             "appointment": ({"intent": state.appointment_intent,
                              "due": datetime.fromtimestamp(state.appointment_due).astimezone().isoformat()}
                             if state.appointment_due else None),
@@ -574,6 +575,24 @@ class QQBotProactivePlugin(MaiBotPlugin):
         target = await self._private_stream()
         if target is None or target[1] != session_id or item_schema_version != 1 or not isinstance(items, list):
             return {"action": "continue"}
+        state = self._schedule
+        if state.stream_id == session_id and state.pending_since:
+            for item in items:
+                if (not isinstance(item, Mapping) or item.get("item_type") != "FunctionCallOutputItem"
+                        or item.get("success") is not True or not str(item.get("output") or "").strip()
+                        or str(item.get("tool_name") or "").rsplit(".", 1)[-1] not in ACTIVITY_TOOLS):
+                    continue
+                meta = item.get("meta")
+                raw_time = meta.get("timestamp") if isinstance(meta, Mapping) else None
+                if not isinstance(raw_time, str):
+                    continue
+                try:
+                    result_at = datetime.fromisoformat(raw_time).timestamp()
+                except ValueError:
+                    continue
+                if result_at >= state.pending_since:
+                    self._share_ready_since = state.pending_since
+                    break
         plan_file = cast(ProactiveConfig, self.config).proactive.day_plan_file
         plan_rule = (
             f"\n[自己的日程]可以用已有文件工具在 {plan_file} 维护日程。"
@@ -588,12 +607,10 @@ class QQBotProactivePlugin(MaiBotPlugin):
             "item_type": "SystemMessageItem",
             "meta": {"item_id": uuid.uuid4().hex, "logical_turn_id": None, "timestamp": datetime.now().isoformat()},
             "parts": [{"type": "text", "text": (
-                "[私聊联系计划]有适合稍后关心的事情时，可以用 schedule_private_followup 给自己安排下次联系，"
-                "通过 tool_search 查找该本地工具。依据对方真实消息的 source_id，指定 300–86400 秒后的时间和具体意图。"
-                "同一私聊只保留一个计划，新计划替换旧计划；不再适合可用 cancel 取消。"
-                "到期会重新判断是否适合发言，不是必须发送的提醒，不要承诺准确时间。"
-                "安排不代表已经回答对方；本轮需要的普通回复照常执行，完成后结束规划，不用 wait 循环等时间。"
-                "工具返回成功才算安排完成。临时忙碌可安排稍后关心，明确不要打扰时不要安排。[/私聊联系计划]"
+                "[蓝铃自己的安排]平时可以按自己的兴趣安排想看的公开视频、想写的东西和休息。"
+                "私聊空闲时会有机会完成一项实际活动，成果适合分享时再开口。"
+                "通过 tool_search 可以找到 schedule_private_followup，供已有约定到期时重新考虑；"
+                "同一私聊保留一个计划，可用 cancel 取消。收到新消息照常聊天。[/蓝铃自己的安排]"
             ) + plan_rule}],
         }
         return {"action": "continue", "modified_kwargs": {

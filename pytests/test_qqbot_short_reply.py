@@ -286,13 +286,17 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertEqual(list(self.stored), ['qq-1'])
         self.assertLessEqual(self.waits[0], timing.FOLDED_TYPING_LIMIT)
 
-    async def test_proactive_send_skips_answered_target_but_allows_new_message(self):
+    async def test_activity_share_requires_fresh_success_and_allows_new_chat(self):
         plugin = QQBotProactivePlugin()
         plugin.set_plugin_config({
             'plugin': {'enabled': True, 'config_version': '0.1.0'},
             'proactive': {'bot_qq': self.account},
         })
         plugin._schedule = Schedule(stream_id=self.session_id, pending_since=self.wall_clock)
+        plugin._share_ready_since = 0.0
+        plugin._day_plan = None
+        plugin._private_stream = AsyncMock(return_value=('123456789', self.session_id))
+
         def fact(mid, qq, sent_at, **extra):
             return {
                 'message_id': mid, 'session_id': self.session_id, 'platform': 'qq',
@@ -305,14 +309,26 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
             if payload['capability'] == 'message.get_by_id':
                 target = {m['message_id']: m for m in (old, sent, new)}[payload['args']['message_id']]
                 return {'success': True, 'message': target}
-            if payload['capability'] == 'message.get_recent':
-                return {'success': True, 'messages': [old, sent, new]}
             raise AssertionError(payload['capability'])
         plugin._set_context(PluginContext('mlj.qqbot-proactive', rpc))
         outbound = {'platform': 'qq', 'session_id': self.session_id}
-        self.assertEqual((await plugin.skip_answered_followup(outbound, 'old'))['action'], 'abort')
-        self.assertEqual((await plugin.skip_answered_followup(outbound, 'sent'))['action'], 'continue')
-        self.assertEqual((await plugin.skip_answered_followup(outbound, 'new'))['action'], 'continue')
+        self.assertEqual((await plugin.guard_activity_share(outbound, 'old'))['action'], 'abort')
+        self.assertEqual((await plugin.guard_activity_share(outbound, 'sent'))['action'], 'abort')
+        self.assertEqual((await plugin.guard_activity_share(outbound, 'new'))['action'], 'continue')
+
+        async def record(name, seconds, success=True):
+            await plugin.prepare_schedule(session_id=self.session_id, item_schema_version=1, items=[{
+                'item_type': 'FunctionCallOutputItem', 'tool_name': name, 'output': '工具结果', 'success': success,
+                'meta': {'timestamp': datetime.fromtimestamp(self.wall_clock + seconds).isoformat()},
+            }])
+
+        await record('bilibili_search', 1)
+        await record('bilibili_watch', -60)
+        await record('lanling_write_file', 2, success=False)
+        self.assertEqual((await plugin.guard_activity_share(outbound, 'sent'))['action'], 'abort')
+        await record('bilibili_watch', 2)
+        self.assertEqual((await plugin.guard_activity_share(outbound, 'sent'))['action'], 'continue')
+        self.assertEqual((await plugin.guard_activity_share(outbound, 'old'))['action'], 'abort')
 
     async def test_short_and_attachment_reply_keep_their_whole_content(self):
         self.text = '中文 API Key 中文，数值 3.5 kg。'
