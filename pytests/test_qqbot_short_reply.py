@@ -1,4 +1,5 @@
 """用隔离 QQ 发送出口核对蓝铃的原生首段和后续自然段。"""
+from asyncio import timeout
 from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ from qqbot_reply_timing import plugin as timing
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils import utils as chat_utils
 from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
-from src.common.data_models.message_component_data_model import AtComponent, MessageSequence, TextComponent
+from src.common.data_models.message_component_data_model import AtComponent, MessageSequence, ReplyComponent, TextComponent
 from src.common.data_models.reply_generation_data_models import ReplyGenerationResult
 from src.core.tooling import ToolInvocation
 from src.maisaka.builtin_tool import reply
@@ -38,6 +39,9 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.scope = 'lanling'
         self.session_id = 'isolated-session'
         self.clock = 100.0
+        self.wall_clock = 1_800_000_000.0
+        self.new_messages = 0
+        self.count_queries = []
         self.waits = []
         self.deliveries = []
         self.fail_at = 0
@@ -51,7 +55,7 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
             plugin._set_context(PluginContext(name, self.rpc))
             await plugin.on_load()
             self.addAsyncCleanup(plugin.on_unload)
-        self.source = SessionMessage(message_id='source-1', platform='qq', timestamp=datetime.now())
+        self.source = SessionMessage(message_id='source-1', platform='qq', timestamp=datetime.fromtimestamp(self.wall_clock))
         self.source.session_id = self.session_id
         self.source.raw_message = MessageSequence([TextComponent('隔离消息')])
         self.source.message_info = MessageInfo(user_info=UserInfo(user_id='123456789', user_nickname='隔离用户'))
@@ -88,8 +92,8 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         stack = ExitStack()
         self.addCleanup(stack.close)
         for obj, key, value in (
-            (timing, 'time', SimpleNamespace(monotonic=lambda: self.clock)),
-            (timing, 'asyncio', SimpleNamespace(sleep=self.sleep)),
+            (timing, 'time', SimpleNamespace(monotonic=lambda: self.clock, time=lambda: self.wall_clock)),
+            (timing, 'asyncio', SimpleNamespace(sleep=self.sleep, timeout=timeout)),
             (send_service, 'asyncio', SimpleNamespace(sleep=self.sleep)),
             (send_service, '_get_runtime_manager', lambda: self),
             (self.context, 'get_runtime_manager', lambda: self),
@@ -122,8 +126,14 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         if cap == 'message.get_by_id':
             mid = args['message_id']
             saved = self.source if mid == self.source.message_id else self.stored.get(mid)
-            message = {'platform': saved.platform, 'session_id': saved.session_id, 'message_id': mid} if saved else None
+            message = {
+                'platform': saved.platform, 'session_id': saved.session_id, 'message_id': mid,
+                'timestamp': str(saved.timestamp.timestamp()),
+            } if saved else None
             return {'success': True, 'message': message}
+        if cap == 'message.count_new':
+            self.count_queries.append((args['chat_id'], float(args['since'])))
+            return {'success': True, 'count': self.new_messages}
         if cap == 'send.text':
             from src.plugin_runtime.capabilities.core import RuntimeCoreCapabilityMixin
             result = await RuntimeCoreCapabilityMixin._cap_send_text(self, plugin_id, cap, args)
@@ -139,6 +149,7 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
     async def sleep(self, seconds):
         self.waits.append(seconds)
         self.clock += seconds
+        self.wall_clock += seconds
 
     async def store(self, message):
         self.stored[message.message_id] = message
@@ -157,7 +168,7 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
             result = await handler(**kwargs)
             if result.get('action') == 'abort':
                 return HookDispatchResult(name, kwargs, aborted=True)
-            kwargs.update(result.get('modified_kwargs', {}))
+            kwargs = result.get('modified_kwargs', kwargs)
         return HookDispatchResult(name, kwargs)
 
     async def generate(self, **kwargs):
@@ -174,9 +185,11 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         return result
 
     async def test_first_native_then_tail_with_original_route_timing_and_receipt_ids(self):
+        self.source.timestamp = datetime.fromtimestamp(self.wall_clock - 30)
+        self.new_messages = 6
         with patch.object(chat_utils, 'split_into_sentences_w_remove_punctuation',
                           side_effect=AssertionError('原生分段被调用')):
-            result = await self.send_reply(set_quote=True)
+            result = await self.send_reply()
         expected = self.text.split('\n\n')
         self.assertTrue(result.success, result.error_message)
         self.assertEqual(result.structured_content['reply_segments'], expected[:1])
@@ -189,9 +202,38 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.history, [f'[回复消息] {expected[0]}', expected[1]])
         self.assertTrue(self.deliveries[0][0].reply_to)
         self.assertIsNone(self.deliveries[1][0].reply_to)
+        self.assertEqual([
+            [part.target_message_id for part in msg.raw_message.components if isinstance(part, ReplyComponent)]
+            for msg, _ in self.deliveries
+        ], [['source-1'], []])
+        self.assertEqual(self.count_queries, [(self.session_id, self.source.timestamp.timestamp())])
         self.assertEqual(len(self.waits), 2)
         self.assertAlmostEqual(self.waits[0], timing.normal_delay(expected[0], 0.2) - 0.1)
         self.assertAlmostEqual(self.waits[1], timing.normal_delay(expected[1], 0.2))
+
+    async def test_five_new_messages_keep_old_reply_unquoted(self):
+        self.source.timestamp = datetime.fromtimestamp(self.wall_clock - 90)
+        self.new_messages = 5
+        result = await self.send_reply(set_quote=True)
+        self.assertTrue(result.success, result.error_message)
+        self.assertEqual(self.history, self.text.split('\n\n'))
+        self.assertEqual(self.count_queries, [(self.session_id, self.source.timestamp.timestamp())])
+
+    async def test_reply_younger_than_thirty_seconds_skips_count_and_quote(self):
+        self.source.timestamp = datetime.fromtimestamp(self.wall_clock - 10)
+        self.new_messages = 12
+        result = await self.send_reply(set_quote=True)
+        self.assertTrue(result.success, result.error_message)
+        self.assertEqual(self.history, self.text.split('\n\n'))
+        self.assertEqual(self.count_queries, [])
+
+    async def test_thirty_seconds_can_elapse_during_first_segment_wait(self):
+        self.source.timestamp = datetime.fromtimestamp(self.wall_clock - 29.9)
+        self.new_messages = 6
+        result = await self.send_reply()
+        self.assertTrue(result.success, result.error_message)
+        self.assertTrue(any(isinstance(part, ReplyComponent) for part in self.deliveries[0][0].raw_message.components))
+        self.assertEqual(self.count_queries, [(self.session_id, self.source.timestamp.timestamp())])
 
     async def test_short_and_attachment_reply_keep_their_whole_content(self):
         self.text = '中文 API Key 中文，数值 3.5 kg。'

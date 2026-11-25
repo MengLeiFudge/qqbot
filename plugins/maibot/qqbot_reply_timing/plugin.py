@@ -49,7 +49,7 @@ def normal_delay(text: str, speed: float, is_emoji: bool = False) -> float:
 
 
 class QQBotReplyTimingPlugin(MaiBotPlugin):
-    """在公开发送 Hook 中修正首条等待，后续消息交还原生发送器。"""
+    """在公开发送 Hook 中处理首条等待和引用。"""
 
     config_model: ClassVar[type[PluginConfigBase] | None] = TimingConfig
 
@@ -60,12 +60,13 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         self._group_received: OrderedDict[tuple[str, str], tuple[str, float, str]] = OrderedDict()
         self._sources: OrderedDict[tuple[str, str], tuple[str, float, str]] = OrderedDict()
         self._turns: OrderedDict[str, ReplyTurn] = OrderedDict()
+        self._reply_quotes: OrderedDict[str, tuple[str, str]] = OrderedDict()
         self._active = False
 
     async def on_load(self) -> None:
         """启用首条等待修正，不执行外部请求。"""
         self._active = True
-        self.ctx.logger.info("首条回复等待修正已加载，启用=%s", cast(TimingConfig, self.config).plugin.enabled)
+        self.ctx.logger.info("首条回复等待与引用规则已加载，启用=%s", cast(TimingConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
         """停止接纳新修正并释放瞬时状态。"""
@@ -74,6 +75,7 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         self._group_received.clear()
         self._sources.clear()
         self._turns.clear()
+        self._reply_quotes.clear()
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
         """配置更新后放弃旧轮次，下一条真实消息重新建立时钟。"""
@@ -82,6 +84,7 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         self._group_received.clear()
         self._sources.clear()
         self._turns.clear()
+        self._reply_quotes.clear()
 
     def _enabled(self) -> bool:
         return self._active and cast(TimingConfig, self.config).plugin.enabled
@@ -135,8 +138,13 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
     ) -> dict[str, object]:
         """把计时绑定到实际回复对象在快照中的最新消息。"""
         del kwargs
-        if not self._enabled() or item_schema_version != 1 or not isinstance(items, list) or not reply_message_id:
+        if (not self._enabled() or item_schema_version != 1 or not isinstance(items, list)
+                or not session_id or not reply_message_id):
             return {"action": "continue"}
+        self._reply_quotes[session_id] = (reply_message_id, "")
+        self._reply_quotes.move_to_end(session_id)
+        if len(self._reply_quotes) > 128:
+            self._reply_quotes.popitem(last=False)
         target = self._sources.get((session_id, reply_message_id))
         if target is None:
             self._turns.pop(session_id, None)
@@ -163,16 +171,24 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
 
     @HookHandler(
         "send_service.after_build_message", name="qqbot_reply_timing_native",
-        description="让已完成后处理的回复首段进入统一发送计时",
+        description="识别原生回复首段并接入统一发送计时",
         mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
     )
     async def prepare_segment(
         self, message: object = None, processed_plain_text: str = "", typing: bool = False, **kwargs: Any,
     ) -> dict[str, object]:
         """原生回复首段默认关闭 typing；分段已完成时统一由首条抵扣决定补等。"""
-        turn = self._turns.get(message.get("session_id")) if isinstance(message, Mapping) else None
-        if (self._enabled() and not typing and processed_plain_text and isinstance(message, Mapping)
-                and message.get("platform") == "qq" and turn is not None and message.get("reply_to") == turn.target_id):
+        if (not self._enabled() or typing or not isinstance(message, Mapping)
+                or message.get("platform") != "qq"):
+            return {"action": "continue"}
+        session_id, target_id, delivery_id = message.get("session_id"), message.get("reply_to"), message.get("message_id")
+        if not isinstance(session_id, str):
+            return {"action": "continue"}
+        if (isinstance(target_id, str) and isinstance(delivery_id, str) and delivery_id
+                and self._reply_quotes.get(session_id) == (target_id, "")):
+            self._reply_quotes[session_id] = (target_id, delivery_id)
+        turn = self._turns.get(session_id)
+        if processed_plain_text and turn is not None and target_id == turn.target_id:
             return {"action": "continue", "modified_kwargs": {
                 **kwargs, "message": message, "processed_plain_text": processed_plain_text, "typing": True,
             }}
@@ -221,12 +237,52 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
 
     @HookHandler(
         "send_service.before_send", name="qqbot_reply_timing_send",
-        description="首条打字等待扣除本轮已经经过的处理时间",
+        description="扣除首条已耗时，并在打字等待结束后判断是否引用",
         mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=180000, error_policy=ErrorPolicy.ABORT,
     )
     async def before_send(
         self, message: object = None, typing: bool = False, reply_message_id: str = "", **kwargs: Any,
     ) -> dict[str, object]:
+        result = await self._wait_before_send(message, typing, reply_message_id, **kwargs)
+        if result["action"] == "abort" or not self._enabled() or not isinstance(message, Mapping):
+            return result
+        session_id, delivery_id = message.get("session_id"), message.get("message_id")
+        if (not isinstance(session_id, str) or not delivery_id
+                or self._reply_quotes.get(session_id) != (reply_message_id, delivery_id)):
+            return result
+        modified = {
+            **kwargs, "message": message, "typing": typing, "reply_message_id": reply_message_id,
+            **result.get("modified_kwargs", {}),
+        }
+        if modified["typing"]:
+            speed = float(await self.ctx.config.get("response_post_process.typing_speed", 1.0))
+            text = message.get("processed_plain_text")
+            await asyncio.sleep(normal_delay(text if isinstance(text, str) else "", speed, message.get("is_emoji") is True))
+            modified["typing"] = False
+        modified["set_reply"] = await self._should_quote(session_id, reply_message_id)
+        return {"action": "continue", "modified_kwargs": modified}
+
+    async def _should_quote(self, session_id: str, target_id: str) -> bool:
+        try:
+            async with asyncio.timeout(1):
+                target = await self.ctx.message.get_by_id(target_id, chat_id=session_id, include_binary_data=False)
+                if (not isinstance(target, Mapping) or target.get("platform") != "qq"
+                        or target.get("session_id") != session_id or target.get("message_id") != target_id):
+                    return False
+                timestamp = float(target.get("timestamp") or 0)
+                if not 0 < timestamp <= time.time() - 30:
+                    return False
+                count = await self.ctx.message.count_new(session_id, since=str(timestamp))
+                return type(count) is int and count > 5
+        except (TypeError, ValueError):
+            return False
+        except Exception as exc:
+            self.ctx.logger.warning("无法核对首条回复的引用条件: %s", exc)
+            return False
+
+    async def _wait_before_send(
+        self, message: object, typing: bool, reply_message_id: str, **kwargs: Any,
+    ) -> dict[str, Any]:
         """原子占用首条资格；取消或未知发送结果不会让另一条消息重复抵扣。"""
         if not self._enabled() or not typing or not isinstance(message, Mapping) or message.get("platform") != "qq":
             return {"action": "continue"}
