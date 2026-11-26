@@ -21,6 +21,7 @@ from .day_plan import DayPlan
 from .followup import FOLLOWUP_PROMPT, TOPIC_LIFETIME, Decision, Topic
 from .self_state import SelfState
 
+CHECK_IN_IDLE_SECONDS = 8 * 3600
 ACTIVITY_TOOLS = {"bilibili_watch", "lanling_write_file"}
 ACTIVITY_INTENT = (
     "这是你安排给自己的空闲活动。做一件你感兴趣的事，完成后可以安静结束。"
@@ -329,7 +330,11 @@ class QQBotProactivePlugin(MaiBotPlugin):
         state.pending_since = 0
         state.next_due = now + self._delay(resting=True)
         state.save(self._state_path)
-        decision = await self._consider(state, owner, bot_qq)
+        can_check_in = (
+            now - last_activity >= CHECK_IN_IDLE_SECONDS
+            and datetime.fromtimestamp(last_activity).date() < datetime.fromtimestamp(now).date()
+        )
+        decision = await self._consider(state, owner, bot_qq, can_check_in=can_check_in)
         # 模型执行期间可能收到新消息或更换身份配置，旧决定不得继续发送。
         if await self._private_stream() != target or self._schedule is not state:
             return
@@ -351,11 +356,24 @@ class QQBotProactivePlugin(MaiBotPlugin):
             delay = max(delay, self._delay(resting=True))
         state.next_due = time.time() + delay
         state.quiet = decision.action == "quiet"
-        if decision.action == "continue":
+        if decision.action == "check_in" and not can_check_in:
+            state.save(self._state_path)
+            self.ctx.logger.warning("当前私聊未到隔夜问候条件，本次保持静默")
+            return
+        if decision.action in ("continue", "check_in"):
             state.pending_since = time.time()
             self._share_ready_since = 0.0
         state.save(self._state_path)
         self.ctx.logger.info("空闲活动判断完成，动作=%s", decision.action)
+        if decision.action == "check_in":
+            receipt = await self.ctx.send.text(
+                decision.intent, stream_id, return_details=True,
+                sync_to_maisaka_history=True, maisaka_source_kind="guided_reply",
+            )
+            if not isinstance(receipt, Mapping) or receipt.get("sent") is not True:
+                raise RuntimeError("蓝铃的隔夜问候未收到成功回执")
+            self.ctx.logger.info("蓝铃隔夜问候已送达")
+            return
         if decision.action != "continue":
             return
         share_anchor = (
@@ -399,8 +417,8 @@ class QQBotProactivePlugin(MaiBotPlugin):
         self.ctx.logger.info("空闲活动未满足分享条件，保留静默")
         return {"action": "abort"}
 
-    async def _consider(self, state: Schedule, owner: str, bot_qq: str) -> Decision:
-        """空闲时整理少量话题；只读取文本和真实发送者，不传输图片或身份账号。"""
+    async def _consider(self, state: Schedule, owner: str, bot_qq: str, *, can_check_in: bool) -> Decision:
+        """空闲时了解近况，决定安排活动、简短问候或等待。"""
         sources = {topic.source_id: topic.source_time for topic in state.topics}
         messages: list[dict[str, object]] = []
         recent = await self._messages(state.stream_id, limit=24)
@@ -425,6 +443,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
         self_state = self._current_self_state()
         payload = {
             "now": datetime.now().astimezone().isoformat(),
+            "can_check_in": can_check_in,
             "unanswered_turns": state.sent_turns,
             "latest_sender": "bot" if recent and _message_fact(recent[-1], state.stream_id)[1] == bot_qq else "owner",
             "appointment": ({"intent": state.appointment_intent,

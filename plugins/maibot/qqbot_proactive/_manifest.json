@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-proactive",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "name": "QQBot 自身状态与空闲活动",
   "description": "维护跨会话的自身状态，安排蓝铃的空闲活动并按需分享成果。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
@@ -14,7 +14,7 @@
   "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
   "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
   "dependencies": [{"type": "plugin", "id": "mlj.qqbot-identity", "version_spec": ">=0.1.0,<0.2.0"}],
-  "capabilities": ["config.get", "config.get_plugin", "chat.get_stream_by_user_id", "message.get_recent", "message.get_by_id", "llm.generate", "maisaka.proactive.trigger"],
+  "capabilities": ["config.get", "config.get_plugin", "chat.get_stream_by_user_id", "message.get_recent", "message.get_by_id", "llm.generate", "maisaka.proactive.trigger", "send.text"],
   "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
   "plugin_type": "extension"
 }

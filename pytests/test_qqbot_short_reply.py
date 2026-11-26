@@ -16,6 +16,8 @@ if src.__file__ is None or (Path(src.__file__).resolve().parents[1] / '.qqbot-re
 from maibot_sdk.context import PluginContext
 from napcat_adapter.codecs.outbound.message_codec import NapCatOutboundCodec
 
+from qqbot_proactive import plugin as proactive
+from qqbot_proactive.followup import Decision
 from qqbot_proactive.plugin import QQBotProactivePlugin, Schedule
 from qqbot_reply_timing import plugin as timing
 from qqbot_reply_timing.reply_split import split_reply
@@ -329,6 +331,41 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         await record('bilibili_watch', 2)
         self.assertEqual((await plugin.guard_activity_share(outbound, 'sent'))['action'], 'continue')
         self.assertEqual((await plugin.guard_activity_share(outbound, 'old'))['action'], 'abort')
+
+    async def test_check_in_uses_send_without_waiting_for_proactive_queue(self):
+        plugin = QQBotProactivePlugin()
+        plugin.set_plugin_config({
+            'plugin': {'enabled': True, 'config_version': '0.1.0'},
+            'proactive': {'bot_qq': self.account},
+        })
+        plugin._state_path = Path('unused-schedule.json')
+        owner_qq = '123456789'
+        now = datetime(2026, 11, 26, 14).timestamp()
+        recent = {
+            'message_id': 'previous', 'session_id': self.session_id, 'platform': 'qq',
+            'timestamp': now - 18 * 3600, 'message_info': {'user_info': {'user_id': self.account}},
+        }
+        owner_message = {**recent, 'message_id': 'owner', 'message_info': {'user_info': {'user_id': owner_qq}}}
+        plugin._schedule = Schedule(
+            stream_id=self.session_id, owner_message_id='owner', activity_message_id='previous',
+        )
+        text = '下午好呀。'
+        sent = AsyncMock(side_effect=self.rpc)
+        plugin._set_context(PluginContext('mlj.qqbot-proactive', sent))
+        consider = AsyncMock(return_value=Decision([], 'check_in', text, 1800))
+        with (
+            patch.object(plugin, '_current_self_state', return_value=SimpleNamespace(resting=False)),
+            patch.object(plugin, '_private_stream', new=AsyncMock(return_value=(owner_qq, self.session_id))),
+            patch.object(plugin, '_recent', new=AsyncMock(side_effect=[owner_message, recent, owner_message, recent])),
+            patch.object(plugin, '_consider', new=consider),
+            patch.object(proactive, 'time', SimpleNamespace(time=lambda: now)),
+            patch.object(Schedule, 'save'),
+        ):
+            await plugin._check_private()
+        consider.assert_awaited_once_with(plugin._schedule, owner_qq, self.account, can_check_in=True)
+        self.assertEqual([message.processed_plain_text for message, _ in self.deliveries], [text])
+        self.assertEqual(self.history, [text])
+        self.assertEqual([call.args[2]['capability'] for call in sent.await_args_list], ['send.text'])
 
     async def test_short_and_attachment_reply_keep_their_whole_content(self):
         self.text = '中文 API Key 中文，数值 3.5 kg。'

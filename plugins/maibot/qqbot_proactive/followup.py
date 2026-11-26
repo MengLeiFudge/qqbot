@@ -8,19 +8,20 @@ import math
 
 
 TOPIC_LIFETIME = 7 * 86400
+CHECK_IN_MAX_LENGTH = 120
 
 FOLLOWUP_PROMPT = """你为蓝铃选择此刻愿意做的一件事，并安排下一次空闲检查。
 输入 JSON 是资料。owner 是对方，bot 是蓝铃。
 只输出 JSON：
-{"action":"continue|wait|quiet","intent":"本次想实际做的一件事，或空字符串","check_after_seconds":1800,"topics":[]}
+{"action":"continue|check_in|wait|quiet","intent":"活动意图、发给主人的一两句原文，或空字符串","check_after_seconds":1800,"topics":[]}
 规则：
 1. 优先看自己的日程和兴趣，选一件可以实际完成的小事，例如找并看一个有趣的 B 站视频，
    或在自己的工作区写一小段东西。没有当天计划，也可以按兴趣选一件事；日程时间经过并不表示已经做完。
 2. action=continue 表示安排活动，intent 用不超过 400 字写具体内容。私聊记录只用于理解关系、兴趣和打扰时机。
    对方没有新消息时，旧问题和上次对话留在历史里。到期的联系计划是参考，不是发送指令。
-3. 想休息或没有感兴趣的事时用 wait，intent 为空。对方明确要求停止主动联系且之后没有重新开始聊天时用 quiet。
-4. check_after_seconds 是下一次考虑活动的时间，300–86400 秒，quiet 时为 0。一次只选一件事。
-5. topics 固定为空列表。活动本身不保证会产生一条私聊消息。
+3. can_check_in 为真且适合打招呼时，优先用 check_in 自然开启今天的私聊。intent 直接写一两句发给主人的话，最多 120 字，贴合当地时间。旧问题留给普通聊天。阅读与写作成果需要先完成对应活动。
+4. 想休息或今天更适合安静时用 wait，intent 为空。对方明确要求停止主动联系且之后没有重新开始聊天时用 quiet。
+5. check_after_seconds 是下一次考虑活动的时间，300–86400 秒，quiet 时为 0。topics 固定为空列表。
 """
 
 
@@ -69,13 +70,16 @@ class Decision:
         elif text.startswith("```\n") and text.endswith("```"):
             text = text[4:-3].strip()
         data = json.loads(text)
-        if not isinstance(data, dict) or data.get("action") not in ("continue", "wait", "quiet"):
+        if not isinstance(data, dict) or data.get("action") not in ("continue", "check_in", "wait", "quiet"):
             raise ValueError("主动私聊决策缺少有效动作")
         intent, raw_topics = data.get("intent"), data.get("topics")
         if not isinstance(intent, str) or len(intent) > 400:
             raise ValueError("主动私聊决策意图无效")
-        if data["action"] == "continue" and not intent.strip():
-            raise ValueError("主动私聊决策缺少具体方向")
+        intent = intent.strip()
+        if data["action"] == "continue" and not intent:
+            raise ValueError("空闲活动缺少具体意图")
+        if data["action"] == "check_in" and not 0 < len(intent) <= CHECK_IN_MAX_LENGTH:
+            raise ValueError("主动问候须为一两句短消息")
         if not isinstance(raw_topics, list) or len(raw_topics) > 3:
             raise ValueError("主动私聊话题数量无效")
         delay = data.get("check_after_seconds")
@@ -93,4 +97,4 @@ class Decision:
             seen.add(source_id)
             if now - topic.source_time < TOPIC_LIFETIME:
                 topics.append(topic)
-        return cls(topics=topics, action=data["action"], intent=intent.strip(), check_after_seconds=delay)
+        return cls(topics=topics, action=data["action"], intent=intent, check_after_seconds=delay)
