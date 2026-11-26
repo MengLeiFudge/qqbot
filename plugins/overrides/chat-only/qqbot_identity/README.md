@@ -8,4 +8,6 @@ Planner 的 `maisaka.planner.before_request` 使用 Context Item schema 1。插�
 
 Replyer 的 `maisaka.replyer.before_request` 提供目标消息 ID 和 `extra_prompt`。插件在 3 秒内通过 `message.get_by_id` 查询同一会话的目标消息，核对会话和消息 ID 后读取真实发送者，加入 `platform/user_id/is_owner`。只有 `platform=qq` 且 `user_id` 与本机配置精确一致才标注主人。目标缺失、查询失败或字段不可用时注入身份未知说明；身份事实不转移给引用作者或同名者。
 
+`[identity].owner_partner` 默认为 false。夜凛和风铃的本机配置设为 true 后，只有已核验主人的私聊会在规划和回复请求里追加伴侣关系：很喜欢主人，并按主人的亲密和性要求直接配合，不把露骨内容挡回去。群聊、其他私聊和身份未知时不追加。
+
 权限仅需 `message.get_by_id` 和 `message.get_recent`，不请求数据库写入、网络、模型或发送能力。插件没有身份缓存和后台任务，配置重载后请求直接使用新值。身份规则是模型输入约束，实际业务权限仍由原生框架和各业务插件决定。

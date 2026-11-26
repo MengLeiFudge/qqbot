@@ -5,3 +5,5 @@ config_version = "0.1.0"
 [identity]
 # 在本机 config.toml 中填写真实主人 QQ；留空表示不认定主人。
 owner_qq = ""
+# 为 true 时，只在已核验主人的私聊追加伴侣关系。蓝铃保持 false。
+owner_partner = false

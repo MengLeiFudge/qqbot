@@ -36,7 +36,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 蓝铃通过 [qqbot_reply_guard](../../../plugins/maibot/qqbot_reply_guard/README.md) 处理主人私聊连发和同会话引用。四个账号的分段规则见 [QQBot 回复分段](../../../plugins/maibot/qqbot_reply_timing/README.md#分段)。阶段答复与历史查阅指导写入原生 `[chat.reply_style]` 配置。公开可靠结论后可继续研究。
 
-`qqbot_identity` 从同会话消息 API 读取真实发送者，为 Planner 中已经出现的消息补充身份表，Replyer 则按实际目标消息 ID 查询并注入 `platform/user_id/is_owner`。只有已核验的主人使用“主人”称呼，其他人和未知身份使用昵称或“你”；本机回复风格不得把所有第二人称替换成“主人”。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见 [qqbot_identity](../../plugins/qqbot_identity/README.md)。
+`qqbot_identity` 从同会话消息 API 读取真实发送者，为 Planner 中已经出现的消息补充身份表，Replyer 则按实际目标消息 ID 查询并注入 `platform/user_id/is_owner`。只有已核验的主人使用“主人”称呼，其他人和未知身份使用昵称或“你”；本机回复风格不得把所有第二人称替换成“主人”。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。云栖、夜凛、风铃把 `[identity].owner_partner` 设为 true，只在已核验主人的私聊追加伴侣关系；蓝铃保持 false。详见 [qqbot_identity](../../plugins/qqbot_identity/README.md)。
 
 `provider.example.toml` 的生成 provider 使用本机 CPA 地址 `http://127.0.0.1:8317/v1` 与 CPA 客户端密钥。联网搜索单独使用官网凭据，部署方法见 [qqbot_web_search](../../plugins/qqbot_web_search/README.md)；嵌入 provider 保留原百炼接口，CPA 支持 `/embeddings` 前不能一起替换地址。
 
